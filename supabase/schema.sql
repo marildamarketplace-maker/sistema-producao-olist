@@ -13,13 +13,26 @@ create table if not exists public.produtos (
   sku text not null unique,
   nome text not null,
   imagem_url text,
-  meta_estoque integer not null default 0 check (meta_estoque >= 0),
+  meta_estoque integer check (meta_estoque >= 0),
   ativo boolean not null default true,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_produtos_nome on public.produtos (nome);
 create index if not exists idx_produtos_ativo on public.produtos (ativo);
+
+
+-- =========================
+-- Tabela: configuracoes_sistema
+-- =========================
+create table if not exists public.configuracoes_sistema (
+  id uuid primary key default gen_random_uuid(),
+  chave text not null unique,
+  valor numeric not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_configuracoes_chave on public.configuracoes_sistema (chave);
 
 -- =========================
 -- Tabela: solicitacoes_producao
