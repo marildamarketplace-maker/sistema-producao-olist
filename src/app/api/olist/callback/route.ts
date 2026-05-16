@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 const usedAuthorizationCodes = new Set<string>();
@@ -83,6 +84,24 @@ export async function GET(req: NextRequest) {
 
   const tokenData = JSON.parse(rawText) as { access_token?: string; refresh_token?: string; expires_in?: number };
   if (grantType === "authorization_code" && code) usedAuthorizationCodes.add(code);
+
+  const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString() : null;
+  const { error: persistError } = await supabaseAdmin.from("integracao_olist_tokens").upsert(
+    {
+      provider: "olist",
+      access_token: tokenData.access_token ?? null,
+      refresh_token: tokenData.refresh_token ?? null,
+      expires_at: expiresAt,
+      status: "conectado",
+      last_login_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "provider" },
+  );
+
+  if (persistError) {
+    return NextResponse.json({ error: `Falha ao salvar tokens OAuth: ${persistError.message}` }, { status: 500 });
+  }
 
   return NextResponse.json({
     ok: true,

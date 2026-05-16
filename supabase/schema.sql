@@ -181,6 +181,20 @@ create index if not exists idx_pedidos_olist_processados_solicitacao
   on public.pedidos_olist_processados (solicitacao_producao_id);
 
 -- =========================
+-- Tabela: integracao_olist_tokens
+-- =========================
+create table if not exists public.integracao_olist_tokens (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null default 'olist' unique,
+  access_token text,
+  refresh_token text,
+  expires_at timestamptz,
+  status text not null default 'nao_conectado' check (status in ('conectado', 'expirado', 'nao_conectado', 'erro_autenticacao')),
+  last_login_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+-- =========================
 -- Regras de imutabilidade (append-only)
 -- =========================
 -- Nunca sobrescrever solicitação antiga:
