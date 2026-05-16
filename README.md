@@ -29,6 +29,11 @@
 ### Endpoint
 - **POST** `/api/olist/gerar-solicitacao`
 
+### Referência oficial (Swagger Olist/Tiny v3)
+- Swagger: `https://erp.tiny.com.br/public-api/v3/swagger/index.html#`
+- Base da API pública v3: `https://erp.tiny.com.br/public-api/v3`
+- Observação: a implementação atual usa `OLIST_API_URL` configurável e tenta automaticamente `GET {OLIST_API_URL}/orders`; se receber `404`, tenta `GET {OLIST_API_URL}/pedidos` com o mesmo filtro e token Bearer.
+
 ### Payload
 ```json
 {
@@ -48,21 +53,39 @@
 - `periodo_fim` (ISO datetime)
 
 ### Regras de negócio implementadas
-1. Busca pedidos na Olist e mantém apenas status válidos:
+1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) com filtro `shipping_deadline_lte={data_limite}` e autenticação Bearer (`OLIST_API_TOKEN`), tentando nesta ordem:
+   - `GET {OLIST_API_URL}/orders`
+   - em caso de `404`, fallback para `GET {OLIST_API_URL}/pedidos`
+2. Mantém apenas pedidos com status válidos:
    - Em aberto
    - Aprovado
    - Preparando envio
    - Faturado
-2. Filtra pedidos pelo período calculado conforme `filtro_data_base`:
+3. Filtra pedidos pelo período informado conforme `filtro_data_base`:
    - `APROVACAO_PEDIDO` usa `approved_at`
    - `CRIACAO_PEDIDO` usa `created_at`
-3. Evita reprocessamento de item da Olist:
-   - verifica `pedido_olist_id + item_olist_id` em `pedidos_olist_processados`
-   - se já existir, ignora o item
-   - se não existir, inclui no cálculo e salva no tracking
-4. Calcula necessidade de produção por SKU e gera nova solicitação em `solicitacoes_producao`.
-5. Salva os itens gerados em `itens_solicitacao_producao`.
-6. Salva o rastreio dos itens processados em `pedidos_olist_processados`.
+   - pedidos sem data-base válida ficam fora
+4. Evita reprocessamento item a item usando `pedidos_olist_processados`:
+   - chave de deduplicação: `pedido_olist_id + item_olist_id`
+   - quando o item não vem com `id` na Olist, usa fallback `${pedido.id}:${item.sku}:${index}`
+   - item já processado é ignorado e contabilizado em `itens_ja_processados`
+5. Agrega a demanda por SKU somando `quantity` dos itens novos.
+6. Busca dados internos para cálculo:
+   - `produtos` (somente ativos)
+   - `vw_estoque_atual`
+   - `configuracoes_sistema` (`META_GERAL_ESTOQUE`)
+7. Calcula `quantidade_solicitada` por SKU:
+   - `max(0, demanda_pedidos + meta_estoque - estoque_atual)`
+   - `meta_estoque` do produto tem prioridade; fallback para `META_GERAL_ESTOQUE`
+8. Gera a solicitação em `solicitacoes_producao` com:
+   - `status: em_producao`
+   - `observacao_geral: Gerada automaticamente via Olist`
+   - período e filtro usados na geração
+9. Gera os itens em `itens_solicitacao_producao` com:
+   - `tipo_corte: PADRAO`
+   - `status_item: em_producao`
+   - `observacao: Gerado por integração Olist`
+10. Salva o rastreio dos itens novos em `pedidos_olist_processados` vinculando `solicitacao_producao_id`, `turno_id` e período da execução.
 
 ### Resposta de sucesso (exemplo)
 ```json
