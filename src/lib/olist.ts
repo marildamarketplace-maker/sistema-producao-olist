@@ -27,6 +27,13 @@ type OlistOrder = {
   items?: OlistOrderItem[];
 };
 
+type OlistOrderDetailResponse = {
+  id?: string | number;
+  pedido?: OlistOrder;
+  itens?: OlistOrderItem[];
+  items?: OlistOrderItem[];
+};
+
 const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://api.tiny.com.br/public-api/v3";
 const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
@@ -77,6 +84,19 @@ function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
   const dataObj = payload as Record<string, unknown>;
   const data = dataObj.itens ?? dataObj.items ?? dataObj.data ?? dataObj.orders ?? dataObj.results;
   return Array.isArray(data) ? (data as OlistOrder[]) : [];
+}
+
+function normalizarPedidoDetalhe(payload: unknown): OlistOrder | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as OlistOrderDetailResponse & Record<string, unknown>;
+  const pedido = (obj.pedido as OlistOrder | undefined) ?? (obj as OlistOrder);
+  if (!pedido?.id && !obj.id) return null;
+  return {
+    ...pedido,
+    id: pedido.id ?? (obj.id as string | number),
+    itens: pedido.itens ?? (obj.itens as OlistOrderItem[] | undefined),
+    items: pedido.items ?? (obj.items as OlistOrderItem[] | undefined),
+  };
 }
 
 function normalizarBaseUrl(url: string) {
@@ -204,7 +224,33 @@ export async function buscarPedidosOlistPorDataLimite(
 
   const pedidosUnicos = Array.from(new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values());
 
-  return pedidosUnicos
+  const pedidosComItens = await Promise.all(
+    pedidosUnicos.map(async (pedido) => {
+      const url = new URL(`pedidos/${pedido.id}`, normalizarBaseUrl(OLIST_API_BASE_URL));
+      const response = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+
+      logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedido-detalhe" });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        validarRespostaJsonOrThrow(response, responseText);
+        if (response.status === 401) {
+          throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+        }
+        throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
+      }
+
+      const payload = await response.json();
+      const detalhe = normalizarPedidoDetalhe(payload);
+      if (!detalhe) return pedido;
+      return detalhe;
+    }),
+  );
+
+  return pedidosComItens
     .filter((pedido) => {
       const situacao = String(pedido.situacao ?? "").trim();
       if (!situacao) return true;
