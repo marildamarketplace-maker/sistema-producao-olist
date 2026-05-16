@@ -17,6 +17,7 @@
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `OLIST_API_TOKEN`
+   - `OLIST_API_BASE_URL` (opcional)
 3. Deploy.
 
 ## Observações de segurança
@@ -30,8 +31,9 @@
 
 ### Referência oficial (Swagger Olist/Tiny v3)
 - Swagger: `https://erp.tiny.com.br/public-api/v3/swagger/index.html#`
-- Base da API pública v3: `https://erp.tiny.com.br/public-api/v3`
-- A implementação usa exclusivamente a API pública v3 do Tiny ERP em `https://erp.tiny.com.br/public-api/v3`.
+- Base da API pública v3: `https://erp.olist.com/public-api/v3`
+- A implementação usa exclusivamente a API pública v3 da Olist/Tiny em `https://erp.olist.com/public-api/v3`.
+- Opcional: sobrescreva via `OLIST_API_BASE_URL` (ex.: homologação).
 
 ### Payload
 ```json

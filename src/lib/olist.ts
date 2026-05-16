@@ -27,7 +27,7 @@ type OlistOrder = {
   items?: OlistOrderItem[];
 };
 
-const TINY_API_BASE_URL = "https://erp.tiny.com.br/public-api/v3";
+const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://erp.olist.com/public-api/v3";
 const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
@@ -95,7 +95,7 @@ export async function buscarPedidosOlistPorDataLimite(
   const pedidos: OlistOrder[] = [];
 
   while (true) {
-    const url = new URL("pedidos", TINY_API_BASE_URL);
+    const url = new URL("pedidos", OLIST_API_BASE_URL.endsWith("/") ? OLIST_API_BASE_URL : `${OLIST_API_BASE_URL}/`);
     url.searchParams.set("dataInicial", inputDate(periodoInicio));
     url.searchParams.set("dataFinal", inputDate(periodoFim));
     url.searchParams.set("limit", String(limite));
@@ -109,7 +109,11 @@ export async function buscarPedidosOlistPorDataLimite(
 
     if (!response.ok) {
       const responseText = await response.text();
-      throw new Error(`Erro Tiny ERP ${response.status} ${response.statusText}: ${responseText}`);
+      const isLegacyRedirectBody = responseText.includes("erp.olist.com") || responseText.includes("window.location.href");
+      if (response.status === 404 && isLegacyRedirectBody) {
+        throw new Error("Endpoint legado detectado. Configure OLIST_API_BASE_URL=https://erp.olist.com/public-api/v3.");
+      }
+      throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
     }
 
     const payload = await response.json();
