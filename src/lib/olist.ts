@@ -17,6 +17,28 @@ type OlistOrder = {
 const STATUS_PERMITIDOS = new Set(["Em aberto", "Aprovado", "Preparando envio", "Faturado"]);
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
+type ProdutoRow = {
+  id: string;
+  sku: string;
+  nome: string | null;
+  imagem_url: string | null;
+  meta_estoque: number | null;
+  ativo: boolean;
+};
+
+type EstoqueAtualRow = {
+  sku: string;
+  estoque_atual: number | null;
+};
+
+type ItemSolicitacao = {
+  produto_id: string;
+  sku: string;
+  nome: string;
+  imagem_url: string | null;
+  quantidade_solicitada: number;
+};
+
 function parseIsoDateOrNull(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value);
@@ -81,13 +103,17 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   if (Number.isNaN(periodoInicio.getTime()) || Number.isNaN(periodoFim.getTime())) {
     throw new Error("Período inválido.");
   }
+  if (periodoInicio > periodoFim) {
+    throw new Error("Período inválido: periodo_inicio deve ser menor ou igual a periodo_fim.");
+  }
 
   const pedidos = await buscarPedidosOlistPorDataLimite(input.dataLimite, input.filtroDataBase, periodoInicio, periodoFim);
   const pedidosEncontrados = pedidos.length;
   const paresPedidoItem = pedidos.flatMap((pedido) =>
-    (pedido.items ?? [])
-      .filter((item) => Boolean(item.id))
-      .map((item) => ({ pedido_olist_id: pedido.id, item_olist_id: String(item.id) })),
+    (pedido.items ?? []).map((item, index) => ({
+      pedido_olist_id: pedido.id,
+      item_olist_id: item.id ? String(item.id) : `${pedido.id}:${item.sku}:${index}`,
+    })),
   );
 
   const pedidosIds = [...new Set(paresPedidoItem.map((par) => par.pedido_olist_id))];
@@ -111,6 +137,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
   const agregados = new Map<string, { sku: string; nome: string; imagem_url: string | null; quantidade_pedidos: number }>();
   const itensNovosProcessados: Array<{ pedido_olist_id: string; item_olist_id: string; sku: string }> = [];
+  const novosProcessadosSet = new Set<string>();
   let itensJaProcessados = 0;
   let pedidosIgnorados = 0;
   let pedidosAdicionados = 0;
@@ -123,12 +150,14 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
         itensJaProcessados += 1;
         continue;
       }
+      if (novosProcessadosSet.has(chaveProcessamento)) continue;
 
       const atual = agregados.get(item.sku) ?? { sku: item.sku, nome: item.name, imagem_url: item.image_url ?? null, quantidade_pedidos: 0 };
       atual.quantidade_pedidos += Number(item.quantity ?? 0);
       if (!atual.imagem_url && item.image_url) atual.imagem_url = item.image_url;
       agregados.set(item.sku, atual);
       itensNovosProcessados.push({ pedido_olist_id: pedido.id, item_olist_id: itemOlistId, sku: item.sku });
+      novosProcessadosSet.add(chaveProcessamento);
       teveItemNovo = true;
     }
     if (teveItemNovo) pedidosAdicionados += 1;
@@ -147,10 +176,10 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   if (prodError || estError || cfgError) throw new Error(prodError?.message ?? estError?.message ?? cfgError?.message ?? "Erro ao buscar dados internos.");
 
   const metaGeral = Number(cfgData?.valor ?? 0);
-  const estoqueMap = new Map((estoqueRows ?? []).map((e: any) => [e.sku, Number(e.estoque_atual ?? 0)]));
+  const estoqueMap = new Map(((estoqueRows ?? []) as EstoqueAtualRow[]).map((e) => [e.sku, Number(e.estoque_atual ?? 0)]));
 
-  const itens: any[] = [];
-  for (const produto of (produtos ?? []) as any[]) {
+  const itens: ItemSolicitacao[] = [];
+  for (const produto of (produtos ?? []) as ProdutoRow[]) {
     if (!produto.ativo) continue;
     const demanda = agregados.get(produto.sku);
     if (!demanda) continue;
@@ -160,7 +189,13 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     const quantidadeAProduzir = Math.max(0, demanda.quantidade_pedidos + metaEstoque - estoqueAtual);
 
     if (quantidadeAProduzir > 0) {
-      itens.push({ produto_id: produto.id, sku: produto.sku, nome: produto.nome ?? demanda.nome, imagem_url: produto.imagem_url ?? demanda.imagem_url, quantidade_solicitada: quantidadeAProduzir });
+      itens.push({
+        produto_id: produto.id,
+        sku: produto.sku,
+        nome: produto.nome ?? demanda.nome,
+        imagem_url: produto.imagem_url ?? demanda.imagem_url,
+        quantidade_solicitada: quantidadeAProduzir,
+      });
     }
   }
 
