@@ -102,7 +102,6 @@ export async function GET(req: NextRequest) {
       expires_at: expiresAt,
       status: "conectado",
       last_login_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "provider" },
