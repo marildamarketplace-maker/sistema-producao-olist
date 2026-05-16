@@ -1,25 +1,9 @@
 {
   "pages": {
-    "/layout": [
+    "/api/olist/gerar-solicitacao/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/css/app/layout.css",
-      "static/chunks/app/layout.js"
-    ],
-    "/solicitacoes-producao/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/solicitacoes-producao/page.js"
-    ],
-    "/configuracoes/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/configuracoes/page.js"
-    ],
-    "/turnos-producao/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/turnos-producao/page.js"
+      "static/chunks/app/api/olist/gerar-solicitacao/route.js"
     ]
   }
 }

@@ -1,5 +1,3 @@
 {
-  "/solicitacoes-producao/page": "app/solicitacoes-producao/page.js",
-  "/configuracoes/page": "app/configuracoes/page.js",
-  "/turnos-producao/page": "app/turnos-producao/page.js"
+  "/api/olist/gerar-solicitacao/route": "app/api/olist/gerar-solicitacao/route.js"
 }
