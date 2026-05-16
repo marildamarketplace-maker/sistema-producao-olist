@@ -16,20 +16,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/configuracoes/page.js"
     ],
-    "/page": [
+    "/turnos-producao/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
-    ],
-    "/produtos/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/produtos/page.js"
-    ],
-    "/estoque/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/estoque/page.js"
+      "static/chunks/app/turnos-producao/page.js"
     ]
   }
 }
