@@ -1,20 +1,34 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-type OlistOrder = {
-  id: string;
-  status: string;
-  approved_at?: string | null;
-  created_at?: string | null;
-  items: Array<{
-    id?: string;
-    sku: string;
-    name: string;
-    quantity: number;
-    image_url?: string;
-  }>;
+type OlistOrderItem = {
+  id?: string | number;
+  sku?: string;
+  codigo?: string;
+  quantidade?: number;
+  quantity?: number;
+  descricao?: string;
+  description?: string;
+  product_name?: string;
+  imagemURL?: string;
+  image_url?: string;
 };
 
-const STATUS_PERMITIDOS = new Set(["Em aberto", "Aprovado", "Preparando envio", "Faturado"]);
+type OlistOrder = {
+  id: string | number;
+  numero?: number;
+  number?: string;
+  status?: string;
+  situacao?: string | number;
+  approved_at?: string | null;
+  created_at?: string | null;
+  data?: string | null;
+  date?: string | null;
+  itens?: OlistOrderItem[];
+  items?: OlistOrderItem[];
+};
+
+const TINY_API_BASE_URL = "https://erp.tiny.com.br/public-api/v3";
+const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
 type ProdutoRow = {
@@ -51,9 +65,17 @@ function pedidoDentroDoPeriodo(
   periodoInicio: Date,
   periodoFim: Date,
 ) {
-  const dataBase = filtroDataBase === "APROVACAO_PEDIDO" ? parseIsoDateOrNull(pedido.approved_at) : parseIsoDateOrNull(pedido.created_at);
+  const dataBaseRaw = filtroDataBase === "APROVACAO_PEDIDO" ? pedido.approved_at : pedido.created_at ?? pedido.data ?? pedido.date;
+  const dataBase = parseIsoDateOrNull(dataBaseRaw);
   if (!dataBase) return false;
   return dataBase >= periodoInicio && dataBase <= periodoFim;
+}
+
+function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
+  if (!payload || typeof payload !== "object") return [];
+  const dataObj = payload as Record<string, unknown>;
+  const data = dataObj.itens ?? dataObj.items ?? dataObj.data ?? dataObj.orders ?? dataObj.results;
+  return Array.isArray(data) ? (data as OlistOrder[]) : [];
 }
 
 export async function buscarPedidosOlistPorDataLimite(
@@ -62,50 +84,55 @@ export async function buscarPedidosOlistPorDataLimite(
   periodoInicio: Date,
   periodoFim: Date,
 ): Promise<OlistOrder[]> {
-  const baseUrl = process.env.OLIST_API_URL;
   const token = process.env.OLIST_API_TOKEN;
 
-  if (!baseUrl || !token) {
-    throw new Error("Configure OLIST_API_URL e OLIST_API_TOKEN nas variáveis de ambiente da Vercel.");
+  if (!token) {
+    throw new Error("Configure OLIST_API_TOKEN nas variáveis de ambiente da Vercel.");
   }
 
-  const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const resourcePaths = ["orders", "pedidos"];
-  const headers = { Authorization: `Bearer ${token}` };
+  const limite = 100;
+  let offset = 0;
+  const pedidos: OlistOrder[] = [];
 
-  let payload: unknown = null;
-  let lastError = "";
-
-  for (const resourcePath of resourcePaths) {
-    const url = new URL(resourcePath, normalizedBaseUrl);
-    url.searchParams.set("shipping_deadline_lte", dataLimite);
+  while (true) {
+    const url = new URL("pedidos", TINY_API_BASE_URL);
+    url.searchParams.set("dataInicial", inputDate(periodoInicio));
+    url.searchParams.set("dataFinal", inputDate(periodoFim));
+    url.searchParams.set("limit", String(limite));
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("orderBy", "asc");
 
     const response = await fetch(url.toString(), {
-      headers,
+      headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });
 
-    if (response.ok) {
-      payload = await response.json();
-      break;
+    if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`Erro Tiny ERP ${response.status} ${response.statusText}: ${responseText}`);
     }
 
-    const responseText = await response.text();
-    lastError = `Erro Olist ${response.status} ${response.statusText} em ${resourcePath}: ${responseText}`;
+    const payload = await response.json();
+    const paginaPedidos = normalizarPayloadPedidos(payload);
+    if (paginaPedidos.length === 0) break;
 
-    if (response.status !== 404) {
-      throw new Error(lastError);
-    }
-  }
+    pedidos.push(...paginaPedidos);
 
-  if (!payload) {
-    throw new Error(lastError || "Nenhum endpoint válido encontrado na API Olist/Tiny.");
+    if (paginaPedidos.length < limite) break;
+    offset += limite;
   }
-  const pedidos = (payload?.orders ?? payload?.results ?? []) as OlistOrder[];
 
   return pedidos
-    .filter((pedido) => STATUS_PERMITIDOS.has(pedido.status))
+    .filter((pedido) => {
+      const situacao = String(pedido.situacao ?? "").trim();
+      if (!situacao) return true;
+      return SITUACOES_PERMITIDAS.has(situacao);
+    })
     .filter((pedido) => pedidoDentroDoPeriodo(pedido, filtroDataBase, periodoInicio, periodoFim));
+}
+
+function inputDate(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 export async function gerarSolicitacaoPorPedidosOlist(input: {
@@ -127,9 +154,9 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   const pedidos = await buscarPedidosOlistPorDataLimite(input.dataLimite, input.filtroDataBase, periodoInicio, periodoFim);
   const pedidosEncontrados = pedidos.length;
   const paresPedidoItem = pedidos.flatMap((pedido) =>
-    (pedido.items ?? []).map((item, index) => ({
-      pedido_olist_id: pedido.id,
-      item_olist_id: item.id ? String(item.id) : `${pedido.id}:${item.sku}:${index}`,
+    (pedido.itens ?? pedido.items ?? []).map((item, index) => ({
+      pedido_olist_id: String(pedido.id),
+      item_olist_id: item.id ? String(item.id) : `${pedido.id}:${item.sku ?? "sem-sku"}:${index}`,
     })),
   );
 
@@ -160,8 +187,11 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   let pedidosAdicionados = 0;
   for (const pedido of pedidos) {
     let teveItemNovo = false;
-    for (const [index, item] of (pedido.items ?? []).entries()) {
-      const itemOlistId = item.id ? String(item.id) : `${pedido.id}:${item.sku}:${index}`;
+    for (const [index, item] of (pedido.itens ?? pedido.items ?? []).entries()) {
+      const sku = String(item.sku ?? item.codigo ?? "").trim();
+      if (!sku) continue;
+
+      const itemOlistId = item.id ? String(item.id) : `${pedido.id}:${sku}:${index}`;
       const chaveProcessamento = `${pedido.id}::${itemOlistId}`;
       if (processadosSet.has(chaveProcessamento)) {
         itensJaProcessados += 1;
@@ -169,11 +199,16 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
       }
       if (novosProcessadosSet.has(chaveProcessamento)) continue;
 
-      const atual = agregados.get(item.sku) ?? { sku: item.sku, nome: item.name, imagem_url: item.image_url ?? null, quantidade_pedidos: 0 };
-      atual.quantidade_pedidos += Number(item.quantity ?? 0);
+      const atual = agregados.get(sku) ?? {
+        sku,
+        nome: item.product_name ?? item.descricao ?? item.description ?? sku,
+        imagem_url: item.image_url ?? item.imagemURL ?? null,
+        quantidade_pedidos: 0,
+      };
+      atual.quantidade_pedidos += Number(item.quantity ?? item.quantidade ?? 0);
       if (!atual.imagem_url && item.image_url) atual.imagem_url = item.image_url;
-      agregados.set(item.sku, atual);
-      itensNovosProcessados.push({ pedido_olist_id: pedido.id, item_olist_id: itemOlistId, sku: item.sku });
+      agregados.set(sku, atual);
+      itensNovosProcessados.push({ pedido_olist_id: String(pedido.id), item_olist_id: itemOlistId, sku });
       novosProcessadosSet.add(chaveProcessamento);
       teveItemNovo = true;
     }
