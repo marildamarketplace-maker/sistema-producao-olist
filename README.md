@@ -32,7 +32,7 @@
 ### Referência oficial (Swagger Olist/Tiny v3)
 - Swagger: `https://erp.tiny.com.br/public-api/v3/swagger/index.html#`
 - Base da API pública v3: `https://erp.tiny.com.br/public-api/v3`
-- Observação: a implementação atual usa `OLIST_API_URL` configurável e consulta `orders` (ou seja, `{OLIST_API_URL}/orders`). Se sua conta/documentação expõe o recurso em português (`/pedidos`), ajuste `OLIST_API_URL`/proxy mantendo o contrato esperado pelo backend.
+- Observação: a implementação atual usa `OLIST_API_URL` configurável e tenta automaticamente `GET {OLIST_API_URL}/orders`; se receber `404`, tenta `GET {OLIST_API_URL}/pedidos` com o mesmo filtro e token Bearer.
 
 ### Payload
 ```json
@@ -53,7 +53,9 @@
 - `periodo_fim` (ISO datetime)
 
 ### Regras de negócio implementadas
-1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) via `GET {OLIST_API_URL}/orders` com filtro `shipping_deadline_lte={data_limite}` e autenticação Bearer (`OLIST_API_TOKEN`).
+1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) com filtro `shipping_deadline_lte={data_limite}` e autenticação Bearer (`OLIST_API_TOKEN`), tentando nesta ordem:
+   - `GET {OLIST_API_URL}/orders`
+   - em caso de `404`, fallback para `GET {OLIST_API_URL}/pedidos`
 2. Mantém apenas pedidos com status válidos:
    - Em aberto
    - Aprovado

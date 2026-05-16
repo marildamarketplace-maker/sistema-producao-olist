@@ -70,20 +70,37 @@ export async function buscarPedidosOlistPorDataLimite(
   }
 
   const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const url = new URL("orders", normalizedBaseUrl);
-  url.searchParams.set("shipping_deadline_lte", dataLimite);
+  const resourcePaths = ["orders", "pedidos"];
+  const headers = { Authorization: `Bearer ${token}` };
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+  let payload: unknown = null;
+  let lastError = "";
 
-  if (!response.ok) {
+  for (const resourcePath of resourcePaths) {
+    const url = new URL(resourcePath, normalizedBaseUrl);
+    url.searchParams.set("shipping_deadline_lte", dataLimite);
+
+    const response = await fetch(url.toString(), {
+      headers,
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      payload = await response.json();
+      break;
+    }
+
     const responseText = await response.text();
-    throw new Error(`Erro Olist ${response.status} ${response.statusText}: ${responseText}`);
+    lastError = `Erro Olist ${response.status} ${response.statusText} em ${resourcePath}: ${responseText}`;
+
+    if (response.status !== 404) {
+      throw new Error(lastError);
+    }
   }
 
-  const payload = await response.json();
+  if (!payload) {
+    throw new Error(lastError || "Nenhum endpoint válido encontrado na API Olist/Tiny.");
+  }
   const pedidos = (payload?.orders ?? payload?.results ?? []) as OlistOrder[];
 
   return pedidos
