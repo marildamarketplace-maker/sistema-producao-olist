@@ -158,46 +158,53 @@ export async function buscarPedidosOlistPorDataLimite(
   periodoFim: Date,
 ): Promise<OlistOrder[]> {
   const token = await getValidOlistAccessToken();
-
   const limite = 100;
-  let offset = 0;
+  const situacoesConsulta = ["0", "3", "4", "1"];
   const pedidos: OlistOrder[] = [];
 
-  while (true) {
-    const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
-    url.searchParams.set("dataInicial", inputDate(periodoInicio));
-    url.searchParams.set("dataFinal", inputDate(periodoFim));
-    url.searchParams.set("limit", String(limite));
-    url.searchParams.set("offset", String(offset));
-    url.searchParams.set("orderBy", "asc");
+  for (const situacao of situacoesConsulta) {
+    let offset = 0;
+    while (true) {
+      const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
+      url.searchParams.set("dataInicial", inputDate(periodoInicio));
+      url.searchParams.set("dataFinal", inputDate(periodoFim));
+      url.searchParams.set("dataAtualizacao", inputDate(periodoFim));
+      url.searchParams.set("situacao", situacao);
+      url.searchParams.set("origemPedido", "0");
+      url.searchParams.set("limit", String(limite));
+      url.searchParams.set("offset", String(offset));
+      url.searchParams.set("orderBy", "asc");
 
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
+      const response = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
 
-    logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos" });
+      logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos" });
 
-    if (!response.ok) {
-      const responseText = await response.text();
-      validarRespostaJsonOrThrow(response, responseText);
-      if (response.status === 401) {
-        throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+      if (!response.ok) {
+        const responseText = await response.text();
+        validarRespostaJsonOrThrow(response, responseText);
+        if (response.status === 401) {
+          throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+        }
+        throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
       }
-      throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
+
+      const payload = await response.json();
+      const paginaPedidos = normalizarPayloadPedidos(payload);
+      if (paginaPedidos.length === 0) break;
+
+      pedidos.push(...paginaPedidos);
+
+      if (paginaPedidos.length < limite) break;
+      offset += limite;
     }
-
-    const payload = await response.json();
-    const paginaPedidos = normalizarPayloadPedidos(payload);
-    if (paginaPedidos.length === 0) break;
-
-    pedidos.push(...paginaPedidos);
-
-    if (paginaPedidos.length < limite) break;
-    offset += limite;
   }
 
-  return pedidos
+  const pedidosUnicos = Array.from(new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values());
+
+  return pedidosUnicos
     .filter((pedido) => {
       const situacao = String(pedido.situacao ?? "").trim();
       if (!situacao) return true;
