@@ -16,12 +16,14 @@
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
-   - `OLIST_API_TOKEN`
+   - `OLIST_CLIENT_ID`
+   - `OLIST_CLIENT_SECRET`
    - `OLIST_API_BASE_URL` (opcional)
+   - `OLIST_OAUTH_URL` (opcional)
 3. Deploy.
 
 ## Observações de segurança
-- `SUPABASE_SERVICE_ROLE_KEY` e `OLIST_API_TOKEN` devem ficar somente no servidor (Vercel), nunca no browser.
+- `SUPABASE_SERVICE_ROLE_KEY`, `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET` devem ficar somente no servidor (Vercel), nunca no browser.
 - A rota `POST /api/olist/gerar-solicitacao` usa credenciais server-side.
 
 ## API de importação Olist (implementado)
@@ -54,7 +56,7 @@
 - `periodo_fim` (ISO datetime)
 
 ### Regras de negócio implementadas
-1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) via `GET /pedidos` com filtros `dataInicial`, `dataFinal`, `limit`, `offset` e `orderBy`, com autenticação Bearer (`OLIST_API_TOKEN`)
+1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) via `GET /pedidos` com filtros `dataInicial`, `dataFinal`, `limit`, `offset` e `orderBy`, com autenticação OAuth2 (Client Credentials) usando `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET`
 2. Mantém apenas pedidos com status válidos:
    - Em aberto
    - Aprovado

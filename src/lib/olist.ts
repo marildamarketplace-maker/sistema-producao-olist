@@ -28,6 +28,7 @@ type OlistOrder = {
 };
 
 const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://erp.olist.com/public-api/v3";
+const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://erp.olist.com/oauth/token";
 const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
@@ -78,24 +79,67 @@ function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
   return Array.isArray(data) ? (data as OlistOrder[]) : [];
 }
 
+function normalizarBaseUrl(url: string) {
+  return url.endsWith("/") ? url : `${url}/`;
+}
+
+function logIntegracaoOlist(input: { endpoint: string; status: number; modulo: string }) {
+  console.info("[olist-api]", input);
+}
+
+async function obterTokenOlistV3() {
+  const clientId = process.env.OLIST_CLIENT_ID;
+  const clientSecret = process.env.OLIST_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Credenciais da API v3 ausentes. Configure OLIST_CLIENT_ID e OLIST_CLIENT_SECRET. Não use token simples da API v2 na integração v3.",
+    );
+  }
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const response = await fetch(OLIST_OAUTH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
+    cache: "no-store",
+  });
+
+  logIntegracaoOlist({ endpoint: OLIST_OAUTH_URL, status: response.status, modulo: "oauth" });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+    }
+    const responseText = await response.text();
+    throw new Error(`Falha ao autenticar na API v3 da Olist (${response.status}): ${responseText}`);
+  }
+
+  const payload = (await response.json()) as { access_token?: string };
+  if (!payload?.access_token) {
+    throw new Error("Falha ao autenticar na API v3 da Olist: resposta sem access_token.");
+  }
+
+  return payload.access_token;
+}
+
 export async function buscarPedidosOlistPorDataLimite(
   dataLimite: string,
   filtroDataBase: FiltroDataBase,
   periodoInicio: Date,
   periodoFim: Date,
 ): Promise<OlistOrder[]> {
-  const token = process.env.OLIST_API_TOKEN;
-
-  if (!token) {
-    throw new Error("Configure OLIST_API_TOKEN nas variáveis de ambiente da Vercel.");
-  }
+  const token = await obterTokenOlistV3();
 
   const limite = 100;
   let offset = 0;
   const pedidos: OlistOrder[] = [];
 
   while (true) {
-    const url = new URL("pedidos", OLIST_API_BASE_URL.endsWith("/") ? OLIST_API_BASE_URL : `${OLIST_API_BASE_URL}/`);
+    const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
     url.searchParams.set("dataInicial", inputDate(periodoInicio));
     url.searchParams.set("dataFinal", inputDate(periodoFim));
     url.searchParams.set("limit", String(limite));
@@ -107,11 +151,16 @@ export async function buscarPedidosOlistPorDataLimite(
       cache: "no-store",
     });
 
+    logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos" });
+
     if (!response.ok) {
       const responseText = await response.text();
       const isLegacyRedirectBody = responseText.includes("erp.olist.com") || responseText.includes("window.location.href");
       if (response.status === 404 && isLegacyRedirectBody) {
         throw new Error("Endpoint legado detectado. Configure OLIST_API_BASE_URL=https://erp.olist.com/public-api/v3.");
+      }
+      if (response.status === 401) {
+        throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
       }
       throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
     }
