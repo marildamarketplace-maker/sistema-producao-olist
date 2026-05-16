@@ -10,6 +10,7 @@ function isHtmlResponse(contentType: string, text: string) {
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
+  const state = req.nextUrl.searchParams.get("state");
   const refreshToken = req.nextUrl.searchParams.get("refresh_token");
   const clientId = process.env.OLIST_CLIENT_ID;
   const clientSecret = process.env.OLIST_CLIENT_SECRET;
@@ -20,6 +21,13 @@ export async function GET(req: NextRequest) {
   }
 
   const grantType = refreshToken ? "refresh_token" : "authorization_code";
+
+  if (grantType === "authorization_code") {
+    const cookieState = req.cookies.get("olist_oauth_state")?.value;
+    if (!state || !cookieState || state !== cookieState) {
+      return NextResponse.json({ error: "Falha de autenticação OAuth: state inválido." }, { status: 400 });
+    }
+  }
 
   if (grantType === "authorization_code" && !code) {
     return NextResponse.json({ error: "Código OAuth ausente." }, { status: 400 });
@@ -94,6 +102,7 @@ export async function GET(req: NextRequest) {
       expires_at: expiresAt,
       status: "conectado",
       last_login_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "provider" },
@@ -103,10 +112,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Falha ao salvar tokens OAuth: ${persistError.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({
-    ok: true,
-    expires_in: tokenData.expires_in,
-    has_access_token: Boolean(tokenData.access_token),
-    has_refresh_token: Boolean(tokenData.refresh_token),
-  });
+  const redirect = NextResponse.redirect(new URL("/configuracoes/integracoes", req.nextUrl.origin));
+  redirect.cookies.set("olist_oauth_state", "", { path: "/", maxAge: 0 });
+  return redirect;
 }

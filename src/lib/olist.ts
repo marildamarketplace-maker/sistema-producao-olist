@@ -95,45 +95,60 @@ function validarRespostaJsonOrThrow(response: Response, bodyText: string) {
   }
 }
 
-async function obterTokenOlistV3() {
+async function renovarTokenComRefresh(refreshToken: string) {
   const clientId = process.env.OLIST_CLIENT_ID;
   const clientSecret = process.env.OLIST_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error("Credenciais da API v3 ausentes.");
 
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "Credenciais da API v3 ausentes. Configure OLIST_CLIENT_ID e OLIST_CLIENT_SECRET. Não use token simples da API v2 na integração v3.",
-    );
-  }
-
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const response = await fetch(OLIST_OAUTH_URL, {
     method: "POST",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }).toString(),
     cache: "no-store",
   });
 
-  logIntegracaoOlist({ endpoint: OLIST_OAUTH_URL, status: response.status, modulo: "oauth" });
-
+  logIntegracaoOlist({ endpoint: OLIST_OAUTH_URL, status: response.status, modulo: "oauth-refresh" });
   const rawText = await response.text();
   validarRespostaJsonOrThrow(response, rawText);
+  if (!response.ok) throw new Error("Falha ao renovar token OAuth.");
+  return JSON.parse(rawText) as { access_token?: string; refresh_token?: string; expires_in?: number };
+}
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
-    }
-    throw new Error(`Falha ao autenticar na API v3 da Olist (${response.status}).`);
+async function obterTokenOlistV3() {
+  const now = new Date();
+  const { data: tokenRow } = await supabaseAdmin
+    .from("integracao_olist_tokens")
+    .select("access_token, refresh_token, expires_at")
+    .eq("provider", "olist")
+    .maybeSingle();
+
+  if (tokenRow?.access_token && tokenRow?.expires_at && new Date(tokenRow.expires_at) > now) {
+    return tokenRow.access_token;
   }
 
-  const payload = JSON.parse(rawText) as { access_token?: string };
-  if (!payload?.access_token) {
-    throw new Error("Falha ao autenticar na API v3 da Olist: resposta sem access_token.");
+  if (tokenRow?.refresh_token) {
+    const refreshed = await renovarTokenComRefresh(tokenRow.refresh_token);
+    const expiresAt = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null;
+    await supabaseAdmin.from("integracao_olist_tokens").upsert(
+      {
+        provider: "olist",
+        access_token: refreshed.access_token ?? null,
+        refresh_token: refreshed.refresh_token ?? tokenRow.refresh_token,
+        expires_at: expiresAt,
+        status: refreshed.access_token ? "conectado" : "erro_autenticacao",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "provider" },
+    );
+    if (refreshed.access_token) return refreshed.access_token;
   }
 
-  return payload.access_token;
+  throw new Error("Falha no OAuth Olist/Tiny. Verifique Client ID, Client Secret, Redirect URI e se o código de autorização não expirou.");
 }
 
 export async function buscarPedidosOlistPorDataLimite(

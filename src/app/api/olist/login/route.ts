@@ -17,8 +17,17 @@ export async function GET(req: Request) {
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("scope", "openid");
 
-  const state = new URL(req.url).searchParams.get("state");
-  if (state) url.searchParams.set("state", state);
+  const providedState = new URL(req.url).searchParams.get("state");
+  const state = providedState ?? crypto.randomUUID();
+  url.searchParams.set("state", state);
 
-  return NextResponse.redirect(url.toString());
+  const response = NextResponse.redirect(url.toString());
+  response.cookies.set("olist_oauth_state", state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 10,
+  });
+  return response;
 }

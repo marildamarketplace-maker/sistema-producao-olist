@@ -191,6 +191,7 @@ create table if not exists public.integracao_olist_tokens (
   expires_at timestamptz,
   status text not null default 'nao_conectado' check (status in ('conectado', 'expirado', 'nao_conectado', 'erro_autenticacao')),
   last_login_at timestamptz,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
