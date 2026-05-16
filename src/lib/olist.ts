@@ -119,7 +119,7 @@ async function renovarTokenComRefresh(refreshToken: string) {
   return JSON.parse(rawText) as { access_token?: string; refresh_token?: string; expires_in?: number };
 }
 
-async function obterTokenOlistV3() {
+export async function getValidOlistAccessToken() {
   const now = new Date();
   const { data: tokenRow } = await supabaseAdmin
     .from("integracao_olist_tokens")
@@ -157,7 +157,7 @@ export async function buscarPedidosOlistPorDataLimite(
   periodoInicio: Date,
   periodoFim: Date,
 ): Promise<OlistOrder[]> {
-  const token = await obterTokenOlistV3();
+  const token = await getValidOlistAccessToken();
 
   const limite = 100;
   let offset = 0;
