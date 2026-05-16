@@ -27,8 +27,8 @@ type OlistOrder = {
   items?: OlistOrderItem[];
 };
 
-const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://erp.olist.com/public-api/v3";
-const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://erp.olist.com/oauth/token";
+const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://api.tiny.com.br/public-api/v3";
+const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
@@ -87,6 +87,14 @@ function logIntegracaoOlist(input: { endpoint: string; status: number; modulo: s
   console.info("[olist-api]", input);
 }
 
+function validarRespostaJsonOrThrow(response: Response, bodyText: string) {
+  const contentType = response.headers.get("content-type") ?? "";
+  const isHtml = contentType.includes("text/html") || /<html|<script|alert\(/i.test(bodyText);
+  if (isHtml) {
+    throw new Error("Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.");
+  }
+}
+
 async function obterTokenOlistV3() {
   const clientId = process.env.OLIST_CLIENT_ID;
   const clientSecret = process.env.OLIST_CLIENT_SECRET;
@@ -110,15 +118,17 @@ async function obterTokenOlistV3() {
 
   logIntegracaoOlist({ endpoint: OLIST_OAUTH_URL, status: response.status, modulo: "oauth" });
 
+  const rawText = await response.text();
+  validarRespostaJsonOrThrow(response, rawText);
+
   if (!response.ok) {
     if (response.status === 401) {
       throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
     }
-    const responseText = await response.text();
-    throw new Error(`Falha ao autenticar na API v3 da Olist (${response.status}): ${responseText}`);
+    throw new Error(`Falha ao autenticar na API v3 da Olist (${response.status}).`);
   }
 
-  const payload = (await response.json()) as { access_token?: string };
+  const payload = JSON.parse(rawText) as { access_token?: string };
   if (!payload?.access_token) {
     throw new Error("Falha ao autenticar na API v3 da Olist: resposta sem access_token.");
   }
@@ -155,10 +165,7 @@ export async function buscarPedidosOlistPorDataLimite(
 
     if (!response.ok) {
       const responseText = await response.text();
-      const isLegacyRedirectBody = responseText.includes("erp.olist.com") || responseText.includes("window.location.href");
-      if (response.status === 404 && isLegacyRedirectBody) {
-        throw new Error("Endpoint legado detectado. Configure OLIST_API_BASE_URL=https://erp.olist.com/public-api/v3.");
-      }
+      validarRespostaJsonOrThrow(response, responseText);
       if (response.status === 401) {
         throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
       }

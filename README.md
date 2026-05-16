@@ -20,6 +20,7 @@
    - `OLIST_CLIENT_SECRET`
    - `OLIST_API_BASE_URL` (opcional)
    - `OLIST_OAUTH_URL` (opcional)
+   - `OLIST_REDIRECT_URI` (necessário para fluxo authorization code)
 3. Deploy.
 
 ## Observações de segurança
@@ -113,3 +114,9 @@
 - `Período inválido`
 - `Nenhum item elegível encontrado nos pedidos da Olist.`
 - `Não há necessidade de produção para os critérios informados.`
+
+
+### OAuth de autenticação (v3)
+- `GET /api/olist/login`: inicia OAuth2 (authorization code).
+- `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
+- Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
