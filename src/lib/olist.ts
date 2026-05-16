@@ -47,7 +47,8 @@ export async function buscarPedidosOlistPorDataLimite(
     throw new Error("Configure OLIST_API_URL e OLIST_API_TOKEN nas variáveis de ambiente da Vercel.");
   }
 
-  const url = new URL("/orders", baseUrl);
+  const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const url = new URL("orders", normalizedBaseUrl);
   url.searchParams.set("shipping_deadline_lte", dataLimite);
 
   const response = await fetch(url.toString(), {
@@ -56,7 +57,8 @@ export async function buscarPedidosOlistPorDataLimite(
   });
 
   if (!response.ok) {
-    throw new Error(`Erro Olist ${response.status}`);
+    const responseText = await response.text();
+    throw new Error(`Erro Olist ${response.status} ${response.statusText}: ${responseText}`);
   }
 
   const payload = await response.json();
