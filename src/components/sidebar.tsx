@@ -7,6 +7,7 @@ const menuItems = [
   { label: "Solicitações de Produção", href: "/solicitacoes-producao" },
   { label: "Confirmar Produção", href: "/confirmar-producao" },
   { label: "Configurações", href: "/configuracoes" },
+  { label: "Turnos de Produção", href: "/turnos-producao" },
 ];
 
 export function Sidebar() {

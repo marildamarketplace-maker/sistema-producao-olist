@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
+import { calcularPeriodoTurno } from "@/lib/turnos";
 
 type Produto = {
   id: string;
@@ -30,6 +31,22 @@ type ItemForm = {
   observacao: string;
 };
 
+type Turno = {
+  id: string;
+  nome: string;
+  hora_inicio: string;
+  hora_fim: string;
+  inicia_dia_anterior: boolean;
+  ativo: boolean;
+};
+
+type ResultadoImportacaoOlist = {
+  pedidos_encontrados: number;
+  pedidos_adicionados: number;
+  pedidos_ignorados: number;
+  motivo_pedidos_ignorados: string;
+};
+
 const ITEM_INICIAL: ItemForm = {
   produto_id: "",
   quantidade_solicitada: "1",
@@ -49,7 +66,25 @@ export default function SolicitacoesProducaoPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [dataLimiteOlist, setDataLimiteOlist] = useState("");
+  const [turnos, setTurnos] = useState<Turno[]>([]);
+  const [turnoSelecionadoId, setTurnoSelecionadoId] = useState("");
+  const [tipoDataBase, setTipoDataBase] = useState<"APROVACAO_PEDIDO" | "CRIACAO_PEDIDO">("APROVACAO_PEDIDO");
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
+  const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
+
+  const turnoSelecionado = useMemo(
+    () => turnos.find((turno) => turno.id === turnoSelecionadoId) ?? null,
+    [turnoSelecionadoId, turnos],
+  );
+
+  const periodoCalculado = useMemo(() => {
+    if (!dataLimiteOlist || !turnoSelecionado) return null;
+    return calcularPeriodoTurno(dataLimiteOlist, {
+      hora_inicio: turnoSelecionado.hora_inicio,
+      hora_fim: turnoSelecionado.hora_fim,
+      inicia_dia_anterior: turnoSelecionado.inicia_dia_anterior,
+    });
+  }, [dataLimiteOlist, turnoSelecionado]);
 
   const qtdItensPorSolicitacao = useMemo(() => {
     return itens.reduce<Record<string, number>>((acc, item) => {
@@ -62,14 +97,19 @@ export default function SolicitacoesProducaoPage() {
     setLoading(true);
     setErrorMessage(null);
 
-    const [produtosResp, solicitacoesResp, itensResp] = await Promise.all([
+    const [produtosResp, solicitacoesResp, itensResp, turnosResp] = await Promise.all([
       supabase.from("produtos").select("id, sku, nome, imagem_url").eq("ativo", true).order("nome"),
       supabase.from("solicitacoes_producao").select("id, data_entrega, status, created_at").order("created_at", { ascending: false }),
       supabase.from("itens_solicitacao_producao").select("id, solicitacao_id"),
+      supabase
+        .from("turnos_producao")
+        .select("id, nome, hora_inicio, hora_fim, inicia_dia_anterior, ativo")
+        .eq("ativo", true)
+        .order("nome"),
     ]);
 
-    if (produtosResp.error || solicitacoesResp.error || itensResp.error) {
-      setErrorMessage(produtosResp.error?.message ?? solicitacoesResp.error?.message ?? itensResp.error?.message ?? "Erro ao carregar dados.");
+    if (produtosResp.error || solicitacoesResp.error || itensResp.error || turnosResp.error) {
+      setErrorMessage(produtosResp.error?.message ?? solicitacoesResp.error?.message ?? itensResp.error?.message ?? turnosResp.error?.message ?? "Erro ao carregar dados.");
       setLoading(false);
       return;
     }
@@ -77,6 +117,11 @@ export default function SolicitacoesProducaoPage() {
     setProdutos((produtosResp.data as Produto[]) ?? []);
     setSolicitacoes((solicitacoesResp.data as Solicitacao[]) ?? []);
     setItens((itensResp.data as ItemSolicitacao[]) ?? []);
+    const turnosCarregados = (turnosResp.data as Turno[]) ?? [];
+    setTurnos(turnosCarregados);
+    if (!turnoSelecionadoId && turnosCarregados.length > 0) {
+      setTurnoSelecionadoId(turnosCarregados[0].id);
+    }
     setLoading(false);
   }
 
@@ -99,15 +144,26 @@ export default function SolicitacoesProducaoPage() {
 
   async function gerarViaOlist() {
     if (!dataLimiteOlist) {
-      setErrorMessage("Informe a data limite para integração Olist.");
+      setErrorMessage("Informe a data de referência para integração Olist.");
+      return;
+    }
+    if (!turnoSelecionadoId) {
+      setErrorMessage("Selecione um turno.");
       return;
     }
     setIntegrandoOlist(true);
     setErrorMessage(null);
+    setResumoImportacaoOlist(null);
     const resp = await fetch("/api/olist/gerar-solicitacao", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data_limite: dataLimiteOlist }),
+      body: JSON.stringify({
+        data_limite: dataLimiteOlist,
+        turno_id: turnoSelecionadoId,
+        filtro_data_base: tipoDataBase,
+        periodo_inicio: periodoCalculado?.periodo_inicio.toISOString(),
+        periodo_fim: periodoCalculado?.periodo_fim.toISOString(),
+      }),
     });
     const json = await resp.json();
     if (!resp.ok) {
@@ -115,6 +171,12 @@ export default function SolicitacoesProducaoPage() {
       setIntegrandoOlist(false);
       return;
     }
+    setResumoImportacaoOlist({
+      pedidos_encontrados: Number(json.pedidos_encontrados ?? 0),
+      pedidos_adicionados: Number(json.pedidos_adicionados ?? 0),
+      pedidos_ignorados: Number(json.pedidos_ignorados ?? 0),
+      motivo_pedidos_ignorados: String(json.motivo_pedidos_ignorados ?? "Pedido já processado anteriormente."),
+    });
     await carregarDados();
     setIntegrandoOlist(false);
   }
@@ -202,12 +264,49 @@ export default function SolicitacoesProducaoPage() {
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Gerar solicitação via Olist</h3>
         <div className="flex flex-col gap-3 md:max-w-md">
           <label className="text-sm text-slate-700">
-            Data limite de entrega
+            Data de referência
             <input type="date" value={dataLimiteOlist} onChange={(e) => setDataLimiteOlist(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
           </label>
+          <label className="text-sm text-slate-700">
+            Turno
+            <select value={turnoSelecionadoId} onChange={(e) => setTurnoSelecionadoId(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+              <option value="">Selecione</option>
+              {turnos.map((turno) => (
+                <option key={turno.id} value={turno.id}>
+                  {turno.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Tipo de data
+            <select value={tipoDataBase} onChange={(e) => setTipoDataBase(e.target.value as "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO")} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+              <option value="APROVACAO_PEDIDO">Aprovação do pedido</option>
+              <option value="CRIACAO_PEDIDO">Criação do pedido</option>
+            </select>
+          </label>
+          {periodoCalculado && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <p>
+                <strong>Período calculado:</strong>
+              </p>
+              <p>Início: {periodoCalculado.periodo_inicio.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</p>
+              <p>Fim: {periodoCalculado.periodo_fim.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</p>
+            </div>
+          )}
           <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
             {integrandoOlist ? "Integrando..." : "Gerar solicitação automaticamente"}
           </button>
+          {resumoImportacaoOlist && (
+            <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+              <p><strong>Pedidos encontrados:</strong> {resumoImportacaoOlist.pedidos_encontrados}</p>
+              <p><strong>Pedidos adicionados:</strong> {resumoImportacaoOlist.pedidos_adicionados}</p>
+              <p><strong>Pedidos ignorados:</strong> {resumoImportacaoOlist.pedidos_ignorados}</p>
+              {resumoImportacaoOlist.pedidos_ignorados > 0 && (
+                <p className="mt-1 text-slate-600">Motivo: {resumoImportacaoOlist.motivo_pedidos_ignorados}</p>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

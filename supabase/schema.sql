@@ -35,18 +35,83 @@ create table if not exists public.configuracoes_sistema (
 create index if not exists idx_configuracoes_chave on public.configuracoes_sistema (chave);
 
 -- =========================
+-- Tabela: turnos_producao
+-- =========================
+create table if not exists public.turnos_producao (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null unique,
+  hora_inicio time not null,
+  hora_fim time not null,
+  inicia_dia_anterior boolean not null default false,
+  ativo boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_turnos_producao_ativo on public.turnos_producao (ativo);
+
+create or replace function public.fn_set_updated_at_turnos_producao()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_updated_at_turnos_producao on public.turnos_producao;
+create trigger trg_set_updated_at_turnos_producao
+before update on public.turnos_producao
+for each row execute function public.fn_set_updated_at_turnos_producao();
+
+
+-- =========================
 -- Tabela: solicitacoes_producao
 -- =========================
 create table if not exists public.solicitacoes_producao (
   id uuid primary key default gen_random_uuid(),
   data_entrega date not null,
+  turno_id uuid references public.turnos_producao(id) on delete set null,
+  filtro_data_base text check (filtro_data_base in ('APROVACAO_PEDIDO', 'CRIACAO_PEDIDO')),
+  periodo_inicio timestamptz,
+  periodo_fim timestamptz,
   status text not null default 'pendente' check (status in ('pendente', 'em_producao', 'parcial', 'concluida', 'cancelada')),
   observacao_geral text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  check (periodo_inicio is null or periodo_fim is null or periodo_inicio <= periodo_fim)
 );
+
+-- Compatibilidade para bases já existentes (evita erro de coluna inexistente em upgrades)
+alter table public.solicitacoes_producao
+  add column if not exists turno_id uuid references public.turnos_producao(id) on delete set null;
+
+alter table public.solicitacoes_producao
+  add column if not exists filtro_data_base text;
+
+alter table public.solicitacoes_producao
+  add column if not exists periodo_inicio timestamptz;
+
+alter table public.solicitacoes_producao
+  add column if not exists periodo_fim timestamptz;
+
+alter table public.solicitacoes_producao
+  drop constraint if exists solicitacoes_producao_filtro_data_base_check;
+
+alter table public.solicitacoes_producao
+  add constraint solicitacoes_producao_filtro_data_base_check
+  check (filtro_data_base in ('APROVACAO_PEDIDO', 'CRIACAO_PEDIDO'));
+
+alter table public.solicitacoes_producao
+  drop constraint if exists solicitacoes_producao_periodo_check;
+
+alter table public.solicitacoes_producao
+  add constraint solicitacoes_producao_periodo_check
+  check (periodo_inicio is null or periodo_fim is null or periodo_inicio <= periodo_fim);
 
 create index if not exists idx_solicitacoes_data_entrega on public.solicitacoes_producao (data_entrega);
 create index if not exists idx_solicitacoes_status on public.solicitacoes_producao (status);
+create index if not exists idx_solicitacoes_turno_id on public.solicitacoes_producao (turno_id);
 
 -- =========================
 -- Tabela: itens_solicitacao_producao
@@ -90,6 +155,30 @@ create index if not exists idx_movimentacoes_produto_id on public.movimentacoes_
 create index if not exists idx_movimentacoes_tipo on public.movimentacoes_estoque (tipo_movimento);
 create index if not exists idx_movimentacoes_created_at on public.movimentacoes_estoque (created_at desc);
 create index if not exists idx_movimentacoes_referencia_id on public.movimentacoes_estoque (referencia_id);
+
+
+
+-- =========================
+-- Tabela: pedidos_olist_processados
+-- =========================
+create table if not exists public.pedidos_olist_processados (
+  id uuid primary key default gen_random_uuid(),
+  pedido_olist_id text not null,
+  item_olist_id text not null,
+  sku text not null,
+  solicitacao_producao_id uuid not null references public.solicitacoes_producao(id) on delete restrict,
+  turno_id uuid references public.turnos_producao(id) on delete set null,
+  periodo_inicio timestamptz,
+  periodo_fim timestamptz,
+  created_at timestamptz not null default now(),
+  check (periodo_inicio is null or periodo_fim is null or periodo_inicio <= periodo_fim)
+);
+
+create unique index if not exists uq_pedidos_olist_processados_pedido_item
+  on public.pedidos_olist_processados (pedido_olist_id, item_olist_id);
+
+create index if not exists idx_pedidos_olist_processados_solicitacao
+  on public.pedidos_olist_processados (solicitacao_producao_id);
 
 -- =========================
 -- Regras de imutabilidade (append-only)

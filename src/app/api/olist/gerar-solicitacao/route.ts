@@ -5,10 +5,42 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const dataLimite = body?.data_limite;
+    const turnoId = body?.turno_id;
+    const filtroDataBase = body?.filtro_data_base;
+    const periodoInicio = body?.periodo_inicio;
+    const periodoFim = body?.periodo_fim;
+
+    console.log("POST /api/olist/gerar-solicitacao payload:", {
+      data_limite: dataLimite,
+      turno_id: turnoId,
+      filtro_data_base: filtroDataBase,
+      periodo_inicio: periodoInicio,
+      periodo_fim: periodoFim,
+    });
+
     if (!dataLimite) return NextResponse.json({ error: "data_limite é obrigatório" }, { status: 400 });
-    const result = await gerarSolicitacaoPorPedidosOlist(dataLimite);
+    if (!turnoId) return NextResponse.json({ error: "turno_id é obrigatório" }, { status: 400 });
+    if (!filtroDataBase || !["APROVACAO_PEDIDO", "CRIACAO_PEDIDO"].includes(filtroDataBase)) {
+      return NextResponse.json({ error: "filtro_data_base inválido" }, { status: 400 });
+    }
+    if (!periodoInicio || !periodoFim) {
+      return NextResponse.json({ error: "periodo_inicio e periodo_fim são obrigatórios" }, { status: 400 });
+    }
+
+    const result = await gerarSolicitacaoPorPedidosOlist({
+      dataLimite,
+      turnoId,
+      filtroDataBase,
+      periodoInicio,
+      periodoFim,
+    });
+
+    console.log("POST /api/olist/gerar-solicitacao result:", result);
     return NextResponse.json(result);
   } catch (error) {
+    console.error("Erro ao gerar solicitação por pedidos Olist:", error instanceof Error ? error.message : error, {
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado" }, { status: 500 });
   }
 }
