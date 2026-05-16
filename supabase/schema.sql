@@ -82,6 +82,33 @@ create table if not exists public.solicitacoes_producao (
   check (periodo_inicio is null or periodo_fim is null or periodo_inicio <= periodo_fim)
 );
 
+-- Compatibilidade para bases já existentes (evita erro de coluna inexistente em upgrades)
+alter table public.solicitacoes_producao
+  add column if not exists turno_id uuid references public.turnos_producao(id) on delete set null;
+
+alter table public.solicitacoes_producao
+  add column if not exists filtro_data_base text;
+
+alter table public.solicitacoes_producao
+  add column if not exists periodo_inicio timestamptz;
+
+alter table public.solicitacoes_producao
+  add column if not exists periodo_fim timestamptz;
+
+alter table public.solicitacoes_producao
+  drop constraint if exists solicitacoes_producao_filtro_data_base_check;
+
+alter table public.solicitacoes_producao
+  add constraint solicitacoes_producao_filtro_data_base_check
+  check (filtro_data_base in ('APROVACAO_PEDIDO', 'CRIACAO_PEDIDO'));
+
+alter table public.solicitacoes_producao
+  drop constraint if exists solicitacoes_producao_periodo_check;
+
+alter table public.solicitacoes_producao
+  add constraint solicitacoes_producao_periodo_check
+  check (periodo_inicio is null or periodo_fim is null or periodo_inicio <= periodo_fim);
+
 create index if not exists idx_solicitacoes_data_entrega on public.solicitacoes_producao (data_entrega);
 create index if not exists idx_solicitacoes_status on public.solicitacoes_producao (status);
 create index if not exists idx_solicitacoes_turno_id on public.solicitacoes_producao (turno_id);
