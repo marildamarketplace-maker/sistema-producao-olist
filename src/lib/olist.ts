@@ -1,42 +1,25 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type OlistOrderItem = {
-  id?: string | number;
-  sku?: string;
-  codigo?: string;
-  quantidade?: number;
-  quantity?: number;
-  descricao?: string;
-  description?: string;
-  product_name?: string;
-  imagemURL?: string;
-  image_url?: string;
+  produto: {
+    id: number;
+    sku: string;
+    descricao: string;
+  };
+  quantidade: number;
 };
 
 type OlistOrder = {
   id: string | number;
-  numero?: number;
-  number?: string;
-  status?: string;
-  situacao?: string | number;
-  approved_at?: string | null;
-  created_at?: string | null;
-  data?: string | null;
-  date?: string | null;
   itens?: OlistOrderItem[];
-  items?: OlistOrderItem[];
 };
 
-type OlistOrderDetailResponse = {
-  id?: string | number;
-  pedido?: OlistOrder;
-  itens?: OlistOrderItem[];
-  items?: OlistOrderItem[];
-};
-
-const OLIST_API_BASE_URL = process.env.OLIST_API_BASE_URL ?? "https://api.tiny.com.br/public-api/v3";
-const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
-const SITUACOES_PERMITIDAS = new Set(["0", "3", "4", "1"]);
+const OLIST_API_BASE_URL =
+  process.env.OLIST_API_BASE_URL ?? "https://api.tiny.com.br/public-api/v3";
+const OLIST_OAUTH_URL =
+  process.env.OLIST_OAUTH_URL ??
+  "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
+const SITUACAO = "4";
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
 type ProdutoRow = {
@@ -61,64 +44,43 @@ type ItemSolicitacao = {
   quantidade_solicitada: number;
 };
 
-function parseIsoDateOrNull(value: string | null | undefined) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function pedidoDentroDoPeriodo(
-  pedido: OlistOrder,
-  filtroDataBase: FiltroDataBase,
-  periodoInicio: Date,
-  periodoFim: Date,
-) {
-  const dataBaseRaw = filtroDataBase === "APROVACAO_PEDIDO" ? pedido.approved_at : pedido.created_at ?? pedido.data ?? pedido.date;
-  const dataBase = parseIsoDateOrNull(dataBaseRaw);
-  if (!dataBase) return false;
-  return dataBase >= periodoInicio && dataBase <= periodoFim;
-}
-
 function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
   if (!payload || typeof payload !== "object") return [];
   const dataObj = payload as Record<string, unknown>;
-  const data = dataObj.itens ?? dataObj.items ?? dataObj.data ?? dataObj.orders ?? dataObj.results;
+  const data =
+    dataObj.itens ?? dataObj.data ?? dataObj.orders ?? dataObj.results;
   return Array.isArray(data) ? (data as OlistOrder[]) : [];
-}
-
-function normalizarPedidoDetalhe(payload: unknown): OlistOrder | null {
-  if (!payload || typeof payload !== "object") return null;
-  const obj = payload as OlistOrderDetailResponse & Record<string, unknown>;
-  const pedido = (obj.pedido as OlistOrder | undefined) ?? (obj as OlistOrder);
-  if (!pedido?.id && !obj.id) return null;
-  return {
-    ...pedido,
-    id: pedido.id ?? (obj.id as string | number),
-    itens: pedido.itens ?? (obj.itens as OlistOrderItem[] | undefined),
-    items: pedido.items ?? (obj.items as OlistOrderItem[] | undefined),
-  };
 }
 
 function normalizarBaseUrl(url: string) {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
-function logIntegracaoOlist(input: { endpoint: string; status: number; modulo: string }) {
+function logIntegracaoOlist(input: {
+  endpoint: string;
+  status: number;
+  modulo: string;
+}) {
   console.info("[olist-api]", input);
 }
 
 function validarRespostaJsonOrThrow(response: Response, bodyText: string) {
   const contentType = response.headers.get("content-type") ?? "";
-  const isHtml = contentType.includes("text/html") || /<html|<script|alert\(/i.test(bodyText);
+  const isHtml =
+    contentType.includes("text/html") ||
+    /<html|<script|alert\(/i.test(bodyText);
   if (isHtml) {
-    throw new Error("Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.");
+    throw new Error(
+      "Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.",
+    );
   }
 }
 
 async function renovarTokenComRefresh(refreshToken: string) {
   const clientId = process.env.OLIST_CLIENT_ID;
   const clientSecret = process.env.OLIST_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error("Credenciais da API v3 ausentes.");
+  if (!clientId || !clientSecret)
+    throw new Error("Credenciais da API v3 ausentes.");
 
   const response = await fetch(OLIST_OAUTH_URL, {
     method: "POST",
@@ -132,11 +94,19 @@ async function renovarTokenComRefresh(refreshToken: string) {
     cache: "no-store",
   });
 
-  logIntegracaoOlist({ endpoint: OLIST_OAUTH_URL, status: response.status, modulo: "oauth-refresh" });
+  logIntegracaoOlist({
+    endpoint: OLIST_OAUTH_URL,
+    status: response.status,
+    modulo: "oauth-refresh",
+  });
   const rawText = await response.text();
   validarRespostaJsonOrThrow(response, rawText);
   if (!response.ok) throw new Error("Falha ao renovar token OAuth.");
-  return JSON.parse(rawText) as { access_token?: string; refresh_token?: string; expires_in?: number };
+  return JSON.parse(rawText) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
 }
 
 export async function getValidOlistAccessToken() {
@@ -147,13 +117,19 @@ export async function getValidOlistAccessToken() {
     .eq("provider", "olist")
     .maybeSingle();
 
-  if (tokenRow?.access_token && tokenRow?.expires_at && new Date(tokenRow.expires_at) > now) {
+  if (
+    tokenRow?.access_token &&
+    tokenRow?.expires_at &&
+    new Date(tokenRow.expires_at) > now
+  ) {
     return tokenRow.access_token;
   }
 
   if (tokenRow?.refresh_token) {
     const refreshed = await renovarTokenComRefresh(tokenRow.refresh_token);
-    const expiresAt = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null;
+    const expiresAt = refreshed.expires_in
+      ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+      : null;
     await supabaseAdmin.from("integracao_olist_tokens").upsert(
       {
         provider: "olist",
@@ -168,12 +144,12 @@ export async function getValidOlistAccessToken() {
     if (refreshed.access_token) return refreshed.access_token;
   }
 
-  throw new Error("Falha no OAuth Olist/Tiny. Verifique Client ID, Client Secret, Redirect URI e se o código de autorização não expirou.");
+  throw new Error(
+    "Falha no OAuth Olist/Tiny. Verifique Client ID, Client Secret, Redirect URI e se o código de autorização não expirou.",
+  );
 }
 
 export async function buscarPedidosOlistPorDataLimite(
-  dataLimite: string,
-  filtroDataBase: FiltroDataBase,
   periodoInicio: Date,
   periodoFim: Date,
 ): Promise<OlistOrder[]> {
@@ -186,7 +162,8 @@ export async function buscarPedidosOlistPorDataLimite(
     url.searchParams.set("dataInicial", inputDate(periodoInicio));
     url.searchParams.set("dataFinal", inputDate(periodoFim));
     url.searchParams.set("dataAtualizacao", inputDate(periodoFim));
-    url.searchParams.set("origemPedido", "0");
+    // url.searchParams.set("origemPedido", "0");
+    url.searchParams.set("situacao", SITUACAO);
     url.searchParams.set("limit", String(limite));
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("orderBy", "asc");
@@ -196,19 +173,29 @@ export async function buscarPedidosOlistPorDataLimite(
       cache: "no-store",
     });
 
-    logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos" });
+    logIntegracaoOlist({
+      endpoint: url.toString(),
+      status: response.status,
+      modulo: "pedidos",
+    });
 
     if (!response.ok) {
       const responseText = await response.text();
       validarRespostaJsonOrThrow(response, responseText);
       if (response.status === 401) {
-        throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+        throw new Error(
+          "Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.",
+        );
       }
-      throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
+      throw new Error(
+        `Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`,
+      );
     }
 
     const payload = await response.json();
+    console.log("payload", payload)
     const paginaPedidos = normalizarPayloadPedidos(payload);
+    console.log("paginaPedidos", paginaPedidos)
     if (paginaPedidos.length === 0) break;
 
     pedidos.push(...paginaPedidos);
@@ -217,41 +204,51 @@ export async function buscarPedidosOlistPorDataLimite(
     offset += limite;
   }
 
-  const pedidosUnicos = Array.from(new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values());
+  const pedidosUnicos = Array.from(
+    new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
+  );
 
   const pedidosComItens = await Promise.all(
     pedidosUnicos.map(async (pedido) => {
-      const url = new URL(`pedidos/${pedido.id}`, normalizarBaseUrl(OLIST_API_BASE_URL));
+      const url = new URL(
+        `pedidos/${pedido.id}`,
+        normalizarBaseUrl(OLIST_API_BASE_URL),
+      );
       const response = await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
 
-      logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedido-detalhe" });
+      logIntegracaoOlist({
+        endpoint: url.toString(),
+        status: response.status,
+        modulo: "pedido-detalhe",
+      });
 
       if (!response.ok) {
         const responseText = await response.text();
         validarRespostaJsonOrThrow(response, responseText);
         if (response.status === 401) {
-          throw new Error("Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.");
+          throw new Error(
+            "Token inválido, chave expirada ou usuário sem permissão no módulo solicitado.",
+          );
         }
-        throw new Error(`Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`);
+        throw new Error(
+          `Erro Tiny/ERP Olist ${response.status} ${response.statusText}: ${responseText}`,
+        );
       }
 
-      const payload = await response.json();
-      const detalhe = normalizarPedidoDetalhe(payload);
-      if (!detalhe) return pedido;
-      return detalhe;
+      const responseJson = (await response.json()) as OlistOrder;
+      const itens = (responseJson.itens ?? []) as OlistOrderItem[];
+
+      return {
+        id: pedido.id,
+        itens: itens,
+      };
     }),
   );
 
-  return pedidosComItens
-    .filter((pedido) => {
-      const situacao = String(pedido.situacao ?? "").trim();
-      if (!situacao) return true;
-      return SITUACOES_PERMITIDAS.has(situacao);
-    })
-    .filter((pedido) => pedidoDentroDoPeriodo(pedido, filtroDataBase, periodoInicio, periodoFim));
+  return pedidosComItens;
 }
 
 function inputDate(date: Date) {
@@ -267,24 +264,44 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 }) {
   const periodoInicio = new Date(input.periodoInicio);
   const periodoFim = new Date(input.periodoFim);
-  if (Number.isNaN(periodoInicio.getTime()) || Number.isNaN(periodoFim.getTime())) {
+  if (
+    Number.isNaN(periodoInicio.getTime()) ||
+    Number.isNaN(periodoFim.getTime())
+  ) {
     throw new Error("Período inválido.");
   }
   if (periodoInicio > periodoFim) {
-    throw new Error("Período inválido: periodo_inicio deve ser menor ou igual a periodo_fim.");
+    throw new Error(
+      "Período inválido: periodo_inicio deve ser menor ou igual a periodo_fim.",
+    );
   }
 
-  const pedidos = await buscarPedidosOlistPorDataLimite(input.dataLimite, input.filtroDataBase, periodoInicio, periodoFim);
+  const pedidos = await buscarPedidosOlistPorDataLimite(
+    periodoInicio,
+    periodoFim,
+  );
   const pedidosEncontrados = pedidos.length;
+  console.log("pedidos", pedidos);
   const paresPedidoItem = pedidos.flatMap((pedido) =>
-    (pedido.itens ?? pedido.items ?? []).map((item, index) => ({
+    (pedido.itens ?? []).map((item, index) => ({
       pedido_olist_id: String(pedido.id),
-      item_olist_id: item.id ? String(item.id) : `${pedido.id}:${item.sku ?? "sem-sku"}:${index}`,
+      item_olist_id: item.produto.id
+        ? String(item.produto.id)
+        : `${pedido.id}:${item.produto.sku ?? "sem-sku"}:${index}`,
     })),
   );
 
-  const pedidosIds = [...new Set(paresPedidoItem.map((par) => par.pedido_olist_id))];
-  const itensIds = [...new Set(paresPedidoItem.map((par) => par.item_olist_id))];
+  console.log("paresPedidoItem", paresPedidoItem);
+
+  const pedidosIds = [
+    ...new Set(paresPedidoItem.map((par) => par.pedido_olist_id)),
+  ];
+  const itensIds = [
+    ...new Set(paresPedidoItem.map((par) => par.item_olist_id)),
+  ];
+
+  console.log("pedidosIds", pedidosIds);
+  console.log("itensIds", itensIds);
 
   const { data: processadosRows, error: processadosError } =
     pedidosIds.length > 0 && itensIds.length > 0
@@ -297,24 +314,42 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
   if (processadosError) throw new Error(processadosError.message);
   const processadosSet = new Set(
-    ((processadosRows ?? []) as Array<{ pedido_olist_id: string; item_olist_id: string }>).map(
-      (row) => `${row.pedido_olist_id}::${row.item_olist_id}`,
-    ),
+    (
+      (processadosRows ?? []) as Array<{
+        pedido_olist_id: string;
+        item_olist_id: string;
+      }>
+    ).map((row) => `${row.pedido_olist_id}::${row.item_olist_id}`),
   );
 
-  const agregados = new Map<string, { sku: string; nome: string; imagem_url: string | null; quantidade_pedidos: number }>();
-  const itensNovosProcessados: Array<{ pedido_olist_id: string; item_olist_id: string; sku: string }> = [];
+  const agregados = new Map<
+    string,
+    {
+      sku: string;
+      nome: string;
+      imagem_url: string | null;
+      quantidade_pedidos: number;
+    }
+  >();
+  const itensNovosProcessados: Array<{
+    pedido_olist_id: string;
+    item_olist_id: string;
+    sku: string;
+  }> = [];
   const novosProcessadosSet = new Set<string>();
   let itensJaProcessados = 0;
   let pedidosIgnorados = 0;
   let pedidosAdicionados = 0;
   for (const pedido of pedidos) {
     let teveItemNovo = false;
-    for (const [index, item] of (pedido.itens ?? pedido.items ?? []).entries()) {
-      const sku = String(item.sku ?? item.codigo ?? "").trim();
+    console.log("pedido.itens", pedido.itens);
+    for (const [index, item] of (pedido.itens ?? []).entries()) {
+      const sku = String(item.produto.sku).trim();
       if (!sku) continue;
 
-      const itemOlistId = item.id ? String(item.id) : `${pedido.id}:${sku}:${index}`;
+      const itemOlistId = item.produto.id
+        ? String(item.produto.id)
+        : `${pedido.id}:${sku}:${index}`;
       const chaveProcessamento = `${pedido.id}::${itemOlistId}`;
       if (processadosSet.has(chaveProcessamento)) {
         itensJaProcessados += 1;
@@ -324,14 +359,18 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
       const atual = agregados.get(sku) ?? {
         sku,
-        nome: item.product_name ?? item.descricao ?? item.description ?? sku,
-        imagem_url: item.image_url ?? item.imagemURL ?? null,
+        nome: item.produto.descricao,
+        imagem_url: null,
         quantidade_pedidos: 0,
       };
-      atual.quantidade_pedidos += Number(item.quantity ?? item.quantidade ?? 0);
-      if (!atual.imagem_url && item.image_url) atual.imagem_url = item.image_url;
+      atual.quantidade_pedidos += item.quantidade;
+      atual.imagem_url = "";
       agregados.set(sku, atual);
-      itensNovosProcessados.push({ pedido_olist_id: String(pedido.id), item_olist_id: itemOlistId, sku });
+      itensNovosProcessados.push({
+        pedido_olist_id: String(pedido.id),
+        item_olist_id: itemOlistId,
+        sku,
+      });
       novosProcessadosSet.add(chaveProcessamento);
       teveItemNovo = true;
     }
@@ -340,20 +379,45 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   }
 
   const skus = [...agregados.keys()];
-  if (skus.length === 0) throw new Error("Nenhum item elegível encontrado nos pedidos da Olist.");
+  console.log("skus", skus)
+  if (skus.length === 0)
+    throw new Error("Nenhum item elegível encontrado nos pedidos da Olist.");
 
-  const [{ data: produtos, error: prodError }, { data: estoqueRows, error: estError }, { data: cfgData, error: cfgError }] = await Promise.all([
-    supabaseAdmin.from("produtos").select("id, sku, nome, imagem_url, meta_estoque, ativo").in("sku", skus),
+  const [
+    { data: produtos, error: prodError },
+    { data: estoqueRows, error: estError },
+    { data: cfgData, error: cfgError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("produtos")
+      .select("id, sku, nome, imagem_url, meta_estoque, ativo")
+      .in("sku", skus),
     supabaseAdmin.from("vw_estoque_atual").select("sku, estoque_atual"),
-    supabaseAdmin.from("configuracoes_sistema").select("valor").eq("chave", "META_GERAL_ESTOQUE").maybeSingle(),
+    supabaseAdmin
+      .from("configuracoes_sistema")
+      .select("valor")
+      .eq("chave", "META_GERAL_ESTOQUE")
+      .maybeSingle(),
   ]);
 
-  if (prodError || estError || cfgError) throw new Error(prodError?.message ?? estError?.message ?? cfgError?.message ?? "Erro ao buscar dados internos.");
+  if (prodError || estError || cfgError)
+    throw new Error(
+      prodError?.message ??
+        estError?.message ??
+        cfgError?.message ??
+        "Erro ao buscar dados internos.",
+    );
 
   const metaGeral = Number(cfgData?.valor ?? 0);
-  const estoqueMap = new Map(((estoqueRows ?? []) as EstoqueAtualRow[]).map((e) => [e.sku, Number(e.estoque_atual ?? 0)]));
+  const estoqueMap = new Map(
+    ((estoqueRows ?? []) as EstoqueAtualRow[]).map((e) => [
+      e.sku,
+      Number(e.estoque_atual ?? 0),
+    ]),
+  );
 
   const itens: ItemSolicitacao[] = [];
+  console.log("produtos", produtos)
   for (const produto of (produtos ?? []) as ProdutoRow[]) {
     if (!produto.ativo) continue;
     const demanda = agregados.get(produto.sku);
@@ -361,7 +425,10 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
     const estoqueAtual = estoqueMap.get(produto.sku) ?? 0;
     const metaEstoque = produto.meta_estoque ?? metaGeral;
-    const quantidadeAProduzir = Math.max(0, demanda.quantidade_pedidos + metaEstoque - estoqueAtual);
+    const quantidadeAProduzir = Math.max(
+      0,
+      demanda.quantidade_pedidos + metaEstoque - estoqueAtual,
+    );
 
     if (quantidadeAProduzir > 0) {
       itens.push({
@@ -374,7 +441,10 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     }
   }
 
-  if (itens.length === 0) throw new Error("Não há necessidade de produção para os critérios informados.");
+  if (itens.length === 0)
+    throw new Error(
+      "Não há necessidade de produção para os critérios informados.",
+    );
 
   const { data: solicitacao, error: solError } = await supabaseAdmin
     .from("solicitacoes_producao")
@@ -390,7 +460,8 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     .select("id")
     .single();
 
-  if (solError || !solicitacao) throw new Error(solError?.message ?? "Erro ao criar solicitação.");
+  if (solError || !solicitacao)
+    throw new Error(solError?.message ?? "Erro ao criar solicitação.");
 
   const itensPayload = itens.map((item) => ({
     solicitacao_id: solicitacao.id,
@@ -405,7 +476,9 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     status_item: "em_producao",
   }));
 
-  const { error: itemError } = await supabaseAdmin.from("itens_solicitacao_producao").insert(itensPayload);
+  const { error: itemError } = await supabaseAdmin
+    .from("itens_solicitacao_producao")
+    .insert(itensPayload);
   if (itemError) throw new Error(itemError.message);
 
   const registrosProcessados = itensNovosProcessados.map((item) => ({
@@ -419,7 +492,9 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   }));
 
   if (registrosProcessados.length > 0) {
-    const { error: processadosInsertError } = await supabaseAdmin.from("pedidos_olist_processados").insert(registrosProcessados);
+    const { error: processadosInsertError } = await supabaseAdmin
+      .from("pedidos_olist_processados")
+      .insert(registrosProcessados);
     if (processadosInsertError) throw new Error(processadosInsertError.message);
   }
 
