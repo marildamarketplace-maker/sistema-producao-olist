@@ -16,12 +16,15 @@
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
-   - `OLIST_API_URL`
-   - `OLIST_API_TOKEN`
+   - `OLIST_CLIENT_ID`
+   - `OLIST_CLIENT_SECRET`
+   - `OLIST_API_BASE_URL` (opcional)
+   - `OLIST_OAUTH_URL` (opcional)
+   - `OLIST_REDIRECT_URI` (necessário para fluxo authorization code)
 3. Deploy.
 
 ## Observações de segurança
-- `SUPABASE_SERVICE_ROLE_KEY` e `OLIST_API_TOKEN` devem ficar somente no servidor (Vercel), nunca no browser.
+- `SUPABASE_SERVICE_ROLE_KEY`, `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET` devem ficar somente no servidor (Vercel), nunca no browser.
 - A rota `POST /api/olist/gerar-solicitacao` usa credenciais server-side.
 
 ## API de importação Olist (implementado)
@@ -31,8 +34,9 @@
 
 ### Referência oficial (Swagger Olist/Tiny v3)
 - Swagger: `https://erp.tiny.com.br/public-api/v3/swagger/index.html#`
-- Base da API pública v3: `https://erp.tiny.com.br/public-api/v3`
-- Observação: a implementação atual usa `OLIST_API_URL` configurável e tenta automaticamente `GET {OLIST_API_URL}/orders`; se receber `404`, tenta `GET {OLIST_API_URL}/pedidos` com o mesmo filtro e token Bearer.
+- Base da API pública v3: `https://erp.olist.com/public-api/v3`
+- A implementação usa exclusivamente a API pública v3 da Olist/Tiny em `https://erp.olist.com/public-api/v3`.
+- Opcional: sobrescreva via `OLIST_API_BASE_URL` (ex.: homologação).
 
 ### Payload
 ```json
@@ -53,9 +57,7 @@
 - `periodo_fim` (ISO datetime)
 
 ### Regras de negócio implementadas
-1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) com filtro `shipping_deadline_lte={data_limite}` e autenticação Bearer (`OLIST_API_TOKEN`), tentando nesta ordem:
-   - `GET {OLIST_API_URL}/orders`
-   - em caso de `404`, fallback para `GET {OLIST_API_URL}/pedidos`
+1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) via `GET /pedidos` com filtros `dataInicial`, `dataFinal`, `limit`, `offset` e `orderBy`, com autenticação OAuth2 (Client Credentials) usando `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET`
 2. Mantém apenas pedidos com status válidos:
    - Em aberto
    - Aprovado
@@ -112,3 +114,9 @@
 - `Período inválido`
 - `Nenhum item elegível encontrado nos pedidos da Olist.`
 - `Não há necessidade de produção para os critérios informados.`
+
+
+### OAuth de autenticação (v3)
+- `GET /api/olist/login`: inicia OAuth2 (authorization code).
+- `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
+- Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
