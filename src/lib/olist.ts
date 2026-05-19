@@ -1,4 +1,5 @@
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import axios, { AxiosResponse } from "axios";
+import { prisma } from "@/lib/prisma";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -11,7 +12,8 @@ const OLIST_OAUTH_URL =
   process.env.OLIST_OAUTH_URL ??
   "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 
-const SITUACAO = "4";
+const SITUACOES_PADRAO = ["3", "4", "1"];
+const SITUACOES_PERMITIDAS = new Set(["3", "4", "1", "7"]);
 
 /* =========================================================
  * TYPES
@@ -74,8 +76,12 @@ function logIntegracaoOlist(input: {
   console.info("[olist-api]", input);
 }
 
-function validarRespostaJsonOrThrow(response: Response, bodyText: string) {
-  const contentType = response.headers.get("content-type") ?? "";
+function validarRespostaAxiosJsonOrThrow(response: AxiosResponse<unknown>) {
+  const contentType = String(response.headers["content-type"] ?? "");
+  const bodyText =
+    typeof response.data === "string"
+      ? response.data
+      : JSON.stringify(response.data ?? "");
 
   const isHtml =
     contentType.includes("text/html") ||
@@ -103,6 +109,7 @@ function validarPeriodo(input: { periodoInicio: string; periodoFim: string }) {
   const periodoInicio = new Date(input.periodoInicio);
   const periodoFim = new Date(input.periodoFim);
 
+  console.log("periodoInicio", periodoInicio, "periodoFim", periodoFim)
   if (
     Number.isNaN(periodoInicio.getTime()) ||
     Number.isNaN(periodoFim.getTime())
@@ -134,19 +141,21 @@ async function renovarTokenComRefresh(refreshToken: string) {
     throw new Error("Credenciais da API v3 ausentes.");
   }
 
-  const response = await fetch(OLIST_OAUTH_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
+  const response = await axios.post(
+    OLIST_OAUTH_URL,
+    new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: clientId,
       client_secret: clientSecret,
-    }).toString(),
-    cache: "no-store",
-  });
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      validateStatus: () => true,
+    },
+  );
 
   logIntegracaoOlist({
     endpoint: OLIST_OAUTH_URL,
@@ -154,58 +163,78 @@ async function renovarTokenComRefresh(refreshToken: string) {
     modulo: "oauth-refresh",
   });
 
-  const rawText = await response.text();
+  validarRespostaAxiosJsonOrThrow(response);
 
-  validarRespostaJsonOrThrow(response, rawText);
-
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error("Falha ao renovar token OAuth.");
   }
 
-  return JSON.parse(rawText) as {
+  return response.data as {
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
   };
 }
 
+function normalizarSituacoes(situacoes?: string[]) {
+  const situacoesNormalizadas = (situacoes?.length ? situacoes : SITUACOES_PADRAO)
+    .map((situacao) => String(situacao).trim())
+    .filter((situacao) => SITUACOES_PERMITIDAS.has(situacao));
+
+  const unicas = [...new Set(situacoesNormalizadas)];
+
+  if (unicas.length === 0) {
+    throw new Error("Selecione ao menos uma situacao para consultar pedidos.");
+  }
+
+  return unicas;
+}
+
 export async function getValidOlistAccessToken() {
   const now = new Date();
 
-  const { data: tokenRow } = await supabaseAdmin
-    .from("integracao_olist_tokens")
-    .select("access_token, refresh_token, expires_at")
-    .eq("provider", "olist")
-    .maybeSingle();
+  const tokenRow = await prisma.integracaoOlistToken.findUnique({
+    where: { provider: "olist" },
+    select: {
+      accessToken: true,
+      refreshToken: true,
+      expiresAt: true,
+    },
+  });
 
   if (
-    tokenRow?.access_token &&
-    tokenRow?.expires_at &&
-    new Date(tokenRow.expires_at) > now
+    tokenRow?.accessToken &&
+    tokenRow?.expiresAt &&
+    tokenRow.expiresAt > now
   ) {
-    return tokenRow.access_token;
+    return tokenRow.accessToken;
   }
 
-  if (tokenRow?.refresh_token) {
-    const refreshed = await renovarTokenComRefresh(tokenRow.refresh_token);
+  if (tokenRow?.refreshToken) {
+    const refreshed = await renovarTokenComRefresh(tokenRow.refreshToken);
 
     const expiresAt = refreshed.expires_in
-      ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+      ? new Date(Date.now() + refreshed.expires_in * 1000)
       : null;
 
-    await supabaseAdmin.from("integracao_olist_tokens").upsert(
-      {
+    await prisma.integracaoOlistToken.upsert({
+      where: { provider: "olist" },
+      create: {
         provider: "olist",
-        access_token: refreshed.access_token ?? null,
-        refresh_token: refreshed.refresh_token ?? tokenRow.refresh_token,
-        expires_at: expiresAt,
+        accessToken: refreshed.access_token ?? null,
+        refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
+        expiresAt,
         status: refreshed.access_token ? "conectado" : "erro_autenticacao",
-        updated_at: new Date().toISOString(),
+        updatedAt: new Date(),
       },
-      {
-        onConflict: "provider",
+      update: {
+        accessToken: refreshed.access_token ?? null,
+        refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
+        expiresAt,
+        status: refreshed.access_token ? "conectado" : "erro_autenticacao",
+        updatedAt: new Date(),
       },
-    );
+    });
 
     if (refreshed.access_token) {
       return refreshed.access_token;
@@ -223,6 +252,7 @@ async function listarPedidosOlist(
   token: string,
   periodoInicio: Date,
   periodoFim: Date,
+  situacao: string,
 ) {
   const limite = 100;
 
@@ -237,9 +267,7 @@ async function listarPedidosOlist(
 
     url.searchParams.set("dataFinal", inputDate(periodoFim));
 
-    url.searchParams.set("dataAtualizacao", inputDate(periodoFim));
-
-    url.searchParams.set("situacao", SITUACAO);
+    url.searchParams.set("situacao", situacao);
 
     url.searchParams.set("limit", String(limite));
 
@@ -247,11 +275,11 @@ async function listarPedidosOlist(
 
     url.searchParams.set("orderBy", "asc");
 
-    const response = await fetch(url.toString(), {
+    const response = await axios.get(url.toString(), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      cache: "no-store",
+      validateStatus: () => true,
     });
 
     logIntegracaoOlist({
@@ -260,10 +288,8 @@ async function listarPedidosOlist(
       modulo: "pedidos",
     });
 
-    if (!response.ok) {
-      const responseText = await response.text();
-
-      validarRespostaJsonOrThrow(response, responseText);
+    if (response.status < 200 || response.status >= 300) {
+      validarRespostaAxiosJsonOrThrow(response);
 
       if (response.status === 401) {
         throw new Error("Token inválido ou sem permissão.");
@@ -272,7 +298,7 @@ async function listarPedidosOlist(
       throw new Error(`Erro Tiny ${response.status}`);
     }
 
-    const payload = await response.json();
+    const payload = response.data;
 
     const paginaPedidos = normalizarPayloadPedidos(payload);
 
@@ -301,11 +327,11 @@ async function buscarDetalhePedidoOlist(
     normalizarBaseUrl(OLIST_API_BASE_URL),
   );
 
-  const response = await fetch(url.toString(), {
+  const response = await axios.get(url.toString(), {
     headers: {
       Authorization: `Bearer ${token}`,
     },
-    cache: "no-store",
+    validateStatus: () => true,
   });
 
   logIntegracaoOlist({
@@ -314,10 +340,8 @@ async function buscarDetalhePedidoOlist(
     modulo: "pedido-detalhe",
   });
 
-  if (!response.ok) {
-    const responseText = await response.text();
-
-    validarRespostaJsonOrThrow(response, responseText);
+  if (response.status < 200 || response.status >= 300) {
+    validarRespostaAxiosJsonOrThrow(response);
 
     if (response.status === 401) {
       throw new Error("Token inválido ou sem permissão.");
@@ -326,7 +350,7 @@ async function buscarDetalhePedidoOlist(
     throw new Error(`Erro Tiny ${response.status}`);
   }
 
-  const responseJson = (await response.json()) as OlistOrder;
+  const responseJson = response.data as OlistOrder;
 
   return {
     id: pedidoId,
@@ -337,10 +361,17 @@ async function buscarDetalhePedidoOlist(
 export async function buscarPedidosOlistPorDataLimite(
   periodoInicio: Date,
   periodoFim: Date,
+  situacoes: string[],
 ): Promise<OlistOrder[]> {
   const token = await getValidOlistAccessToken();
 
-  const pedidos = await listarPedidosOlist(token, periodoInicio, periodoFim);
+  const pedidosPorSituacao = await Promise.all(
+    situacoes.map((situacao) =>
+      listarPedidosOlist(token, periodoInicio, periodoFim, situacao),
+    ),
+  );
+
+  const pedidos = pedidosPorSituacao.flat();
 
   const pedidosUnicos = Array.from(
     new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
@@ -375,29 +406,22 @@ async function buscarItensJaProcessados(
     ...new Set(paresPedidoItem.map((par) => par.item_olist_id)),
   ];
 
-  const { data: processadosRows, error } =
+  const processadosRows =
     pedidosIds.length > 0 && itensIds.length > 0
-      ? await supabaseAdmin
-          .from("pedidos_olist_processados")
-          .select("pedido_olist_id, item_olist_id")
-          .in("pedido_olist_id", pedidosIds)
-          .in("item_olist_id", itensIds)
-      : {
-          data: [],
-          error: null,
-        };
-
-  if (error) {
-    throw new Error(error.message);
-  }
+      ? await prisma.pedidoOlistProcessado.findMany({
+          where: {
+            pedidoOlistId: { in: pedidosIds },
+            itemOlistId: { in: itensIds },
+          },
+          select: {
+            pedidoOlistId: true,
+            itemOlistId: true,
+          },
+        })
+      : [];
 
   return new Set(
-    (
-      (processadosRows ?? []) as Array<{
-        pedido_olist_id: string;
-        item_olist_id: string;
-      }>
-    ).map((row) => `${row.pedido_olist_id}::${row.item_olist_id}`),
+    processadosRows.map((row) => `${row.pedidoOlistId}::${row.itemOlistId}`),
   );
 }
 
@@ -427,7 +451,7 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
   for (const pedido of pedidos) {
     let teveItemNovo = false;
 
-    for (const [index, item] of (pedido.itens ?? []).entries()) {
+    for (const item of pedido.itens ?? []) {
       const sku = String(item.produto.sku).trim();
 
       if (!sku) continue;
@@ -488,38 +512,48 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
  * ======================================================= */
 
 async function buscarDadosInternos(skus: string[]) {
-  const [
-    { data: produtos, error: prodError },
-    { data: estoqueRows, error: estError },
-    { data: cfgData, error: cfgError },
-  ] = await Promise.all([
-    supabaseAdmin
-      .from("produtos")
-      .select("id, sku, nome, imagem_url, meta_estoque, ativo")
-      .in("sku", skus),
+  const [produtos, estoqueRows, cfgRows] = await Promise.all([
+    prisma.produto.findMany({
+      where: {
+        sku: { in: skus },
+      },
+      select: {
+        id: true,
+        sku: true,
+        nome: true,
+        imagemUrl: true,
+        metaEstoque: true,
+        ativo: true,
+      },
+    }),
 
-    supabaseAdmin.from("vw_estoque_atual").select("sku, estoque_atual"),
+    prisma.$queryRaw<EstoqueAtualRow[]>`
+      select sku, estoque_atual
+      from public.vw_estoque_atual
+    `,
 
-    supabaseAdmin
-      .from("configuracoes_sistema")
-      .select("valor")
-      .eq("chave", "META_GERAL_ESTOQUE")
-      .maybeSingle(),
+    prisma.configuracaoSistema.findMany({
+      where: {
+        chave: { in: ["META_GERAL_ESTOQUE", "MINIMO_GERAL_ESTOQUE"] },
+      },
+      select: { chave: true, valor: true },
+    }),
   ]);
 
-  if (prodError || estError || cfgError) {
-    throw new Error(
-      prodError?.message ??
-        estError?.message ??
-        cfgError?.message ??
-        "Erro ao buscar dados internos.",
-    );
-  }
+  const configsMap = new Map(cfgRows.map((config) => [config.chave, Number(config.valor)]));
 
   return {
-    produtos: (produtos ?? []) as ProdutoRow[],
-    estoqueRows: (estoqueRows ?? []) as EstoqueAtualRow[],
-    metaGeral: Number(cfgData?.valor ?? 0),
+    produtos: produtos.map((produto) => ({
+      id: produto.id,
+      sku: produto.sku,
+      nome: produto.nome,
+      imagem_url: produto.imagemUrl,
+      meta_estoque: produto.metaEstoque,
+      ativo: produto.ativo,
+    })) satisfies ProdutoRow[],
+    estoqueRows,
+    metaGeral: configsMap.get("META_GERAL_ESTOQUE") ?? 0,
+    minimoGeral: configsMap.get("MINIMO_GERAL_ESTOQUE") ?? 0,
   };
 }
 
@@ -536,6 +570,7 @@ function montarItensSolicitacao(
   produtos: ProdutoRow[],
   estoqueRows: EstoqueAtualRow[],
   metaGeral: number,
+  minimoGeral: number,
 ) {
   const estoqueMap = new Map(
     estoqueRows.map((e) => [e.sku, Number(e.estoque_atual ?? 0)]),
@@ -553,11 +588,11 @@ function montarItensSolicitacao(
     const estoqueAtual = estoqueMap.get(produto.sku) ?? 0;
 
     const metaEstoque = produto.meta_estoque ?? metaGeral;
+    const estoqueAposPedidos = estoqueAtual - demanda.quantidade_pedidos;
 
-    const quantidadeAProduzir = Math.max(
-      0,
-      demanda.quantidade_pedidos + metaEstoque - estoqueAtual,
-    );
+    if (estoqueAposPedidos > minimoGeral) continue;
+
+    const quantidadeAProduzir = Math.max(0, metaEstoque - estoqueAposPedidos);
 
     if (quantidadeAProduzir > 0) {
       itens.push({
@@ -579,28 +614,21 @@ function montarItensSolicitacao(
 
 async function criarSolicitacaoProducao(input: {
   dataLimite: string;
-  turnoId: string;
   filtroDataBase: FiltroDataBase;
   periodoInicio: string;
   periodoFim: string;
 }) {
-  const { data: solicitacao, error } = await supabaseAdmin
-    .from("solicitacoes_producao")
-    .insert({
-      data_entrega: input.dataLimite,
-      turno_id: input.turnoId,
-      filtro_data_base: input.filtroDataBase,
-      periodo_inicio: input.periodoInicio,
-      periodo_fim: input.periodoFim,
+  const solicitacao = await prisma.solicitacaoProducao.create({
+    data: {
+      dataEntrega: new Date(`${input.dataLimite}T00:00:00`),
+      filtroDataBase: input.filtroDataBase,
+      periodoInicio: new Date(input.periodoInicio),
+      periodoFim: new Date(input.periodoFim),
       status: "em_producao",
-      observacao_geral: "Gerada automaticamente via Olist",
-    })
-    .select("id")
-    .single();
-
-  if (error || !solicitacao) {
-    throw new Error(error?.message ?? "Erro ao criar solicitação.");
-  }
+      observacaoGeral: "Gerada automaticamente via Olist",
+    },
+    select: { id: true },
+  });
 
   return solicitacao;
 }
@@ -610,27 +638,34 @@ async function inserirItensSolicitacao(
   itens: ItemSolicitacao[],
 ) {
   const itensPayload = itens.map((item) => ({
-    solicitacao_id: solicitacaoId,
-    produto_id: item.produto_id,
+    solicitacaoId,
+    produtoId: item.produto_id,
     sku: item.sku,
     nome: item.nome,
-    imagem_url: item.imagem_url,
-    quantidade_solicitada: item.quantidade_solicitada,
-    quantidade_produzida: 0,
-    tipo_corte: "PADRAO",
+    imagemUrl: item.imagem_url,
+    quantidadeSolicitada: item.quantidade_solicitada,
+    quantidadeProduzida: 0,
+    tipoCorte: "PADRAO",
     observacao: "Gerado por integração Olist",
-    status_item: "em_producao",
+    statusItem: "em_producao",
   }));
 
-  const { error } = await supabaseAdmin
-    .from("itens_solicitacao_producao")
-    .insert(itensPayload);
+  await prisma.itemSolicitacaoProducao.createMany({
+    data: itensPayload,
+  });
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return itensPayload;
+  return itensPayload.map((item) => ({
+    solicitacao_id: item.solicitacaoId,
+    produto_id: item.produtoId,
+    sku: item.sku,
+    nome: item.nome,
+    imagem_url: item.imagemUrl,
+    quantidade_solicitada: item.quantidadeSolicitada,
+    quantidade_produzida: item.quantidadeProduzida,
+    tipo_corte: item.tipoCorte,
+    observacao: item.observacao,
+    status_item: item.statusItem,
+  }));
 }
 
 async function registrarPedidosProcessados(
@@ -641,32 +676,26 @@ async function registrarPedidosProcessados(
   }>,
   solicitacaoId: string,
   input: {
-    turnoId: string;
     periodoInicio: string;
     periodoFim: string;
   },
 ) {
   const registros = itensNovosProcessados.map((item) => ({
-    pedido_olist_id: item.pedido_olist_id,
-    item_olist_id: item.item_olist_id,
+    pedidoOlistId: item.pedido_olist_id,
+    itemOlistId: item.item_olist_id,
     sku: item.sku,
-    solicitacao_producao_id: solicitacaoId,
-    turno_id: input.turnoId,
-    periodo_inicio: input.periodoInicio,
-    periodo_fim: input.periodoFim,
+    solicitacaoProducaoId: solicitacaoId,
+    periodoInicio: new Date(input.periodoInicio),
+    periodoFim: new Date(input.periodoFim),
   }));
 
   if (registros.length === 0) {
     return;
   }
 
-  const { error } = await supabaseAdmin
-    .from("pedidos_olist_processados")
-    .insert(registros);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await prisma.pedidoOlistProcessado.createMany({
+    data: registros,
+  });
 }
 
 async function cadastrarProdutosOlistNaoCadastrados(
@@ -684,17 +713,15 @@ async function cadastrarProdutosOlistNaoCadastrados(
 
   if (skus.length === 0) return;
 
-  const { data: produtosExistentes, error } = await supabaseAdmin
-    .from("produtos")
-    .select("sku")
-    .in("sku", skus);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  const produtosExistentes = await prisma.produto.findMany({
+    where: {
+      sku: { in: skus },
+    },
+    select: { sku: true },
+  });
 
   const skusExistentes = new Set(
-    (produtosExistentes ?? []).map((produto) => produto.sku),
+    produtosExistentes.map((produto) => produto.sku),
   );
 
   const produtosParaCadastrar = skus
@@ -705,23 +732,18 @@ async function cadastrarProdutosOlistNaoCadastrados(
       return {
         sku,
         nome: item?.nome ?? sku,
-        imagem_url: item?.imagem_url ?? null,
+        imagemUrl: item?.imagem_url ?? null,
         ativo: true,
-        meta_estoque: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        metaEstoque: null,
+        createdAt: new Date(),
       };
     });
 
   if (produtosParaCadastrar.length === 0) return;
 
-  const { error: insertError } = await supabaseAdmin
-    .from("produtos")
-    .insert(produtosParaCadastrar);
-
-  if (insertError) {
-    throw new Error(insertError.message);
-  }
+  await prisma.produto.createMany({
+    data: produtosParaCadastrar,
+  });
 }
 
 /* =========================================================
@@ -730,16 +752,18 @@ async function cadastrarProdutosOlistNaoCadastrados(
 
 export async function gerarSolicitacaoPorPedidosOlist(input: {
   dataLimite: string;
-  turnoId: string;
   filtroDataBase: FiltroDataBase;
   periodoInicio: string;
   periodoFim: string;
+  situacoes?: string[];
 }) {
   const { periodoInicio, periodoFim } = validarPeriodo(input);
+  const situacoes = normalizarSituacoes(input.situacoes);
 
   const pedidos = await buscarPedidosOlistPorDataLimite(
     periodoInicio,
     periodoFim,
+    situacoes,
   );
 
   const pedidosEncontrados = pedidos.length;
@@ -763,6 +787,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     dadosInternos.produtos,
     dadosInternos.estoqueRows,
     dadosInternos.metaGeral,
+    dadosInternos.minimoGeral,
   );
 
   if (itens.length === 0) {

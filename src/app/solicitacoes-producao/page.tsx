@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import { ChevronDown } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
-import { calcularPeriodoTurno } from "@/lib/turnos";
 
 type Produto = {
   id: string;
@@ -17,11 +18,16 @@ type Solicitacao = {
   data_entrega: string;
   status: string;
   created_at: string;
+  periodo_inicio: string | null;
+  periodo_fim: string | null;
 };
 
 type ItemSolicitacao = {
   id: string;
   solicitacao_id: string;
+  sku: string;
+  nome: string;
+  quantidade_solicitada: number;
 };
 
 type ItemForm = {
@@ -31,21 +37,35 @@ type ItemForm = {
   observacao: string;
 };
 
-type Turno = {
-  id: string;
-  nome: string;
-  hora_inicio: string;
-  hora_fim: string;
-  inicia_dia_anterior: boolean;
-  ativo: boolean;
-};
-
 type ResultadoImportacaoOlist = {
   pedidos_encontrados: number;
   pedidos_adicionados: number;
   pedidos_ignorados: number;
   motivo_pedidos_ignorados: string;
 };
+
+const FILTRO_DATA_BASE_OLIST = "APROVACAO_PEDIDO";
+const TIME_ZONE = "America/Sao_Paulo";
+const SITUACOES_OLIST = [
+  { valor: "3", label: "Aprovada" },
+  { valor: "4", label: "Preparando Envio" },
+  { valor: "1", label: "Faturada" },
+  { valor: "7", label: "Pronto Envio" },
+];
+const SITUACOES_OLIST_PADRAO = ["3", "4", "1"];
+
+function formatarDataLocal(date: Date) {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const valores = Object.fromEntries(partes.map((parte) => [parte.type, parte.value]));
+
+  return `${valores.year}-${valores.month}-${valores.day}`;
+}
 
 const ITEM_INICIAL: ItemForm = {
   produto_id: "",
@@ -64,27 +84,30 @@ export default function SolicitacoesProducaoPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
 
-  const [dataLimiteOlist, setDataLimiteOlist] = useState("");
-  const [turnos, setTurnos] = useState<Turno[]>([]);
-  const [turnoSelecionadoId, setTurnoSelecionadoId] = useState("");
-  const [tipoDataBase, setTipoDataBase] = useState<"APROVACAO_PEDIDO" | "CRIACAO_PEDIDO">("APROVACAO_PEDIDO");
+  const [agoraOlist, setAgoraOlist] = useState(() => new Date());
+  const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
 
-  const turnoSelecionado = useMemo(
-    () => turnos.find((turno) => turno.id === turnoSelecionadoId) ?? null,
-    [turnoSelecionadoId, turnos],
-  );
+  const ultimaSolicitacaoCriada = solicitacoes[0] ?? null;
 
   const periodoCalculado = useMemo(() => {
-    if (!dataLimiteOlist || !turnoSelecionado) return null;
-    return calcularPeriodoTurno(dataLimiteOlist, {
-      hora_inicio: turnoSelecionado.hora_inicio,
-      hora_fim: turnoSelecionado.hora_fim,
-      inicia_dia_anterior: turnoSelecionado.inicia_dia_anterior,
-    });
-  }, [dataLimiteOlist, turnoSelecionado]);
+    if (!ultimaSolicitacaoCriada) return {
+        periodo_inicio: new Date("2026-01-01"),
+        periodo_fim: new Date(),
+      };
+
+    const periodoInicio = new Date(ultimaSolicitacaoCriada.periodo_fim ?? ultimaSolicitacaoCriada.created_at);
+
+    if (Number.isNaN(periodoInicio.getTime())) return null;
+
+    return {
+      periodo_inicio: periodoInicio,
+      periodo_fim: agoraOlist,
+    };
+  }, [agoraOlist, ultimaSolicitacaoCriada]);
 
   const qtdItensPorSolicitacao = useMemo(() => {
     return itens.reduce<Record<string, number>>((acc, item) => {
@@ -93,23 +116,25 @@ export default function SolicitacoesProducaoPage() {
     }, {});
   }, [itens]);
 
+  const itensPorSolicitacao = useMemo(() => {
+    return itens.reduce<Record<string, ItemSolicitacao[]>>((acc, item) => {
+      acc[item.solicitacao_id] = [...(acc[item.solicitacao_id] ?? []), item];
+      return acc;
+    }, {});
+  }, [itens]);
+
   async function carregarDados() {
     setLoading(true);
     setErrorMessage(null);
 
-    const [produtosResp, solicitacoesResp, itensResp, turnosResp] = await Promise.all([
+    const [produtosResp, solicitacoesResp, itensResp] = await Promise.all([
       supabase.from("produtos").select("id, sku, nome, imagem_url").eq("ativo", true).order("nome"),
-      supabase.from("solicitacoes_producao").select("id, data_entrega, status, created_at").order("created_at", { ascending: false }),
-      supabase.from("itens_solicitacao_producao").select("id, solicitacao_id"),
-      supabase
-        .from("turnos_producao")
-        .select("id, nome, hora_inicio, hora_fim, inicia_dia_anterior, ativo")
-        .eq("ativo", true)
-        .order("nome"),
+      supabase.from("solicitacoes_producao").select("id, data_entrega, status, created_at, periodo_inicio, periodo_fim").order("created_at", { ascending: false }),
+      supabase.from("itens_solicitacao_producao").select("id, solicitacao_id, sku, nome, quantidade_solicitada").order("nome"),
     ]);
 
-    if (produtosResp.error || solicitacoesResp.error || itensResp.error || turnosResp.error) {
-      setErrorMessage(produtosResp.error?.message ?? solicitacoesResp.error?.message ?? itensResp.error?.message ?? turnosResp.error?.message ?? "Erro ao carregar dados.");
+    if (produtosResp.error || solicitacoesResp.error || itensResp.error) {
+      setErrorMessage(produtosResp.error?.message ?? solicitacoesResp.error?.message ?? itensResp.error?.message ?? "Erro ao carregar dados.");
       setLoading(false);
       return;
     }
@@ -117,16 +142,17 @@ export default function SolicitacoesProducaoPage() {
     setProdutos((produtosResp.data as Produto[]) ?? []);
     setSolicitacoes((solicitacoesResp.data as Solicitacao[]) ?? []);
     setItens((itensResp.data as ItemSolicitacao[]) ?? []);
-    const turnosCarregados = (turnosResp.data as Turno[]) ?? [];
-    setTurnos(turnosCarregados);
-    if (!turnoSelecionadoId && turnosCarregados.length > 0) {
-      setTurnoSelecionadoId(turnosCarregados[0].id);
-    }
     setLoading(false);
   }
 
   useEffect(() => {
     carregarDados();
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setAgoraOlist(new Date()), 30000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   function alterarItem(index: number, patch: Partial<ItemForm>) {
@@ -141,32 +167,52 @@ export default function SolicitacoesProducaoPage() {
     setItensForm((anterior) => (anterior.length > 1 ? anterior.filter((_, i) => i !== index) : anterior));
   }
 
+  function alternarDetalhesSolicitacao(solicitacaoId: string) {
+    setSolicitacoesAbertas((anterior) => ({
+      ...anterior,
+      [solicitacaoId]: !anterior[solicitacaoId],
+    }));
+  }
+
+  function alternarSituacaoOlist(situacao: string) {
+    setSituacoesOlistSelecionadas((anteriores) =>
+      anteriores.includes(situacao)
+        ? anteriores.filter((item) => item !== situacao)
+        : [...anteriores, situacao],
+    );
+  }
+
 
   async function gerarViaOlist() {
-    if (!dataLimiteOlist) {
-      setErrorMessage("Informe a data de referência para integração Olist.");
+    const periodoAtual = periodoCalculado
+      ? {
+          periodo_inicio: periodoCalculado.periodo_inicio,
+          periodo_fim: new Date(),
+        }
+      : null;
+
+    if (!periodoAtual) {
+      setErrorMessage("Não há solicitação anterior para definir o início da integração Olist.");
       return;
     }
-    if (!turnoSelecionadoId) {
-      setErrorMessage("Selecione um turno.");
-      return;
-    }
+
     setIntegrandoOlist(true);
     setErrorMessage(null);
     setResumoImportacaoOlist(null);
-    const resp = await fetch("/api/olist/gerar-solicitacao", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data_limite: dataLimiteOlist,
-        turno_id: turnoSelecionadoId,
-        filtro_data_base: tipoDataBase,
-        periodo_inicio: periodoCalculado?.periodo_inicio.toISOString(),
-        periodo_fim: periodoCalculado?.periodo_fim.toISOString(),
-      }),
-    });
-    const json = await resp.json();
-    if (!resp.ok) {
+    const resp = await axios.post(
+      "/api/olist/gerar-solicitacao",
+      {
+        data_limite: formatarDataLocal(periodoAtual.periodo_fim),
+        filtro_data_base: FILTRO_DATA_BASE_OLIST,
+        periodo_inicio: periodoAtual.periodo_inicio.toISOString(),
+        periodo_fim: periodoAtual.periodo_fim.toISOString(),
+      },
+      {
+        validateStatus: () => true,
+      },
+    );
+    const json = resp.data;
+    if (resp.status < 200 || resp.status >= 300) {
       setErrorMessage(`Erro integração Olist: ${json.error ?? "desconhecido"}`);
       setIntegrandoOlist(false);
       return;
@@ -264,37 +310,24 @@ export default function SolicitacoesProducaoPage() {
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Gerar solicitação via Olist</h3>
         <div className="flex flex-col gap-3 md:max-w-md">
           <label className="text-sm text-slate-700">
-            Data de referência
-            <input type="date" value={dataLimiteOlist} onChange={(e) => setDataLimiteOlist(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-          </label>
-          <label className="text-sm text-slate-700">
-            Turno
-            <select value={turnoSelecionadoId} onChange={(e) => setTurnoSelecionadoId(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
-              <option value="">Selecione</option>
-              {turnos.map((turno) => (
-                <option key={turno.id} value={turno.id}>
-                  {turno.nome}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-slate-700">
             Tipo de data
-            <select value={tipoDataBase} onChange={(e) => setTipoDataBase(e.target.value as "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO")} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
-              <option value="APROVACAO_PEDIDO">Aprovação do pedido</option>
-              <option value="CRIACAO_PEDIDO">Criação do pedido</option>
-            </select>
+            <input readOnly value="Aprovação do pedido" className="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
           </label>
           {periodoCalculado && (
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
               <p>
-                <strong>Período calculado:</strong>
+                <strong>Período da integração:</strong>
               </p>
-              <p>Início: {periodoCalculado.periodo_inicio.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</p>
-              <p>Fim: {periodoCalculado.periodo_fim.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</p>
+              <p>Início: {periodoCalculado.periodo_inicio.toLocaleString("pt-BR", { timeZone: TIME_ZONE })}</p>
+              <p>Fim: {periodoCalculado.periodo_fim.toLocaleString("pt-BR", { timeZone: TIME_ZONE })}</p>
             </div>
           )}
-          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          {!periodoCalculado && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Crie uma solicitação antes de gerar a próxima via Olist.
+            </p>
+          )}
+          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist || !periodoCalculado} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
             {integrandoOlist ? "Integrando..." : "Gerar solicitação automaticamente"}
           </button>
           {resumoImportacaoOlist && (
@@ -435,17 +468,64 @@ export default function SolicitacoesProducaoPage() {
                   <th className="p-3">Status</th>
                   <th className="p-3">Quantidade de itens</th>
                   <th className="p-3">Data de criação</th>
+                  <th className="p-3 text-right">Produtos</th>
                 </tr>
               </thead>
               <tbody>
-                {solicitacoes.map((solicitacao) => (
-                  <tr key={solicitacao.id} className="border-b border-slate-100">
-                    <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
-                    <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
-                    <td className="p-3 text-slate-700">{qtdItensPorSolicitacao[solicitacao.id] ?? 0}</td>
-                    <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
-                  </tr>
-                ))}
+                {solicitacoes.map((solicitacao) => {
+                  const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
+                  const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+
+                  return (
+                    <Fragment key={solicitacao.id}>
+                      <tr className="border-b border-slate-100">
+                        <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
+                        <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
+                        <td className="p-3 text-slate-700">{qtdItensPorSolicitacao[solicitacao.id] ?? 0}</td>
+                        <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={itensSolicitacao.length === 0}
+                            title={aberta ? "Ocultar produtos" : "Ver produtos"}
+                            aria-label={aberta ? "Ocultar produtos da solicitação" : "Ver produtos da solicitação"}
+                            aria-expanded={aberta}
+                          >
+                            <ChevronDown className={`h-4 w-4 transition-transform ${aberta ? "rotate-180" : ""}`} />
+                          </button>
+                        </td>
+                      </tr>
+                      {aberta && (
+                        <tr className="border-b border-slate-100 bg-slate-50">
+                          <td className="p-3" colSpan={5}>
+                            <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                              <table className="min-w-full border-collapse text-sm">
+                                <thead>
+                                  <tr className="border-b border-slate-200 text-left text-slate-600">
+                                    <th className="px-3 py-2">SKU</th>
+                                    <th className="px-3 py-2">Produto</th>
+                                    <th className="px-3 py-2 text-right">Quantidade solicitada</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {itensSolicitacao.map((item) => (
+                                    <tr key={item.id} className="border-b border-slate-100 last:border-0">
+                                      <td className="px-3 py-2 font-medium text-slate-700">{item.sku}</td>
+                                      <td className="px-3 py-2 text-slate-700">{item.nome}</td>
+                                      <td className="px-3 py-2 text-right text-slate-700">{item.quantidade_solicitada}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

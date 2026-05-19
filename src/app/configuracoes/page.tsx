@@ -1,13 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import axios from "axios";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
-const CONFIG_KEY = "META_GERAL_ESTOQUE";
+const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
+const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
 
 export default function ConfiguracoesPage() {
   const [metaGeral, setMetaGeral] = useState("0");
+  const [minimoGeral, setMinimoGeral] = useState("0");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -22,19 +25,22 @@ export default function ConfiguracoesPage() {
       setMessage(null);
       const { data, error } = await supabase
         .from("configuracoes_sistema")
-        .select("id, valor")
-        .eq("chave", CONFIG_KEY)
-        .maybeSingle();
+        .select("chave, valor")
+        .in("chave", [META_CONFIG_KEY, MINIMO_CONFIG_KEY]);
 
       if (error) {
         setMessage(`Erro ao carregar configuração: ${error.message}`);
-      } else if (data?.valor) {
-        setMetaGeral(String(data.valor));
+      } else {
+        const configs = new Map((data ?? []).map((config) => [config.chave, config.valor]));
+        setMetaGeral(String(configs.get(META_CONFIG_KEY) ?? "0"));
+        setMinimoGeral(String(configs.get(MINIMO_CONFIG_KEY) ?? "0"));
       }
 
-      const statusResp = await fetch("/api/olist/status", { cache: "no-store" });
-      const statusJson = await statusResp.json();
-      if (statusResp.ok) {
+      const statusResp = await axios.get("/api/olist/status", {
+        validateStatus: () => true,
+      });
+      const statusJson = statusResp.data;
+      if (statusResp.status >= 200 && statusResp.status < 300) {
         setOlistStatus(statusJson.status ?? "nao_conectado");
         setLastLoginAt(statusJson.last_login_at ?? null);
         setExpiresAt(statusJson.expires_at ?? null);
@@ -50,25 +56,37 @@ export default function ConfiguracoesPage() {
     setSaving(true);
     setMessage(null);
 
-    const valor = Number(metaGeral);
-    if (Number.isNaN(valor) || valor < 0) {
+    const metaValor = Number(metaGeral);
+    const minimoValor = Number(minimoGeral);
+    if (Number.isNaN(metaValor) || metaValor < 0) {
       setMessage("Informe uma meta geral válida (>= 0).");
+      setSaving(false);
+      return;
+    }
+    if (Number.isNaN(minimoValor) || minimoValor < 0) {
+      setMessage("Informe um minimo geral valido (>= 0).");
       setSaving(false);
       return;
     }
 
     const { error } = await supabase.from("configuracoes_sistema").upsert(
-      {
-        chave: CONFIG_KEY,
-        valor,
-      },
+      [
+        {
+          chave: META_CONFIG_KEY,
+          valor: metaValor,
+        },
+        {
+          chave: MINIMO_CONFIG_KEY,
+          valor: minimoValor,
+        },
+      ],
       { onConflict: "chave" },
     );
 
     if (error) {
       setMessage(`Erro ao salvar configuração: ${error.message}`);
     } else {
-      setMessage("Meta geral de estoque salva com sucesso.");
+      setMessage("Configuracoes de estoque salvas com sucesso.");
     }
 
     setSaving(false);
@@ -77,9 +95,11 @@ export default function ConfiguracoesPage() {
   async function reconectarOlist() {
     setReconnecting(true);
     setMessage(null);
-    const resp = await fetch("/api/olist/reconnect", { method: "POST" });
-    const json = await resp.json();
-    if (!resp.ok) {
+    const resp = await axios.post("/api/olist/reconnect", null, {
+      validateStatus: () => true,
+    });
+    const json = resp.data;
+    if (resp.status < 200 || resp.status >= 300) {
       setMessage(`Erro ao reconectar Olist: ${json.error ?? "desconhecido"}`);
       setReconnecting(false);
       return;
@@ -103,7 +123,7 @@ export default function ConfiguracoesPage() {
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Meta geral de estoque</h3>
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">Parametros de estoque</h3>
 
         {loading ? (
           <p className="text-sm text-slate-600">Carregando...</p>
@@ -117,6 +137,18 @@ export default function ConfiguracoesPage() {
                 required
                 value={metaGeral}
                 onChange={(event) => setMetaGeral(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+            </label>
+
+            <label className="block text-sm text-slate-700">
+              Minimo geral
+              <input
+                type="number"
+                min={0}
+                required
+                value={minimoGeral}
+                onChange={(event) => setMinimoGeral(event.target.value)}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               />
             </label>

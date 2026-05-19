@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import axios from "axios";
+import { prisma } from "@/lib/prisma";
 
 const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 const usedAuthorizationCodes = new Set<string>();
@@ -52,13 +53,11 @@ export async function GET(req: NextRequest) {
     body.set("refresh_token", refreshToken as string);
   }
 
-  const response = await fetch(OLIST_OAUTH_URL, {
-    method: "POST",
+  const response = await axios.post(OLIST_OAUTH_URL, body, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: body.toString(),
-    cache: "no-store",
+    validateStatus: () => true,
   });
 
   console.info("[olist-api]", {
@@ -71,8 +70,8 @@ export async function GET(req: NextRequest) {
     modulo: "oauth-callback",
   });
 
-  const rawText = await response.text();
-  const contentType = response.headers.get("content-type") ?? "";
+  const rawText = typeof response.data === "string" ? response.data : JSON.stringify(response.data ?? "");
+  const contentType = String(response.headers["content-type"] ?? "");
   if (isHtmlResponse(contentType, rawText)) {
     return NextResponse.json(
       { error: "Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API." },
@@ -80,7 +79,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     if (response.status === 401) {
       return NextResponse.json(
         { error: "Falha no OAuth Olist/Tiny. Verifique Client ID, Client Secret, Redirect URI e se o código de autorização não expirou." },
@@ -90,26 +89,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Falha no callback OAuth (${response.status}).` }, { status: 500 });
   }
 
-  const tokenData = JSON.parse(rawText) as { access_token?: string; refresh_token?: string; expires_in?: number };
+  const tokenData = (typeof response.data === "string" ? JSON.parse(rawText) : response.data) as { access_token?: string; refresh_token?: string; expires_in?: number };
   if (grantType === "authorization_code" && code) usedAuthorizationCodes.add(code);
 
-  const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString() : null;
-  const { error: persistError } = await supabaseAdmin.from("integracao_olist_tokens").upsert(
-    {
+  const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
+  await prisma.integracaoOlistToken.upsert({
+    where: { provider: "olist" },
+    create: {
       provider: "olist",
-      access_token: tokenData.access_token ?? null,
-      refresh_token: tokenData.refresh_token ?? null,
-      expires_at: expiresAt,
+      accessToken: tokenData.access_token ?? null,
+      refreshToken: tokenData.refresh_token ?? null,
+      expiresAt,
       status: "conectado",
-      last_login_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      lastLoginAt: new Date(),
+      updatedAt: new Date(),
     },
-    { onConflict: "provider" },
-  );
-
-  if (persistError) {
-    return NextResponse.json({ error: `Falha ao salvar tokens OAuth: ${persistError.message}` }, { status: 500 });
-  }
+    update: {
+      accessToken: tokenData.access_token ?? null,
+      refreshToken: tokenData.refresh_token ?? null,
+      expiresAt,
+      status: "conectado",
+      lastLoginAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
 
   const redirect = NextResponse.redirect(new URL("/configuracoes/integracoes", req.nextUrl.origin));
   redirect.cookies.set("olist_oauth_state", "", { path: "/", maxAge: 0 });

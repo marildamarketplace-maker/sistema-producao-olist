@@ -1,10 +1,4 @@
 {
   "/api/olist/gerar-solicitacao/route": "app/api/olist/gerar-solicitacao/route.js",
-  "/configuracoes/page": "app/configuracoes/page.js",
-  "/turnos-producao/page": "app/turnos-producao/page.js",
-  "/solicitacoes-producao/page": "app/solicitacoes-producao/page.js",
-  "/confirmar-producao/page": "app/confirmar-producao/page.js",
-  "/produtos/page": "app/produtos/page.js",
-  "/estoque/page": "app/estoque/page.js",
-  "/page": "app/page.js"
+  "/solicitacoes-producao/page": "app/solicitacoes-producao/page.js"
 }

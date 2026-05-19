@@ -5,21 +5,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const dataLimite = body?.data_limite;
-    const turnoId = body?.turno_id;
-    const filtroDataBase = body?.filtro_data_base;
+    const filtroDataBase = body?.filtro_data_base ?? "APROVACAO_PEDIDO";
     const periodoInicio = body?.periodo_inicio;
     const periodoFim = body?.periodo_fim;
+    const situacoes = Array.isArray(body?.situacoes) ? body.situacoes.map(String) : undefined;
 
     console.log("POST /api/olist/gerar-solicitacao payload:", {
       data_limite: dataLimite,
-      turno_id: turnoId,
       filtro_data_base: filtroDataBase,
       periodo_inicio: periodoInicio,
       periodo_fim: periodoFim,
+      situacoes,
     });
 
     if (!dataLimite) return NextResponse.json({ error: "data_limite é obrigatório" }, { status: 400 });
-    if (!turnoId) return NextResponse.json({ error: "turno_id é obrigatório" }, { status: 400 });
     if (!filtroDataBase || !["APROVACAO_PEDIDO", "CRIACAO_PEDIDO"].includes(filtroDataBase)) {
       return NextResponse.json({ error: "filtro_data_base inválido" }, { status: 400 });
     }
@@ -29,10 +28,10 @@ export async function POST(req: NextRequest) {
 
     const result = await gerarSolicitacaoPorPedidosOlist({
       dataLimite,
-      turnoId,
       filtroDataBase,
       periodoInicio,
       periodoFim,
+      situacoes,
     });
 
     console.log("POST /api/olist/gerar-solicitacao result:", result);

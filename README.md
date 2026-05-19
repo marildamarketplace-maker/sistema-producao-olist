@@ -15,6 +15,7 @@
 2. Configure as variáveis de ambiente (Production):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `POSTGRES_PRISMA_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `OLIST_CLIENT_ID`
    - `OLIST_CLIENT_SECRET`
@@ -32,6 +33,16 @@
 ### Endpoint
 - **POST** `/api/olist/gerar-solicitacao`
 
+### Prisma ORM + Supabase
+- O acesso server-side ao banco usa Prisma ORM conectado ao Postgres do Supabase.
+- Configure `POSTGRES_PRISMA_URL` no ambiente para o Prisma Client.
+- O Prisma Client e gerado automaticamente no `postinstall` via `prisma generate`.
+- O Supabase client continua disponivel nas telas client-side, onde Prisma nao roda no browser.
+
+### HTTP com Axios
+- As chamadas server-side para OAuth/API Olist usam `axios`.
+- As chamadas client-side para as APIs internas de integracao Olist tambem usam `axios`.
+
 ### Referência oficial (Swagger Olist/Tiny v3)
 - Swagger: `https://erp.tiny.com.br/public-api/v3/swagger/index.html#`
 - Base da API pública v3: `https://erp.olist.com/public-api/v3`
@@ -42,19 +53,19 @@
 ```json
 {
   "data_limite": "2026-05-16",
-  "turno_id": "uuid-do-turno",
   "filtro_data_base": "APROVACAO_PEDIDO",
   "periodo_inicio": "2026-05-15T16:59:00.000Z",
-  "periodo_fim": "2026-05-16T11:00:00.000Z"
+  "periodo_fim": "2026-05-16T11:00:00.000Z",
+  "situacoes": ["3", "4", "1"]
 }
 ```
 
 ### Campos obrigatórios
 - `data_limite` (string date)
-- `turno_id` (uuid)
 - `filtro_data_base` (`APROVACAO_PEDIDO` ou `CRIACAO_PEDIDO`)
 - `periodo_inicio` (ISO datetime)
 - `periodo_fim` (ISO datetime)
+- `situacoes` (array opcional; padrao: `["3", "4", "1"]`)
 
 ### Regras de negócio implementadas
 1. Busca pedidos na API Olist/Tiny v3 (referência Swagger acima) via `GET /pedidos` com filtros `dataInicial`, `dataFinal`, `limit`, `offset` e `orderBy`, com autenticação OAuth2 (Client Credentials) usando `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET`
@@ -75,9 +86,11 @@
 6. Busca dados internos para cálculo:
    - `produtos` (somente ativos)
    - `vw_estoque_atual`
-   - `configuracoes_sistema` (`META_GERAL_ESTOQUE`)
+   - `configuracoes_sistema` (`META_GERAL_ESTOQUE` e `MINIMO_GERAL_ESTOQUE`)
 7. Calcula `quantidade_solicitada` por SKU:
-   - `max(0, demanda_pedidos + meta_estoque - estoque_atual)`
+   - primeiro calcula `estoque_projetado = estoque_atual - demanda_pedidos`
+   - gera item somente quando `estoque_projetado <= MINIMO_GERAL_ESTOQUE`
+   - quantidade gerada: `max(0, meta_estoque - estoque_projetado)`
    - `meta_estoque` do produto tem prioridade; fallback para `META_GERAL_ESTOQUE`
 8. Gera a solicitação em `solicitacoes_producao` com:
    - `status: em_producao`
@@ -87,7 +100,7 @@
    - `tipo_corte: PADRAO`
    - `status_item: em_producao`
    - `observacao: Gerado por integração Olist`
-10. Salva o rastreio dos itens novos em `pedidos_olist_processados` vinculando `solicitacao_producao_id`, `turno_id` e período da execução.
+10. Salva o rastreio dos itens novos em `pedidos_olist_processados` vinculando `solicitacao_producao_id` e período da execução.
 
 ### Resposta de sucesso (exemplo)
 ```json
@@ -104,7 +117,6 @@
 
 ### Erros de validação (400)
 - `data_limite é obrigatório`
-- `turno_id é obrigatório`
 - `filtro_data_base inválido`
 - `periodo_inicio e periodo_fim são obrigatórios`
 

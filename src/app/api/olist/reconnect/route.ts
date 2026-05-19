@@ -1,20 +1,25 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { prisma } from "@/lib/prisma";
 
 export async function POST() {
-  const { error } = await supabaseAdmin.from("integracao_olist_tokens").upsert(
-    {
+  await prisma.integracaoOlistToken.upsert({
+    where: { provider: "olist" },
+    create: {
       provider: "olist",
-      access_token: null,
-      refresh_token: null,
-      expires_at: null,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
       status: "nao_conectado",
-      updated_at: new Date().toISOString(),
+      updatedAt: new Date(),
     },
-    { onConflict: "provider" },
-  );
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    update: {
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      status: "nao_conectado",
+      updatedAt: new Date(),
+    },
+  });
 
   return NextResponse.json({ login_url: "/api/olist/login" });
 }
