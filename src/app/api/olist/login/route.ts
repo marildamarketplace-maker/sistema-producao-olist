@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-
-const OLIST_OAUTH_AUTHORIZE_URL =
-  process.env.OLIST_OAUTH_AUTHORIZE_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth";
+import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 
 export async function GET(req: Request) {
-  const clientId = process.env.OLIST_CLIENT_ID;
-  const redirectUri = process.env.OLIST_REDIRECT_URI;
+  const olistConfig = await getAplicativoOlistConfig();
+  const clientId = olistConfig.clientId;
+  const redirectUri = olistConfig.redirectUri;
 
   if (!clientId || !redirectUri) {
-    return NextResponse.json({ error: "Configure OLIST_CLIENT_ID e OLIST_REDIRECT_URI." }, { status: 500 });
+    return NextResponse.json({ error: "Configure client ID e redirect URI da Olist no aplicativo." }, { status: 500 });
   }
 
-  const url = new URL(OLIST_OAUTH_AUTHORIZE_URL);
+  const url = new URL(olistConfig.oauthAuthorizeUrl);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);

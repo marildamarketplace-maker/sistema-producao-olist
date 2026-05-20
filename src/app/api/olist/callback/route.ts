@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
+import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 
-const OLIST_OAUTH_URL = process.env.OLIST_OAUTH_URL ?? "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 const usedAuthorizationCodes = new Set<string>();
 
 function isHtmlResponse(contentType: string, text: string) {
@@ -13,12 +13,13 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const refreshToken = req.nextUrl.searchParams.get("refresh_token");
-  const clientId = process.env.OLIST_CLIENT_ID;
-  const clientSecret = process.env.OLIST_CLIENT_SECRET;
-  const redirectUri = process.env.OLIST_REDIRECT_URI;
+  const olistConfig = await getAplicativoOlistConfig();
+  const clientId = olistConfig.clientId;
+  const clientSecret = olistConfig.clientSecret;
+  const redirectUri = olistConfig.redirectUri;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    return NextResponse.json({ error: "Configure OLIST_CLIENT_ID, OLIST_CLIENT_SECRET e OLIST_REDIRECT_URI." }, { status: 500 });
+    return NextResponse.json({ error: "Configure client ID, client secret e redirect URI da Olist no aplicativo." }, { status: 500 });
   }
 
   const grantType = refreshToken ? "refresh_token" : "authorization_code";
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
     body.set("refresh_token", refreshToken as string);
   }
 
-  const response = await axios.post(OLIST_OAUTH_URL, body, {
+  const response = await axios.post(olistConfig.oauthUrl, body, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
     },
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
   });
 
   console.info("[olist-api]", {
-    endpoint: OLIST_OAUTH_URL,
+    endpoint: olistConfig.oauthUrl,
     status: response.status,
     grant_type: grantType,
     client_id_exists: Boolean(clientId),
@@ -96,6 +97,7 @@ export async function GET(req: NextRequest) {
   await prisma.integracaoOlistToken.upsert({
     where: { provider: "olist" },
     create: {
+      aplicativoId: APLICATIVO_PADRAO_ID,
       provider: "olist",
       accessToken: tokenData.access_token ?? null,
       refreshToken: tokenData.refresh_token ?? null,
@@ -105,6 +107,7 @@ export async function GET(req: NextRequest) {
       updatedAt: new Date(),
     },
     update: {
+      aplicativoId: APLICATIVO_PADRAO_ID,
       accessToken: tokenData.access_token ?? null,
       refreshToken: tokenData.refresh_token ?? null,
       expiresAt,

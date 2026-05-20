@@ -1,16 +1,10 @@
 ﻿import axios, { AxiosResponse } from "axios";
+import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 
 /* =========================================================
  * CONFIGURAÇÕES
  * ======================================================= */
-
-const OLIST_API_BASE_URL =
-  process.env.OLIST_API_BASE_URL ?? "https://api.tiny.com.br/public-api/v3";
-
-const OLIST_OAUTH_URL =
-  process.env.OLIST_OAUTH_URL ??
-  "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 
 const SITUACOES_PADRAO = ["3", "4", "1"];
 const SITUACOES_PERMITIDAS = new Set(["3", "4", "1", "7", "5", "6"]);
@@ -217,15 +211,16 @@ function validarPeriodo(input: { periodoInicio: string; periodoFim: string }) {
  * ======================================================= */
 
 async function renovarTokenComRefresh(refreshToken: string) {
-  const clientId = process.env.OLIST_CLIENT_ID;
-  const clientSecret = process.env.OLIST_CLIENT_SECRET;
+  const olistConfig = await getAplicativoOlistConfig();
+  const clientId = olistConfig.clientId;
+  const clientSecret = olistConfig.clientSecret;
 
   if (!clientId || !clientSecret) {
     throw new Error("Credenciais da API v3 ausentes.");
   }
 
   const response = await axios.post(
-    OLIST_OAUTH_URL,
+    olistConfig.oauthUrl,
     new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -241,7 +236,7 @@ async function renovarTokenComRefresh(refreshToken: string) {
   );
 
   logIntegracaoOlist({
-    endpoint: OLIST_OAUTH_URL,
+    endpoint: olistConfig.oauthUrl,
     status: response.status,
     modulo: "oauth-refresh",
   });
@@ -305,6 +300,7 @@ export async function getValidOlistAccessToken() {
     await prisma.integracaoOlistToken.upsert({
       where: { provider: "olist" },
       create: {
+        aplicativoId: APLICATIVO_PADRAO_ID,
         provider: "olist",
         accessToken: refreshed.access_token ?? null,
         refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
@@ -313,6 +309,7 @@ export async function getValidOlistAccessToken() {
         updatedAt: new Date(),
       },
       update: {
+        aplicativoId: APLICATIVO_PADRAO_ID,
         accessToken: refreshed.access_token ?? null,
         refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
         expiresAt,
@@ -344,8 +341,9 @@ async function listarPedidosOlist(
   const pedidos: OlistOrder[] = [];
 
   const offset = 0;
+  const olistConfig = await getAplicativoOlistConfig();
 
-  const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
+  const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
 
   url.searchParams.set("dataInicial", inputDate(periodoInicio));
 
@@ -395,9 +393,10 @@ async function buscarDetalhePedidoOlist(
   token: string,
   pedidoId: string | number,
 ) {
+  const olistConfig = await getAplicativoOlistConfig();
   const url = new URL(
     `pedidos/${pedidoId}`,
-    normalizarBaseUrl(OLIST_API_BASE_URL),
+    normalizarBaseUrl(olistConfig.apiBaseUrl),
   );
 
   const response = await axios.get(url.toString(), {
@@ -432,7 +431,8 @@ async function buscarDetalhePedidoOlist(
 }
 
 async function listarProdutosOlist(token: string, offset: number, limite: number) {
-  const url = new URL("produtos", normalizarBaseUrl(OLIST_API_BASE_URL));
+  const olistConfig = await getAplicativoOlistConfig();
+  const url = new URL("produtos", normalizarBaseUrl(olistConfig.apiBaseUrl));
 
   url.searchParams.set("limit", String(limite));
   url.searchParams.set("offset", String(offset));
