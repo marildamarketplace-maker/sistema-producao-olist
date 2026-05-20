@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
+import { NecessidadeProducaoError, gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,6 +40,15 @@ export async function POST(req: NextRequest) {
     console.error("Erro ao gerar solicitação por pedidos Olist:", error instanceof Error ? error.message : error, {
       stack: error instanceof Error ? error.stack : undefined,
     });
+    if (error instanceof NecessidadeProducaoError) {
+      return NextResponse.json(
+        {
+          error: "Os itens encontrados já possuem estoque suficiente.",
+          estoque_suficiente: error.estoqueSuficiente,
+        },
+        { status: 422 },
+      );
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado" }, { status: 500 });
   }
 }

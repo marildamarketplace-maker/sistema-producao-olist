@@ -7,26 +7,26 @@ import { supabase } from "@/lib/supabase";
 type Produto = {
   id: string;
   sku: string;
-  nome: string;
   imagem_url: string | null;
   meta_estoque: number | null;
+  minimo_estoque: number | null;
   ativo: boolean;
   created_at: string;
 };
 
 type FormData = {
   sku: string;
-  nome: string;
   imagem_url: string;
   meta_estoque: string;
+  minimo_estoque: string;
   ativo: boolean;
 };
 
 const INITIAL_FORM: FormData = {
   sku: "",
-  nome: "",
   imagem_url: "",
   meta_estoque: "",
+  minimo_estoque: "",
   ativo: true,
 };
 
@@ -46,7 +46,7 @@ export default function ProdutosPage() {
 
     const { data, error } = await supabase
       .from("produtos")
-      .select("id, sku, nome, imagem_url, meta_estoque, ativo, created_at")
+      .select("id, sku, imagem_url, meta_estoque, minimo_estoque, ativo, created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -72,9 +72,9 @@ export default function ProdutosPage() {
     setEditingId(produto.id);
     setFormData({
       sku: produto.sku,
-      nome: produto.nome,
       imagem_url: produto.imagem_url ?? "",
       meta_estoque: produto.meta_estoque === null ? "" : String(produto.meta_estoque),
+      minimo_estoque: produto.minimo_estoque === null ? "" : String(produto.minimo_estoque),
       ativo: produto.ativo,
     });
   }
@@ -86,14 +86,20 @@ export default function ProdutosPage() {
 
     const payload = {
       sku: formData.sku.trim(),
-      nome: formData.nome.trim(),
       imagem_url: formData.imagem_url.trim() || null,
       meta_estoque: formData.meta_estoque === "" ? null : Number(formData.meta_estoque),
+      minimo_estoque: formData.minimo_estoque === "" ? null : Number(formData.minimo_estoque),
       ativo: formData.ativo,
     };
 
-    if (!payload.sku || !payload.nome || (payload.meta_estoque !== null && (Number.isNaN(payload.meta_estoque) || payload.meta_estoque < 0))) {
-      setErrorMessage("Preencha SKU, nome e meta de estoque válida.");
+    if (
+      !payload.sku ||
+      (payload.meta_estoque !== null &&
+        (Number.isNaN(payload.meta_estoque) || payload.meta_estoque < 0)) ||
+      (payload.minimo_estoque !== null &&
+        (Number.isNaN(payload.minimo_estoque) || payload.minimo_estoque < 0))
+    ) {
+      setErrorMessage("Preencha SKU, meta e minimo de estoque validos.");
       setIsSaving(false);
       return;
     }
@@ -139,17 +145,6 @@ export default function ProdutosPage() {
             />
           </label>
 
-          <label className="text-sm text-slate-700">
-            Nome
-            <input
-              required
-              value={formData.nome}
-              onChange={(event) => setFormData((prev) => ({ ...prev, nome: event.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="Ex.: Camiseta básica"
-            />
-          </label>
-
           <label className="text-sm text-slate-700 md:col-span-2">
             URL da imagem
             <input
@@ -168,6 +163,17 @@ export default function ProdutosPage() {
               min={0}
               value={formData.meta_estoque}
               onChange={(event) => setFormData((prev) => ({ ...prev, meta_estoque: event.target.value }))}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            />
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Minimo de estoque
+            <input
+              type="number"
+              min={0}
+              value={formData.minimo_estoque}
+              onChange={(event) => setFormData((prev) => ({ ...prev, minimo_estoque: event.target.value }))}
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             />
           </label>
@@ -218,8 +224,8 @@ export default function ProdutosPage() {
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Imagem</th>
                   <th className="p-3">SKU</th>
-                  <th className="p-3">Nome</th>
                   <th className="p-3">Meta de estoque</th>
+                  <th className="p-3">Minimo de estoque</th>
                   <th className="p-3">Ativo</th>
                   <th className="p-3">Ações</th>
                 </tr>
@@ -232,7 +238,7 @@ export default function ProdutosPage() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={produto.imagem_url}
-                          alt={produto.nome}
+                          alt={produto.sku}
                           className="h-12 w-12 rounded object-cover"
                         />
                       ) : (
@@ -242,8 +248,8 @@ export default function ProdutosPage() {
                       )}
                     </td>
                     <td className="p-3 font-medium text-slate-700">{produto.sku}</td>
-                    <td className="p-3 text-slate-700">{produto.nome}</td>
                     <td className="p-3 text-slate-700">{produto.meta_estoque ?? "(meta geral)"}</td>
+                    <td className="p-3 text-slate-700">{produto.minimo_estoque ?? "(minimo geral)"}</td>
                     <td className="p-3 text-slate-700">{produto.ativo ? "Sim" : "Não"}</td>
                     <td className="p-3">
                       <button

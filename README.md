@@ -85,7 +85,7 @@
 5. Agrega a demanda por SKU somando `quantity` dos itens novos.
 6. Busca dados internos para cálculo:
    - `produtos` (somente ativos)
-   - `vw_estoque_atual`
+   - estoque atual assumido como zero quando nao houver tabela/view de estoque no banco
    - `configuracoes_sistema` (`META_GERAL_ESTOQUE` e `MINIMO_GERAL_ESTOQUE`)
 7. Calcula `quantidade_solicitada` por SKU:
    - primeiro calcula `estoque_projetado = estoque_atual - demanda_pedidos`

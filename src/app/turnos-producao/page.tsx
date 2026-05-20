@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase";
 
 type Turno = {
   id: string;
-  nome: string;
   hora_inicio: string;
   hora_fim: string;
   inicia_dia_anterior: boolean;
@@ -16,7 +15,6 @@ type Turno = {
 };
 
 type FormState = {
-  nome: string;
   hora_inicio: string;
   hora_fim: string;
   inicia_dia_anterior: boolean;
@@ -24,7 +22,6 @@ type FormState = {
 };
 
 const INITIAL_FORM: FormState = {
-  nome: "",
   hora_inicio: "",
   hora_fim: "",
   inicia_dia_anterior: false,
@@ -47,8 +44,8 @@ export default function TurnosProducaoPage() {
 
     const { data, error } = await supabase
       .from("turnos_producao")
-      .select("id, nome, hora_inicio, hora_fim, inicia_dia_anterior, ativo, created_at, updated_at")
-      .order("nome", { ascending: true });
+      .select("id, hora_inicio, hora_fim, inicia_dia_anterior, ativo, created_at, updated_at")
+      .order("id", { ascending: true });
 
     if (error) {
       setMessage(`Erro ao carregar turnos: ${error.message}`);
@@ -71,7 +68,6 @@ export default function TurnosProducaoPage() {
   function editarTurno(turno: Turno) {
     setEditingId(turno.id);
     setForm({
-      nome: turno.nome,
       hora_inicio: turno.hora_inicio,
       hora_fim: turno.hora_fim,
       inicia_dia_anterior: turno.inicia_dia_anterior,
@@ -85,12 +81,6 @@ export default function TurnosProducaoPage() {
     setSaving(true);
     setMessage(null);
 
-    if (!form.nome.trim()) {
-      setMessage("Informe o nome do turno.");
-      setSaving(false);
-      return;
-    }
-
     if (!form.hora_inicio || !form.hora_fim) {
       setMessage("Informe hora inicial e hora final.");
       setSaving(false);
@@ -98,7 +88,6 @@ export default function TurnosProducaoPage() {
     }
 
     const payload = {
-      nome: form.nome.trim(),
       hora_inicio: form.hora_inicio,
       hora_fim: form.hora_fim,
       inicia_dia_anterior: form.inicia_dia_anterior,
@@ -147,17 +136,6 @@ export default function TurnosProducaoPage() {
         <h3 className="mb-4 text-lg font-semibold text-slate-900">{isEditing ? "Editar turno" : "Novo turno"}</h3>
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={salvarTurno}>
-          <label className="block text-sm text-slate-700 md:col-span-2">
-            Nome
-            <input
-              type="text"
-              required
-              value={form.nome}
-              onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-
           <label className="block text-sm text-slate-700">
             Hora inicial
             <input
@@ -232,7 +210,6 @@ export default function TurnosProducaoPage() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-slate-700">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">Nome</th>
                   <th className="px-3 py-2 text-left font-medium">Hora inicial</th>
                   <th className="px-3 py-2 text-left font-medium">Hora final</th>
                   <th className="px-3 py-2 text-left font-medium">Inicia dia anterior</th>
@@ -243,7 +220,6 @@ export default function TurnosProducaoPage() {
               <tbody className="divide-y divide-slate-100">
                 {turnos.map((turno) => (
                   <tr key={turno.id}>
-                    <td className="px-3 py-2">{turno.nome}</td>
                     <td className="px-3 py-2">{turno.hora_inicio.slice(0, 5)}</td>
                     <td className="px-3 py-2">{turno.hora_fim.slice(0, 5)}</td>
                     <td className="px-3 py-2">{turno.inicia_dia_anterior ? "Sim" : "Não"}</td>

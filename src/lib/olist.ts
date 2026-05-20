@@ -1,4 +1,4 @@
-import axios, { AxiosResponse } from "axios";
+﻿import axios, { AxiosResponse } from "axios";
 import { prisma } from "@/lib/prisma";
 
 /* =========================================================
@@ -13,7 +13,10 @@ const OLIST_OAUTH_URL =
   "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token";
 
 const SITUACOES_PADRAO = ["3", "4", "1"];
-const SITUACOES_PERMITIDAS = new Set(["3", "4", "1", "7"]);
+const SITUACOES_PERMITIDAS = new Set(["3", "4", "1", "7", "5", "6"]);
+const CONTROLE_BUSCA_BAIXA_ESTOQUE = "baixa_estoque_olist";
+const SITUACOES_BAIXA_ESTOQUE = ["7", "5", "6"];
+const SITUACAO_PRODUTO_ATIVO = "A";
 
 /* =========================================================
  * TYPES
@@ -24,7 +27,6 @@ type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 type OlistOrderItem = {
   produto: {
     sku: string;
-    descricao: string;
   };
   quantidade: number;
 };
@@ -37,9 +39,9 @@ type OlistOrder = {
 type ProdutoRow = {
   id: string;
   sku: string;
-  nome: string | null;
   imagem_url: string | null;
   meta_estoque: number | null;
+  minimo_estoque: number | null;
   ativo: boolean;
 };
 
@@ -51,9 +53,51 @@ type EstoqueAtualRow = {
 type ItemSolicitacao = {
   produto_id: string;
   sku: string;
-  nome: string;
   imagem_url: string | null;
   quantidade_solicitada: number;
+  prioridade_producao: boolean;
+  existe_em_producao?: boolean;
+  quantidade_em_producao?: number;
+};
+
+type ItemEstoqueSuficiente = {
+  sku: string;
+  estoque_atual: number;
+  quantidade_pedidos: number;
+  estoque_apos_pedidos: number;
+  minimo_estoque: number;
+};
+
+export class NecessidadeProducaoError extends Error {
+  estoqueSuficiente: ItemEstoqueSuficiente[];
+
+  constructor(estoqueSuficiente: ItemEstoqueSuficiente[]) {
+    super("Não há necessidade de produção.");
+    this.name = "NecessidadeProducaoError";
+    this.estoqueSuficiente = estoqueSuficiente;
+  }
+}
+
+type ItemBaixaEstoqueInput = {
+  sku: string;
+  quantidade: number;
+  pedidoOlistId?: string | null;
+  itemOlistId?: string | null;
+  observacao?: string | null;
+};
+
+type ProdutoOlistListagem = {
+  id?: string | number;
+  sku?: string | number | null;
+  tipo?: string | null;
+  situacao?: string | null;
+  dataCriacao?: string | null;
+  dataAlteracao?: string | null;
+  unidade?: string | null;
+  gtin?: string | null;
+  precos?: unknown;
+  estoque?: unknown;
+  tipoVariacao?: string | null;
 };
 
 /* =========================================================
@@ -66,6 +110,14 @@ function inputDate(date: Date) {
 
 function normalizarBaseUrl(url: string) {
   return url.endsWith("/") ? url : `${url}/`;
+}
+
+function aguardar(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function arredondarParaPar(valor: number) {
+  return valor % 2 === 0 ? valor : valor + 1;
 }
 
 function logIntegracaoOlist(input: {
@@ -94,6 +146,10 @@ function validarRespostaAxiosJsonOrThrow(response: AxiosResponse<unknown>) {
   }
 }
 
+function isErroTiny429(error: unknown) {
+  return error instanceof Error && error.message.includes("Erro Tiny 429");
+}
+
 function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
   if (!payload || typeof payload !== "object") return [];
 
@@ -105,11 +161,38 @@ function normalizarPayloadPedidos(payload: unknown): OlistOrder[] {
   return Array.isArray(data) ? (data as OlistOrder[]) : [];
 }
 
+function normalizarPayloadProdutos(payload: unknown): ProdutoOlistListagem[] {
+  if (!payload || typeof payload !== "object") return [];
+
+  const dataObj = payload as Record<string, unknown>;
+  const data =
+    dataObj.itens ?? dataObj.data ?? dataObj.produtos ?? dataObj.results;
+
+  return Array.isArray(data) ? (data as ProdutoOlistListagem[]) : [];
+}
+
+function extrairTotalPaginacao(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const paginacao = (payload as Record<string, unknown>).paginacao;
+
+  if (!paginacao || typeof paginacao !== "object") return null;
+
+  const data = paginacao as Record<string, unknown>;
+  const total =
+    data.total ??
+    data.totalRegistros ??
+    data.total_registros ??
+    data.quantidadeTotal;
+  const totalNumber = Number(total);
+
+  return Number.isFinite(totalNumber) ? totalNumber : null;
+}
+
 function validarPeriodo(input: { periodoInicio: string; periodoFim: string }) {
   const periodoInicio = new Date(input.periodoInicio);
   const periodoFim = new Date(input.periodoFim);
 
-  console.log("periodoInicio", periodoInicio, "periodoFim", periodoFim)
   if (
     Number.isNaN(periodoInicio.getTime()) ||
     Number.isNaN(periodoFim.getTime())
@@ -177,7 +260,9 @@ async function renovarTokenComRefresh(refreshToken: string) {
 }
 
 function normalizarSituacoes(situacoes?: string[]) {
-  const situacoesNormalizadas = (situacoes?.length ? situacoes : SITUACOES_PADRAO)
+  const situacoesNormalizadas = (
+    situacoes?.length ? situacoes : SITUACOES_PADRAO
+  )
     .map((situacao) => String(situacao).trim())
     .filter((situacao) => SITUACOES_PERMITIDAS.has(situacao));
 
@@ -258,62 +343,50 @@ async function listarPedidosOlist(
 
   const pedidos: OlistOrder[] = [];
 
-  let offset = 0;
+  const offset = 0;
 
-  while (true) {
-    const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
+  const url = new URL("pedidos", normalizarBaseUrl(OLIST_API_BASE_URL));
 
-    url.searchParams.set("dataInicial", inputDate(periodoInicio));
+  url.searchParams.set("dataInicial", inputDate(periodoInicio));
 
-    url.searchParams.set("dataFinal", inputDate(periodoFim));
+  url.searchParams.set("dataFinal", inputDate(periodoFim));
 
-    url.searchParams.set("situacao", situacao);
+  url.searchParams.set("situacao", situacao);
 
-    url.searchParams.set("limit", String(limite));
+  url.searchParams.set("limit", String(limite));
 
-    url.searchParams.set("offset", String(offset));
+  url.searchParams.set("offset", String(offset));
 
-    url.searchParams.set("orderBy", "asc");
+  url.searchParams.set("orderBy", "asc");
 
-    const response = await axios.get(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      validateStatus: () => true,
-    });
+  const response = await axios.get(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    validateStatus: () => true,
+  });
 
-    logIntegracaoOlist({
-      endpoint: url.toString(),
-      status: response.status,
-      modulo: "pedidos",
-    });
+  logIntegracaoOlist({
+    endpoint: url.toString(),
+    status: response.status,
+    modulo: "pedidos",
+  });
 
-    if (response.status < 200 || response.status >= 300) {
-      validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    validarRespostaAxiosJsonOrThrow(response);
 
-      if (response.status === 401) {
-        throw new Error("Token inválido ou sem permissão.");
-      }
-
-      throw new Error(`Erro Tiny ${response.status}`);
+    if (response.status === 401) {
+      throw new Error("Token inválido ou sem permissão.");
     }
 
-    const payload = response.data;
-
-    const paginaPedidos = normalizarPayloadPedidos(payload);
-
-    if (paginaPedidos.length === 0) {
-      break;
-    }
-
-    pedidos.push(...paginaPedidos);
-
-    if (paginaPedidos.length < limite) {
-      break;
-    }
-
-    offset += limite;
+    throw new Error(`Erro Tiny ${response.status}`);
   }
+
+  const payload = response.data;
+
+  const paginaPedidos = normalizarPayloadPedidos(payload);
+
+  pedidos.push(...paginaPedidos);
 
   return pedidos;
 }
@@ -358,28 +431,182 @@ async function buscarDetalhePedidoOlist(
   };
 }
 
+async function listarProdutosOlist(token: string, offset: number, limite: number) {
+  const url = new URL("produtos", normalizarBaseUrl(OLIST_API_BASE_URL));
+
+  url.searchParams.set("limit", String(limite));
+  url.searchParams.set("offset", String(offset));
+  url.searchParams.set("situacao", SITUACAO_PRODUTO_ATIVO);
+
+  const response = await axios.get(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({
+    endpoint: url.toString(),
+    status: response.status,
+    modulo: "produtos",
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    validarRespostaAxiosJsonOrThrow(response);
+
+    if (response.status === 401) {
+      throw new Error("Token inválido ou sem permissão.");
+    }
+
+    throw new Error(`Erro Tiny ${response.status}`);
+  }
+
+  return {
+    produtos: normalizarPayloadProdutos(response.data),
+    total: extrairTotalPaginacao(response.data),
+  };
+}
+
+function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
+  const sku = String(produto.sku ?? "").trim();
+  const situacao = String(produto.situacao ?? "A").toUpperCase();
+
+  if (!sku || situacao !== SITUACAO_PRODUTO_ATIVO) {
+    return null;
+  }
+
+  return {
+    sku,
+    imagemUrl: null,
+    ativo: true,
+  };
+}
+
+export async function importarProdutosOlist() {
+  const token = await getValidOlistAccessToken();
+  const limite = 100;
+  let offset = 0;
+  let total: number | null = null;
+  let lidos = 0;
+  let criados = 0;
+  let atualizados = 0;
+  let ignorados = 0;
+  const vistos = new Set<string>();
+
+  while (true) {
+    const pagina = await listarProdutosOlist(token, offset, limite);
+
+    if (total === null) {
+      total = pagina.total;
+    }
+
+    if (pagina.produtos.length === 0) {
+      break;
+    }
+
+    for (const produtoOlist of pagina.produtos) {
+      lidos += 1;
+
+      const produto = normalizarProdutoOlist(produtoOlist);
+
+      if (!produto || vistos.has(produto.sku)) {
+        ignorados += 1;
+        continue;
+      }
+
+      vistos.add(produto.sku);
+
+      const existente = await prisma.produto.findUnique({
+        where: { sku: produto.sku },
+        select: { id: true },
+      });
+
+      await prisma.produto.upsert({
+        where: { sku: produto.sku },
+        create: {
+          sku: produto.sku,
+          imagemUrl: produto.imagemUrl,
+          ativo: produto.ativo,
+        },
+        update: {
+          imagemUrl: produto.imagemUrl,
+          ativo: produto.ativo,
+        },
+      });
+
+      if (existente) {
+        atualizados += 1;
+      } else {
+        criados += 1;
+      }
+    }
+
+    offset += limite;
+
+    if (pagina.produtos.length < limite || (total !== null && offset >= total)) {
+      break;
+    }
+
+    await aguardar(300);
+  }
+
+  return {
+    lidos,
+    criados,
+    atualizados,
+    ignorados,
+  };
+}
+
 export async function buscarPedidosOlistPorDataLimite(
   periodoInicio: Date,
   periodoFim: Date,
   situacoes: string[],
-): Promise<OlistOrder[]> {
+): Promise<{
+  pedidos: OlistOrder[];
+  pedidosEncontrados: number;
+  pedidosJaProcessadosIgnorados: number;
+}> {
   const token = await getValidOlistAccessToken();
 
-  const pedidosPorSituacao = await Promise.all(
-    situacoes.map((situacao) =>
-      listarPedidosOlist(token, periodoInicio, periodoFim, situacao),
-    ),
-  );
+  const pedidos: OlistOrder[] = [];
 
-  const pedidos = pedidosPorSituacao.flat();
+  for (const situacao of situacoes) {
+    const pedidosPorSituacao = await listarPedidosOlist(
+      token,
+      periodoInicio,
+      periodoFim,
+      situacao,
+    );
+
+    pedidos.push(...pedidosPorSituacao);
+
+    await aguardar(500);
+  }
 
   const pedidosUnicos = Array.from(
     new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
   );
-
-  return Promise.all(
-    pedidosUnicos.map((pedido) => buscarDetalhePedidoOlist(token, pedido.id)),
+  const pedidosJaProcessadosSet = await buscarPedidosJaProcessados(pedidosUnicos);
+  const pedidosNaoProcessados = pedidosUnicos.filter(
+    (pedido) => !pedidosJaProcessadosSet.has(String(pedido.id)),
   );
+
+  const resultados = [];
+
+  for (const pedido of pedidosNaoProcessados) {
+    const detalhe = await buscarDetalhePedidoOlist(token, pedido.id);
+
+    resultados.push(detalhe);
+
+    await aguardar(500);
+  }
+
+  return {
+    pedidos: resultados,
+    pedidosEncontrados: pedidosUnicos.length,
+    pedidosJaProcessadosIgnorados: pedidosJaProcessadosSet.size,
+  };
 }
 
 /* =========================================================
@@ -390,8 +617,50 @@ function extrairParesPedidoItem(pedidos: OlistOrder[]) {
   return pedidos.flatMap((pedido) =>
     (pedido.itens ?? []).map((item) => ({
       pedido_olist_id: String(pedido.id),
-      item_olist_id: item.produto.sku
+      item_olist_id: item.produto.sku,
     })),
+  );
+}
+
+async function buscarPedidosJaProcessados(pedidos: OlistOrder[]) {
+  const pedidosIds = [...new Set(pedidos.map((pedido) => String(pedido.id)))];
+
+  if (pedidosIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const processadosRows = await prisma.pedidoOlistProcessado.findMany({
+    where: {
+      pedidoOlistId: { in: pedidosIds },
+    },
+    select: {
+      pedidoOlistId: true,
+    },
+  });
+
+  return new Set(processadosRows.map((row) => row.pedidoOlistId));
+}
+
+async function buscarPedidosComBaixaJaRegistrada(pedidos: OlistOrder[]) {
+  const pedidosIds = [...new Set(pedidos.map((pedido) => String(pedido.id)))];
+
+  if (pedidosIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const baixadosRows = await prisma.itemBaixaEstoqueOlist.findMany({
+    where: {
+      pedidoOlistId: { in: pedidosIds },
+    },
+    select: {
+      pedidoOlistId: true,
+    },
+  });
+
+  return new Set(
+    baixadosRows
+      .map((row) => row.pedidoOlistId)
+      .filter((pedidoId): pedidoId is string => Boolean(pedidoId)),
   );
 }
 
@@ -430,7 +699,6 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
     string,
     {
       sku: string;
-      nome: string;
       imagem_url: string | null;
       quantidade_pedidos: number;
     }
@@ -456,7 +724,7 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
 
       if (!sku) continue;
 
-      const itemOlistId = item.produto.sku
+      const itemOlistId = item.produto.sku;
       const chaveProcessamento = `${pedido.id}::${itemOlistId}`;
 
       if (processadosSet.has(chaveProcessamento)) {
@@ -470,7 +738,6 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
 
       const atual = agregados.get(sku) ?? {
         sku,
-        nome: item.produto.descricao,
         imagem_url: null,
         quantidade_pedidos: 0,
       };
@@ -511,6 +778,35 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
  * DADOS INTERNOS
  * ======================================================= */
 
+async function buscarEstoqueAtual(skus: string[]) {
+  if (skus.length === 0) return [];
+
+  const movimentacoes = await prisma.movimentacaoEstoque.groupBy({
+    by: ["sku", "tipoMovimento"],
+    where: {
+      sku: { in: skus },
+    },
+    _sum: {
+      quantidade: true,
+    },
+  });
+
+  const estoquePorSku = new Map(skus.map((sku) => [sku, 0]));
+
+  for (const movimentacao of movimentacoes) {
+    const quantidade = Number(movimentacao._sum.quantidade ?? 0);
+    const atual = estoquePorSku.get(movimentacao.sku) ?? 0;
+    const sinal = movimentacao.tipoMovimento === "saida" ? -1 : 1;
+
+    estoquePorSku.set(movimentacao.sku, atual + quantidade * sinal);
+  }
+
+  return [...estoquePorSku.entries()].map(([sku, estoque_atual]) => ({
+    sku,
+    estoque_atual,
+  }));
+}
+
 async function buscarDadosInternos(skus: string[]) {
   const [produtos, estoqueRows, cfgRows] = await Promise.all([
     prisma.produto.findMany({
@@ -520,17 +816,14 @@ async function buscarDadosInternos(skus: string[]) {
       select: {
         id: true,
         sku: true,
-        nome: true,
         imagemUrl: true,
         metaEstoque: true,
+        minimoEstoque: true,
         ativo: true,
       },
     }),
 
-    prisma.$queryRaw<EstoqueAtualRow[]>`
-      select sku, estoque_atual
-      from public.vw_estoque_atual
-    `,
+    buscarEstoqueAtual(skus),
 
     prisma.configuracaoSistema.findMany({
       where: {
@@ -540,15 +833,17 @@ async function buscarDadosInternos(skus: string[]) {
     }),
   ]);
 
-  const configsMap = new Map(cfgRows.map((config) => [config.chave, Number(config.valor)]));
+  const configsMap = new Map(
+    cfgRows.map((config) => [config.chave, Number(config.valor)]),
+  );
 
   return {
     produtos: produtos.map((produto) => ({
       id: produto.id,
       sku: produto.sku,
-      nome: produto.nome,
       imagem_url: produto.imagemUrl,
       meta_estoque: produto.metaEstoque,
+      minimo_estoque: produto.minimoEstoque,
       ativo: produto.ativo,
     })) satisfies ProdutoRow[],
     estoqueRows,
@@ -562,7 +857,6 @@ function montarItensSolicitacao(
     string,
     {
       sku: string;
-      nome: string;
       imagem_url: string | null;
       quantidade_pedidos: number;
     }
@@ -577,6 +871,8 @@ function montarItensSolicitacao(
   );
 
   const itens: ItemSolicitacao[] = [];
+  const estoqueSuficiente: ItemEstoqueSuficiente[] = [];
+  let prioridadeProducao = false;
 
   for (const produto of produtos) {
     if (!produto.ativo) continue;
@@ -586,62 +882,102 @@ function montarItensSolicitacao(
     if (!demanda) continue;
 
     const estoqueAtual = estoqueMap.get(produto.sku) ?? 0;
+    const quantidadePedidosIntegracao = Number(demanda.quantidade_pedidos ?? 0);
 
     const metaEstoque = produto.meta_estoque ?? metaGeral;
-    const estoqueAposPedidos = estoqueAtual - demanda.quantidade_pedidos;
+    const minimoEstoque = produto.minimo_estoque ?? minimoGeral;
+    const estoqueAposPedidos = estoqueAtual - quantidadePedidosIntegracao;
 
-    if (estoqueAposPedidos > minimoGeral) continue;
+    const prioridadeItem = estoqueAtual < quantidadePedidosIntegracao;
 
-    const quantidadeAProduzir = Math.max(0, metaEstoque - estoqueAposPedidos);
-
-    if (quantidadeAProduzir > 0) {
-      itens.push({
-        produto_id: produto.id,
-        sku: produto.sku,
-        nome: produto.nome ?? demanda.nome,
-        imagem_url: produto.imagem_url ?? demanda.imagem_url,
-        quantidade_solicitada: quantidadeAProduzir,
-      });
+    if (prioridadeItem) {
+      prioridadeProducao = true;
     }
+
+    if (estoqueAposPedidos >= minimoEstoque) {
+      estoqueSuficiente.push({
+        sku: produto.sku,
+        estoque_atual: estoqueAtual,
+        quantidade_pedidos: quantidadePedidosIntegracao,
+        estoque_apos_pedidos: estoqueAposPedidos,
+        minimo_estoque: minimoEstoque,
+      });
+      continue;
+    }
+
+    const quantidadeAProduzir = arredondarParaPar(
+      Math.max(0, metaEstoque - estoqueAposPedidos),
+    );
+
+    itens.push({
+      produto_id: produto.id,
+      sku: produto.sku,
+      imagem_url: produto.imagem_url ?? demanda.imagem_url,
+      quantidade_solicitada: quantidadeAProduzir,
+      prioridade_producao: prioridadeItem,
+    });
   }
 
-  return itens;
+  return { itens, prioridadeProducao, estoqueSuficiente };
 }
 
-/* =========================================================
+
+async function marcarItensJaSolicitadosEmProducao(itens: ItemSolicitacao[]) {
+  if (itens.length === 0) return itens;
+
+  const skus = [...new Set(itens.map((item) => item.sku))];
+  const solicitacoesEmProducao = await prisma.solicitacaoProducao.findMany({
+    where: { status: "em_producao" },
+    select: { id: true },
+  });
+  const solicitacoesIds = solicitacoesEmProducao.map((solicitacao) => solicitacao.id);
+
+  if (solicitacoesIds.length === 0) return itens;
+
+  const itensEmProducao = await prisma.itemSolicitacaoProducao.groupBy({
+    by: ["sku"],
+    where: {
+      solicitacaoId: { in: solicitacoesIds },
+      sku: { in: skus },
+    },
+    _sum: {
+      quantidadeSolicitada: true,
+    },
+  });
+  const quantidadePorSku = new Map(
+    itensEmProducao.map((item) => [item.sku, Number(item._sum.quantidadeSolicitada ?? 0)]),
+  );
+
+  return itens.map((item) => {
+    const quantidadeEmProducao = quantidadePorSku.get(item.sku) ?? 0;
+
+    return {
+      ...item,
+      existe_em_producao: quantidadeEmProducao > 0,
+      quantidade_em_producao: quantidadeEmProducao,
+    };
+  });
+}/* =========================================================
  * PERSISTÊNCIA
  * ======================================================= */
 
-async function criarSolicitacaoProducao(input: {
-  dataLimite: string;
-  filtroDataBase: FiltroDataBase;
-  periodoInicio: string;
-  periodoFim: string;
-}) {
-  const solicitacao = await prisma.solicitacaoProducao.create({
-    data: {
-      dataEntrega: new Date(`${input.dataLimite}T00:00:00`),
-      filtroDataBase: input.filtroDataBase,
-      periodoInicio: new Date(input.periodoInicio),
-      periodoFim: new Date(input.periodoFim),
-      status: "em_producao",
-      observacaoGeral: "Gerada automaticamente via Olist",
-    },
-    select: { id: true },
-  });
-
-  return solicitacao;
-}
-
-async function inserirItensSolicitacao(
+async function registrarPedidosProcessados(
+  itensNovosProcessados: Array<{
+    pedido_olist_id: string;
+    item_olist_id: string;
+    sku: string;
+  }>,
   solicitacaoId: string,
-  itens: ItemSolicitacao[],
+  input: {
+    periodoInicio: string;
+    periodoFim: string;
+  },
 ) {
+  /*
   const itensPayload = itens.map((item) => ({
     solicitacaoId,
     produtoId: item.produto_id,
     sku: item.sku,
-    nome: item.nome,
     imagemUrl: item.imagem_url,
     quantidadeSolicitada: item.quantidade_solicitada,
     quantidadeProduzida: 0,
@@ -658,7 +994,6 @@ async function inserirItensSolicitacao(
     solicitacao_id: item.solicitacaoId,
     produto_id: item.produtoId,
     sku: item.sku,
-    nome: item.nome,
     imagem_url: item.imagemUrl,
     quantidade_solicitada: item.quantidadeSolicitada,
     quantidade_produzida: item.quantidadeProduzida,
@@ -666,9 +1001,6 @@ async function inserirItensSolicitacao(
     observacao: item.observacao,
     status_item: item.statusItem,
   }));
-}
-
-async function registrarPedidosProcessados(
   itensNovosProcessados: Array<{
     pedido_olist_id: string;
     item_olist_id: string;
@@ -680,6 +1012,7 @@ async function registrarPedidosProcessados(
     periodoFim: string;
   },
 ) {
+  */
   const registros = itensNovosProcessados.map((item) => ({
     pedidoOlistId: item.pedido_olist_id,
     itemOlistId: item.item_olist_id,
@@ -695,7 +1028,327 @@ async function registrarPedidosProcessados(
 
   await prisma.pedidoOlistProcessado.createMany({
     data: registros,
+    skipDuplicates: true,
   });
+}
+
+export async function registrarPedidosOlistProcessados(input: {
+  solicitacaoId: string;
+  periodoInicio: string;
+  periodoFim: string;
+  itens: Array<{
+    pedido_olist_id: string;
+    item_olist_id: string;
+    sku: string;
+  }>;
+}) {
+  await registrarPedidosProcessados(input.itens, input.solicitacaoId, {
+    periodoInicio: input.periodoInicio,
+    periodoFim: input.periodoFim,
+  });
+}
+
+async function obterPeriodoBuscaBaixaEstoque() {
+  const controle = await prisma.controleBuscaOlist.findUnique({
+    where: { chave: CONTROLE_BUSCA_BAIXA_ESTOQUE },
+    select: { ultimaBuscaEm: true },
+  });
+
+  return {
+    periodoInicio: controle?.ultimaBuscaEm ?? new Date("2026-01-01T00:00:00-03:00"),
+    periodoFim: new Date(),
+  };
+}
+
+async function atualizarUltimaBuscaBaixaEstoque(data: Date) {
+  await prisma.controleBuscaOlist.upsert({
+    where: { chave: CONTROLE_BUSCA_BAIXA_ESTOQUE },
+    create: {
+      chave: CONTROLE_BUSCA_BAIXA_ESTOQUE,
+      ultimaBuscaEm: data,
+      updatedAt: new Date(),
+    },
+    update: {
+      ultimaBuscaEm: data,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
+  const skus = [
+    ...new Set(
+      detalhes.flatMap((pedido) =>
+        (pedido.itens ?? []).map((item) => String(item.produto.sku).trim()).filter(Boolean),
+      ),
+    ),
+  ];
+  const produtos = skus.length
+    ? await prisma.produto.findMany({
+        where: { sku: { in: skus }, ativo: true },
+        select: { id: true, sku: true },
+      })
+    : [];
+  const produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
+  const produtosAusentesMap = new Map<string, { sku: string; }>();
+
+  const pedidos = detalhes.map((pedido) => ({
+    id: String(pedido.id),
+    detalhe_pendente: false,
+    itens: (pedido.itens ?? []).map((item, index) => {
+      const sku = String(item.produto.sku).trim();
+      const produto = produtoPorSku.get(sku);
+
+      if (!produto) {
+        produtosAusentesMap.set(sku, {
+          sku,
+        });
+      }
+
+      return {
+        sku,
+        quantidade: Number(item.quantidade ?? 0),
+        pedido_olist_id: String(pedido.id),
+        item_olist_id: sku || `${pedido.id}:${index}`,
+        produto_id: produto?.id ?? null,
+        produto_cadastrado: Boolean(produto),
+        detalhe_pendente: false,
+      };
+    }),
+  }));
+
+  return {
+    pedidos,
+    produtosAusentes: [...produtosAusentesMap.values()],
+  };
+}
+
+export async function buscarPedidosParaBaixaEstoqueOlist() {
+  const { periodoInicio, periodoFim } = await obterPeriodoBuscaBaixaEstoque();
+  const token = await getValidOlistAccessToken();
+  const pedidos: OlistOrder[] = [];
+
+  for (const situacao of SITUACOES_BAIXA_ESTOQUE) {
+    const pedidosPorSituacao = await listarPedidosOlist(
+      token,
+      periodoInicio,
+      periodoFim,
+      situacao,
+    );
+
+    pedidos.push(...pedidosPorSituacao);
+    await aguardar(500);
+  }
+
+  const pedidosUnicos = Array.from(
+    new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
+  );
+  const pedidosComBaixaSet = await buscarPedidosComBaixaJaRegistrada(pedidosUnicos);
+  const pedidosNaoBaixados = pedidosUnicos.filter(
+    (pedido) => !pedidosComBaixaSet.has(String(pedido.id)),
+  );
+  const detalhes: OlistOrder[] = [];
+  const pedidosPendentes: OlistOrder[] = [];
+  let atingiuLimiteDetalhe = false;
+
+  for (let index = 0; index < pedidosNaoBaixados.length; index += 1) {
+    const pedido = pedidosNaoBaixados[index];
+
+    try {
+      detalhes.push(await buscarDetalhePedidoOlist(token, pedido.id));
+      await aguardar(500);
+    } catch (error) {
+      if (!isErroTiny429(error)) {
+        throw error;
+      }
+
+      atingiuLimiteDetalhe = true;
+      pedidosPendentes.push(...pedidosNaoBaixados.slice(index));
+      break;
+    }
+  }
+
+  const { pedidos: pedidosPreparados, produtosAusentes } =
+    await prepararPedidosBaixaEstoque(detalhes);
+  const pedidosPendentesPreparados = pedidosPendentes.map((pedido) => ({
+    id: String(pedido.id),
+    detalhe_pendente: true,
+    itens: [
+      {
+        sku: "",
+        quantidade: 1,
+        pedido_olist_id: String(pedido.id),
+        item_olist_id: "",
+        produto_id: null,
+        produto_cadastrado: undefined,
+        detalhe_pendente: true,
+        observacao: "Detalhe pendente por limite de requisicoes da Olist",
+      },
+    ],
+  }));
+
+  return {
+    periodo_inicio: periodoInicio.toISOString(),
+    periodo_fim: periodoFim.toISOString(),
+    pedidos_encontrados: pedidosUnicos.length,
+    pedidos_ignorados: pedidosComBaixaSet.size,
+    pedidos: [...pedidosPreparados, ...pedidosPendentesPreparados],
+    produtos_ausentes: produtosAusentes,
+    pedidos_detalhe_pendente: pedidosPendentesPreparados.length,
+    aviso:
+      atingiuLimiteDetalhe
+        ? "A Olist limitou as requisições de detalhe. Alguns pedidos foram listados apenas com o ID para sincronizar depois."
+        : null,
+  };
+}
+
+export async function sincronizarPedidoBaixaEstoqueOlist(pedidoId: string) {
+  const token = await getValidOlistAccessToken();
+  const detalhe = await buscarDetalhePedidoOlist(token, pedidoId);
+  const { pedidos, produtosAusentes } = await prepararPedidosBaixaEstoque([detalhe]);
+
+  return {
+    pedido: pedidos[0],
+    produtos_ausentes: produtosAusentes,
+  };
+}
+
+export async function confirmarBaixaEstoqueOlist(input: {
+  origem: "automatica" | "manual";
+  observacao?: string | null;
+  periodoFimBusca?: string | null;
+  itens: ItemBaixaEstoqueInput[];
+}) {
+  if (!input.itens.length) {
+    throw new Error("Informe ao menos um item para baixa.");
+  }
+
+  const skusInformados = input.itens.map((item) => item.sku.trim());
+
+  if (skusInformados.some((sku) => !sku)) {
+    throw new Error("Todos os itens precisam de SKU/referência.");
+  }
+
+  const skus = [...new Set(skusInformados)];
+
+  const produtos = await prisma.produto.findMany({
+    where: { sku: { in: skus }, ativo: true },
+    select: { id: true, sku: true },
+  });
+  let produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
+  const ausentes = skus.filter((sku) => !produtoPorSku.has(sku));
+
+  if (ausentes.length > 0) {
+    await prisma.produto.updateMany({
+      where: { sku: { in: ausentes } },
+      data: { ativo: true },
+    });
+
+    await prisma.produto.createMany({
+      data: ausentes.map((sku) => {
+        const item = input.itens.find((itemInput) => itemInput.sku.trim() === sku);
+
+        return {
+          sku,
+          ativo: true,
+          metaEstoque: null,
+          createdAt: new Date(),
+        };
+      }),
+      skipDuplicates: true,
+    });
+
+    const produtosAtualizados = await prisma.produto.findMany({
+      where: { sku: { in: skus }, ativo: true },
+      select: { id: true, sku: true },
+    });
+
+    produtoPorSku = new Map(produtosAtualizados.map((produto) => [produto.sku, produto]));
+  }
+
+  const itensComPedido = input.itens.filter((item) => item.pedidoOlistId && item.itemOlistId);
+  const baixasExistentes = itensComPedido.length
+    ? await prisma.itemBaixaEstoqueOlist.findMany({
+        where: {
+          OR: itensComPedido.map((item) => ({
+            pedidoOlistId: item.pedidoOlistId,
+            itemOlistId: item.itemOlistId,
+          })),
+        },
+        select: { pedidoOlistId: true, itemOlistId: true },
+      })
+    : [];
+
+  if (baixasExistentes.length > 0) {
+    const repetidos = baixasExistentes
+      .map((item) => `${item.pedidoOlistId}/${item.itemOlistId}`)
+      .join(", ");
+
+    throw new Error(`Baixa duplicada bloqueada para pedido/item: ${repetidos}`);
+  }
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    const baixa = await tx.baixaEstoqueOlist.create({
+      data: {
+        origem: input.origem,
+        observacao: input.observacao?.trim() || null,
+      },
+      select: { id: true },
+    });
+
+    for (const item of input.itens) {
+      const produto = produtoPorSku.get(item.sku.trim());
+      const quantidade = Number(item.quantidade);
+
+      if (!produto || Number.isNaN(quantidade) || quantidade <= 0) {
+        throw new Error(`Quantidade inválida para ${item.sku}.`);
+      }
+
+      const movimentacao = await tx.movimentacaoEstoque.create({
+        data: {
+          produtoId: produto.id,
+          sku: produto.sku,
+          tipoMovimento: "saida",
+          quantidade,
+          origem: input.origem === "automatica" ? "BAIXA_OLIST" : "BAIXA_MANUAL",
+          referenciaId: baixa.id,
+          observacao:
+            item.observacao?.trim() ||
+            (item.pedidoOlistId ? `Baixa por pedido Olist ${item.pedidoOlistId}` : "Baixa manual de estoque"),
+        },
+        select: { id: true },
+      });
+
+      await tx.itemBaixaEstoqueOlist.create({
+        data: {
+          baixaId: baixa.id,
+          produtoId: produto.id,
+          sku: produto.sku,
+          quantidade,
+          pedidoOlistId: item.pedidoOlistId || null,
+          itemOlistId: item.itemOlistId || null,
+          observacao: item.observacao?.trim() || null,
+          origem: input.origem,
+          movimentacaoId: movimentacao.id,
+        },
+      });
+    }
+
+    return {
+      baixa_id: baixa.id,
+      itens: input.itens.length,
+    };
+  }, { maxWait: 10000, timeout: 30000 });
+
+  if (input.origem === "automatica" && input.periodoFimBusca) {
+    const periodoFimBusca = new Date(input.periodoFimBusca);
+
+    if (!Number.isNaN(periodoFimBusca.getTime())) {
+      await atualizarUltimaBuscaBaixaEstoque(periodoFimBusca);
+    }
+  }
+
+  return resultado;
 }
 
 async function cadastrarProdutosOlistNaoCadastrados(
@@ -703,7 +1356,6 @@ async function cadastrarProdutosOlistNaoCadastrados(
     string,
     {
       sku: string;
-      nome: string;
       imagem_url: string | null;
       quantidade_pedidos: number;
     }
@@ -711,7 +1363,7 @@ async function cadastrarProdutosOlistNaoCadastrados(
 ) {
   const skus = [...agregados.keys()];
 
-  if (skus.length === 0) return;
+  if (skus.length === 0) return 0;
 
   const produtosExistentes = await prisma.produto.findMany({
     where: {
@@ -731,7 +1383,6 @@ async function cadastrarProdutosOlistNaoCadastrados(
 
       return {
         sku,
-        nome: item?.nome ?? sku,
         imagemUrl: item?.imagem_url ?? null,
         ativo: true,
         metaEstoque: null,
@@ -739,11 +1390,13 @@ async function cadastrarProdutosOlistNaoCadastrados(
       };
     });
 
-  if (produtosParaCadastrar.length === 0) return;
+  if (produtosParaCadastrar.length === 0) return 0;
 
   await prisma.produto.createMany({
     data: produtosParaCadastrar,
   });
+
+  return produtosParaCadastrar.length;
 }
 
 /* =========================================================
@@ -760,16 +1413,18 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   const { periodoInicio, periodoFim } = validarPeriodo(input);
   const situacoes = normalizarSituacoes(input.situacoes);
 
-  const pedidos = await buscarPedidosOlistPorDataLimite(
+  const {
+    pedidos,
+    pedidosEncontrados,
+    pedidosJaProcessadosIgnorados,
+  } = await buscarPedidosOlistPorDataLimite(
     periodoInicio,
     periodoFim,
     situacoes,
   );
 
-  const pedidosEncontrados = pedidos.length;
-
   const paresPedidoItem = extrairParesPedidoItem(pedidos);
-  
+
   if (paresPedidoItem.length === 0) {
     throw new Error("Nenhum item elegível encontrado nos pedidos da Olist.");
   }
@@ -778,11 +1433,13 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
   const resultadoAgregacao = agregarItensNovos(pedidos, processadosSet);
 
-  await cadastrarProdutosOlistNaoCadastrados(resultadoAgregacao.agregados);
+  const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(
+    resultadoAgregacao.agregados,
+  );
 
   const dadosInternos = await buscarDadosInternos(resultadoAgregacao.skus);
 
-  const itens = montarItensSolicitacao(
+  const { itens, prioridadeProducao, estoqueSuficiente } = montarItensSolicitacao(
     resultadoAgregacao.agregados,
     dadosInternos.produtos,
     dadosInternos.estoqueRows,
@@ -791,26 +1448,29 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   );
 
   if (itens.length === 0) {
-    throw new Error("Não há necessidade de produção.");
+    throw new NecessidadeProducaoError(estoqueSuficiente);
   }
 
-  const solicitacao = await criarSolicitacaoProducao(input);
-
-  const itensPayload = await inserirItensSolicitacao(solicitacao.id, itens);
-
-  await registrarPedidosProcessados(
-    resultadoAgregacao.itensNovosProcessados,
-    solicitacao.id,
-    input,
-  );
+  const itensComStatusProducao = await marcarItensJaSolicitadosEmProducao(itens);
 
   return {
-    solicitacao_id: solicitacao.id,
-    itens: itensPayload.length,
+    data_entrega: input.dataLimite,
+    filtro_data_base: input.filtroDataBase,
+    periodo_inicio: input.periodoInicio,
+    periodo_fim: input.periodoFim,
+    observacao_geral: "Gerada via Olist. Revise os itens antes de salvar.",
+    prioridade_producao: prioridadeProducao,
+    itens: itensComStatusProducao,
+    total_itens: itensComStatusProducao.length,
     itens_ja_processados: resultadoAgregacao.itensJaProcessados,
     pedidos_encontrados: pedidosEncontrados,
     pedidos_adicionados: resultadoAgregacao.pedidosAdicionados,
-    pedidos_ignorados: resultadoAgregacao.pedidosIgnorados,
+    pedidos_ignorados:
+      resultadoAgregacao.pedidosIgnorados + pedidosJaProcessadosIgnorados,
+    produtos_cadastrados: produtosCadastrados,
+    rastreio_olist: resultadoAgregacao.itensNovosProcessados,
     motivo_pedidos_ignorados: "Pedido já processado anteriormente.",
   };
 }
+
+

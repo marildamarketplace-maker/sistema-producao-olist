@@ -9,6 +9,10 @@ type Solicitacao = {
   data_entrega: string;
   status: string;
   created_at: string;
+  observacao_geral: string | null;
+  prioridade_producao: boolean | null;
+  periodo_inicio: string | null;
+  periodo_fim: string | null;
 };
 
 type ItemSolicitacao = {
@@ -16,99 +20,123 @@ type ItemSolicitacao = {
   solicitacao_id: string;
   produto_id: string;
   sku: string;
-  nome: string;
   imagem_url: string | null;
   quantidade_solicitada: number;
   quantidade_produzida: number;
+  tipo_corte: string | null;
   observacao: string | null;
 };
 
+function formatarStatus(status: string) {
+  return status === "em_producao" ? "EM_PRODUCAO" : status.toUpperCase();
+}
+
+function formatarDataEntrega(dataEntrega: string) {
+  return new Date(`${dataEntrega}T00:00:00`).toLocaleDateString("pt-BR");
+}
+
 export default function ConfirmarProducaoPage() {
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
   const [itens, setItens] = useState<ItemSolicitacao[]>([]);
   const [produzidas, setProduzidas] = useState<Record<string, string>>({});
+  const [telefoneWhatsapp, setTelefoneWhatsapp] = useState("+55 37 8803-2390");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const solicitacaoSelecionada = useMemo(
-    () => solicitacoes.find((s) => s.id === selectedId) ?? null,
-    [selectedId, solicitacoes],
-  );
+  const itensPorSolicitacao = useMemo(() => {
+    return itens.reduce<Record<string, ItemSolicitacao[]>>((acc, item) => {
+      acc[item.solicitacao_id] = [...(acc[item.solicitacao_id] ?? []), item];
+      return acc;
+    }, {});
+  }, [itens]);
 
-  async function carregarSolicitacoes() {
-    const { data, error } = await supabase
-      .from("solicitacoes_producao")
-      .select("id, data_entrega, status, created_at")
-      .eq("status", "em_producao")
-      .order("created_at", { ascending: false });
+  async function carregarDados() {
+    setLoading(true);
+    setMessage(null);
 
-    if (error) {
-      setMessage(`Erro ao carregar solicitações: ${error.message}`);
+    const [solicitacoesResp, itensResp] = await Promise.all([
+      supabase
+        .from("solicitacoes_producao")
+        .select(
+          "id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim",
+        )
+        .eq("status", "em_producao")
+        .order("prioridade_producao", { ascending: false })
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("itens_solicitacao_producao")
+        .select(
+          "id, solicitacao_id, produto_id, sku, imagem_url, quantidade_solicitada, quantidade_produzida, tipo_corte, observacao",
+        )
+        .order("created_at", { ascending: true }),
+    ]);
+
+    if (solicitacoesResp.error || itensResp.error) {
+      setMessage(solicitacoesResp.error?.message ?? itensResp.error?.message ?? "Erro ao carregar dados.");
+      setLoading(false);
       return;
     }
 
-    const lista = (data as Solicitacao[]) ?? [];
-    setSolicitacoes(lista);
+    const listaSolicitacoes = [...((solicitacoesResp.data as Solicitacao[]) ?? [])].sort((a, b) => {
+      const prioridadeA = a.prioridade_producao ? 1 : 0;
+      const prioridadeB = b.prioridade_producao ? 1 : 0;
 
-    if (!selectedId && lista.length > 0) {
-      setSelectedId(lista[0].id);
-    }
+      if (prioridadeA !== prioridadeB) return prioridadeB - prioridadeA;
 
-    if (lista.length === 0) {
-      setSelectedId("");
-      setItens([]);
-      setProduzidas({});
-    }
-  }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    const solicitacoesIds = new Set(listaSolicitacoes.map((solicitacao) => solicitacao.id));
+    const listaItens = ((itensResp.data as ItemSolicitacao[]) ?? []).filter((item) =>
+      solicitacoesIds.has(item.solicitacao_id),
+    );
 
-  async function carregarItens(solicitacaoId: string) {
-    const { data, error } = await supabase
-      .from("itens_solicitacao_producao")
-      .select(
-        "id, solicitacao_id, produto_id, sku, nome, imagem_url, quantidade_solicitada, quantidade_produzida, observacao",
-      )
-      .eq("solicitacao_id", solicitacaoId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      setMessage(`Erro ao carregar itens: ${error.message}`);
-      return;
-    }
-
-    const listaItens = (data as ItemSolicitacao[]) ?? [];
+    setSolicitacoes(listaSolicitacoes);
     setItens(listaItens);
+
     const inicial: Record<string, string> = {};
     listaItens.forEach((item) => {
       inicial[item.id] = String(item.quantidade_produzida ?? 0);
     });
     setProduzidas(inicial);
+    setLoading(false);
   }
 
   useEffect(() => {
-    async function init() {
-      setLoading(true);
-      setMessage(null);
-      await carregarSolicitacoes();
-      setLoading(false);
-    }
-    init();
+    carregarDados();
   }, []);
 
-  useEffect(() => {
-    if (!selectedId) return;
+  function montarRelatorioWhatsapp(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
+    const linhas = itensSolicitacao.map((item) => `${item.quantidade_solicitada} - ${item.sku}`);
+    const cabecalho = solicitacao.prioridade_producao
+      ? ["🚨🚨 PRIORIDADE 🚨🚨", "Produção prioritária. Pode confirmar esta solicitação com urgência?"]
+      : ["Olá! Pode confirmar a produção desta solicitação?"];
+
+    return [
+      ...cabecalho,
+      "",
+      `Entrega: ${formatarDataEntrega(solicitacao.data_entrega)}`,
+      "",
+      "Itens:",
+      ...linhas,
+    ].join("\n");
+  }
+
+  function montarLinkWhatsapp(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
+    const telefone = telefoneWhatsapp.replace(/\D/g, "");
+    const texto = montarRelatorioWhatsapp(solicitacao, itensSolicitacao);
+
+    return `https://wa.me/${telefone}?text=${encodeURIComponent(texto)}`;
+  }
+
+  async function confirmarProducao(solicitacao: Solicitacao) {
+    const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+    if (itensSolicitacao.length === 0) return;
+
+    setSavingId(solicitacao.id);
     setMessage(null);
-    carregarItens(selectedId);
-  }, [selectedId]);
 
-  async function confirmarProducao() {
-    if (!solicitacaoSelecionada) return;
-
-    setSaving(true);
-    setMessage(null);
-
-    const atualizacoes = itens.map((item) => {
+    const atualizacoes = itensSolicitacao.map((item) => {
       const qtd = Number(produzidas[item.id]);
       return { item, qtd };
     });
@@ -116,7 +144,7 @@ export default function ConfirmarProducaoPage() {
     const invalido = atualizacoes.find(({ qtd }) => Number.isNaN(qtd) || qtd < 0);
     if (invalido) {
       setMessage("Informe quantidades produzidas válidas (>= 0).");
-      setSaving(false);
+      setSavingId(null);
       return;
     }
 
@@ -128,7 +156,7 @@ export default function ConfirmarProducaoPage() {
 
       if (updateError) {
         setMessage(`Erro ao atualizar item ${item.sku}: ${updateError.message}`);
-        setSaving(false);
+        setSavingId(null);
         return;
       }
 
@@ -139,13 +167,13 @@ export default function ConfirmarProducaoPage() {
           tipo_movimento: "entrada",
           quantidade: qtd,
           origem: "PRODUCAO",
-          referencia_id: solicitacaoSelecionada.id,
+          referencia_id: solicitacao.id,
           observacao: "Entrada por confirmação de produção",
         });
 
         if (movError) {
           setMessage(`Erro ao criar movimentação de ${item.sku}: ${movError.message}`);
-          setSaving(false);
+          setSavingId(null);
           return;
         }
       }
@@ -154,23 +182,17 @@ export default function ConfirmarProducaoPage() {
     const { error: statusError } = await supabase
       .from("solicitacoes_producao")
       .update({ status: "concluida" })
-      .eq("id", solicitacaoSelecionada.id);
+      .eq("id", solicitacao.id);
 
     if (statusError) {
       setMessage(`Erro ao concluir solicitação: ${statusError.message}`);
-      setSaving(false);
+      setSavingId(null);
       return;
     }
 
     setMessage("Solicitação confirmada com sucesso.");
-    await carregarSolicitacoes();
-    if (selectedId) {
-      const aindaExiste = solicitacoes.some((s) => s.id === selectedId);
-      if (!aindaExiste) {
-        setSelectedId("");
-      }
-    }
-    setSaving(false);
+    await carregarDados();
+    setSavingId(null);
   }
 
   return (
@@ -181,93 +203,159 @@ export default function ConfirmarProducaoPage() {
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações EM_PRODUCAO</h3>
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações pendentes de confirmação</h3>
 
         {loading ? (
           <p className="text-sm text-slate-600">Carregando solicitações...</p>
         ) : solicitacoes.length === 0 ? (
-          <p className="text-sm text-slate-600">Não há solicitações com status EM_PRODUCAO.</p>
+          <p className="text-sm text-slate-600">Não há solicitações pendentes de confirmação.</p>
         ) : (
-          <label className="block text-sm text-slate-700">
-            Selecione a solicitação
-            <select
-              value={selectedId}
-              onChange={(event) => setSelectedId(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            >
-              {solicitacoes.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {new Date(`${s.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")} • {new Date(s.created_at).toLocaleString("pt-BR")}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p className="text-sm text-slate-600">
+            Todas as solicitações ainda não confirmadas aparecem abaixo, com seus itens abertos.
+          </p>
         )}
+
+        {message && <p className="mt-3 text-sm text-slate-700">{message}</p>}
       </section>
 
-      {selectedId && itens.length > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white p-6">
-          <h3 className="mb-4 text-lg font-semibold text-slate-900">Itens da solicitação</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">Imagem</th>
-                  <th className="p-3">SKU</th>
-                  <th className="p-3">Nome</th>
-                  <th className="p-3">Qtd. solicitada</th>
-                  <th className="p-3">Qtd. produzida</th>
-                  <th className="p-3">Observação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {itens.map((item) => (
-                  <tr key={item.id} className="border-b border-slate-100">
-                    <td className="p-3">
-                      {item.imagem_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.imagem_url} alt={item.nome} className="h-12 w-12 rounded object-cover" />
-                      ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-xs text-slate-500">Sem imagem</div>
-                      )}
-                    </td>
-                    <td className="p-3 font-medium text-slate-700">{item.sku}</td>
-                    <td className="p-3 text-slate-700">{item.nome}</td>
-                    <td className="p-3 text-slate-700">{item.quantidade_solicitada}</td>
-                    <td className="p-3">
-                      <input
-                        type="number"
-                        min={0}
-                        value={produzidas[item.id] ?? "0"}
-                        onChange={(event) =>
-                          setProduzidas((prev) => ({
-                            ...prev,
-                            [item.id]: event.target.value,
-                          }))
-                        }
-                        className="w-28 rounded-md border border-slate-300 px-2 py-1"
-                      />
-                    </td>
-                    <td className="p-3 text-slate-700">{item.observacao || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <label className="block text-sm font-medium text-slate-700 md:max-w-sm">
+          Telefone para cobrança via WhatsApp
+          <input
+            value={telefoneWhatsapp}
+            onChange={(event) => setTelefoneWhatsapp(event.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-normal"
+            placeholder="+55 37 8803-2390"
+          />
+        </label>
+      </section>
 
-          <div className="mt-4">
-            <button
-              onClick={confirmarProducao}
-              disabled={saving}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {saving ? "Confirmando..." : "Confirmar produção"}
-            </button>
-          </div>
+      {!loading &&
+        solicitacoes.map((solicitacao) => {
+          const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+          const saving = savingId === solicitacao.id;
 
-          {message && <p className="mt-3 text-sm text-slate-700">{message}</p>}
-        </section>
-      )}
+          return (
+            <section key={solicitacao.id} className="rounded-lg border border-slate-200 bg-white p-6">
+              {solicitacao.prioridade_producao ? (
+                <div className="mb-4 rounded-md border-2 border-red-600 bg-red-50 px-4 py-3 text-sm font-black uppercase tracking-wide text-red-700">
+                  PRIORIDADE
+                </div>
+              ) : null}
+
+              <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      Entrega {formatarDataEntrega(solicitacao.data_entrega)}
+                    </h3>
+                    <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                      {formatarStatus(solicitacao.status)}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+                    <p>
+                      <strong>Criada em:</strong> {new Date(solicitacao.created_at).toLocaleString("pt-BR")}
+                    </p>
+                    <p>
+                      <strong>Itens:</strong> {itensSolicitacao.length}
+                    </p>
+                    <p className="md:col-span-2">
+                      <strong>Observação geral:</strong> {solicitacao.observacao_geral || "-"}
+                    </p>
+                    {(solicitacao.periodo_inicio || solicitacao.periodo_fim) && (
+                      <p className="md:col-span-2">
+                        <strong>Período Olist:</strong>{" "}
+                        {solicitacao.periodo_inicio
+                          ? new Date(solicitacao.periodo_inicio).toLocaleString("pt-BR")
+                          : "-"}{" "}
+                        até{" "}
+                        {solicitacao.periodo_fim ? new Date(solicitacao.periodo_fim).toLocaleString("pt-BR") : "-"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
+                  <a
+                    href={montarLinkWhatsapp(solicitacao, itensSolicitacao)}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-disabled={itensSolicitacao.length === 0 || telefoneWhatsapp.replace(/\D/g, "").length === 0}
+                    className={`rounded-md border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 hover:bg-slate-50 ${
+                      itensSolicitacao.length === 0 || telefoneWhatsapp.replace(/\D/g, "").length === 0
+                        ? "pointer-events-none opacity-50"
+                        : ""
+                    }`}
+                  >
+                    Cobrar no WhatsApp
+                  </a>
+                  <button
+                    onClick={() => confirmarProducao(solicitacao)}
+                    disabled={savingId !== null || itensSolicitacao.length === 0}
+                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {saving ? "Confirmando..." : "Confirmar produção"}
+                  </button>
+                </div>
+              </div>
+
+              {itensSolicitacao.length === 0 ? (
+                <p className="text-sm text-slate-600">Solicitação sem itens cadastrados.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-slate-600">
+                        <th className="p-3">Imagem</th>
+                        <th className="p-3">SKU</th>
+                        <th className="p-3">Qtd. solicitada</th>
+                        <th className="p-3">Qtd. produzida</th>
+                        <th className="p-3">Corte a laser</th>
+                        <th className="p-3">Observação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itensSolicitacao.map((item) => (
+                        <tr key={item.id} className="border-b border-slate-100">
+                          <td className="p-3">
+                            {item.imagem_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={item.imagem_url} alt={item.sku} className="h-12 w-12 rounded object-cover" />
+                            ) : (
+                              <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-xs text-slate-500">
+                                Sem imagem
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 font-medium text-slate-700">{item.sku}</td>
+                          <td className="p-3 text-slate-700">{item.quantidade_solicitada}</td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min={0}
+                              value={produzidas[item.id] ?? "0"}
+                              onChange={(event) =>
+                                setProduzidas((prev) => ({
+                                  ...prev,
+                                  [item.id]: event.target.value,
+                                }))
+                              }
+                              className="w-28 rounded-md border border-slate-300 px-2 py-1"
+                            />
+                          </td>
+                          <td className="p-3 text-slate-700">{item.tipo_corte === "LASER" ? "Sim" : "Não"}</td>
+                          <td className="p-3 text-slate-700">{item.observacao || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          );
+        })}
     </div>
   );
 }

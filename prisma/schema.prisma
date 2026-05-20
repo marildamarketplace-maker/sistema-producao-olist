@@ -9,9 +9,9 @@ datasource db {
 model Produto {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku         String   @unique
-  nome        String
   imagemUrl   String?  @map("imagem_url")
   metaEstoque Int?     @map("meta_estoque")
+  minimoEstoque Int?   @map("minimo_estoque")
   ativo       Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -28,15 +28,16 @@ model ConfiguracaoSistema {
 }
 
 model SolicitacaoProducao {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  dataEntrega     DateTime  @map("data_entrega") @db.Date
-  turnoId         String?   @map("turno_id") @db.Uuid
-  filtroDataBase  String?   @map("filtro_data_base")
-  periodoInicio   DateTime? @map("periodo_inicio") @db.Timestamptz(6)
-  periodoFim      DateTime? @map("periodo_fim") @db.Timestamptz(6)
-  status          String    @default("pendente")
-  observacaoGeral String?   @map("observacao_geral")
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dataEntrega        DateTime  @map("data_entrega") @db.Date
+  turnoId            String?   @map("turno_id") @db.Uuid
+  filtroDataBase     String?   @map("filtro_data_base")
+  periodoInicio      DateTime? @map("periodo_inicio") @db.Timestamptz(6)
+  periodoFim         DateTime? @map("periodo_fim") @db.Timestamptz(6)
+  status             String    @default("pendente")
+  observacaoGeral    String?   @map("observacao_geral")
+  prioridadeProducao Boolean   @default(false) @map("prioridade_producao")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("solicitacoes_producao")
 }
@@ -46,7 +47,6 @@ model ItemSolicitacaoProducao {
   solicitacaoId        String   @map("solicitacao_id") @db.Uuid
   produtoId            String   @map("produto_id") @db.Uuid
   sku                  String
-  nome                 String
   imagemUrl            String?  @map("imagem_url")
   quantidadeSolicitada Int      @map("quantidade_solicitada")
   quantidadeProduzida  Int      @default(0) @map("quantidade_produzida")
@@ -71,6 +71,81 @@ model PedidoOlistProcessado {
 
   @@unique([pedidoOlistId, itemOlistId], map: "uq_pedidos_olist_processados_pedido_item")
   @@map("pedidos_olist_processados")
+}
+
+model MovimentacaoEstoque {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  produtoId     String   @map("produto_id") @db.Uuid
+  sku           String
+  tipoMovimento String   @map("tipo_movimento")
+  quantidade    Int
+  origem        String
+  referenciaId  String?  @map("referencia_id") @db.Uuid
+  observacao    String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("movimentacoes_estoque")
+}
+
+model SolicitacaoDevolucao {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status          String   @default("pendente")
+  pedidoReferencia String? @map("pedido_referencia")
+  observacaoGeral String?  @map("observacao_geral")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmadaEm    DateTime? @map("confirmada_em") @db.Timestamptz(6)
+
+  @@map("solicitacoes_devolucao")
+}
+
+model ItemSolicitacaoDevolucao {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solicitacaoId        String   @map("solicitacao_id") @db.Uuid
+  produtoId            String   @map("produto_id") @db.Uuid
+  sku                  String
+  imagemUrl            String?  @map("imagem_url")
+  quantidadeSolicitada Int      @map("quantidade_solicitada")
+  quantidadeConfirmada Int      @default(0) @map("quantidade_confirmada")
+  observacao           String?
+  statusItem           String   @default("pendente") @map("status_item")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("itens_solicitacao_devolucao")
+}
+
+model BaixaEstoqueOlist {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  origem     String
+  observacao String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("baixas_estoque_olist")
+}
+
+model ItemBaixaEstoqueOlist {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  baixaId        String   @map("baixa_id") @db.Uuid
+  produtoId      String?  @map("produto_id") @db.Uuid
+  sku            String
+  quantidade     Int
+  pedidoOlistId  String?  @map("pedido_olist_id")
+  itemOlistId    String?  @map("item_olist_id")
+  observacao     String?
+  origem         String
+  movimentacaoId String?  @map("movimentacao_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([pedidoOlistId, itemOlistId], map: "uq_itens_baixa_olist_pedido_item")
+  @@map("itens_baixa_estoque_olist")
+}
+
+model ControleBuscaOlist {
+  chave         String   @id
+  ultimaBuscaEm DateTime @map("ultima_busca_em") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("controles_busca_olist")
 }
 
 model IntegracaoOlistToken {
