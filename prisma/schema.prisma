@@ -11,10 +11,6 @@ model Aplicativo {
   nome                      String
   olistClientId             String?                    @map("olist_client_id")
   olistClientSecret         String?                    @map("olist_client_secret")
-  olistRedirectUri          String?                    @map("olist_redirect_uri")
-  olistApiBaseUrl           String?                    @map("olist_api_base_url")
-  olistOauthUrl             String?                    @map("olist_oauth_url")
-  olistOauthAuthorizeUrl    String?                    @map("olist_oauth_authorize_url")
   createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
   baixasEstoqueOlist        BaixaEstoqueOlist[]

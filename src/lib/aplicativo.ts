@@ -15,10 +15,6 @@ export async function getAplicativoOlistConfig(aplicativoId = APLICATIVO_PADRAO_
       nome: true,
       olistClientId: true,
       olistClientSecret: true,
-      olistRedirectUri: true,
-      olistApiBaseUrl: true,
-      olistOauthUrl: true,
-      olistOauthAuthorizeUrl: true,
     },
   });
 
@@ -27,10 +23,9 @@ export async function getAplicativoOlistConfig(aplicativoId = APLICATIVO_PADRAO_
     nome: aplicativo?.nome ?? "Aplicativo padrão",
     clientId: aplicativo?.olistClientId ?? process.env.OLIST_CLIENT_ID ?? "",
     clientSecret: aplicativo?.olistClientSecret ?? process.env.OLIST_CLIENT_SECRET ?? "",
-    redirectUri: aplicativo?.olistRedirectUri ?? process.env.OLIST_REDIRECT_URI ?? "",
-    apiBaseUrl: aplicativo?.olistApiBaseUrl ?? process.env.OLIST_API_BASE_URL ?? OLIST_API_BASE_URL_DEFAULT,
-    oauthUrl: aplicativo?.olistOauthUrl ?? process.env.OLIST_OAUTH_URL ?? OLIST_OAUTH_URL_DEFAULT,
-    oauthAuthorizeUrl:
-      aplicativo?.olistOauthAuthorizeUrl ?? process.env.OLIST_OAUTH_AUTHORIZE_URL ?? OLIST_OAUTH_AUTHORIZE_URL_DEFAULT,
+    redirectUri: process.env.OLIST_REDIRECT_URI ?? "",
+    apiBaseUrl: OLIST_API_BASE_URL_DEFAULT,
+    oauthUrl: OLIST_OAUTH_URL_DEFAULT,
+    oauthAuthorizeUrl: OLIST_OAUTH_AUTHORIZE_URL_DEFAULT,
   };
 }
