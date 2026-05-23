@@ -800,6 +800,140 @@ export default function SolicitacoesProducaoPage() {
     setSaving(false);
   }
 
+  const solicitacoesEmProducao = solicitacoes.filter((solicitacao) => solicitacao.status === "em_producao");
+  const demaisSolicitacoes = solicitacoes.filter((solicitacao) => solicitacao.status !== "em_producao");
+
+  function renderTabelaSolicitacoes(solicitacoesTabela: Solicitacao[]) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-slate-600">
+              <th className="p-3">Data de entrega</th>
+              <th className="p-3">Prioridade</th>
+              <th className="p-3">Status</th>
+              <th className="p-3">Observação geral</th>
+              <th className="p-3">Quantidade de itens</th>
+              <th className="p-3">Data de criação</th>
+              <th className="p-3 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {solicitacoesTabela.map((solicitacao) => {
+              const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
+              const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+              const podeAlterar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
+
+              return (
+                <Fragment key={solicitacao.id}>
+                  <tr className="border-b border-slate-100">
+                    <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
+                    <td className="p-3">
+                      {solicitacao.prioridade_producao ? (
+                        <span className="inline-flex rounded-md bg-red-600 px-3 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm">
+                          PRIORIDADE
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                    <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
+                    <td className="p-3 text-slate-700">{solicitacao.observacao_geral || "-"}</td>
+                    <td className="p-3 text-slate-700">{qtdItensPorSolicitacao[solicitacao.id] ?? 0}</td>
+                    <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
+                    <td className="p-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => imprimirSolicitacao(solicitacao, itensSolicitacao)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={itensSolicitacao.length === 0}
+                          title="Imprimir detalhes"
+                          aria-label="Imprimir detalhes da solicitação"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => baixarImagemSolicitacao(solicitacao, itensSolicitacao)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={itensSolicitacao.length === 0}
+                          title="Salvar imagem"
+                          aria-label="Salvar imagem dos detalhes da solicitação"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => editarSolicitacao(solicitacao, itensSolicitacao)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={itensSolicitacao.length === 0 || saving || !podeAlterar}
+                          title="Editar solicitação"
+                          aria-label="Editar solicitação"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cancelarSolicitacao(solicitacao)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={saving || !podeAlterar}
+                          title="Cancelar solicitação"
+                          aria-label="Cancelar solicitação"
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={itensSolicitacao.length === 0}
+                          title={aberta ? "Ocultar produtos" : "Ver produtos"}
+                          aria-label={aberta ? "Ocultar produtos da solicitação" : "Ver produtos da solicitação"}
+                          aria-expanded={aberta}
+                        >
+                          <ChevronDown className={`h-4 w-4 transition-transform ${aberta ? "rotate-180" : ""}`} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {aberta && (
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <td className="p-3" colSpan={7}>
+                        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                          <table className="min-w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="border-b border-slate-200 text-left text-slate-600">
+                                <th className="px-3 py-2">Quantidade</th>
+                                <th className="px-3 py-2">SKU</th>
+                                <th className="px-3 py-2">Corte a laser</th>
+                                <th className="px-3 py-2">Observação</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {itensSolicitacao.map((item) => (
+                                <tr key={item.id} className="border-b border-slate-100 last:border-0">
+                                  <td className="px-3 py-2 font-semibold text-slate-900">{item.quantidade_solicitada}</td>
+                                  <td className="px-3 py-2 font-medium text-slate-700">{item.sku}</td>
+                                  <td className="px-3 py-2 text-slate-700">{item.tipo_corte === "LASER" ? "Sim" : "Não"}</td>
+                                  <td className="px-3 py-2 text-slate-700">{item.observacao || "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -1021,139 +1155,35 @@ export default function SolicitacoesProducaoPage() {
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-slate-900">Solicitações em produção</h3>
+          {!loading && (
+            <span className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              {solicitacoesEmProducao.length} em produção
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-slate-600">Carregando solicitações...</p>
+        ) : solicitacoesEmProducao.length === 0 ? (
+          <p className="text-sm text-slate-600">Nenhuma solicitação em produção.</p>
+        ) : (
+          renderTabelaSolicitacoes(solicitacoesEmProducao)
+        )}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações cadastradas</h3>
 
         {loading ? (
           <p className="text-sm text-slate-600">Carregando solicitações...</p>
         ) : solicitacoes.length === 0 ? (
           <p className="text-sm text-slate-600">Nenhuma solicitação criada.</p>
+        ) : demaisSolicitacoes.length === 0 ? (
+          <p className="text-sm text-slate-600">Nenhuma outra solicitação cadastrada.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">Data de entrega</th>
-                  <th className="p-3">Prioridade</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Observação geral</th>
-                  <th className="p-3">Quantidade de itens</th>
-                  <th className="p-3">Data de criação</th>
-                  <th className="p-3 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {solicitacoes.map((solicitacao) => {
-                  const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
-                  const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
-                  const podeAlterar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
-
-                  return (
-                    <Fragment key={solicitacao.id}>
-                      <tr className="border-b border-slate-100">
-                        <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
-                        <td className="p-3">
-                          {solicitacao.prioridade_producao ? (
-                            <span className="inline-flex rounded-md bg-red-600 px-3 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm">
-                              PRIORIDADE
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                        <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
-                        <td className="p-3 text-slate-700">{solicitacao.observacao_geral || "-"}</td>
-                        <td className="p-3 text-slate-700">{qtdItensPorSolicitacao[solicitacao.id] ?? 0}</td>
-                        <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
-                        <td className="p-3">
-                          <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => imprimirSolicitacao(solicitacao, itensSolicitacao)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={itensSolicitacao.length === 0}
-                            title="Imprimir detalhes"
-                            aria-label="Imprimir detalhes da solicitação"
-                          >
-                            <Printer className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => baixarImagemSolicitacao(solicitacao, itensSolicitacao)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={itensSolicitacao.length === 0}
-                            title="Salvar imagem"
-                            aria-label="Salvar imagem dos detalhes da solicitação"
-                          >
-                            <Download className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => editarSolicitacao(solicitacao, itensSolicitacao)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={itensSolicitacao.length === 0 || saving || !podeAlterar}
-                            title="Editar solicitação"
-                            aria-label="Editar solicitação"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => cancelarSolicitacao(solicitacao)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={saving || !podeAlterar}
-                            title="Cancelar solicitação"
-                            aria-label="Cancelar solicitação"
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={itensSolicitacao.length === 0}
-                            title={aberta ? "Ocultar produtos" : "Ver produtos"}
-                            aria-label={aberta ? "Ocultar produtos da solicitação" : "Ver produtos da solicitação"}
-                            aria-expanded={aberta}
-                          >
-                            <ChevronDown className={`h-4 w-4 transition-transform ${aberta ? "rotate-180" : ""}`} />
-                          </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {aberta && (
-                        <tr className="border-b border-slate-100 bg-slate-50">
-                          <td className="p-3" colSpan={7}>
-                            <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                              <table className="min-w-full border-collapse text-sm">
-                                <thead>
-                                  <tr className="border-b border-slate-200 text-left text-slate-600">
-                                    <th className="px-3 py-2">Quantidade</th>
-                                    <th className="px-3 py-2">SKU</th>
-                                    <th className="px-3 py-2">Corte a laser</th>
-                                    <th className="px-3 py-2">Observação</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {itensSolicitacao.map((item) => (
-                                    <tr key={item.id} className="border-b border-slate-100 last:border-0">
-                                      <td className="px-3 py-2 font-semibold text-slate-900">{item.quantidade_solicitada}</td>
-                                      <td className="px-3 py-2 font-medium text-slate-700">{item.sku}</td>
-                                      <td className="px-3 py-2 text-slate-700">{item.tipo_corte === "LASER" ? "Sim" : "Não"}</td>
-                                      <td className="px-3 py-2 text-slate-700">{item.observacao || "-"}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          renderTabelaSolicitacoes(demaisSolicitacoes)
         )}
       </section>
     </div>
