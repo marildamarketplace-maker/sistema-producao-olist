@@ -52,6 +52,8 @@ type ItemSolicitacao = {
   prioridade_producao: boolean;
   existe_em_producao?: boolean;
   quantidade_em_producao?: number;
+  quantidade_pedidos?: number;
+  estoque_atual?: number;
 };
 
 type ItemEstoqueSuficiente = {
@@ -183,29 +185,6 @@ function extrairTotalPaginacao(payload: unknown) {
   return Number.isFinite(totalNumber) ? totalNumber : null;
 }
 
-function validarPeriodo(input: { periodoInicio: string; periodoFim: string }) {
-  const periodoInicio = new Date(input.periodoInicio);
-  const periodoFim = new Date(input.periodoFim);
-
-  if (
-    Number.isNaN(periodoInicio.getTime()) ||
-    Number.isNaN(periodoFim.getTime())
-  ) {
-    throw new Error("Período inválido.");
-  }
-
-  if (periodoInicio > periodoFim) {
-    throw new Error(
-      "Período inválido: periodo_inicio deve ser menor ou igual a periodo_fim.",
-    );
-  }
-
-  return {
-    periodoInicio,
-    periodoFim,
-  };
-}
-
 /* =========================================================
  * OAUTH
  * ======================================================= */
@@ -332,61 +311,72 @@ export async function getValidOlistAccessToken() {
 
 async function listarPedidosOlist(
   token: string,
-  periodoInicio: Date,
-  periodoFim: Date,
+  periodoInicio: Date | null,
+  periodoFim: Date | null,
   situacao: string,
 ) {
   const limite = 100;
-
   const pedidos: OlistOrder[] = [];
-
-  const offset = 0;
+  let offset = 0;
+  let total: number | null = null;
   const olistConfig = await getAplicativoOlistConfig();
 
-  const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
+  while (true) {
+    const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
 
-  url.searchParams.set("dataInicial", inputDate(periodoInicio));
-
-  url.searchParams.set("dataFinal", inputDate(periodoFim));
-
-  url.searchParams.set("situacao", situacao);
-
-  url.searchParams.set("limit", String(limite));
-
-  url.searchParams.set("offset", String(offset));
-
-  url.searchParams.set("orderBy", "asc");
-
-  const response = await axios.get(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    validateStatus: () => true,
-  });
-
-  logIntegracaoOlist({
-    endpoint: url.toString(),
-    status: response.status,
-    modulo: "pedidos",
-  });
-
-  if (response.status < 200 || response.status >= 300) {
-    validarRespostaAxiosJsonOrThrow(response);
-
-    if (response.status === 401) {
-      throw new Error("Token inválido ou sem permissão.");
+    if (periodoInicio && periodoFim) {
+      url.searchParams.set("dataInicial", inputDate(periodoInicio));
+      url.searchParams.set("dataFinal", inputDate(periodoFim));
     }
 
-    throw new Error(`Erro Tiny ${response.status}`);
+    url.searchParams.set("situacao", situacao);
+
+    url.searchParams.set("limit", String(limite));
+
+    url.searchParams.set("offset", String(offset));
+
+    url.searchParams.set("orderBy", "asc");
+
+    const response = await axios.get(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      validateStatus: () => true,
+    });
+
+    logIntegracaoOlist({
+      endpoint: url.toString(),
+      status: response.status,
+      modulo: "pedidos",
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      validarRespostaAxiosJsonOrThrow(response);
+
+      if (response.status === 401) {
+        throw new Error("Token inválido ou sem permissão.");
+      }
+
+      throw new Error(`Erro Tiny ${response.status}`);
+    }
+
+    const payload = response.data;
+    const paginaPedidos = normalizarPayloadPedidos(payload);
+
+    if (total === null) {
+      total = extrairTotalPaginacao(payload);
+    }
+
+    pedidos.push(...paginaPedidos);
+
+    offset += limite;
+
+    if (paginaPedidos.length < limite || (total !== null && offset >= total)) {
+      return pedidos;
+    }
+
+    await aguardar(300);
   }
-
-  const payload = response.data;
-
-  const paginaPedidos = normalizarPayloadPedidos(payload);
-
-  pedidos.push(...paginaPedidos);
-
-  return pedidos;
 }
 
 async function buscarDetalhePedidoOlist(
@@ -559,8 +549,8 @@ export async function importarProdutosOlist() {
 }
 
 export async function buscarPedidosOlistPorDataLimite(
-  periodoInicio: Date,
-  periodoFim: Date,
+  periodoInicio: Date | null,
+  periodoFim: Date | null,
   situacoes: string[],
 ): Promise<{
   pedidos: OlistOrder[];
@@ -915,6 +905,8 @@ function montarItensSolicitacao(
       imagem_url: produto.imagem_url ?? demanda.imagem_url,
       quantidade_solicitada: quantidadeAProduzir,
       prioridade_producao: prioridadeItem,
+      quantidade_pedidos: quantidadePedidosIntegracao,
+      estoque_atual: estoqueAtual,
     });
   }
 
@@ -1053,9 +1045,12 @@ async function obterPeriodoBuscaBaixaEstoque() {
     where: { chave: CONTROLE_BUSCA_BAIXA_ESTOQUE },
     select: { ultimaBuscaEm: true },
   });
+  const periodoInicio = controle?.ultimaBuscaEm
+    ? new Date(controle.ultimaBuscaEm.getTime() - 24 * 60 * 60 * 1000)
+    : new Date("2026-01-01T00:00:00-03:00");
 
   return {
-    periodoInicio: controle?.ultimaBuscaEm ?? new Date("2026-01-01T00:00:00-03:00"),
+    periodoInicio,
     periodoFim: new Date(),
   };
 }
@@ -1406,20 +1401,18 @@ async function cadastrarProdutosOlistNaoCadastrados(
 export async function gerarSolicitacaoPorPedidosOlist(input: {
   dataLimite: string;
   filtroDataBase: FiltroDataBase;
-  periodoInicio: string;
-  periodoFim: string;
   situacoes?: string[];
 }) {
-  const { periodoInicio, periodoFim } = validarPeriodo(input);
   const situacoes = normalizarSituacoes(input.situacoes);
+  const processamentoEm = new Date().toISOString();
 
   const {
     pedidos,
     pedidosEncontrados,
     pedidosJaProcessadosIgnorados,
   } = await buscarPedidosOlistPorDataLimite(
-    periodoInicio,
-    periodoFim,
+    null,
+    null,
     situacoes,
   );
 
@@ -1456,8 +1449,8 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   return {
     data_entrega: input.dataLimite,
     filtro_data_base: input.filtroDataBase,
-    periodo_inicio: input.periodoInicio,
-    periodo_fim: input.periodoFim,
+    periodo_inicio: processamentoEm,
+    periodo_fim: processamentoEm,
     observacao_geral: "Gerada via Olist. Revise os itens antes de salvar.",
     prioridade_producao: prioridadeProducao,
     itens: itensComStatusProducao,

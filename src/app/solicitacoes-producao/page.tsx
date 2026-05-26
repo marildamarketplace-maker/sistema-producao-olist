@@ -43,6 +43,8 @@ type ItemForm = {
   prioridade_producao?: boolean;
   existe_em_producao?: boolean;
   quantidade_em_producao?: number;
+  quantidade_pedidos?: number;
+  estoque_atual?: number;
 };
 
 type ItemPreparadoOlist = {
@@ -51,6 +53,8 @@ type ItemPreparadoOlist = {
   prioridade_producao?: boolean;
   existe_em_producao?: boolean;
   quantidade_em_producao?: number;
+  quantidade_pedidos?: number;
+  estoque_atual?: number;
 };
 
 type RastreioOlist = {
@@ -173,36 +177,11 @@ export default function SolicitacoesProducaoPage() {
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
 
-  const [agoraOlist, setAgoraOlist] = useState(() => new Date());
   const situacoesOlistSelecionadas = SITUACOES_OLIST_PADRAO;
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
   const [processamentoOlistPendente, setProcessamentoOlistPendente] = useState<ProcessamentoOlistPendente | null>(null);
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
-
-  const ultimaSolicitacaoCriada = useMemo(() => {
-    return solicitacoes.reduce<Solicitacao | null>((maisRecente, solicitacao) => {
-      if (!maisRecente) return solicitacao;
-
-      const dataAtual = new Date(solicitacao.created_at);
-      const dataMaisRecente = new Date(maisRecente.created_at);
-
-      return dataAtual > dataMaisRecente ? solicitacao : maisRecente;
-    }, null);
-  }, [solicitacoes]);
-
-  const periodoCalculado = useMemo(() => {
-    const periodoInicio = ultimaSolicitacaoCriada
-      ? new Date(ultimaSolicitacaoCriada.created_at)
-      : new Date(agoraOlist.getFullYear(), 0, 1, 0, 0, 0);
-
-    if (Number.isNaN(periodoInicio.getTime())) return null;
-
-    return {
-      periodo_inicio: periodoInicio,
-      periodo_fim: agoraOlist,
-    };
-  }, [agoraOlist, ultimaSolicitacaoCriada]);
 
   const qtdItensPorSolicitacao = useMemo(() => {
     return itens.reduce<Record<string, number>>((acc, item) => {
@@ -278,12 +257,6 @@ export default function SolicitacoesProducaoPage() {
       window.localStorage.removeItem(DASHBOARD_SOLICITACAO_KEY);
     }
   }, [produtos]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => setAgoraOlist(new Date()), 30000);
-
-    return () => window.clearInterval(intervalId);
-  }, []);
 
   function alterarItem(index: number, patch: Partial<ItemForm>) {
     setItensForm((anterior) => anterior.map((item, i) => (i === index ? { ...item, ...patch } : item)));
@@ -537,17 +510,7 @@ export default function SolicitacoesProducaoPage() {
   }
 
   async function gerarViaOlist() {
-    const periodoAtual = periodoCalculado
-      ? {
-          periodo_inicio: periodoCalculado.periodo_inicio,
-          periodo_fim: new Date(),
-        }
-      : null;
-
-    if (!periodoAtual) {
-      setErrorMessage("Não há solicitação anterior para definir o início da integração Olist.");
-      return;
-    }
+    const dataProcessamento = new Date();
 
     setIntegrandoOlist(true);
     setErrorMessage(null);
@@ -557,10 +520,8 @@ export default function SolicitacoesProducaoPage() {
     const resp = await axios.post(
       "/api/olist/gerar-solicitacao",
       {
-        data_limite: formatarDataLocal(periodoAtual.periodo_fim),
+        data_limite: formatarDataLocal(dataProcessamento),
         filtro_data_base: FILTRO_DATA_BASE_OLIST,
-        periodo_inicio: periodoAtual.periodo_inicio.toISOString(),
-        periodo_fim: periodoAtual.periodo_fim.toISOString(),
         situacoes: situacoesOlistSelecionadas,
       },
       {
@@ -594,7 +555,7 @@ export default function SolicitacoesProducaoPage() {
     }
 
     await carregarDados();
-    setDataEntrega(String(json.data_entrega ?? formatarDataLocal(periodoAtual.periodo_fim)));
+    setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
     setObservacaoGeral(String(json.observacao_geral ?? "Gerada via Olist. Revise os itens antes de salvar."));
     setPrioridadeProducao(Boolean(json.prioridade_producao));
     setItensForm(
@@ -607,11 +568,13 @@ export default function SolicitacoesProducaoPage() {
         prioridade_producao: Boolean(item.prioridade_producao),
         existe_em_producao: Boolean(item.existe_em_producao),
         quantidade_em_producao: Number(item.quantidade_em_producao ?? 0),
+        quantidade_pedidos: Number(item.quantidade_pedidos ?? 0),
+        estoque_atual: Number(item.estoque_atual ?? 0),
       })),
     );
     setProcessamentoOlistPendente({
-      periodo_inicio: String(json.periodo_inicio ?? periodoAtual.periodo_inicio.toISOString()),
-      periodo_fim: String(json.periodo_fim ?? periodoAtual.periodo_fim.toISOString()),
+      periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
+      periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
       itens: (Array.isArray(json.rastreio_olist) ? json.rastreio_olist : []) as RastreioOlist[],
     });
     setResumoImportacaoOlist({
@@ -949,21 +912,12 @@ export default function SolicitacoesProducaoPage() {
             Tipo de data
             <input readOnly value="Aprovação do pedido" className="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
           </label>
-          {periodoCalculado && (
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-              <p>
-                <strong>Período da integração:</strong>
-              </p>
-              <p>Início: {periodoCalculado.periodo_inicio.toLocaleString("pt-BR", { timeZone: TIME_ZONE })}</p>
-              <p>Fim: {periodoCalculado.periodo_fim.toLocaleString("pt-BR", { timeZone: TIME_ZONE })}</p>
-            </div>
-          )}
-          {!periodoCalculado && (
-            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              Crie uma solicitação antes de gerar a próxima via Olist.
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <p>
+              <strong>Situações consultadas:</strong> {situacoesOlistSelecionadas.join(", ")}
             </p>
-          )}
-          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist || !periodoCalculado} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          </div>
+          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
             {integrandoOlist ? "Integrando..." : "Gerar solicitação automaticamente"}
           </button>
           {resumoImportacaoOlist && (
@@ -1034,11 +988,19 @@ export default function SolicitacoesProducaoPage() {
                     </span>
                   </div>
                 )}
+                {item.quantidade_pedidos !== undefined && (
+                  <div className="md:col-span-5">
+                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold uppercase tracking-wide text-slate-700">
+                      <span>Pedidos: {item.quantidade_pedidos}</span>
+                      <span>Estoque: {item.estoque_atual ?? 0}</span>
+                    </span>
+                  </div>
+                )}
                 {item.existe_em_producao && (
                   <div className="md:col-span-5">
-                    <span className="inline-flex rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
-                      ATENÇÃO: existe item em produção
-                      {item.quantidade_em_producao ? ` (${item.quantidade_em_producao} solicitado)` : ""}
+                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
+                      <span>ATENÇÃO: existe item em produção</span>
+                      <span>Solicitado: {item.quantidade_em_producao ?? 0}</span>
                     </span>
                   </div>
                 )}

@@ -247,3 +247,113 @@ model IntegracaoOlistToken {
   @@index([aplicativoId], map: "idx_integracao_olist_tokens_aplicativo_id")
   @@map("integracao_olist_tokens")
 }
+
+model TipoProduto {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo                String
+  sku                   String         @unique
+  descricao             String?
+  descricaoSeo          String?        @map("descricao_seo")
+  palavrasChave         String?        @map("palavras_chave")
+  slug                  String?
+  categoria             String?
+  precoCusto            Decimal?       @map("preco_custo") @db.Decimal(10, 2)
+  preco                 Decimal?       @db.Decimal(10, 2)
+  pesoLiquido           Decimal?       @map("peso_liquido") @db.Decimal(10, 3)
+  pesoBruto             Decimal?       @map("peso_bruto") @db.Decimal(10, 3)
+  larguraEmbalagem      Decimal?       @map("largura_embalagem") @db.Decimal(10, 2)
+  alturaEmbalagem       Decimal?       @map("altura_embalagem") @db.Decimal(10, 2)
+  comprimentoEmbalagem  Decimal?       @map("comprimento_embalagem") @db.Decimal(10, 2)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  produtosOlist         ProdutoOlist[]
+
+  @@map("tipo_produto")
+}
+
+model Estampa {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo         String         @unique
+  descricao      String?
+  palavrasChave  String?        @map("palavras_chave")
+  extra          String?
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  variantes      Variante[]
+  produtosOlist  ProdutoOlist[]
+
+  @@map("estampa")
+}
+
+model Variante {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  estampaId      String?        @map("estampa_id") @db.Uuid
+  tamanhoId      String?        @map("tamanho_id") @db.Uuid
+  codigo         String
+  descricao      String?
+  palavrasChave  String?        @map("palavras_chave")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  estampa        Estampa?       @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tamanho        Tamanho?       @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  produtosOlist  ProdutoOlist[]
+
+  @@unique([estampaId, codigo], map: "uq_variante_estampa_codigo")
+  @@index([estampaId], map: "idx_variante_estampa_id")
+  @@index([tamanhoId], map: "idx_variante_tamanho_id")
+  @@map("variante")
+}
+
+model Tamanho {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo                String
+  sku                   String         @unique
+  slug                  String?        @unique
+  precoCusto            Decimal?       @map("preco_custo") @db.Decimal(10, 2)
+  preco                 Decimal?       @db.Decimal(10, 2)
+  pesoLiquido           Decimal?       @map("peso_liquido") @db.Decimal(10, 3)
+  pesoBruto             Decimal?       @map("peso_bruto") @db.Decimal(10, 3)
+  larguraEmbalagem      Decimal?       @map("largura_embalagem") @db.Decimal(10, 2)
+  alturaEmbalagem       Decimal?       @map("altura_embalagem") @db.Decimal(10, 2)
+  comprimentoEmbalagem  Decimal?       @map("comprimento_embalagem") @db.Decimal(10, 2)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  variantes             Variante[]
+  produtosOlist         ProdutoOlist[]
+
+  @@map("tamanho")
+}
+
+model ProdutoOlist {
+  id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipoProdutoId         String       @map("tipo_produto_id") @db.Uuid
+  estampaId             String       @map("estampa_id") @db.Uuid
+  varianteId            String?      @map("variante_id") @db.Uuid
+  tamanhoId             String?      @map("tamanho_id") @db.Uuid
+  skuFinal              String       @unique @map("sku_final")
+  tituloFinal           String       @map("titulo_final")
+  descricaoFinal        String?      @map("descricao_final")
+  descricaoSeoFinal     String?      @map("descricao_seo_final")
+  palavrasChaveFinal    String?      @map("palavras_chave_final")
+  slugFinal             String?      @map("slug_final")
+  categoria             String?
+  precoCusto            Decimal?     @map("preco_custo") @db.Decimal(10, 2)
+  preco                 Decimal?     @db.Decimal(10, 2)
+  pesoLiquido           Decimal?     @map("peso_liquido") @db.Decimal(10, 3)
+  pesoBruto             Decimal?     @map("peso_bruto") @db.Decimal(10, 3)
+  larguraEmbalagem      Decimal?     @map("largura_embalagem") @db.Decimal(10, 2)
+  alturaEmbalagem       Decimal?     @map("altura_embalagem") @db.Decimal(10, 2)
+  comprimentoEmbalagem  Decimal?     @map("comprimento_embalagem") @db.Decimal(10, 2)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tipoProduto           TipoProduto  @relation(fields: [tipoProdutoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  estampa               Estampa      @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  variante              Variante?    @relation(fields: [varianteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tamanho               Tamanho?     @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([tipoProdutoId], map: "idx_produto_olist_tipo_produto_id")
+  @@index([estampaId], map: "idx_produto_olist_estampa_id")
+  @@index([varianteId], map: "idx_produto_olist_variante_id")
+  @@index([tamanhoId], map: "idx_produto_olist_tamanho_id")
+  @@map("produto_olist")
+}

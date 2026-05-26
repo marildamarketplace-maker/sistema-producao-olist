@@ -3,6 +3,7 @@ import Link from "next/link";
 const menuItems = [
   { label: "Dashboard", href: "/" },
   { label: "Produtos", href: "/produtos" },
+  { label: "Gerador CSV Olist", href: "/gerador-csv-olist" },
   { label: "Estoque", href: "/estoque" },
   { label: "Baixa Olist", href: "/baixa-estoque-olist" },
   { label: "Devoluções", href: "/devolucoes" },

@@ -107,7 +107,13 @@ export default function ConfirmarProducaoPage() {
   }, []);
 
   function montarRelatorioWhatsapp(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
-    const linhas = itensSolicitacao.map((item) => `${item.quantidade_solicitada} - ${item.sku}`);
+    const linhas = itensSolicitacao.map((item) => {
+      const observacao = item.observacao?.trim();
+      return observacao
+        ? `${item.quantidade_solicitada} - ${item.sku} | Obs: ${observacao}`
+        : `${item.quantidade_solicitada} - ${item.sku}`;
+    });
+    const observacaoGeral = solicitacao.observacao_geral?.trim();
     const cabecalho = solicitacao.prioridade_producao
       ? ["🚨🚨 PRIORIDADE 🚨🚨", "Produção prioritária. Pode confirmar esta solicitação com urgência?"]
       : ["Olá! Pode confirmar a produção desta solicitação?"];
@@ -119,6 +125,7 @@ export default function ConfirmarProducaoPage() {
       "",
       "Itens:",
       ...linhas,
+      ...(observacaoGeral ? ["", `Observacao geral: ${observacaoGeral}`] : []),
     ].join("\n");
   }
 
