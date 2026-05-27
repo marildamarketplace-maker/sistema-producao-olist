@@ -255,6 +255,7 @@ model TipoProduto {
   descricao             String?
   descricaoSeo          String?        @map("descricao_seo")
   palavrasChave         String?        @map("palavras_chave")
+  detalhesPromptIa      String?        @map("detalhes_prompt_ia")
   slug                  String?
   categoria             String?
   precoCusto            Decimal?       @map("preco_custo") @db.Decimal(10, 2)

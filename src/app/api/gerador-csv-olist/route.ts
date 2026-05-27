@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  getGoogleStorageObjectInfo,
+  GoogleStorageServiceError,
+  uploadToGoogleStorage,
+} from "@/services/googleStorageService";
+import { gerarImagemMockupComEstampa } from "@/services/openaiImageService";
+
+const PREVIEW_IMAGE_MODEL = "gpt-image-1-mini";
 
 function decimalToNumber(value: unknown) {
   if (value === null || value === undefined) return null;
@@ -109,6 +117,189 @@ function buildProdutoVariables(
   };
 }
 
+function buildProdutoMockupPrompt(input: {
+  nomeProduto: string;
+  sku: string;
+  tamanho: string;
+  descricaoEstampa: string;
+  descricaoVariante: string;
+  detalhesPromptIa: string;
+}) {
+  return `Use a primeira imagem como mockup principal do produto.
+
+Use a segunda imagem como referencia obrigatoria da estampa/arte.
+
+Prioridade maxima: a estampa da segunda imagem deve ser preservada como arte original. Nao redesenhe, nao resuma, nao interprete e nao substitua a arte. Trate a segunda imagem como fonte visual literal que deve ser transferida para o produto.
+
+Se a estampa possuir texto, letras, numeros, logotipos, frases, simbolos ou assinatura visual:
+- manter exatamente o mesmo texto
+- manter todas as palavras legiveis
+- manter grafia, acentos, pontuacao e ordem dos caracteres
+- manter tipografia aparente
+- manter logotipos e simbolos sem alteracao
+- nao inventar letras
+- nao trocar palavras
+- nao borrar texto
+- nao omitir textos pequenos quando estiverem visiveis na arte original
+- nao substituir texto por pseudo-texto
+
+Aplique a estampa da segunda imagem no produto do mockup mantendo:
+
+- mesmo enquadramento base
+- mesma perspectiva principal
+- mesma proposta visual
+- mesma estrutura do mockup
+- mesmo formato do produto
+- mesma proporcao visual
+- mesmo estilo comercial marketplace
+
+O mockup deve continuar altamente fiel ao original, porem e PERMITIDO realizar pequenas variacoes naturais para evitar imagens excessivamente identicas entre geracoes.
+
+Variacoes permitidas:
+- leves ajustes de iluminacao
+- pequenas variacoes de sombra
+- pequenas mudancas de textura do ambiente
+- variacoes suaves de fundo mantendo o mesmo estilo
+- pequenas mudancas de tons neutros do ambiente
+- pequenas variacoes de pose/persona (quando houver modelo)
+- pequenas variacoes de acessorios neutros
+- pequenas variacoes de profundidade de campo
+- pequenas variacoes de composicao secundaria
+
+As variacoes devem:
+- manter identidade visual consistente
+- manter aspecto profissional
+- manter padrao marketplace
+- parecer fotos reais diferentes do mesmo produto
+- evitar aparencia de imagem duplicada
+
+NUNCA alterar:
+- geometria do produto
+- modelagem do produto
+- proporcao do produto
+- posicionamento principal
+- identidade da estampa
+- cores originais da arte
+- textos, letras, palavras, numeros, logotipos ou simbolos da arte
+- estilo principal do mockup
+
+Ajuste obrigatoriamente a proporcao e escala da arte conforme o tamanho real informado do produto, respeitando:
+- area util de impressao
+- caimento natural do tecido
+- proporcao correta da estampa
+- densidade visual adequada
+- tamanho real do produto
+- posicionamento proporcional da arte
+
+A estampa NAO deve:
+- ficar esticada
+- comprimida
+- distorcida
+- desproporcional
+- ampliar ou reduzir elementos aleatoriamente
+
+Utilize o tamanho informado para manter a relacao correta entre:
+- dimensao do produto
+- escala da estampa
+- repeticao da arte
+- ocupacao visual no mockup
+
+Caso a arte seja localizada:
+- centralizar proporcionalmente
+- respeitar margens naturais do produto
+- manter alinhamento realista
+
+Caso a arte seja padrao/pattern:
+- repetir mantendo escala coerente com o tamanho informado
+- evitar elementos exageradamente grandes ou pequenos
+
+Regras obrigatorias:
+- manter aparencia realista
+- resultado profissional para marketplace
+- alta fidelidade a estampa enviada
+- reproduzir a arte original com maxima fidelidade visual
+- preservar textos e elementos graficos da estampa exatamente como enviados
+- qualidade fotografica
+- textura natural do tecido
+- sombras coerentes
+- perspectiva realista
+
+Produto:
+${input.nomeProduto}
+
+SKU:
+${input.sku}
+
+Tamanho:
+${input.tamanho}
+
+Descricao da estampa:
+${input.descricaoEstampa}
+
+Descricao da variante:
+${input.descricaoVariante}
+
+Detalhes especificos do tipo de produto:
+${input.detalhesPromptIa}`;
+}
+
+function normalizeMockupMode(value: unknown) {
+  return value === "final" ? "final" : "preview";
+}
+
+async function findExistingMockup(outputPath: string) {
+  try {
+    const storageObject = await getGoogleStorageObjectInfo(outputPath);
+    return storageObject.exists ? storageObject : null;
+  } catch (error) {
+    if (error instanceof GoogleStorageServiceError && error.message.includes("Variavel de ambiente")) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function buildProdutoMockupStorageInfo(produtoId: string, mockupIndex: number) {
+  if (!Number.isInteger(mockupIndex) || mockupIndex < 1 || mockupIndex > 5) {
+    throw new Error("Mockup invalido. Informe um numero de 1 a 5.");
+  }
+
+  const produto = await prisma.produtoOlist.findUniqueOrThrow({
+    where: { id: produtoId },
+    include: {
+      tipoProduto: { select: { sku: true, detalhesPromptIa: true } },
+      estampa: { select: { codigo: true, descricao: true } },
+      variante: { select: { codigo: true, descricao: true } },
+      tamanho: { select: { sku: true, titulo: true } },
+    },
+  });
+
+  if (!produto.tamanho?.sku) {
+    throw new Error("Produto sem tamanho/SKU de tamanho para localizar o mockup.");
+  }
+  if (!produto.estampa?.codigo) {
+    throw new Error("Produto sem estampa para localizar a imagem de referencia.");
+  }
+  if (!produto.variante?.codigo) {
+    throw new Error("Produto sem variante para localizar a imagem de referencia.");
+  }
+
+  const tipoSku = cleanCodePart(produto.tipoProduto.sku);
+  const tamanhoSku = cleanCodePart(produto.tamanho.sku);
+  const estampaCodigo = cleanCodePart(produto.estampa.codigo);
+  const varianteCodigo = cleanCodePart(produto.variante.codigo);
+
+  return {
+    produto,
+    tamanhoTitulo: produto.tamanho.titulo,
+    descricaoVariante: produto.variante.descricao ?? "",
+    mockupUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${tamanhoSku}/mockup-${mockupIndex}.jpg`,
+    estampaUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-0.jpg`,
+    outputPath: `${tipoSku}/${estampaCodigo}/ia/${estampaCodigo}-${varianteCodigo}-${mockupIndex - 1}.jpg`,
+  };
+}
+
 function normalizeTipoProduto(tipoProduto: {
   id: string;
   titulo: string;
@@ -116,6 +307,7 @@ function normalizeTipoProduto(tipoProduto: {
   descricao: string | null;
   descricaoSeo: string | null;
   palavrasChave: string | null;
+  detalhesPromptIa: string | null;
   slug: string | null;
   categoria: string | null;
   precoCusto: unknown;
@@ -136,6 +328,7 @@ function normalizeTipoProduto(tipoProduto: {
     descricao: tipoProduto.descricao,
     descricaoSeo: tipoProduto.descricaoSeo,
     palavrasChave: tipoProduto.palavrasChave,
+    detalhesPromptIa: tipoProduto.detalhesPromptIa,
     slug: tipoProduto.slug,
     categoria: tipoProduto.categoria,
     precoCusto: decimalToNumber(tipoProduto.precoCusto),
@@ -272,6 +465,7 @@ function normalizeProdutoOlist(produto: {
     descricao: string | null;
     descricaoSeo: string | null;
     palavrasChave: string | null;
+    detalhesPromptIa: string | null;
     slug: string | null;
     categoria: string | null;
     precoCusto: unknown;
@@ -329,6 +523,7 @@ function normalizeProdutoOlist(produto: {
       descricao: produto.tipoProduto.descricao,
       descricaoSeo: produto.tipoProduto.descricaoSeo,
       palavrasChave: produto.tipoProduto.palavrasChave,
+      detalhesPromptIa: produto.tipoProduto.detalhesPromptIa,
       slug: produto.tipoProduto.slug,
       categoria: produto.tipoProduto.categoria,
       precoCusto: decimalToNumber(produto.tipoProduto.precoCusto),
@@ -404,6 +599,7 @@ async function carregarDados() {
             descricao: true,
             descricaoSeo: true,
             palavrasChave: true,
+            detalhesPromptIa: true,
             slug: true,
             categoria: true,
             precoCusto: true,
@@ -475,6 +671,7 @@ export async function POST(request: Request) {
         descricao: optionalString(payload.descricao),
         descricaoSeo: optionalString(payload.descricaoSeo),
         palavrasChave: optionalString(payload.palavrasChave),
+        detalhesPromptIa: optionalString(payload.detalhesPromptIa),
         slug: buildSlugFinal([optionalString(payload.slug) ?? titulo]),
         categoria: optionalString(payload.categoria),
         precoCusto: optionalNumber(payload.precoCusto, "precoCusto"),
@@ -697,6 +894,7 @@ export async function POST(request: Request) {
               descricao: true,
               descricaoSeo: true,
               palavrasChave: true,
+              detalhesPromptIa: true,
               slug: true,
               categoria: true,
               precoCusto: true,
@@ -762,6 +960,7 @@ export async function POST(request: Request) {
               descricao: true,
               descricaoSeo: true,
               palavrasChave: true,
+              detalhesPromptIa: true,
               slug: true,
               categoria: true,
               precoCusto: true,
@@ -801,6 +1000,88 @@ export async function POST(request: Request) {
       await prisma.produtoOlist.delete({ where: { id } });
 
       return NextResponse.json({ ok: true });
+    }
+
+    if (body.action === "gerar-mockup-produto") {
+      const produtoId = requiredString(payload.produtoId, "produtoId");
+      const mockupIndex = Number(payload.mockupIndex);
+      const mode = normalizeMockupMode(payload.mode);
+      const { produto, tamanhoTitulo, descricaoVariante, mockupUrl, estampaUrl, outputPath } =
+        await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
+      const existingMockup = await findExistingMockup(outputPath);
+
+      if (existingMockup) {
+        return NextResponse.json({
+          imagem: {
+            dataUrl: existingMockup.publicUrl,
+            base64: "",
+            mimeType: "image/jpeg",
+            mockupUrl,
+            estampaUrl,
+            uploadedUrl: existingMockup.publicUrl,
+            uploadedPath: existingMockup.path,
+            prompt: "",
+            mode,
+            fromStorage: true,
+          },
+        });
+      }
+
+      const prompt = buildProdutoMockupPrompt({
+        nomeProduto: produto.tituloFinal,
+        sku: produto.skuFinal,
+        tamanho: tamanhoTitulo,
+        descricaoEstampa: produto.estampa.descricao ?? "",
+        descricaoVariante,
+        detalhesPromptIa: produto.tipoProduto.detalhesPromptIa ?? "",
+      });
+      const imagem = await gerarImagemMockupComEstampa({
+        mockupUrl,
+        estampaUrl,
+        prompt,
+        model: mode === "preview" ? PREVIEW_IMAGE_MODEL : undefined,
+        size: "1024x1024",
+        quality: mode === "preview" ? "medium" : "high",
+        outputFormat: "jpeg",
+      });
+
+      return NextResponse.json({
+        imagem: {
+          dataUrl: `data:${imagem.mimeType};base64,${imagem.base64}`,
+          base64: imagem.base64,
+          mimeType: imagem.mimeType,
+          mockupUrl,
+          estampaUrl,
+          mode,
+          fromStorage: false,
+          prompt,
+        },
+      });
+    }
+
+    if (body.action === "upload-mockup-produto") {
+      const produtoId = requiredString(payload.produtoId, "produtoId");
+      const mockupIndex = Number(payload.mockupIndex);
+      const base64 = requiredString(payload.base64, "base64");
+      const mimeType = requiredString(payload.mimeType, "mimeType");
+
+      if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
+        throw new Error("Formato de imagem invalido para upload.");
+      }
+
+      const { outputPath } = await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
+      const uploadedImage = await uploadToGoogleStorage({
+        path: outputPath,
+        buffer: Buffer.from(base64, "base64"),
+        contentType: mimeType,
+      });
+
+      return NextResponse.json({
+        upload: {
+          uploadedUrl: uploadedImage.publicUrl,
+          uploadedPath: uploadedImage.path,
+        },
+      });
     }
 
     return NextResponse.json({ error: "Acao invalida." }, { status: 400 });

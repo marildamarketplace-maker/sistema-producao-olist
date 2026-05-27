@@ -4,6 +4,7 @@ export type TipoProdutoOlist = {
   sku: string;
   descricaoSeo: string | null;
   palavrasChave: string | null;
+  detalhesPromptIa: string | null;
   slug: string | null;
   categoria: string | null;
   precoCusto: number | null;
@@ -101,6 +102,7 @@ export type ProdutoFinalOlist = {
     | "descricao"
     | "descricaoSeo"
     | "palavrasChave"
+    | "detalhesPromptIa"
     | "slug"
     | "categoria"
     | "precoCusto"
@@ -170,6 +172,7 @@ export function salvarTipoProdutoOlist(payload: {
   descricao?: string | null;
   descricaoSeo?: string | null;
   palavrasChave?: string | null;
+  detalhesPromptIa?: string | null;
   slug?: string | null;
   categoria?: string | null;
   precoCusto?: number | null;
@@ -294,6 +297,47 @@ export function excluirProdutoFinalOlist(id: string) {
   return requestGeradorCsv<{ ok: true }>({
     method: "POST",
     body: JSON.stringify({ action: "excluir-produto-final", payload: { id } }),
+  });
+}
+
+export function gerarMockupProdutoOlist(payload: {
+  produtoId: string;
+  mockupIndex: number;
+  mode?: "preview" | "final";
+}) {
+  return requestGeradorCsv<{
+    imagem: {
+      dataUrl: string;
+      base64: string;
+      mimeType: string;
+      mockupUrl: string;
+      estampaUrl: string;
+      uploadedUrl?: string;
+      uploadedPath?: string;
+      mode: "preview" | "final";
+      fromStorage: boolean;
+      prompt: string;
+    };
+  }>({
+    method: "POST",
+    body: JSON.stringify({ action: "gerar-mockup-produto", payload }),
+  });
+}
+
+export function uploadMockupProdutoOlist(payload: {
+  produtoId: string;
+  mockupIndex: number;
+  base64: string;
+  mimeType: string;
+}) {
+  return requestGeradorCsv<{
+    upload: {
+      uploadedUrl: string;
+      uploadedPath: string;
+    };
+  }>({
+    method: "POST",
+    body: JSON.stringify({ action: "upload-mockup-produto", payload }),
   });
 }
 

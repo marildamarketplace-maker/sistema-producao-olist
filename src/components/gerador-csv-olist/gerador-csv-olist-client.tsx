@@ -17,6 +17,7 @@ import {
   excluirTipoProdutoOlist,
   excluirVarianteOlist,
   gerarProdutoFinalOlist,
+  gerarMockupProdutoOlist,
   montarCamposCsvProdutoOlist,
   montarCsvProdutosOlist,
   salvarEstampaOlist,
@@ -24,6 +25,7 @@ import {
   salvarTamanhoOlist,
   salvarTipoProdutoOlist,
   salvarVarianteOlist,
+  uploadMockupProdutoOlist,
 } from "@/lib/gerador-csv-olist";
 
 type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "produtos";
@@ -43,6 +45,7 @@ const tipoInicial = {
   descricao: "",
   descricaoSeo: "",
   palavrasChave: "",
+  detalhesPromptIa: "",
   slug: "",
   categoria: "",
   precoCusto: "",
@@ -311,6 +314,7 @@ export function GeradorCsvOlistClient() {
         descricao: tipoForm.descricao || null,
         descricaoSeo: tipoForm.descricaoSeo || null,
         palavrasChave: tipoForm.palavrasChave || null,
+        detalhesPromptIa: tipoForm.detalhesPromptIa || null,
         slug: tipoForm.slug || null,
         categoria: tipoForm.categoria || null,
         precoCusto: toNumberOrNull(tipoForm.precoCusto),
@@ -548,6 +552,7 @@ export function GeradorCsvOlistClient() {
       descricao: tipo.descricao ?? "",
       descricaoSeo: tipo.descricaoSeo ?? "",
       palavrasChave: tipo.palavrasChave ?? "",
+      detalhesPromptIa: tipo.detalhesPromptIa ?? "",
       slug: tipo.slug ?? "",
       categoria: tipo.categoria ?? "",
       precoCusto: formatNumberForInput(tipo.precoCusto, 2),
@@ -568,6 +573,7 @@ export function GeradorCsvOlistClient() {
       descricao: tipo.descricao ?? "",
       descricaoSeo: tipo.descricaoSeo ?? "",
       palavrasChave: tipo.palavrasChave ?? "",
+      detalhesPromptIa: tipo.detalhesPromptIa ?? "",
       slug: withSlugCopySuffix(tipo.slug),
       categoria: tipo.categoria ?? "",
       precoCusto: formatNumberForInput(tipo.precoCusto, 2),
@@ -1031,6 +1037,15 @@ function TiposProdutoTab({
               value={form.descricaoSeo}
               onChange={(event) => setForm((prev) => ({ ...prev, descricaoSeo: event.target.value }))}
               className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-slate-700 md:col-span-4">
+            Detalhes especificos do tipo de produto para prompt IA
+            <textarea
+              value={form.detalhesPromptIa}
+              onChange={(event) => setForm((prev) => ({ ...prev, detalhesPromptIa: event.target.value }))}
+              className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="Ex.: Produto em tecido fourway com leve elasticidade. A arte deve acompanhar o caimento natural do tecido."
             />
           </label>
           {decimalFields.map((field) => (
@@ -1756,6 +1771,21 @@ function ProdutosCriadosTab({
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [produtoEditando, setProdutoEditando] = useState<ProdutoFinalOlist | null>(null);
   const [produtoVisualizando, setProdutoVisualizando] = useState<ProdutoFinalOlist | null>(null);
+  const [mockupGerando, setMockupGerando] = useState<number | null>(null);
+  const [mockupGerado, setMockupGerado] = useState<{
+    dataUrl: string;
+    base64: string;
+    mockupIndex: number;
+    mockupUrl: string;
+    estampaUrl: string;
+    mode: "preview" | "final";
+    fromStorage: boolean;
+    uploadedUrl?: string;
+    uploadedPath?: string;
+    prompt: string;
+  } | null>(null);
+  const [mockupUploading, setMockupUploading] = useState(false);
+  const [mockupErro, setMockupErro] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     skuFinal: "",
     tituloFinal: "",
@@ -1823,6 +1853,74 @@ function ProdutosCriadosTab({
       precoCusto: formatNumberForInput(produto.precoCusto, 2),
       preco: formatNumberForInput(produto.preco, 2),
     });
+  }
+
+  function abrirVisualizacao(produto: ProdutoFinalOlist) {
+    setProdutoVisualizando(produto);
+    setMockupGerado(null);
+    setMockupErro(null);
+    setMockupGerando(null);
+    setMockupUploading(false);
+  }
+
+  async function gerarMockup(produto: ProdutoFinalOlist, mockupIndex: number, mode: "preview" | "final" = "preview") {
+    setMockupGerando(mockupIndex);
+    setMockupErro(null);
+
+    try {
+      const resposta = await gerarMockupProdutoOlist({
+        produtoId: produto.id,
+        mockupIndex,
+        mode,
+      });
+      setMockupGerado({ ...resposta.imagem, mockupIndex });
+    } catch (error) {
+      setMockupErro(error instanceof Error ? error.message : "Erro ao gerar mockup.");
+    } finally {
+      setMockupGerando(null);
+    }
+  }
+
+  function baixarMockup() {
+    if (!mockupGerado || !produtoVisualizando) return;
+
+    const link = document.createElement("a");
+    link.href = mockupGerado.dataUrl;
+    link.download = `${produtoVisualizando.skuFinal}-mockup-${mockupGerado.mockupIndex}.jpg`;
+    link.click();
+  }
+
+  async function uploadMockup(produto: ProdutoFinalOlist) {
+    if (!mockupGerado) return;
+    if (!mockupGerado.base64) {
+      setMockupErro("Esta imagem ja esta no Storage.");
+      return;
+    }
+
+    setMockupUploading(true);
+    setMockupErro(null);
+
+    try {
+      const resposta = await uploadMockupProdutoOlist({
+        produtoId: produto.id,
+        mockupIndex: mockupGerado.mockupIndex,
+        base64: mockupGerado.base64,
+        mimeType: "image/jpeg",
+      });
+      setMockupGerado((prev) =>
+        prev
+          ? {
+              ...prev,
+              uploadedUrl: resposta.upload.uploadedUrl,
+              uploadedPath: resposta.upload.uploadedPath,
+            }
+          : prev,
+      );
+    } catch (error) {
+      setMockupErro(error instanceof Error ? error.message : "Erro ao enviar mockup para o Storage.");
+    } finally {
+      setMockupUploading(false);
+    }
   }
 
   async function salvarEdicao(event: FormEvent<HTMLFormElement>) {
@@ -2005,7 +2103,7 @@ function ProdutosCriadosTab({
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            onClick={() => setProdutoVisualizando(produto)}
+                            onClick={() => abrirVisualizacao(produto)}
                             className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                           >
                             Visualizar
@@ -2150,7 +2248,13 @@ function ProdutosCriadosTab({
               </div>
               <button
                 type="button"
-                onClick={() => setProdutoVisualizando(null)}
+                onClick={() => {
+                  setProdutoVisualizando(null);
+                  setMockupGerado(null);
+                  setMockupErro(null);
+                  setMockupGerando(null);
+                  setMockupUploading(false);
+                }}
                 className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
               >
                 Fechar
@@ -2158,6 +2262,102 @@ function ProdutosCriadosTab({
             </div>
 
             <div className="overflow-y-auto p-5">
+              <div className="mb-5 space-y-4 rounded-md border border-slate-200 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-900">Mockups OpenAI</h4>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Preview usa qualidade media. A versao final usa alta qualidade.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[1, 2, 3, 4, 5].map((index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => gerarMockup(produtoVisualizando, index, "preview")}
+                        disabled={mockupGerando !== null}
+                        className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        {mockupGerando === index ? "Gerando..." : `Preview mockup ${index}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {mockupErro && (
+                  <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {mockupErro}
+                  </p>
+                )}
+
+                {mockupGerado && (
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
+                    <img
+                      src={mockupGerado.dataUrl}
+                      alt={`Mockup gerado para ${produtoVisualizando.skuFinal}`}
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+                    />
+                    <div className="space-y-2 text-xs text-slate-600">
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => gerarMockup(produtoVisualizando, mockupGerado.mockupIndex, "final")}
+                          disabled={mockupGerando !== null}
+                          className="rounded-md border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                        >
+                          {mockupGerando === mockupGerado.mockupIndex ? "Gerando..." : "Gerar final"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={baixarMockup}
+                          className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => uploadMockup(produtoVisualizando)}
+                          disabled={mockupUploading || !mockupGerado.base64}
+                          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                        >
+                          {mockupUploading ? "Enviando..." : "Upload no Storage"}
+                        </button>
+                      </div>
+                      <p>
+                        <span className="font-semibold text-slate-800">Modo:</span>{" "}
+                        {mockupGerado.fromStorage
+                          ? "Arquivo existente no Storage"
+                          : mockupGerado.mode === "preview"
+                            ? "Preview medium"
+                            : "Final em alta qualidade"}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-slate-800">Mockup:</span>{" "}
+                        <span className="break-all">{mockupGerado.mockupUrl}</span>
+                      </p>
+                      <p>
+                        <span className="font-semibold text-slate-800">Estampa:</span>{" "}
+                        <span className="break-all">{mockupGerado.estampaUrl}</span>
+                      </p>
+                      {mockupGerado.uploadedUrl && (
+                        <p>
+                          <span className="font-semibold text-slate-800">Upload:</span>{" "}
+                          <a
+                            href={mockupGerado.uploadedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all text-blue-700 hover:underline"
+                          >
+                            {mockupGerado.uploadedUrl}
+                          </a>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="overflow-x-auto rounded-md border border-slate-200">
                 <table className="min-w-full border-collapse text-sm">
                   <thead className="sticky top-0 bg-white">
