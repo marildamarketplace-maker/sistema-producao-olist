@@ -302,6 +302,11 @@ function csvValue(value: string | number | null | undefined) {
   return `"${normalized.replace(/"/g, '""')}"`;
 }
 
+function decimalPtBr(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value).replace(".", ",");
+}
+
 function joinClean(parts: Array<string | null | undefined>, separator = " ") {
   return parts
     .filter((part): part is string => Boolean(part?.trim()))
@@ -363,18 +368,17 @@ function storageImageUrl(produto: ProdutoFinalOlist, index: number) {
   const estampa = produto.estampa?.codigo ?? "";
   const variante = produto.variante?.codigo ?? "";
 
-  return `https://storage.googleapis.com/${tipoSku}/${estampa}/${estampa}-${variante}-${index}.jpg`;
+  return `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/${estampa}-${variante}-${index}.jpg`;
 }
 
 function storageVideoUrl(produto: ProdutoFinalOlist) {
   const tipoSku = produto.tipoProduto.sku;
   const estampa = produto.estampa?.codigo ?? "";
 
-  return `https://storage.googleapis.com/${tipoSku}/${estampa}/video.mp4`;
+  return `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/video.mp4`;
 }
 
-export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
-  const headers = [
+export const PRODUTOS_OLIST_CSV_HEADERS = [
     "ID",
     "Código (SKU)",
     "Descrição",
@@ -439,9 +443,9 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
     "Markup",
     "Permitir inclusão nas vendas",
     "EX TIPI",
-  ];
+];
 
-  function buildProdutoCsvRow(produto: ProdutoFinalOlist, isParent = false) {
+export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent = false) {
     const variables = produtoCsvVariables(produto);
     const parentSku = joinClean(
       [produto.tipoProduto.sku, produto.tamanho?.sku, produto.estampa?.codigo],
@@ -517,25 +521,25 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
     ]);
 
     return [
-      isParent ? "" : produto.id,
+      "",
       isParent ? parentSku : produto.skuFinal,
       descricao,
       "un",
       "5407.52.10",
       "1 - Estrangeira - Importação direta, exceto a indicada no código 6",
-      produto.preco ?? produto.tipoProduto.preco ?? "",
+      decimalPtBr(produto.preco ?? produto.tipoProduto.preco),
       0,
       "",
       "Ativo",
       1000,
-      produto.precoCusto ?? produto.tipoProduto.precoCusto ?? "",
+      decimalPtBr(produto.precoCusto ?? produto.tipoProduto.precoCusto),
       "",
       "",
       "",
       0,
       0,
-      produto.pesoLiquido ?? produto.tipoProduto.pesoLiquido ?? "",
-      produto.pesoBruto ?? produto.tipoProduto.pesoBruto ?? "",
+      decimalPtBr(produto.pesoLiquido ?? produto.tipoProduto.pesoLiquido),
+      decimalPtBr(produto.pesoBruto ?? produto.tipoProduto.pesoBruto),
       "",
       "",
       descricaoComplementar,
@@ -582,7 +586,18 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
       "",
       "",
     ];
-  }
+}
+
+export function montarCamposCsvProdutoOlist(produto: ProdutoFinalOlist, isParent = false) {
+  const row = montarLinhaCsvProdutoOlist(produto, isParent);
+  return PRODUTOS_OLIST_CSV_HEADERS.map((header, index) => ({
+    campo: header,
+    valor: row[index] ?? "",
+  }));
+}
+
+export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
+  const headers = PRODUTOS_OLIST_CSV_HEADERS;
 
   const rows: Array<Array<string | number | null | undefined>> = [];
   const parentRows = new Set<string>();
@@ -595,12 +610,12 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
       ).toUpperCase();
 
       if (!parentRows.has(parentSku)) {
-        rows.push(buildProdutoCsvRow(produto, true));
+        rows.push(montarLinhaCsvProdutoOlist(produto, true));
         parentRows.add(parentSku);
       }
     }
 
-    rows.push(buildProdutoCsvRow(produto));
+    rows.push(montarLinhaCsvProdutoOlist(produto));
   }
 
   return [headers, ...rows]

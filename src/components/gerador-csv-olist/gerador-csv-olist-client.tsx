@@ -17,6 +17,7 @@ import {
   excluirTipoProdutoOlist,
   excluirVarianteOlist,
   gerarProdutoFinalOlist,
+  montarCamposCsvProdutoOlist,
   montarCsvProdutosOlist,
   salvarEstampaOlist,
   salvarProdutoFinalOlist,
@@ -780,6 +781,10 @@ export function GeradorCsvOlistClient() {
     const confirmar = window.confirm("Excluir este produto final?");
     if (!confirmar) return;
 
+    await excluirProdutoFinalSemConfirmar(id);
+  }
+
+  async function excluirProdutoFinalSemConfirmar(id: string) {
     setSaving(true);
     setMessage(null);
     setErrorMessage(null);
@@ -932,6 +937,7 @@ export function GeradorCsvOlistClient() {
               saving={saving}
               onSave={salvarProdutoFinal}
               onDelete={excluirProdutoFinal}
+              onDeleteMany={excluirProdutoFinalSemConfirmar}
               onExportCsv={baixarCsv}
             />
           )}
@@ -962,7 +968,7 @@ function TiposProdutoTab({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onEdit: (tipo: TipoProdutoOlist) => void;
   onDuplicate: (tipo: TipoProdutoOlist) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
 }) {
   const textFields: {
     key: keyof typeof tipoInicial;
@@ -1720,6 +1726,7 @@ function ProdutosCriadosTab({
   saving,
   onSave,
   onDelete,
+  onDeleteMany,
   onExportCsv,
 }: {
   produtos: ProdutoFinalOlist[];
@@ -1735,7 +1742,8 @@ function ProdutosCriadosTab({
     precoCusto: string;
     preco: string;
   }) => Promise<void>;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onDeleteMany: (id: string) => void | Promise<void>;
   onExportCsv: (produtos: ProdutoFinalOlist[]) => void;
 }) {
   const [buscaSku, setBuscaSku] = useState("");
@@ -1747,6 +1755,7 @@ function ProdutosCriadosTab({
   const [pagina, setPagina] = useState(1);
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [produtoEditando, setProdutoEditando] = useState<ProdutoFinalOlist | null>(null);
+  const [produtoVisualizando, setProdutoVisualizando] = useState<ProdutoFinalOlist | null>(null);
   const [editForm, setEditForm] = useState({
     skuFinal: "",
     tituloFinal: "",
@@ -1827,6 +1836,19 @@ function ProdutosCriadosTab({
     setProdutoEditando(null);
   }
 
+  async function excluirSelecionados() {
+    if (produtosSelecionados.length === 0) return;
+
+    const confirmar = window.confirm(`Excluir ${produtosSelecionados.length} produto(s) selecionado(s)?`);
+    if (!confirmar) return;
+
+    for (const produto of produtosSelecionados) {
+      await onDeleteMany(produto.id);
+    }
+
+    setSelecionados([]);
+  }
+
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
@@ -1837,14 +1859,24 @@ function ProdutosCriadosTab({
               Consulte, filtre, edite e exporte os produtos finais gerados.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onExportCsv(produtosSelecionados)}
-            disabled={produtosSelecionados.length === 0}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            Exportar selecionados CSV
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={excluirSelecionados}
+              disabled={saving || produtosSelecionados.length === 0}
+              className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Excluir selecionados
+            </button>
+            <button
+              type="button"
+              onClick={() => onExportCsv(produtosSelecionados)}
+              disabled={produtosSelecionados.length === 0}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Exportar selecionados CSV
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -1973,6 +2005,13 @@ function ProdutosCriadosTab({
                         <div className="flex gap-2">
                           <button
                             type="button"
+                            onClick={() => setProdutoVisualizando(produto)}
+                            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                          >
+                            Visualizar
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => abrirEdicao(produto)}
                             className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                           >
@@ -2097,6 +2136,51 @@ function ProdutosCriadosTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {produtoVisualizando && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Visualizar produto CSV</h3>
+                <p className="mt-1 text-sm text-slate-600">{produtoVisualizando.skuFinal}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProdutoVisualizando(null)}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-5">
+              <div className="overflow-x-auto rounded-md border border-slate-200">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b border-slate-200 text-left text-slate-600">
+                      <th className="w-72 p-3">Campo</th>
+                      <th className="p-3">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {montarCamposCsvProdutoOlist(produtoVisualizando).map((item) => (
+                      <tr key={item.campo} className="border-b border-slate-100 align-top">
+                        <td className="p-3 font-medium text-slate-700">{item.campo}</td>
+                        <td className="max-w-3xl whitespace-pre-wrap break-words p-3 text-slate-700">
+                          {item.valor === "" || item.valor === null || item.valor === undefined
+                            ? "-"
+                            : String(item.valor)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       )}
