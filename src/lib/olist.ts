@@ -1240,16 +1240,12 @@ export async function confirmarBaixaEstoqueOlist(input: {
     });
 
     await prisma.produto.createMany({
-      data: ausentes.map((sku) => {
-        const item = input.itens.find((itemInput) => itemInput.sku.trim() === sku);
-
-        return {
-          sku,
-          ativo: true,
-          metaEstoque: null,
-          createdAt: new Date(),
-        };
-      }),
+      data: ausentes.map((sku) => ({
+        sku,
+        ativo: true,
+        metaEstoque: null,
+        createdAt: new Date(),
+      })),
       skipDuplicates: true,
     });
 
@@ -1465,5 +1461,4 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     motivo_pedidos_ignorados: "Pedido já processado anteriormente.",
   };
 }
-
 
