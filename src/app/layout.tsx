@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
+import { AppShell } from "@/components/app-shell";
+import { AuthProvider } from "@/components/auth-provider";
 
 export const metadata: Metadata = {
   title: "Sistema de Produção e Estoque",
@@ -15,10 +16,9 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 p-8">{children}</main>
-        </div>
+        <AuthProvider>
+          <AppShell>{children}</AppShell>
+        </AuthProvider>
       </body>
     </html>
   );
