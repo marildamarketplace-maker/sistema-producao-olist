@@ -75,6 +75,30 @@ export async function uploadToGoogleStorage(
   };
 }
 
+export async function deleteGoogleStorageObject(
+  path: string,
+  bucket = getRequiredEnv("GOOGLE_CLOUD_STORAGE_BUCKET"),
+) {
+  const objectPath = normalizeObjectPath(path);
+  const accessToken = await getGoogleAccessToken();
+  const url = `${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    throw new GoogleStorageServiceError("Nao foi possivel substituir imagem no Google Cloud Storage.", {
+      status: response.status,
+      details: await readResponseDetails(response),
+    });
+  }
+}
+
 export async function getGoogleStorageObjectInfo(
   path: string,
   bucket = getRequiredEnv("GOOGLE_CLOUD_STORAGE_BUCKET"),

@@ -29,6 +29,7 @@ import {
 } from "@/lib/gerador-csv-olist";
 
 type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "produtos";
+type MockupQuality = "low" | "medium" | "high";
 
 const ABAS: { id: Aba; label: string }[] = [
   { id: "tipos", label: "Tipos de Produto" },
@@ -38,6 +39,19 @@ const ABAS: { id: Aba; label: string }[] = [
   { id: "gerar", label: "Gerar Produto Final" },
   { id: "produtos", label: "Produtos Criados" },
 ];
+
+const MOCKUP_QUALITY_LABELS: Record<MockupQuality, string> = {
+  low: "Baixa",
+  medium: "Media",
+  high: "Alta",
+};
+
+function withCacheBust(url: string, key?: number) {
+  if (!key || url.startsWith("data:")) return url;
+
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${key}`;
+}
 
 const tipoInicial = {
   titulo: "",
@@ -808,7 +822,7 @@ export function GeradorCsvOlistClient() {
 
   function baixarCsv(produtos?: ProdutoFinalOlist[]) {
     const produtosCsv = Array.isArray(produtos) ? produtos : dados.produtosFinais;
-    const csv = montarCsvProdutosOlist(produtosCsv);
+    const csv = montarCsvProdutosOlist(produtosCsv, { cacheKey: Date.now() });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1779,13 +1793,20 @@ function ProdutosCriadosTab({
     mockupUrl: string;
     estampaUrl: string;
     mode: "preview" | "final";
+    quality: MockupQuality;
     fromStorage: boolean;
+    replacingExisting?: boolean;
+    cacheKey?: number;
     uploadedUrl?: string;
     uploadedPath?: string;
     prompt: string;
   } | null>(null);
   const [mockupUploading, setMockupUploading] = useState(false);
   const [mockupErro, setMockupErro] = useState<string | null>(null);
+  const [mockupErroIndex, setMockupErroIndex] = useState<number | null>(null);
+  const [mockupUrlsSubstitutas, setMockupUrlsSubstitutas] = useState<Record<number, string>>({});
+  const [mockupQuality, setMockupQuality] = useState<MockupQuality>("medium");
+  const [csvImageCacheKey, setCsvImageCacheKey] = useState(() => Date.now());
   const [editForm, setEditForm] = useState({
     skuFinal: "",
     tituloFinal: "",
@@ -1859,23 +1880,36 @@ function ProdutosCriadosTab({
     setProdutoVisualizando(produto);
     setMockupGerado(null);
     setMockupErro(null);
+    setMockupErroIndex(null);
     setMockupGerando(null);
     setMockupUploading(false);
+    setMockupUrlsSubstitutas({});
+    setCsvImageCacheKey(Date.now());
   }
 
-  async function gerarMockup(produto: ProdutoFinalOlist, mockupIndex: number, mode: "preview" | "final" = "preview") {
+  async function gerarMockup(
+    produto: ProdutoFinalOlist,
+    mockupIndex: number,
+    forceRegenerate = false,
+  ) {
     setMockupGerando(mockupIndex);
     setMockupErro(null);
+    setMockupErroIndex(null);
 
     try {
+      const mockupUrlOverride = mockupUrlsSubstitutas[mockupIndex]?.trim() || null;
       const resposta = await gerarMockupProdutoOlist({
         produtoId: produto.id,
         mockupIndex,
-        mode,
+        mode: mockupQuality === "high" ? "final" : "preview",
+        quality: mockupQuality,
+        mockupUrlOverride,
+        forceRegenerate,
       });
-      setMockupGerado({ ...resposta.imagem, mockupIndex });
+      setMockupGerado({ ...resposta.imagem, mockupIndex, cacheKey: Date.now() });
     } catch (error) {
       setMockupErro(error instanceof Error ? error.message : "Erro ao gerar mockup.");
+      setMockupErroIndex(mockupIndex);
     } finally {
       setMockupGerando(null);
     }
@@ -1913,9 +1947,11 @@ function ProdutosCriadosTab({
               ...prev,
               uploadedUrl: resposta.upload.uploadedUrl,
               uploadedPath: resposta.upload.uploadedPath,
+              cacheKey: Date.now(),
             }
           : prev,
       );
+      setCsvImageCacheKey(Date.now());
     } catch (error) {
       setMockupErro(error instanceof Error ? error.message : "Erro ao enviar mockup para o Storage.");
     } finally {
@@ -2252,8 +2288,10 @@ function ProdutosCriadosTab({
                   setProdutoVisualizando(null);
                   setMockupGerado(null);
                   setMockupErro(null);
+                  setMockupErroIndex(null);
                   setMockupGerando(null);
                   setMockupUploading(false);
+                  setMockupUrlsSubstitutas({});
                 }}
                 className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
               >
@@ -2267,19 +2305,32 @@ function ProdutosCriadosTab({
                   <div>
                     <h4 className="text-sm font-semibold text-slate-900">Mockups OpenAI</h4>
                     <p className="mt-1 text-xs text-slate-600">
-                      Preview usa qualidade media. A versao final usa alta qualidade.
+                      Selecione o nivel de geracao e escolha o mockup.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="block text-xs font-medium text-slate-700">
+                      Nivel de geracao
+                      <select
+                        value={mockupQuality}
+                        onChange={(event) => setMockupQuality(event.target.value as MockupQuality)}
+                        disabled={mockupGerando !== null}
+                        className="mt-1 h-9 rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:opacity-50"
+                      >
+                        <option value="low">Baixa</option>
+                        <option value="medium">Media</option>
+                        <option value="high">Alta</option>
+                      </select>
+                    </label>
                     {[1, 2, 3, 4, 5].map((index) => (
                       <button
                         key={index}
                         type="button"
-                        onClick={() => gerarMockup(produtoVisualizando, index, "preview")}
+                        onClick={() => gerarMockup(produtoVisualizando, index)}
                         disabled={mockupGerando !== null}
                         className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                       >
-                        {mockupGerando === index ? "Gerando..." : `Preview mockup ${index}`}
+                        {mockupGerando === index ? "Gerando..." : `Gerar mockup ${index}`}
                       </button>
                     ))}
                   </div>
@@ -2291,10 +2342,43 @@ function ProdutosCriadosTab({
                   </p>
                 )}
 
+                {mockupErro?.includes("Nao foi possivel baixar imagem por URL") && mockupErroIndex && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                    <label className="block text-xs font-medium text-amber-900">
+                      URL substituta do mockup {mockupErroIndex}
+                      <input
+                        type="url"
+                        value={mockupUrlsSubstitutas[mockupErroIndex] ?? ""}
+                        onChange={(event) =>
+                          setMockupUrlsSubstitutas((prev) => ({
+                            ...prev,
+                            [mockupErroIndex]: event.target.value,
+                          }))
+                        }
+                        placeholder="https://..."
+                        className="mt-2 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                      />
+                    </label>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => gerarMockup(produtoVisualizando, mockupErroIndex)}
+                        disabled={mockupGerando !== null || !mockupUrlsSubstitutas[mockupErroIndex]?.trim()}
+                        className="rounded-md bg-amber-700 px-3 py-2 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                      >
+                        Tentar preview novamente
+                      </button>
+                      <span className="text-xs text-amber-900">
+                        Essa URL substitui o mockup faltante enviado para a IA.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {mockupGerado && (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
                     <img
-                      src={mockupGerado.dataUrl}
+                      src={withCacheBust(mockupGerado.dataUrl, mockupGerado.cacheKey)}
                       alt={`Mockup gerado para ${produtoVisualizando.skuFinal}`}
                       className="w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
                     />
@@ -2302,11 +2386,17 @@ function ProdutosCriadosTab({
                       <div className="mb-3 flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => gerarMockup(produtoVisualizando, mockupGerado.mockupIndex, "final")}
+                          onClick={() =>
+                            gerarMockup(produtoVisualizando, mockupGerado.mockupIndex, mockupGerado.fromStorage)
+                          }
                           disabled={mockupGerando !== null}
                           className="rounded-md border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
                         >
-                          {mockupGerando === mockupGerado.mockupIndex ? "Gerando..." : "Gerar final"}
+                          {mockupGerando === mockupGerado.mockupIndex
+                            ? "Gerando..."
+                            : mockupGerado.fromStorage
+                              ? "Gerar nova imagem"
+                              : "Gerar novamente"}
                         </button>
                         <button
                           type="button"
@@ -2321,16 +2411,20 @@ function ProdutosCriadosTab({
                           disabled={mockupUploading || !mockupGerado.base64}
                           className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                         >
-                          {mockupUploading ? "Enviando..." : "Upload no Storage"}
+                          {mockupUploading
+                            ? "Enviando..."
+                            : !mockupGerado.base64
+                              ? "Gere nova imagem para substituir"
+                              : mockupGerado.uploadedUrl || mockupGerado.replacingExisting
+                              ? "Substituir no Storage"
+                              : "Upload no Storage"}
                         </button>
                       </div>
                       <p>
-                        <span className="font-semibold text-slate-800">Modo:</span>{" "}
+                        <span className="font-semibold text-slate-800">Geracao:</span>{" "}
                         {mockupGerado.fromStorage
                           ? "Arquivo existente no Storage"
-                          : mockupGerado.mode === "preview"
-                            ? "Preview medium"
-                            : "Final em alta qualidade"}
+                          : MOCKUP_QUALITY_LABELS[mockupGerado.quality]}
                       </p>
                       <p>
                         <span className="font-semibold text-slate-800">Mockup:</span>{" "}
@@ -2344,12 +2438,12 @@ function ProdutosCriadosTab({
                         <p>
                           <span className="font-semibold text-slate-800">Upload:</span>{" "}
                           <a
-                            href={mockupGerado.uploadedUrl}
+                            href={withCacheBust(mockupGerado.uploadedUrl, mockupGerado.cacheKey)}
                             target="_blank"
                             rel="noreferrer"
                             className="break-all text-blue-700 hover:underline"
                           >
-                            {mockupGerado.uploadedUrl}
+                            {withCacheBust(mockupGerado.uploadedUrl, mockupGerado.cacheKey)}
                           </a>
                         </p>
                       )}
@@ -2367,7 +2461,7 @@ function ProdutosCriadosTab({
                     </tr>
                   </thead>
                   <tbody>
-                    {montarCamposCsvProdutoOlist(produtoVisualizando).map((item) => (
+                    {montarCamposCsvProdutoOlist(produtoVisualizando, false, { cacheKey: csvImageCacheKey }).map((item) => (
                       <tr key={item.campo} className="border-b border-slate-100 align-top">
                         <td className="p-3 font-medium text-slate-700">{item.campo}</td>
                         <td className="max-w-3xl whitespace-pre-wrap break-words p-3 text-slate-700">

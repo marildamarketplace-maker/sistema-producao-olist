@@ -304,6 +304,9 @@ export function gerarMockupProdutoOlist(payload: {
   produtoId: string;
   mockupIndex: number;
   mode?: "preview" | "final";
+  quality?: "low" | "medium" | "high";
+  mockupUrlOverride?: string | null;
+  forceRegenerate?: boolean;
 }) {
   return requestGeradorCsv<{
     imagem: {
@@ -315,7 +318,9 @@ export function gerarMockupProdutoOlist(payload: {
       uploadedUrl?: string;
       uploadedPath?: string;
       mode: "preview" | "final";
+      quality: "low" | "medium" | "high";
       fromStorage: boolean;
+      replacingExisting?: boolean;
       prompt: string;
     };
   }>({
@@ -360,6 +365,30 @@ function joinClean(parts: Array<string | null | undefined>, separator = " ") {
     .trim();
 }
 
+function normalizeComparableText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(?:cm|mm|m)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function joinCleanUnique(parts: Array<string | null | undefined>, separator = " ") {
+  return parts.reduce<string[]>((acc, part) => {
+    const value = part?.trim();
+    if (!value) return acc;
+
+    const normalizedValue = normalizeComparableText(value);
+    const alreadyIncluded = acc.some((existing) => {
+      const normalizedExisting = normalizeComparableText(existing);
+      return normalizedExisting.includes(normalizedValue) || normalizedValue.includes(normalizedExisting);
+    });
+
+    return alreadyIncluded ? acc : [...acc, value];
+  }, []).join(separator);
+}
+
 function slugCsv(parts: Array<string | null | undefined>) {
   return parts
     .filter((part): part is string => Boolean(part?.trim()))
@@ -376,6 +405,16 @@ function slugCsv(parts: Array<string | null | undefined>) {
     .join("-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function cleanCodePart(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toUpperCase();
 }
 
 function truncate(value: string | null | undefined, length: number) {
@@ -413,6 +452,30 @@ function storageImageUrl(produto: ProdutoFinalOlist, index: number) {
   const variante = produto.variante?.codigo ?? "";
 
   return `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/${estampa}-${variante}-${index}.jpg`;
+}
+
+type ProdutoOlistCsvOptions = {
+  cacheKey?: number;
+};
+
+function withCacheBust(url: string, cacheKey?: number) {
+  if (!url || !cacheKey) return url;
+
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${cacheKey}`;
+}
+
+function storageAiImageUrl(produto: ProdutoFinalOlist, index: number, options?: ProdutoOlistCsvOptions) {
+  const tipoSku = cleanCodePart(produto.tipoProduto.sku);
+  const estampa = cleanCodePart(produto.estampa?.codigo);
+  const variante = cleanCodePart(produto.variante?.codigo);
+
+  if (!tipoSku || !estampa || !variante) return "";
+
+  return withCacheBust(
+    `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/ia/${estampa}-${variante}-${index}.jpg`,
+    options?.cacheKey,
+  );
 }
 
 function storageVideoUrl(produto: ProdutoFinalOlist) {
@@ -489,7 +552,11 @@ export const PRODUTOS_OLIST_CSV_HEADERS = [
     "EX TIPI",
 ];
 
-export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent = false) {
+export function montarLinhaCsvProdutoOlist(
+  produto: ProdutoFinalOlist,
+  isParent = false,
+  options?: ProdutoOlistCsvOptions,
+) {
     const variables = produtoCsvVariables(produto);
     const parentSku = joinClean(
       [produto.tipoProduto.sku, produto.tamanho?.sku, produto.estampa?.codigo],
@@ -499,7 +566,7 @@ export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent 
     const codigoPai = !isParent && temVariacao ? parentSku : "";
     const variacoes = !isParent && produto.variante ? `Cor:${produto.variante.codigo}` : "";
     const descricaoBase = isParent
-      ? joinClean([
+      ? joinCleanUnique([
           produto.tipoProduto.titulo,
           produto.tamanho?.titulo,
           produto.estampa?.codigo,
@@ -514,7 +581,7 @@ export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent 
       ? renderTemplateCsv(descricaoBase, variables)
       : descricaoBase;
     const descricaoComplementarBase = isParent
-      ? joinClean([
+      ? joinCleanUnique([
           produto.tipoProduto.descricao,
           produto.tamanho?.titulo,
           produto.estampa?.descricao,
@@ -595,12 +662,12 @@ export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent 
       produto.comprimentoEmbalagem ?? produto.tipoProduto.comprimentoEmbalagem ?? "",
       0,
       isParent || !temVariacao ? "V" : "K",
-      storageImageUrl(produto, 0),
-      storageImageUrl(produto, 1),
-      storageImageUrl(produto, 2),
-      storageImageUrl(produto, 3),
-      storageImageUrl(produto, 4),
-      storageImageUrl(produto, 5),
+      storageAiImageUrl(produto, 0, options),
+      storageAiImageUrl(produto, 1, options),
+      storageAiImageUrl(produto, 2, options),
+      storageAiImageUrl(produto, 3, options),
+      storageAiImageUrl(produto, 4, options),
+      "",
       produto.tipoProduto.categoria ?? produto.categoria ?? "",
       codigoPai,
       variacoes,
@@ -632,15 +699,19 @@ export function montarLinhaCsvProdutoOlist(produto: ProdutoFinalOlist, isParent 
     ];
 }
 
-export function montarCamposCsvProdutoOlist(produto: ProdutoFinalOlist, isParent = false) {
-  const row = montarLinhaCsvProdutoOlist(produto, isParent);
+export function montarCamposCsvProdutoOlist(
+  produto: ProdutoFinalOlist,
+  isParent = false,
+  options?: ProdutoOlistCsvOptions,
+) {
+  const row = montarLinhaCsvProdutoOlist(produto, isParent, options);
   return PRODUTOS_OLIST_CSV_HEADERS.map((header, index) => ({
     campo: header,
     valor: row[index] ?? "",
   }));
 }
 
-export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
+export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[], options?: ProdutoOlistCsvOptions) {
   const headers = PRODUTOS_OLIST_CSV_HEADERS;
 
   const rows: Array<Array<string | number | null | undefined>> = [];
@@ -654,12 +725,12 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[]) {
       ).toUpperCase();
 
       if (!parentRows.has(parentSku)) {
-        rows.push(montarLinhaCsvProdutoOlist(produto, true));
+        rows.push(montarLinhaCsvProdutoOlist(produto, true, options));
         parentRows.add(parentSku);
       }
     }
 
-    rows.push(montarLinhaCsvProdutoOlist(produto));
+    rows.push(montarLinhaCsvProdutoOlist(produto, false, options));
   }
 
   return [headers, ...rows]

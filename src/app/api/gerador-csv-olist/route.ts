@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  deleteGoogleStorageObject,
   getGoogleStorageObjectInfo,
   GoogleStorageServiceError,
   uploadToGoogleStorage,
@@ -245,6 +246,10 @@ ${input.detalhesPromptIa}`;
 
 function normalizeMockupMode(value: unknown) {
   return value === "final" ? "final" : "preview";
+}
+
+function normalizeMockupQuality(value: unknown) {
+  return value === "low" || value === "high" ? value : "medium";
 }
 
 async function findExistingMockup(outputPath: string) {
@@ -1006,11 +1011,15 @@ export async function POST(request: Request) {
       const produtoId = requiredString(payload.produtoId, "produtoId");
       const mockupIndex = Number(payload.mockupIndex);
       const mode = normalizeMockupMode(payload.mode);
-      const { produto, tamanhoTitulo, descricaoVariante, mockupUrl, estampaUrl, outputPath } =
+      const quality = normalizeMockupQuality(payload.quality);
+      const mockupUrlOverride = optionalString(payload.mockupUrlOverride);
+      const forceRegenerate = payload.forceRegenerate === true;
+      const { produto, tamanhoTitulo, descricaoVariante, mockupUrl: defaultMockupUrl, estampaUrl, outputPath } =
         await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
+      const mockupUrl = mockupUrlOverride ?? defaultMockupUrl;
       const existingMockup = await findExistingMockup(outputPath);
 
-      if (existingMockup) {
+      if (existingMockup && !forceRegenerate) {
         return NextResponse.json({
           imagem: {
             dataUrl: existingMockup.publicUrl,
@@ -1022,6 +1031,7 @@ export async function POST(request: Request) {
             uploadedPath: existingMockup.path,
             prompt: "",
             mode,
+            quality,
             fromStorage: true,
           },
         });
@@ -1039,9 +1049,9 @@ export async function POST(request: Request) {
         mockupUrl,
         estampaUrl,
         prompt,
-        model: mode === "preview" ? PREVIEW_IMAGE_MODEL : undefined,
+        model: quality === "high" ? undefined : PREVIEW_IMAGE_MODEL,
         size: "1024x1024",
-        quality: mode === "preview" ? "medium" : "high",
+        quality,
         outputFormat: "jpeg",
       });
 
@@ -1053,7 +1063,9 @@ export async function POST(request: Request) {
           mockupUrl,
           estampaUrl,
           mode,
+          quality,
           fromStorage: false,
+          replacingExisting: Boolean(existingMockup),
           prompt,
         },
       });
@@ -1070,6 +1082,8 @@ export async function POST(request: Request) {
       }
 
       const { outputPath } = await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
+      await deleteGoogleStorageObject(outputPath);
+
       const uploadedImage = await uploadToGoogleStorage({
         path: outputPath,
         buffer: Buffer.from(base64, "base64"),
