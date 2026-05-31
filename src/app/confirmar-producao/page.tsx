@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AccessGuard } from "@/components/access-guard";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -203,7 +204,8 @@ export default function ConfirmarProducaoPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeConfirmarProducao"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Confirmar Produção"
         description="Confirme quantidades produzidas e gere entradas de estoque por solicitação."
@@ -363,6 +365,7 @@ export default function ConfirmarProducaoPage() {
             </section>
           );
         })}
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

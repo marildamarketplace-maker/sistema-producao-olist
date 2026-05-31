@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
+import { hasAnyPermission } from "@/lib/permissions";
 
 type Produto = {
   id: string;
@@ -89,6 +91,7 @@ function extrairGrupoSku(sku: string) {
 }
 
 export default function DashboardPage() {
+  const { usuario } = useAuth();
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
@@ -100,6 +103,18 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selecionadosBaixoEstoque, setSelecionadosBaixoEstoque] = useState<Set<string>>(new Set());
+  const podeVerEstoque = hasAnyPermission(usuario, ["podeVisualizarEstoque", "podeEditarEstoque"]);
+  const podeVerBaixa = hasAnyPermission(usuario, ["podeVisualizarBaixa", "podeSolicitarBaixa"]);
+  const podeVerProducao = hasAnyPermission(usuario, [
+    "podeVisualizarProducao",
+    "podeSolicitarProducao",
+    "podeConfirmarProducao",
+  ]);
+  const podeVerDevolucao = hasAnyPermission(usuario, [
+    "podeVisualizarDevolucao",
+    "podeSolicitarDevolucao",
+  ]);
+  const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
 
   async function carregarDashboard() {
     setLoading(true);
@@ -296,6 +311,8 @@ export default function DashboardPage() {
   }
 
   function enviarBaixoEstoqueParaSolicitacao() {
+    if (!podeSolicitarProducao) return;
+
     const itensSelecionados = indicadores.vendidosComBaixoEstoque
       .filter((produto) => selecionadosBaixoEstoque.has(produto.id))
       .map((produto) => ({
@@ -328,56 +345,65 @@ export default function DashboardPage() {
       ) : (
         <>
           <section className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-7">
-            <ResumoCard label="Produtos ativos" value={indicadores.produtosAtivos} />
-            <ResumoCard label="Estoque total" value={indicadores.estoqueTotal} />
-            <ResumoCard label="Total vendido" value={indicadores.totalVendido} />
-            <ResumoCard label="Solicitacoes em producao" value={indicadores.solicitacoesEmProducao} />
-            <ResumoCard label="Prioridades abertas" value={indicadores.solicitacoesPrioridade} destaque={indicadores.solicitacoesPrioridade > 0} />
-            <ResumoCard
-              label="Devolucoes"
-              value={indicadores.devolucoesTotal}
-              detalhe={`${indicadores.devolucoesPendentes} pendentes`}
-              destaque={indicadores.devolucoesPendentes > 0}
-            />
-            <ResumoCard label="Pecas pendentes" value={indicadores.quantidadePendente} />
+            {podeVerEstoque && <ResumoCard label="Produtos ativos" value={indicadores.produtosAtivos} />}
+            {podeVerEstoque && <ResumoCard label="Estoque total" value={indicadores.estoqueTotal} />}
+            {podeVerBaixa && <ResumoCard label="Total vendido" value={indicadores.totalVendido} />}
+            {podeVerProducao && <ResumoCard label="Solicitacoes em producao" value={indicadores.solicitacoesEmProducao} />}
+            {podeVerProducao && <ResumoCard label="Prioridades abertas" value={indicadores.solicitacoesPrioridade} destaque={indicadores.solicitacoesPrioridade > 0} />}
+            {podeVerDevolucao && (
+              <ResumoCard
+                label="Devolucoes"
+                value={indicadores.devolucoesTotal}
+                detalhe={`${indicadores.devolucoesPendentes} pendentes`}
+                destaque={indicadores.devolucoesPendentes > 0}
+              />
+            )}
+            {podeVerProducao && <ResumoCard label="Pecas pendentes" value={indicadores.quantidadePendente} />}
           </section>
 
-          <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <GrupoSkuCard rows={indicadores.gruposMaisVendidos} />
+          {(podeVerBaixa || podeVerEstoque) && (
+            <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              {podeVerBaixa && <GrupoSkuCard rows={indicadores.gruposMaisVendidos} />}
 
-            <RankingCard
-              title="Produtos mais vendidos"
-              description="Com base nas baixas registradas da Olist."
-              emptyMessage="Nenhuma venda registrada."
-              rows={indicadores.maisVendidos}
-              columns={[
-                { label: "SKU", render: (produto) => <ProdutoCell produto={produto} /> },
-                { label: "Vendido", align: "right", render: (produto) => produto.total_vendido },
-                { label: "Estoque", align: "right", render: (produto) => produto.saldo_atual },
-              ]}
-            />
-          </section>
+              {podeVerBaixa && podeVerEstoque && (
+                <RankingCard
+                  title="Produtos mais vendidos"
+                  description="Com base nas baixas registradas da Olist."
+                  emptyMessage="Nenhuma venda registrada."
+                  rows={indicadores.maisVendidos}
+                  columns={[
+                    { label: "SKU", render: (produto) => <ProdutoCell produto={produto} /> },
+                    { label: "Vendido", align: "right", render: (produto) => produto.total_vendido },
+                    { label: "Estoque", align: "right", render: (produto) => produto.saldo_atual },
+                  ]}
+                />
+              )}
+            </section>
+          )}
 
-          <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <RankingCard
-              title="Maior estoque"
-              description="Produtos com mais saldo disponivel."
-              emptyMessage="Nenhum produto ativo encontrado."
-              rows={indicadores.maiorEstoque}
-              columns={[
-                { label: "SKU", render: (produto) => <ProdutoCell produto={produto} /> },
-                { label: "Estoque", align: "right", render: (produto) => produto.saldo_atual },
-                { label: "Meta", align: "right", render: (produto) => produto.meta_aplicada },
-              ]}
-            />
+          {podeVerEstoque && (
+            <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              <RankingCard
+                title="Maior estoque"
+                description="Produtos com mais saldo disponivel."
+                emptyMessage="Nenhum produto ativo encontrado."
+                rows={indicadores.maiorEstoque}
+                columns={[
+                  { label: "SKU", render: (produto) => <ProdutoCell produto={produto} /> },
+                  { label: "Estoque", align: "right", render: (produto) => produto.saldo_atual },
+                  { label: "Meta", align: "right", render: (produto) => produto.meta_aplicada },
+                ]}
+              />
 
-            <BaixoEstoqueCard
-              rows={indicadores.vendidosComBaixoEstoque}
-              selecionados={selecionadosBaixoEstoque}
-              onToggle={alternarSelecionadoBaixoEstoque}
-              onEnviar={enviarBaixoEstoqueParaSolicitacao}
-            />
-          </section>
+              <BaixoEstoqueCard
+                rows={indicadores.vendidosComBaixoEstoque}
+                selecionados={selecionadosBaixoEstoque}
+                canSend={podeSolicitarProducao}
+                onToggle={alternarSelecionadoBaixoEstoque}
+                onEnviar={enviarBaixoEstoqueParaSolicitacao}
+              />
+            </section>
+          )}
         </>
       )}
     </div>
@@ -387,11 +413,13 @@ export default function DashboardPage() {
 function BaixoEstoqueCard({
   rows,
   selecionados,
+  canSend,
   onToggle,
   onEnviar,
 }: {
   rows: ProdutoIndicador[];
   selecionados: Set<string>;
+  canSend: boolean;
   onToggle: (produtoId: string) => void;
   onEnviar: () => void;
 }) {
@@ -404,14 +432,16 @@ function BaixoEstoqueCard({
             Selecione itens para preencher uma nova solicitacao manual com a quantidade minima.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onEnviar}
-          disabled={selecionados.size === 0}
-          className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Enviar selecionados
-        </button>
+        {canSend && (
+          <button
+            type="button"
+            onClick={onEnviar}
+            disabled={selecionados.size === 0}
+            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            Enviar selecionados
+          </button>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -421,7 +451,7 @@ function BaixoEstoqueCard({
           <table className="min-w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-500">
-                <th className="pb-2 text-left font-medium">Selecionar</th>
+                {canSend && <th className="pb-2 text-left font-medium">Selecionar</th>}
                 <th className="pb-2 text-left font-medium">SKU</th>
                 <th className="pb-2 text-right font-medium">Estoque</th>
                 <th className="pb-2 text-right font-medium">Minimo a produzir</th>
@@ -431,13 +461,15 @@ function BaixoEstoqueCard({
             <tbody>
               {rows.map((produto) => (
                 <tr key={produto.id} className="border-b border-slate-100 last:border-0">
-                  <td className="py-3">
-                    <input
-                      type="checkbox"
-                      checked={selecionados.has(produto.id)}
-                      onChange={() => onToggle(produto.id)}
-                    />
-                  </td>
+                  {canSend && (
+                    <td className="py-3">
+                      <input
+                        type="checkbox"
+                        checked={selecionados.has(produto.id)}
+                        onChange={() => onToggle(produto.id)}
+                      />
+                    </td>
+                  )}
                   <td className="py-3 text-slate-700">
                     <ProdutoCell produto={produto} />
                   </td>

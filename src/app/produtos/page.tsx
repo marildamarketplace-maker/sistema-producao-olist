@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -31,12 +33,14 @@ const INITIAL_FORM: FormData = {
 };
 
 export default function ProdutosPage() {
+  const { usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [formData, setFormData] = useState<FormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const podeEditarEstoque = Boolean(usuario?.podeEditarEstoque);
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
@@ -69,6 +73,8 @@ export default function ProdutosPage() {
   }
 
   function handleEdit(produto: Produto) {
+    if (!podeEditarEstoque) return;
+
     setEditingId(produto.id);
     setFormData({
       sku: produto.sku,
@@ -81,6 +87,8 @@ export default function ProdutosPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!podeEditarEstoque) return;
+
     setIsSaving(true);
     setErrorMessage(null);
 
@@ -122,12 +130,14 @@ export default function ProdutosPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeVisualizarEstoque", "podeEditarEstoque"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Produtos"
         description="Cadastre, edite e acompanhe os produtos têxteis para produção e estoque."
       />
 
+      {podeEditarEstoque && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">
           {isEditing ? "Editar produto" : "Cadastrar produto"}
@@ -209,6 +219,7 @@ export default function ProdutosPage() {
 
         {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
       </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Listagem de produtos</h3>
@@ -227,7 +238,7 @@ export default function ProdutosPage() {
                   <th className="p-3">Meta de estoque</th>
                   <th className="p-3">Minimo de estoque</th>
                   <th className="p-3">Ativo</th>
-                  <th className="p-3">Ações</th>
+                  {podeEditarEstoque && <th className="p-3">Ações</th>}
                 </tr>
               </thead>
               <tbody>
@@ -251,14 +262,16 @@ export default function ProdutosPage() {
                     <td className="p-3 text-slate-700">{produto.meta_estoque ?? "(meta geral)"}</td>
                     <td className="p-3 text-slate-700">{produto.minimo_estoque ?? "(minimo geral)"}</td>
                     <td className="p-3 text-slate-700">{produto.ativo ? "Sim" : "Não"}</td>
-                    <td className="p-3">
-                      <button
-                        onClick={() => handleEdit(produto)}
-                        className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                      >
-                        Editar
-                      </button>
-                    </td>
+                    {podeEditarEstoque && (
+                      <td className="p-3">
+                        <button
+                          onClick={() => handleEdit(produto)}
+                          className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Editar
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -266,6 +279,7 @@ export default function ProdutosPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

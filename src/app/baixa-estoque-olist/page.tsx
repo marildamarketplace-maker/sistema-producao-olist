@@ -3,6 +3,8 @@
 import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { ChevronDown } from "lucide-react";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -66,6 +68,7 @@ const ITEM_INICIAL: ItemBaixaForm = {
 };
 
 export default function BaixaEstoqueOlistPage() {
+  const { usuario } = useAuth();
   const [resultadoBusca, setResultadoBusca] = useState<ResultadoBusca | null>(null);
   const [pedidosSelecionados, setPedidosSelecionados] = useState<string[]>([]);
   const [itensForm, setItensForm] = useState<ItemBaixaForm[]>([{ ...ITEM_INICIAL }]);
@@ -80,6 +83,7 @@ export default function BaixaEstoqueOlistPage() {
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const podeSolicitarBaixa = Boolean(usuario?.podeSolicitarBaixa);
 
   const itensPorBaixa = useMemo(() => {
     return itensHistorico.reduce<Record<string, ItemBaixaHistorico[]>>((acc, item) => {
@@ -125,6 +129,8 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   async function buscarPedidosOlist() {
+    if (!podeSolicitarBaixa) return;
+
     setBuscando(true);
     setMessage(null);
     setErrorMessage(null);
@@ -150,6 +156,8 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function preencherItensSelecionados(idsSelecionados: string[]) {
+    if (!podeSolicitarBaixa) return;
+
     const pedidos = resultadoBusca?.pedidos ?? [];
     const itens = pedidos
       .filter((pedido) => idsSelecionados.includes(pedido.id))
@@ -166,6 +174,8 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function alternarPedido(pedidoId: string) {
+    if (!podeSolicitarBaixa) return;
+
     const proximos = pedidosSelecionados.includes(pedidoId)
       ? pedidosSelecionados.filter((id) => id !== pedidoId)
       : [...pedidosSelecionados, pedidoId];
@@ -176,6 +186,8 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function alternarTodosPedidos() {
+    if (!podeSolicitarBaixa) return;
+
     const pedidos = resultadoBusca?.pedidos ?? [];
     const todosSelecionados =
       pedidos.length > 0 && pedidos.every((pedido) => pedidosSelecionados.includes(pedido.id));
@@ -187,12 +199,16 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function alterarItem(index: number, patch: Partial<ItemBaixaForm>) {
+    if (!podeSolicitarBaixa) return;
+
     setItensForm((anteriores) =>
       anteriores.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     );
   }
 
   async function sincronizarPedidoOlist(index: number) {
+    if (!podeSolicitarBaixa) return;
+
     const pedidoId = itensForm[index]?.pedido_olist_id?.trim();
 
     if (!pedidoId) {
@@ -265,12 +281,16 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function adicionarItemManual() {
+    if (!podeSolicitarBaixa) return;
+
     setModoAtual("manual");
     setPedidosSelecionados([]);
     setItensForm((anteriores) => [...anteriores, { ...ITEM_INICIAL, produto_cadastrado: undefined }]);
   }
 
   function limparParaManual() {
+    if (!podeSolicitarBaixa) return;
+
     setModoAtual("manual");
     setPedidosSelecionados([]);
     setItensForm([{ ...ITEM_INICIAL, produto_cadastrado: undefined }]);
@@ -279,6 +299,8 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function removerItem(index: number) {
+    if (!podeSolicitarBaixa) return;
+
     setItensForm((anteriores) =>
       anteriores.length > 1 ? anteriores.filter((_, i) => i !== index) : anteriores,
     );
@@ -286,6 +308,8 @@ export default function BaixaEstoqueOlistPage() {
 
   async function confirmarBaixa(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!podeSolicitarBaixa) return;
+
     setSalvando(true);
     setMessage(null);
     setErrorMessage(null);
@@ -334,12 +358,14 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeVisualizarBaixa", "podeSolicitarBaixa"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Baixa de Estoque por Pedidos Olist"
         description="Busque pedidos enviados pela Olist ou registre baixas manuais com histórico."
       />
 
+      {podeSolicitarBaixa && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -435,7 +461,9 @@ export default function BaixaEstoqueOlistPage() {
           </div>
         )}
       </section>
+      )}
 
+      {podeSolicitarBaixa && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Formulário de baixa de estoque</h3>
@@ -549,6 +577,7 @@ export default function BaixaEstoqueOlistPage() {
         {message && <p className="mt-4 text-sm text-emerald-700">{message}</p>}
         {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
       </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Histórico de confirmações de baixa</h3>
@@ -631,6 +660,7 @@ export default function BaixaEstoqueOlistPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

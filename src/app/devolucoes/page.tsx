@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle, Plus, Trash2 } from "lucide-react";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -54,6 +56,7 @@ function formatarStatus(status: string) {
 }
 
 export default function DevolucoesPage() {
+  const { usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<SolicitacaoDevolucao[]>([]);
   const [itens, setItens] = useState<ItemSolicitacaoDevolucao[]>([]);
@@ -66,6 +69,7 @@ export default function DevolucoesPage() {
   const [saving, setSaving] = useState(false);
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const podeSolicitarDevolucao = Boolean(usuario?.podeSolicitarDevolucao);
 
   const itensPorSolicitacao = useMemo(() => {
     return itens.reduce<Record<string, ItemSolicitacaoDevolucao[]>>((acc, item) => {
@@ -125,6 +129,8 @@ export default function DevolucoesPage() {
   }, []);
 
   function alterarItem(index: number, patch: Partial<ItemForm>) {
+    if (!podeSolicitarDevolucao) return;
+
     setItensForm((anterior) => anterior.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   }
 
@@ -136,6 +142,8 @@ export default function DevolucoesPage() {
   }
 
   function alterarProdutoBusca(index: number, valor: string) {
+    if (!podeSolicitarDevolucao) return;
+
     const produto = produtos.find((item) => item.sku.toLowerCase() === valor.trim().toLowerCase());
 
     alterarItem(index, {
@@ -146,6 +154,8 @@ export default function DevolucoesPage() {
   }
 
   function selecionarProduto(index: number, produto: Produto) {
+    if (!podeSolicitarDevolucao) return;
+
     alterarItem(index, {
       produto_id: produto.id,
       produto_busca: produto.sku,
@@ -154,10 +164,14 @@ export default function DevolucoesPage() {
   }
 
   function adicionarItem() {
+    if (!podeSolicitarDevolucao) return;
+
     setItensForm((anterior) => [...anterior, { ...ITEM_INICIAL }]);
   }
 
   function removerItem(index: number) {
+    if (!podeSolicitarDevolucao) return;
+
     setItensForm((anterior) => (anterior.length > 1 ? anterior.filter((_, i) => i !== index) : anterior));
   }
 
@@ -169,6 +183,8 @@ export default function DevolucoesPage() {
 
   async function criarSolicitacao(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!podeSolicitarDevolucao) return;
+
     setSaving(true);
     setMessage(null);
 
@@ -229,6 +245,8 @@ export default function DevolucoesPage() {
   }
 
   async function confirmarChegada(solicitacao: SolicitacaoDevolucao) {
+    if (!podeSolicitarDevolucao) return;
+
     const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
     if (itensSolicitacao.length === 0) return;
 
@@ -297,12 +315,14 @@ export default function DevolucoesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeVisualizarDevolucao", "podeSolicitarDevolucao"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Devoluções"
         description="Crie solicitações de devolução e confirme a chegada para devolver os itens ao estoque."
       />
 
+      {podeSolicitarDevolucao && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Nova solicitação de devolução</h3>
 
@@ -422,6 +442,7 @@ export default function DevolucoesPage() {
 
         {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
       </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações de devolução</h3>
@@ -456,7 +477,7 @@ export default function DevolucoesPage() {
                       <p>Observação: {solicitacao.observacao_geral || "-"}</p>
                     </div>
 
-                    {pendente && (
+                    {pendente && podeSolicitarDevolucao && (
                       <button
                         type="button"
                         onClick={() => confirmarChegada(solicitacao)}
@@ -496,7 +517,7 @@ export default function DevolucoesPage() {
                             <td className="p-3 font-medium text-slate-700">{item.sku}</td>
                             <td className="p-3 text-slate-700">{item.quantidade_solicitada}</td>
                             <td className="p-3">
-                              {pendente ? (
+                              {pendente && podeSolicitarDevolucao ? (
                                 <input
                                   type="number"
                                   min={0}
@@ -525,6 +546,7 @@ export default function DevolucoesPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

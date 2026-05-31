@@ -4,6 +4,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import type { PermissionSet } from "@/lib/permissions";
 
 type UsuarioAplicativo = {
   id: string;
@@ -13,11 +14,7 @@ type UsuarioAplicativo = {
   aplicativo?: {
     nome: string;
   } | null;
-};
-
-type UsuarioAplicativoResponse = Omit<UsuarioAplicativo, "aplicativo"> & {
-  aplicativo?: { nome: string } | { nome: string }[] | null;
-};
+} & PermissionSet;
 
 type AuthContextValue = {
   session: Session | null;
@@ -26,6 +23,25 @@ type AuthContextValue = {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshUsuario: () => Promise<void>;
+};
+
+type UsuarioAplicativoFallbackResponse = {
+  id: string;
+  nome: string;
+  email: string;
+  aplicativo_id: string;
+  aplicativo?: { nome: string } | { nome: string }[] | null;
+  pode_visualizar_estoque: boolean;
+  pode_editar_estoque: boolean;
+  pode_visualizar_baixa: boolean;
+  pode_solicitar_baixa: boolean;
+  pode_visualizar_devolucao: boolean;
+  pode_solicitar_devolucao: boolean;
+  pode_solicitar_producao: boolean;
+  pode_visualizar_producao: boolean;
+  pode_confirmar_producao: boolean;
+  pode_visualizar_configuracao: boolean;
+  pode_editar_configuracao: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -45,51 +61,94 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
 
-  const carregarUsuario = useCallback(async (userEmail: string | undefined) => {
-    if (!userEmail) {
-      setUsuario(null);
-      setAccessMessage("Não foi possível identificar o e-mail do usuário autenticado.");
-      return;
-    }
-
+  const carregarUsuarioFallback = useCallback(async (email: string) => {
     const { data, error } = await supabase
       .from("usuario")
-      .select("id, nome, email, aplicativo_id, aplicativo(nome)")
-      .eq("email", userEmail)
+      .select(`
+        id,
+        nome,
+        email,
+        aplicativo_id,
+        pode_visualizar_estoque,
+        pode_editar_estoque,
+        pode_visualizar_baixa,
+        pode_solicitar_baixa,
+        pode_visualizar_devolucao,
+        pode_solicitar_devolucao,
+        pode_solicitar_producao,
+        pode_visualizar_producao,
+        pode_confirmar_producao,
+        pode_visualizar_configuracao,
+        pode_editar_configuracao,
+        aplicativo(nome)
+      `)
+      .ilike("email", email.trim())
       .eq("ativo", true)
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      setUsuario(null);
-      setAccessMessage(`Erro ao validar acesso: ${error.message}`);
-      return;
-    }
+    if (error || !data) return null;
 
-    if (!data) {
-      setUsuario(null);
-      setAccessMessage("Usuário autenticado, mas sem cadastro ativo neste aplicativo.");
-      return;
-    }
-
-    const usuarioData = data as UsuarioAplicativoResponse;
+    const usuarioData = data as UsuarioAplicativoFallbackResponse;
     const aplicativo = Array.isArray(usuarioData.aplicativo)
       ? usuarioData.aplicativo[0] ?? null
       : usuarioData.aplicativo ?? null;
 
-    setUsuario({
+    return {
       id: usuarioData.id,
       nome: usuarioData.nome,
       email: usuarioData.email,
       aplicativo_id: usuarioData.aplicativo_id,
       aplicativo,
-    });
-    setAccessMessage(null);
+      podeVisualizarEstoque: Boolean(usuarioData.pode_visualizar_estoque),
+      podeEditarEstoque: Boolean(usuarioData.pode_editar_estoque),
+      podeVisualizarBaixa: Boolean(usuarioData.pode_visualizar_baixa),
+      podeSolicitarBaixa: Boolean(usuarioData.pode_solicitar_baixa),
+      podeVisualizarDevolucao: Boolean(usuarioData.pode_visualizar_devolucao),
+      podeSolicitarDevolucao: Boolean(usuarioData.pode_solicitar_devolucao),
+      podeSolicitarProducao: Boolean(usuarioData.pode_solicitar_producao),
+      podeVisualizarProducao: Boolean(usuarioData.pode_visualizar_producao),
+      podeConfirmarProducao: Boolean(usuarioData.pode_confirmar_producao),
+      podeVisualizarConfiguracao: Boolean(usuarioData.pode_visualizar_configuracao),
+      podeEditarConfiguracao: Boolean(usuarioData.pode_editar_configuracao),
+    } satisfies UsuarioAplicativo;
   }, []);
 
+  const carregarUsuario = useCallback(async (nextSession: Session | null) => {
+    if (!nextSession?.user.email || !nextSession.access_token) {
+      setUsuario(null);
+      setAccessMessage("Não foi possível identificar o e-mail do usuário autenticado.");
+      return;
+    }
+
+    const resp = await fetch("/api/usuario/me", {
+      headers: {
+        Authorization: `Bearer ${nextSession.access_token}`,
+      },
+    });
+    const json = await resp.json();
+
+    if (!resp.ok) {
+      const usuarioFallback = await carregarUsuarioFallback(nextSession.user.email);
+
+      if (usuarioFallback) {
+        setUsuario(usuarioFallback);
+        setAccessMessage(null);
+        return;
+      }
+
+      setUsuario(null);
+      setAccessMessage(json.error ?? "Erro ao validar acesso.");
+      return;
+    }
+
+    setUsuario(json as UsuarioAplicativo);
+    setAccessMessage(null);
+  }, [carregarUsuarioFallback]);
+
   const refreshUsuario = useCallback(async () => {
-    await carregarUsuario(session?.user.email);
-  }, [carregarUsuario, session?.user.email]);
+    await carregarUsuario(session);
+  }, [carregarUsuario, session]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -109,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setSession(data.session);
       if (data.session) {
-        await carregarUsuario(data.session.user.email);
+        await carregarUsuario(data.session);
       } else {
         setUsuario(null);
         setAccessMessage(null);
@@ -126,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       if (nextSession) {
-        carregarUsuario(nextSession.user.email).finally(() => setLoading(false));
+        carregarUsuario(nextSession).finally(() => setLoading(false));
       } else {
         setUsuario(null);
         setAccessMessage(null);

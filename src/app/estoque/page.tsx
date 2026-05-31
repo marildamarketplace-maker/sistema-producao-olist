@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -51,6 +53,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 export default function EstoquePage() {
+  const { usuario } = useAuth();
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
@@ -76,6 +79,7 @@ export default function EstoquePage() {
     key: "saldo_atual",
     direction: "desc",
   });
+  const podeEditarEstoque = Boolean(usuario?.podeEditarEstoque);
 
   const produtoSelecionado = useMemo(
     () => produtos.find((produto) => produto.id === produtoId) ?? null,
@@ -244,6 +248,8 @@ export default function EstoquePage() {
   }
 
   function alterarProdutoBusca(valor: string) {
+    if (!podeEditarEstoque) return;
+
     setProdutoBusca(valor);
     setProdutoBuscaAberta(true);
 
@@ -255,6 +261,8 @@ export default function EstoquePage() {
   }
 
   function selecionarProduto(produto: Produto) {
+    if (!podeEditarEstoque) return;
+
     setProdutoBusca(produto.sku);
     setProdutoId(produto.id);
     setProdutoBuscaAberta(false);
@@ -264,6 +272,8 @@ export default function EstoquePage() {
     event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
+    if (!podeEditarEstoque) return;
+
     setSaving(true);
     setErrorMessage(null);
 
@@ -315,6 +325,8 @@ export default function EstoquePage() {
   }
 
   async function importarProdutosDaOlist() {
+    if (!podeEditarEstoque) return;
+
     setImportingProdutos(true);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -347,7 +359,8 @@ export default function EstoquePage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeVisualizarEstoque", "podeEditarEstoque"]}>
+      <div className="space-y-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <PageHeader
@@ -359,20 +372,23 @@ export default function EstoquePage() {
             produto nao possui meta individual).
           </p>
         </div>
-        <button
-          type="button"
-          onClick={importarProdutosDaOlist}
-          disabled={importingProdutos}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {importingProdutos ? "Importando..." : "Importar produtos da Olist"}
-        </button>
+        {podeEditarEstoque && (
+          <button
+            type="button"
+            onClick={importarProdutosDaOlist}
+            disabled={importingProdutos}
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {importingProdutos ? "Importando..." : "Importar produtos da Olist"}
+          </button>
+        )}
       </div>
 
       {successMessage && (
         <p className="-mt-4 text-sm text-emerald-700">{successMessage}</p>
       )}
 
+      {podeEditarEstoque && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">
           Adicionar movimentacao manual
@@ -472,6 +488,7 @@ export default function EstoquePage() {
           <p className="mt-4 text-sm text-red-600">{errorMessage}</p>
         )}
       </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">
@@ -606,6 +623,7 @@ export default function EstoquePage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

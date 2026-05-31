@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -9,6 +11,7 @@ const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
 const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
 
 export default function ConfiguracoesPage() {
+  const { usuario } = useAuth();
   const [metaGeral, setMetaGeral] = useState("0");
   const [minimoGeral, setMinimoGeral] = useState("0");
   const [loading, setLoading] = useState(true);
@@ -18,6 +21,7 @@ export default function ConfiguracoesPage() {
   const [lastLoginAt, setLastLoginAt] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const podeEditarConfiguracao = Boolean(usuario?.podeEditarConfiguracao);
 
   useEffect(() => {
     async function carregar() {
@@ -53,6 +57,8 @@ export default function ConfiguracoesPage() {
 
   async function salvar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!podeEditarConfiguracao) return;
+
     setSaving(true);
     setMessage(null);
 
@@ -93,6 +99,8 @@ export default function ConfiguracoesPage() {
   }
 
   async function reconectarOlist() {
+    if (!podeEditarConfiguracao) return;
+
     setReconnecting(true);
     setMessage(null);
     const resp = await axios.post("/api/olist/reconnect", null, {
@@ -116,7 +124,8 @@ export default function ConfiguracoesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeVisualizarConfiguracao", "podeEditarConfiguracao"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Configurações"
         description="Defina parâmetros globais do sistema de produção e estoque."
@@ -136,8 +145,9 @@ export default function ConfiguracoesPage() {
                 min={0}
                 required
                 value={metaGeral}
+                disabled={!podeEditarConfiguracao}
                 onChange={(event) => setMetaGeral(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500"
               />
             </label>
 
@@ -148,14 +158,15 @@ export default function ConfiguracoesPage() {
                 min={0}
                 required
                 value={minimoGeral}
+                disabled={!podeEditarConfiguracao}
                 onChange={(event) => setMinimoGeral(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500"
               />
             </label>
 
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !podeEditarConfiguracao}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {saving ? "Salvando..." : "Salvar configuração"}
@@ -174,7 +185,7 @@ export default function ConfiguracoesPage() {
         <button
           type="button"
           onClick={reconectarOlist}
-          disabled={reconnecting}
+          disabled={reconnecting || !podeEditarConfiguracao}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {reconnecting ? "Redirecionando..." : "Reconectar Olist"}
@@ -183,6 +194,7 @@ export default function ConfiguracoesPage() {
           Use este botão caso a integração retorne erro 401 ou após alterar permissões do aplicativo na Olist/Tiny.
         </p>
       </section>
-    </div>
+      </div>
+    </AccessGuard>
   );
 }

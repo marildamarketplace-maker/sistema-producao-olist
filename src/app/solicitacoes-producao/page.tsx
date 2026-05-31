@@ -3,6 +3,8 @@
 import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { ChevronDown, Download, Pencil, Printer, XCircle } from "lucide-react";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -164,6 +166,7 @@ function ordenarSolicitacoes(a: Solicitacao, b: Solicitacao) {
 }
 
 export default function SolicitacoesProducaoPage() {
+  const { usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [itens, setItens] = useState<ItemSolicitacao[]>([]);
@@ -182,6 +185,7 @@ export default function SolicitacoesProducaoPage() {
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
   const [processamentoOlistPendente, setProcessamentoOlistPendente] = useState<ProcessamentoOlistPendente | null>(null);
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
+  const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
 
   const qtdItensPorSolicitacao = useMemo(() => {
     return itens.reduce<Record<string, number>>((acc, item) => {
@@ -329,6 +333,8 @@ export default function SolicitacoesProducaoPage() {
   }
 
   function editarSolicitacao(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
+    if (!podeSolicitarProducao) return;
+
     if (itensSolicitacao.length === 0) {
       setErrorMessage("Solicitacao sem itens para editar.");
       return;
@@ -355,6 +361,8 @@ export default function SolicitacoesProducaoPage() {
   }
 
   async function cancelarSolicitacao(solicitacao: Solicitacao) {
+    if (!podeSolicitarProducao) return;
+
     const confirmar = window.confirm("Cancelar esta solicitação de produção?");
 
     if (!confirmar) return;
@@ -510,6 +518,8 @@ export default function SolicitacoesProducaoPage() {
   }
 
   async function gerarViaOlist() {
+    if (!podeSolicitarProducao) return;
+
     const dataProcessamento = new Date();
 
     setIntegrandoOlist(true);
@@ -590,6 +600,8 @@ export default function SolicitacoesProducaoPage() {
 
   async function handleSalvar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!podeSolicitarProducao) return;
+
     setSaving(true);
     setErrorMessage(null);
 
@@ -766,7 +778,7 @@ export default function SolicitacoesProducaoPage() {
   const solicitacoesEmProducao = solicitacoes.filter((solicitacao) => solicitacao.status === "em_producao");
   const demaisSolicitacoes = solicitacoes.filter((solicitacao) => solicitacao.status !== "em_producao");
 
-  function renderTabelaSolicitacoes(solicitacoesTabela: Solicitacao[]) {
+  function renderTabelaSolicitacoes(solicitacoesTabela: Solicitacao[], destacarDivisao = false) {
     return (
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse text-sm">
@@ -789,7 +801,7 @@ export default function SolicitacoesProducaoPage() {
 
               return (
                 <Fragment key={solicitacao.id}>
-                  <tr className="border-b border-slate-100">
+                  <tr className={`border-b ${destacarDivisao && !aberta ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
                     <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
                     <td className="p-3">
                       {solicitacao.prioridade_producao ? (
@@ -826,26 +838,30 @@ export default function SolicitacoesProducaoPage() {
                         >
                           <Download className="h-4 w-4" />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => editarSolicitacao(solicitacao, itensSolicitacao)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={itensSolicitacao.length === 0 || saving || !podeAlterar}
-                          title="Editar solicitação"
-                          aria-label="Editar solicitação"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => cancelarSolicitacao(solicitacao)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={saving || !podeAlterar}
-                          title="Cancelar solicitação"
-                          aria-label="Cancelar solicitação"
-                        >
-                          <XCircle className="h-4 w-4" />
-                        </button>
+                        {podeSolicitarProducao && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => editarSolicitacao(solicitacao, itensSolicitacao)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={itensSolicitacao.length === 0 || saving || !podeAlterar}
+                              title="Editar solicitação"
+                              aria-label="Editar solicitação"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cancelarSolicitacao(solicitacao)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={saving || !podeAlterar}
+                              title="Cancelar solicitação"
+                              aria-label="Cancelar solicitação"
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
@@ -861,7 +877,7 @@ export default function SolicitacoesProducaoPage() {
                     </td>
                   </tr>
                   {aberta && (
-                    <tr className="border-b border-slate-100 bg-slate-50">
+                    <tr className={`border-b bg-slate-50 ${destacarDivisao ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
                       <td className="p-3" colSpan={7}>
                         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
                           <table className="min-w-full border-collapse text-sm">
@@ -898,13 +914,15 @@ export default function SolicitacoesProducaoPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <AccessGuard permissions={["podeSolicitarProducao", "podeVisualizarProducao"]}>
+      <div className="space-y-8">
       <PageHeader
         title="Solicitações de Produção"
         description="Crie novas solicitações e acompanhe as solicitações já abertas."
       />
 
 
+      {podeSolicitarProducao && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Gerar solicitação via Olist</h3>
         <div className="flex flex-col gap-3 md:max-w-md">
@@ -934,7 +952,9 @@ export default function SolicitacoesProducaoPage() {
           )}
         </div>
       </section>
+      )}
 
+      {podeSolicitarProducao && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">
           {solicitacaoEditandoId ? "Editar solicitação" : "Nova solicitação manual"}
@@ -1115,6 +1135,7 @@ export default function SolicitacoesProducaoPage() {
 
         {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
       </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1131,7 +1152,7 @@ export default function SolicitacoesProducaoPage() {
         ) : solicitacoesEmProducao.length === 0 ? (
           <p className="text-sm text-slate-600">Nenhuma solicitação em produção.</p>
         ) : (
-          renderTabelaSolicitacoes(solicitacoesEmProducao)
+          renderTabelaSolicitacoes(solicitacoesEmProducao, true)
         )}
       </section>
 
@@ -1148,8 +1169,7 @@ export default function SolicitacoesProducaoPage() {
           renderTabelaSolicitacoes(demaisSolicitacoes)
         )}
       </section>
-    </div>
+      </div>
+    </AccessGuard>
   );
 }
-
-
