@@ -19,6 +19,7 @@ import {
   gerarProdutoFinalOlist,
   gerarMockupProdutoOlist,
   montarCamposCsvProdutoOlist,
+  montarCsvProdutosFabricadosOlist,
   montarCsvProdutosOlist,
   salvarEstampaOlist,
   salvarProdutoFinalOlist,
@@ -26,6 +27,7 @@ import {
   salvarTipoProdutoOlist,
   salvarVarianteOlist,
   uploadMockupProdutoOlist,
+  vincularProdutosFinaisOlist,
 } from "@/lib/gerador-csv-olist";
 
 type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "produtos";
@@ -41,9 +43,9 @@ const ABAS: { id: Aba; label: string }[] = [
 ];
 
 const MOCKUP_QUALITY_LABELS: Record<MockupQuality, string> = {
-  low: "Baixa",
-  medium: "Media",
-  high: "Alta",
+  low: "Baixa (mini)",
+  medium: "Media (padrao)",
+  high: "Alta (padrao)",
 };
 
 function withCacheBust(url: string, key?: number) {
@@ -97,6 +99,21 @@ const tamanhoInicial = {
   larguraEmbalagem: "",
   alturaEmbalagem: "",
   comprimentoEmbalagem: "",
+};
+
+type EstampaImportadaInput = {
+  codigo: string;
+  descricao: string | null;
+  palavrasChave: string | null;
+  extra: string | null;
+};
+
+type VarianteImportadaInput = {
+  codigo: string;
+  estampaCodigo: string;
+  tamanhoRef: string;
+  descricao: string | null;
+  palavrasChave: string | null;
 };
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -176,6 +193,8 @@ function buildProdutoVariables(
 ) {
   return {
     TAMANHO: tamanho?.titulo ?? variante?.codigo,
+    ESTAMPA: estampa.codigo,
+    VARIANTE: variante?.codigo,
     EXTRA: estampa.extra,
     PALAVRAS_CHAVE_ESTAMPA: estampa.palavrasChave,
     PALAVRAS_CHAVE_PRODUTO: tipoProduto.palavrasChave,
@@ -209,6 +228,84 @@ function withCopySuffix(value: string | null | undefined, suffix = "-COPIA") {
 
 function withSlugCopySuffix(value: string | null | undefined) {
   return withCopySuffix(value, "-copia");
+}
+
+function parseEstampasImport(text: string): EstampaImportadaInput[] {
+  const linhas = text
+    .split(/\r?\n/)
+    .map((linha) => linha.trim())
+    .filter(Boolean);
+
+  const primeiraLinha = linhas[0]?.toLowerCase().replace(/\s+/g, "");
+  const linhasSemCabecalho = primeiraLinha?.startsWith("codigo;descricao;palavras-chave;extra")
+    ? linhas.slice(1)
+    : linhas;
+
+  const estampas = linhasSemCabecalho.map((linha, index) => {
+    const [codigoRaw = "", descricaoRaw = "", palavrasChaveRaw = "", extraRaw = ""] = linha.split(";");
+    const codigo = codigoRaw.trim().toUpperCase();
+
+    if (!codigo) {
+      throw new Error(`Linha ${index + 1}: informe o codigo da estampa.`);
+    }
+
+    return {
+      codigo,
+      descricao: descricaoRaw.trim() || null,
+      palavrasChave: palavrasChaveRaw.trim() || null,
+      extra: extraRaw.trim() || null,
+    };
+  });
+
+  if (!estampas.length) {
+    throw new Error("Informe ao menos uma linha para importar.");
+  }
+
+  return estampas;
+}
+
+function parseVariantesImport(text: string): VarianteImportadaInput[] {
+  const linhas = text
+    .split(/\r?\n/)
+    .map((linha) => linha.trim())
+    .filter(Boolean);
+
+  const primeiraLinha = linhas[0]?.toLowerCase().replace(/\s+/g, "");
+  const linhasSemCabecalho = primeiraLinha?.startsWith("codigo;estampa;tamanho;descricao;palavras-chave")
+    ? linhas.slice(1)
+    : linhas;
+
+  const variantes = linhasSemCabecalho.map((linha, index) => {
+    const [codigoRaw = "", estampaRaw = "", tamanhoRaw = "", descricaoRaw = "", palavrasChaveRaw = ""] =
+      linha.split(";");
+    const codigo = codigoRaw.trim().toUpperCase();
+    const estampaCodigo = estampaRaw.trim().toUpperCase();
+    const tamanhoRef = tamanhoRaw.trim();
+
+    if (!codigo) {
+      throw new Error(`Linha ${index + 1}: informe o codigo da variante.`);
+    }
+    if (!estampaCodigo) {
+      throw new Error(`Linha ${index + 1}: informe a estampa da variante.`);
+    }
+    if (!tamanhoRef) {
+      throw new Error(`Linha ${index + 1}: informe o tamanho da variante.`);
+    }
+
+    return {
+      codigo,
+      estampaCodigo,
+      tamanhoRef,
+      descricao: descricaoRaw.trim() || null,
+      palavrasChave: palavrasChaveRaw.trim() || null,
+    };
+  });
+
+  if (!variantes.length) {
+    throw new Error("Informe ao menos uma linha para importar.");
+  }
+
+  return variantes;
 }
 
 export function GeradorCsvOlistClient() {
@@ -387,6 +484,48 @@ export function GeradorCsvOlistClient() {
     }
   }
 
+  async function importarEstampas(text: string) {
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const estampas = parseEstampasImport(text);
+      const codigosImportados = new Set<string>();
+      const codigosDuplicadosNoArquivo = estampas
+        .map((estampa) => estampa.codigo)
+        .filter((codigo) => {
+          if (codigosImportados.has(codigo)) return true;
+          codigosImportados.add(codigo);
+          return false;
+        });
+
+      if (codigosDuplicadosNoArquivo.length) {
+        throw new Error(`Codigos duplicados no arquivo: ${Array.from(new Set(codigosDuplicadosNoArquivo)).join(", ")}.`);
+      }
+
+      const estampasPorCodigo = new Map(dados.estampas.map((estampa) => [estampa.codigo.toUpperCase(), estampa]));
+      const totalAtualizadas = estampas.filter((estampa) => estampasPorCodigo.has(estampa.codigo)).length;
+      const totalCriadas = estampas.length - totalAtualizadas;
+
+      await Promise.all(
+        estampas.map((estampa) =>
+          salvarEstampaOlist({
+            id: estampasPorCodigo.get(estampa.codigo)?.id ?? null,
+            ...estampa,
+          }),
+        ),
+      );
+      setMessage(`${totalCriadas} estampa(s) criada(s) e ${totalAtualizadas} substituida(s) com sucesso.`);
+      await carregar();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao importar estampas.");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function salvarVariante(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -431,6 +570,83 @@ export function GeradorCsvOlistClient() {
       await carregar();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar variante.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function importarVariantes(text: string) {
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const variantes = parseVariantesImport(text);
+      const estampasPorCodigo = new Map(dados.estampas.map((estampa) => [estampa.codigo.toUpperCase(), estampa]));
+      const tamanhosPorRef = new Map<string, TamanhoOlist>();
+
+      dados.tamanhos.forEach((tamanho) => {
+        tamanhosPorRef.set(tamanho.sku.toUpperCase(), tamanho);
+        tamanhosPorRef.set(tamanho.titulo.toUpperCase(), tamanho);
+        if (tamanho.slug) {
+          tamanhosPorRef.set(tamanho.slug.toUpperCase(), tamanho);
+        }
+      });
+
+      const variantesResolvidas = variantes.map((variante, index) => {
+        const estampa = estampasPorCodigo.get(variante.estampaCodigo);
+        const tamanho = tamanhosPorRef.get(variante.tamanhoRef.toUpperCase());
+
+        if (!estampa) {
+          throw new Error(`Linha ${index + 1}: estampa nao encontrada (${variante.estampaCodigo}).`);
+        }
+        if (!tamanho) {
+          throw new Error(`Linha ${index + 1}: tamanho nao encontrado (${variante.tamanhoRef}).`);
+        }
+
+        return {
+          codigo: variante.codigo,
+          estampaId: estampa.id,
+          tamanhoId: tamanho.id,
+          descricao: variante.descricao,
+          palavrasChave: variante.palavrasChave,
+        };
+      });
+
+      const chavesImportadas = new Set<string>();
+      const chavesDuplicadasNoArquivo = variantesResolvidas
+        .map((variante) => `${variante.estampaId}:${variante.codigo}`)
+        .filter((chave) => {
+          if (chavesImportadas.has(chave)) return true;
+          chavesImportadas.add(chave);
+          return false;
+        });
+
+      if (chavesDuplicadasNoArquivo.length) {
+        throw new Error("Existem variantes duplicadas no arquivo para a mesma estampa e codigo.");
+      }
+
+      const variantesPorChave = new Map(
+        dados.variantes.map((variante) => [`${variante.estampaId}:${variante.codigo.toUpperCase()}`, variante]),
+      );
+      const totalAtualizadas = variantesResolvidas.filter((variante) =>
+        variantesPorChave.has(`${variante.estampaId}:${variante.codigo}`),
+      ).length;
+      const totalCriadas = variantesResolvidas.length - totalAtualizadas;
+
+      await Promise.all(
+        variantesResolvidas.map((variante) =>
+          salvarVarianteOlist({
+            id: variantesPorChave.get(`${variante.estampaId}:${variante.codigo}`)?.id ?? null,
+            ...variante,
+          }),
+        ),
+      );
+      setMessage(`${totalCriadas} variante(s) criada(s) e ${totalAtualizadas} substituida(s) com sucesso.`);
+      await carregar();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao importar variantes.");
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -503,7 +719,6 @@ export function GeradorCsvOlistClient() {
       }
 
       const tamanhoIds = payload.tamanhoIds;
-      const skusExistentes = new Set(dados.produtosFinais.map((produto) => produto.sku));
       const skusNovos = new Set<string>();
       const combinacoes = [];
 
@@ -520,9 +735,6 @@ export function GeradorCsvOlistClient() {
           if (!tamanho) continue;
           const skuFinal = buildSkuFinal(tipoProduto, estampa, variante, tamanho);
 
-          if (skusExistentes.has(skuFinal)) {
-            throw new Error(`Ja existe um produto final com o SKU ${skuFinal}.`);
-          }
           if (skusNovos.has(skuFinal)) {
             throw new Error(`A selecao atual gera SKU duplicado: ${skuFinal}.`);
           }
@@ -537,18 +749,27 @@ export function GeradorCsvOlistClient() {
       }
 
       let totalGerado = 0;
+      let totalSobrescrito = 0;
 
       for (const combinacao of combinacoes) {
+        const skuFinal = buildSkuFinal(tipoProduto, combinacao.estampa, combinacao.variante, combinacao.tamanho);
+        const jaExiste = dados.produtosFinais.some((produto) => produto.sku === skuFinal);
+
         await gerarProdutoFinalOlist({
           tipoProdutoId: tipoProduto.id,
           estampaId: combinacao.estampa.id,
           varianteId: combinacao.variante?.id ?? null,
           tamanhoId: combinacao.tamanho?.id ?? null,
         });
-        totalGerado += 1;
+
+        if (jaExiste) {
+          totalSobrescrito += 1;
+        } else {
+          totalGerado += 1;
+        }
       }
 
-      setMessage(`${totalGerado} produto(s) final(is) gerado(s) com sucesso.`);
+      setMessage(`${totalGerado} produto(s) criado(s) e ${totalSobrescrito} sobrescrito(s) com sucesso.`);
       await carregar();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao gerar produtos.");
@@ -820,6 +1041,26 @@ export function GeradorCsvOlistClient() {
     }
   }
 
+  async function vincularProdutosFinais(ids: string[]) {
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const resposta = await vincularProdutosFinaisOlist(ids);
+      const semVinculo = resposta.naoEncontrados.length
+        ? ` ${resposta.naoEncontrados.length} SKU(s) nao encontrado(s) em produtos.`
+        : "";
+
+      setMessage(`${resposta.vinculados} produto(s) vinculado(s) com sucesso.${semVinculo}`);
+      await carregar();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao vincular produtos.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function baixarCsv(produtos?: ProdutoFinalOlist[]) {
     const produtosCsv = Array.isArray(produtos) ? produtos : dados.produtosFinais;
     const csv = montarCsvProdutosOlist(produtosCsv, { cacheKey: Date.now() });
@@ -910,6 +1151,7 @@ export function GeradorCsvOlistClient() {
               setBusca={setEstampaBusca}
               saving={saving}
               onSubmit={salvarEstampa}
+              onImport={importarEstampas}
               onEdit={editarEstampa}
               onDuplicate={duplicarEstampa}
               onDelete={excluirEstampa}
@@ -929,6 +1171,7 @@ export function GeradorCsvOlistClient() {
               setBusca={setVarianteBusca}
               saving={saving}
               onSubmit={salvarVariante}
+              onImport={importarVariantes}
               onEdit={editarVariante}
               onDuplicate={duplicarVariante}
               onDelete={excluirVariante}
@@ -959,6 +1202,7 @@ export function GeradorCsvOlistClient() {
               onDelete={excluirProdutoFinal}
               onDeleteMany={excluirProdutoFinalSemConfirmar}
               onExportCsv={baixarCsv}
+              onLinkProdutos={vincularProdutosFinais}
             />
           )}
         </>
@@ -1387,6 +1631,7 @@ function EstampasTab({
   setBusca,
   saving,
   onSubmit,
+  onImport,
   onEdit,
   onDuplicate,
   onDelete,
@@ -1400,16 +1645,47 @@ function EstampasTab({
   setBusca: Dispatch<SetStateAction<string>>;
   saving: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onImport: (text: string) => Promise<void>;
   onEdit: (estampa: EstampaOlist) => void;
   onDuplicate: (estampa: EstampaOlist) => void;
   onDelete: (id: string) => void;
 }) {
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function submitImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setImportError(null);
+
+    try {
+      await onImport(importText);
+      setImportText("");
+      setImportModalOpen(false);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Erro ao importar estampas.");
+    }
+  }
+
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {editingId ? "Editar estampa" : "Cadastrar estampa"}
-        </h3>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">
+            {editingId ? "Editar estampa" : "Cadastrar estampa"}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setImportError(null);
+              setImportModalOpen(true);
+            }}
+            disabled={saving}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Importar em lote
+          </button>
+        </div>
 
         <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
           <label className="text-sm text-slate-700">
@@ -1543,6 +1819,59 @@ function EstampasTab({
           </div>
         )}
       </section>
+
+      {importModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-900">Importar estampas</h3>
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(false)}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <form className="space-y-4 p-5" onSubmit={submitImport}>
+              <label className="block text-sm text-slate-700">
+                Codigo;Descricao;Palavras-chave;Extra
+                <textarea
+                  required
+                  value={importText}
+                  onChange={(event) => setImportText(event.target.value)}
+                  className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+                  placeholder={"FLR-001;Floral azul;floral, azul, primavera;tecido claro\nFLR-002;Folhagem verde;folhagem, verde;tropical"}
+                />
+              </label>
+
+              {importError && (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {importError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImportModalOpen(false)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {saving ? "Importando..." : "Importar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1559,6 +1888,7 @@ function VariantesTab({
   setBusca,
   saving,
   onSubmit,
+  onImport,
   onEdit,
   onDuplicate,
   onDelete,
@@ -1574,16 +1904,47 @@ function VariantesTab({
   setBusca: Dispatch<SetStateAction<string>>;
   saving: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onImport: (text: string) => Promise<void>;
   onEdit: (variante: VarianteOlist) => void;
   onDuplicate: (variante: VarianteOlist) => void;
   onDelete: (id: string) => void;
 }) {
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function submitImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setImportError(null);
+
+    try {
+      await onImport(importText);
+      setImportText("");
+      setImportModalOpen(false);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Erro ao importar variantes.");
+    }
+  }
+
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {editingId ? "Editar variante" : "Cadastrar variante"}
-        </h3>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">
+            {editingId ? "Editar variante" : "Cadastrar variante"}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setImportError(null);
+              setImportModalOpen(true);
+            }}
+            disabled={saving}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Importar em lote
+          </button>
+        </div>
 
         <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
           <label className="text-sm text-slate-700">
@@ -1743,6 +2104,59 @@ function VariantesTab({
           </div>
         )}
       </section>
+
+      {importModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-900">Importar variantes</h3>
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(false)}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <form className="space-y-4 p-5" onSubmit={submitImport}>
+              <label className="block text-sm text-slate-700">
+                Codigo;Estampa;Tamanho;Descricao;Palavras-chave
+                <textarea
+                  required
+                  value={importText}
+                  onChange={(event) => setImportText(event.target.value)}
+                  className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+                  placeholder={"VAR-001;FLR-001;P;Versao pequena;pequeno, p\nVAR-002;FLR-001;M;Versao media;medio, m"}
+                />
+              </label>
+
+              {importError && (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {importError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImportModalOpen(false)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {saving ? "Importando..." : "Importar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1757,6 +2171,7 @@ function ProdutosCriadosTab({
   onDelete,
   onDeleteMany,
   onExportCsv,
+  onLinkProdutos,
 }: {
   produtos: ProdutoFinalOlist[];
   tipos: TipoProdutoOlist[];
@@ -1774,6 +2189,7 @@ function ProdutosCriadosTab({
   onDelete: (id: string) => void | Promise<void>;
   onDeleteMany: (id: string) => void | Promise<void>;
   onExportCsv: (produtos: ProdutoFinalOlist[]) => void;
+  onLinkProdutos: (ids: string[]) => void | Promise<void>;
 }) {
   const [buscaSku, setBuscaSku] = useState("");
   const [buscaTitulo, setBuscaTitulo] = useState("");
@@ -1782,9 +2198,14 @@ function ProdutosCriadosTab({
   const [varianteId, setVarianteId] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [pagina, setPagina] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [produtoEditando, setProdutoEditando] = useState<ProdutoFinalOlist | null>(null);
   const [produtoVisualizando, setProdutoVisualizando] = useState<ProdutoFinalOlist | null>(null);
+  const [fabricadoModalOpen, setFabricadoModalOpen] = useState(false);
+  const [fabricadoComponenteId, setFabricadoComponenteId] = useState("");
+  const [fabricadoQuantidade, setFabricadoQuantidade] = useState("1");
+  const [fabricadoErro, setFabricadoErro] = useState<string | null>(null);
   const [mockupGerando, setMockupGerando] = useState<number | null>(null);
   const [mockupGerado, setMockupGerado] = useState<{
     dataUrl: string;
@@ -1814,8 +2235,6 @@ function ProdutosCriadosTab({
     precoCusto: "",
     preco: "",
   });
-  const pageSize = 10;
-
   const produtosFiltrados = useMemo(() => {
     const sku = buscaSku.trim().toLowerCase();
     const titulo = buscaTitulo.trim().toLowerCase();
@@ -1983,6 +2402,40 @@ function ProdutosCriadosTab({
     setSelecionados([]);
   }
 
+  async function vincularSelecionados() {
+    if (produtosSelecionados.length === 0) return;
+
+    await onLinkProdutos(produtosSelecionados.map((produto) => produto.id));
+  }
+
+  function exportarFabricado(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFabricadoErro(null);
+
+    const componenteId = fabricadoComponenteId.trim();
+    const quantidade = fabricadoQuantidade.trim() || "1";
+    const semProdutoVinculado = produtosSelecionados.filter((produto) => !produto.produto?.idCadastroOlist);
+
+    if (!componenteId) {
+      setFabricadoErro("Informe o ID componente.");
+      return;
+    }
+    if (semProdutoVinculado.length > 0) {
+      setFabricadoErro("Todos os produtos selecionados precisam ter ID produto Olist vinculado.");
+      return;
+    }
+
+    const csv = montarCsvProdutosFabricadosOlist(produtosSelecionados, { componenteId, quantidade });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "produtos-fabricados-olist.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+    setFabricadoModalOpen(false);
+  }
+
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
@@ -2009,6 +2462,25 @@ function ProdutosCriadosTab({
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               Exportar selecionados CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFabricadoErro(null);
+                setFabricadoModalOpen(true);
+              }}
+              disabled={produtosSelecionados.length === 0}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Exportar CSV Fabricado
+            </button>
+            <button
+              type="button"
+              onClick={vincularSelecionados}
+              disabled={saving || produtosSelecionados.length === 0}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Salvar vinculo produto
             </button>
           </div>
         </div>
@@ -2091,7 +2563,26 @@ function ProdutosCriadosTab({
           <h3 className="text-lg font-semibold text-slate-900">
             Listagem ({produtosFiltrados.length})
           </h3>
-          <p className="text-sm text-slate-600">{selecionados.length} selecionado(s)</p>
+          <div className="flex flex-col gap-2 md:flex-row md:items-end">
+            <label className="text-sm text-slate-700">
+              Exibir
+              <select
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setPagina(1);
+                }}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                {[5, 10, 50, 100].map((size) => (
+                  <option key={size} value={size}>
+                    {size} itens
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="pb-2 text-sm text-slate-600">{selecionados.length} selecionado(s)</p>
+          </div>
         </div>
 
         <TableEmpty visible={produtosFiltrados.length === 0} text="Nenhum produto criado encontrado." />
@@ -2105,6 +2596,7 @@ function ProdutosCriadosTab({
                       <input type="checkbox" checked={todosDaPaginaSelecionados} onChange={togglePagina} />
                     </th>
                     <th className="p-3">SKU final</th>
+                    <th className="p-3">ID produto Olist</th>
                     <th className="p-3">Titulo final</th>
                     <th className="p-3">Categoria</th>
                     <th className="p-3">Preco de custo</th>
@@ -2127,6 +2619,7 @@ function ProdutosCriadosTab({
                         />
                       </td>
                       <td className="p-3 font-medium text-slate-700">{produto.skuFinal}</td>
+                      <td className="p-3 text-slate-700">{produto.produto?.idCadastroOlist ?? "-"}</td>
                       <td className="p-3 text-slate-700">{produto.tituloFinal}</td>
                       <td className="p-3 text-slate-700">{produto.categoria ?? "-"}</td>
                       <td className="p-3 text-slate-700">{formatMoney(produto.precoCusto)}</td>
@@ -2191,6 +2684,78 @@ function ProdutosCriadosTab({
           </>
         )}
       </section>
+
+      {fabricadoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Exportar como fabricado</h3>
+                <a
+                  href="https://erp.olist.com/importador_fabricados_kits"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-sm text-blue-700 hover:underline"
+                >
+                  Abrir importador de fabricados/kits
+                </a>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFabricadoModalOpen(false)}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <form className="space-y-4 p-5" onSubmit={exportarFabricado}>
+              <label className="block text-sm text-slate-700">
+                ID componente
+                <input
+                  required
+                  value={fabricadoComponenteId}
+                  onChange={(event) => setFabricadoComponenteId(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                  placeholder="Ex.: 345775052"
+                />
+              </label>
+              <label className="block text-sm text-slate-700">
+                Quantidade componente
+                <input
+                  required
+                  value={fabricadoQuantidade}
+                  onChange={(event) => setFabricadoQuantidade(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                  placeholder="1"
+                />
+              </label>
+
+              {fabricadoErro && (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {fabricadoErro}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFabricadoModalOpen(false)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Exportar CSV
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {produtoEditando && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
@@ -2317,9 +2882,9 @@ function ProdutosCriadosTab({
                         disabled={mockupGerando !== null}
                         className="mt-1 h-9 rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:opacity-50"
                       >
-                        <option value="low">Baixa</option>
-                        <option value="medium">Media</option>
-                        <option value="high">Alta</option>
+                        <option value="low">Baixa (mini)</option>
+                        <option value="medium">Media (padrao)</option>
+                        <option value="high">Alta (padrao)</option>
                       </select>
                     </label>
                     {[1, 2, 3, 4, 5].map((index) => (
@@ -2465,9 +3030,32 @@ function ProdutosCriadosTab({
                       <tr key={item.campo} className="border-b border-slate-100 align-top">
                         <td className="p-3 font-medium text-slate-700">{item.campo}</td>
                         <td className="max-w-3xl whitespace-pre-wrap break-words p-3 text-slate-700">
-                          {item.valor === "" || item.valor === null || item.valor === undefined
-                            ? "-"
-                            : String(item.valor)}
+                          {item.valor === "" || item.valor === null || item.valor === undefined ? (
+                            "-"
+                          ) : item.campo === "Descrição complementar" ? (
+                            <div
+                              className="prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: String(item.valor) }}
+                            />
+                          ) : item.campo.match(/^URL imagem [1-5]$/) ? (
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={String(item.valor)}
+                                alt={item.campo}
+                                className="h-14 w-14 rounded-md border border-slate-200 object-cover"
+                              />
+                              <a
+                                href={String(item.valor)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="break-all text-blue-700 hover:underline"
+                              >
+                                {String(item.valor)}
+                              </a>
+                            </div>
+                          ) : (
+                            String(item.valor)
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -2508,6 +3096,10 @@ function GerarProdutoTab({
 }) {
   const [modalAberto, setModalAberto] = useState(false);
   const [tipoProdutoId, setTipoProdutoId] = useState("");
+  const [produtoSkuBusca, setProdutoSkuBusca] = useState("");
+  const [produtoPageSize, setProdutoPageSize] = useState(10);
+  const [produtoPagina, setProdutoPagina] = useState(1);
+  const [estampaBusca, setEstampaBusca] = useState("");
   const [estampaIds, setEstampaIds] = useState<string[]>([]);
   const [tamanhoIds, setTamanhoIds] = useState<string[]>([]);
   const totalCombinacoes = estampaIds.reduce((total, estampaId) => {
@@ -2517,6 +3109,18 @@ function GerarProdutoTab({
   }, 0);
   const tipoSelecionado = tipos.find((tipo) => tipo.id === tipoProdutoId) ?? null;
   const skusExistentes = useMemo(() => new Set(produtos.map((produto) => produto.sku)), [produtos]);
+  const produtosFiltrados = useMemo(() => {
+    const busca = produtoSkuBusca.trim().toLowerCase();
+    if (!busca) return produtos;
+
+    return produtos.filter((produto) => produto.sku.toLowerCase().includes(busca));
+  }, [produtoSkuBusca, produtos]);
+  const totalPaginasProdutos = Math.max(1, Math.ceil(produtosFiltrados.length / produtoPageSize));
+  const produtoPaginaAtual = Math.min(produtoPagina, totalPaginasProdutos);
+  const produtosPaginados = produtosFiltrados.slice(
+    (produtoPaginaAtual - 1) * produtoPageSize,
+    produtoPaginaAtual * produtoPageSize,
+  );
   const previewProdutos = useMemo(() => {
     if (!tipoSelecionado || estampaIds.length === 0) return [];
 
@@ -2546,7 +3150,22 @@ function GerarProdutoTab({
       );
     });
   }, [estampaIds, estampas, skusExistentes, tamanhoIds, tamanhos, tipoSelecionado, variantes]);
-  const previewTemDuplicados = previewProdutos.some((produto) => produto.duplicado);
+  const estampasFiltradas = useMemo(() => {
+    const busca = estampaBusca.trim().toLowerCase();
+    if (!busca) return estampas;
+
+    return estampas.filter((estampa) =>
+      [estampa.codigo, estampa.descricao, estampa.palavrasChave, estampa.extra].some((value) =>
+        value?.toLowerCase().includes(busca),
+      ),
+    );
+  }, [estampaBusca, estampas]);
+  const todasEstampasFiltradasSelecionadas =
+    estampasFiltradas.length > 0 && estampasFiltradas.every((estampa) => estampaIds.includes(estampa.id));
+
+  useEffect(() => {
+    setProdutoPagina(1);
+  }, [produtoPageSize, produtoSkuBusca]);
 
   function toggleSelecionado(id: string, selecionados: string[], setSelecionados: Dispatch<SetStateAction<string[]>>) {
     setSelecionados(
@@ -2556,10 +3175,21 @@ function GerarProdutoTab({
     );
   }
 
+  function toggleEstampasFiltradas() {
+    const idsFiltrados = estampasFiltradas.map((estampa) => estampa.id);
+
+    setEstampaIds((selecionados) =>
+      todasEstampasFiltradasSelecionadas
+        ? selecionados.filter((id) => !idsFiltrados.includes(id))
+        : Array.from(new Set([...selecionados, ...idsFiltrados])),
+    );
+  }
+
   async function confirmarGeracao() {
     await onGenerate({ tipoProdutoId, estampaIds, tamanhoIds });
     setModalAberto(false);
     setTipoProdutoId("");
+    setEstampaBusca("");
     setEstampaIds([]);
     setTamanhoIds([]);
   }
@@ -2596,38 +3226,101 @@ function GerarProdutoTab({
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Produtos finais</h3>
-        <TableEmpty visible={produtos.length === 0} text="Nenhum produto final gerado." />
-        {produtos.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">SKU</th>
-                  <th className="p-3">Titulo</th>
-                  <th className="p-3">Tipo</th>
-                  <th className="p-3">Tamanho</th>
-                  <th className="p-3">Estampa</th>
-                  <th className="p-3">Variante</th>
-                  <th className="p-3">Preco</th>
-                  <th className="p-3">Qtd.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {produtos.map((produto) => (
-                  <tr key={produto.id} className="border-b border-slate-100">
-                    <td className="p-3 font-medium text-slate-700">{produto.sku}</td>
-                    <td className="p-3 text-slate-700">{produto.titulo}</td>
-                    <td className="p-3 text-slate-700">{produto.tipoProduto.nome}</td>
-                    <td className="p-3 text-slate-700">{produto.tamanho?.titulo ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{produto.estampa?.nome ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{produto.variante?.nome ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{produto.preco ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{produto.quantidade}</td>
-                  </tr>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Produtos finais</h3>
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-end">
+            <label className="w-full text-sm text-slate-700 md:w-56">
+              Filtrar por SKU
+              <input
+                value={produtoSkuBusca}
+                onChange={(event) => setProdutoSkuBusca(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Digite parte do SKU"
+              />
+            </label>
+            <label className="w-full text-sm text-slate-700 md:w-36">
+              Exibir
+              <select
+                value={produtoPageSize}
+                onChange={(event) => setProdutoPageSize(Number(event.target.value))}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                {[5, 10, 50, 100].map((size) => (
+                  <option key={size} value={size}>
+                    {size} itens
+                  </option>
                 ))}
-              </tbody>
-            </table>
+              </select>
+            </label>
+          </div>
+        </div>
+        <TableEmpty visible={produtos.length === 0} text="Nenhum produto final gerado." />
+        {produtos.length > 0 && produtosFiltrados.length === 0 && (
+          <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+            Nenhum produto final encontrado para este SKU.
+          </p>
+        )}
+        {produtosFiltrados.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+              <span>
+                Exibindo {(produtoPaginaAtual - 1) * produtoPageSize + 1}-
+                {Math.min(produtoPaginaAtual * produtoPageSize, produtosFiltrados.length)} de{" "}
+                {produtosFiltrados.length}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setProdutoPagina((pagina) => Math.max(1, pagina - 1))}
+                  disabled={produtoPaginaAtual === 1}
+                  className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <span className="px-2 py-1 text-sm text-slate-600">
+                  {produtoPaginaAtual} / {totalPaginasProdutos}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setProdutoPagina((pagina) => Math.min(totalPaginasProdutos, pagina + 1))}
+                  disabled={produtoPaginaAtual === totalPaginasProdutos}
+                  className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
+                >
+                  Proxima
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-600">
+                    <th className="p-3">SKU</th>
+                    <th className="p-3">Titulo</th>
+                    <th className="p-3">Tipo</th>
+                    <th className="p-3">Tamanho</th>
+                    <th className="p-3">Estampa</th>
+                    <th className="p-3">Variante</th>
+                    <th className="p-3">Preco</th>
+                    <th className="p-3">Qtd.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {produtosPaginados.map((produto) => (
+                    <tr key={produto.id} className="border-b border-slate-100">
+                      <td className="p-3 font-medium text-slate-700">{produto.sku}</td>
+                      <td className="p-3 text-slate-700">{produto.titulo}</td>
+                      <td className="p-3 text-slate-700">{produto.tipoProduto.nome}</td>
+                      <td className="p-3 text-slate-700">{produto.tamanho?.titulo ?? "-"}</td>
+                      <td className="p-3 text-slate-700">{produto.estampa?.nome ?? "-"}</td>
+                      <td className="p-3 text-slate-700">{produto.variante?.nome ?? "-"}</td>
+                      <td className="p-3 text-slate-700">{produto.preco ?? "-"}</td>
+                      <td className="p-3 text-slate-700">{produto.quantidade}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </section>
@@ -2699,31 +3392,60 @@ function GerarProdutoTab({
                 </div>
 
                 <div>
-                  <h4 className="mb-2 text-sm font-semibold text-slate-900">Estampas</h4>
-                  <div className="max-h-64 overflow-y-auto rounded-md border border-slate-200">
-                    {estampas.map((estampa) => (
-                      <label
-                        key={estampa.id}
-                        className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 text-sm text-slate-700 last:border-b-0 hover:bg-slate-50"
-                      >
+                  <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                    <h4 className="text-sm font-semibold text-slate-900">Estampas</h4>
+                    <div className="flex w-full flex-col gap-2 md:max-w-sm">
+                      <label className="text-xs font-medium text-slate-700">
+                        Filtrar estampas
+                        <input
+                          value={estampaBusca}
+                          onChange={(event) => setEstampaBusca(event.target.value)}
+                          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+                          placeholder="Codigo, descricao, palavra-chave ou extra"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-700">
                         <input
                           type="checkbox"
-                          checked={estampaIds.includes(estampa.id)}
-                          onChange={() => toggleSelecionado(estampa.id, estampaIds, setEstampaIds)}
-                          className="mt-1"
+                          checked={todasEstampasFiltradasSelecionadas}
+                          onChange={toggleEstampasFiltradas}
+                          disabled={estampasFiltradas.length === 0}
                         />
-                        <span>
-                          <span className="font-medium">{estampa.codigo}</span>
-                          <span className="ml-2 text-xs text-slate-500">
-                            {variantes.filter((variante) => variante.estampaId === estampa.id).length} variante(s)
-                          </span>
-                          {estampa.descricao && (
-                            <span className="block text-xs text-slate-500">{estampa.descricao}</span>
-                          )}
-                        </span>
+                        Marcar estampas filtradas
                       </label>
-                    ))}
+                    </div>
                   </div>
+                  <div className="max-h-64 overflow-y-auto rounded-md border border-slate-200">
+                    {estampasFiltradas.length === 0 ? (
+                      <p className="px-3 py-2 text-sm text-slate-600">Nenhuma estampa encontrada.</p>
+                    ) : (
+                      estampasFiltradas.map((estampa) => (
+                        <label
+                          key={estampa.id}
+                          className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 text-sm text-slate-700 last:border-b-0 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={estampaIds.includes(estampa.id)}
+                            onChange={() => toggleSelecionado(estampa.id, estampaIds, setEstampaIds)}
+                            className="mt-1"
+                          />
+                          <span>
+                            <span className="font-medium">{estampa.codigo}</span>
+                            <span className="ml-2 text-xs text-slate-500">
+                              {variantes.filter((variante) => variante.estampaId === estampa.id).length} variante(s)
+                            </span>
+                            {estampa.descricao && (
+                              <span className="block text-xs text-slate-500">{estampa.descricao}</span>
+                            )}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {estampaIds.length} selecionada(s) de {estampas.length}
+                  </p>
                 </div>
               </div>
 
@@ -2754,8 +3476,8 @@ function GerarProdutoTab({
                             <td className="p-3 text-slate-700">{produto.tamanho}</td>
                             <td className="p-3 text-slate-700">{produto.estampa}</td>
                             <td className="p-3 text-slate-700">{produto.variante}</td>
-                            <td className={`p-3 ${produto.duplicado ? "text-red-700" : "text-emerald-700"}`}>
-                              {produto.duplicado ? "SKU existente" : "Pronto"}
+                            <td className={`p-3 ${produto.duplicado ? "text-amber-700" : "text-emerald-700"}`}>
+                              {produto.duplicado ? "Sobrescrever" : "Pronto"}
                             </td>
                           </tr>
                         ))}
@@ -2782,8 +3504,7 @@ function GerarProdutoTab({
                   !tipoProdutoId ||
                   estampaIds.length === 0 ||
                   tamanhoIds.length === 0 ||
-                  previewProdutos.length === 0 ||
-                  previewTemDuplicados
+                  previewProdutos.length === 0
                 }
                 className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >

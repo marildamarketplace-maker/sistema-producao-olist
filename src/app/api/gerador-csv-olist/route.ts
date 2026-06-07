@@ -97,6 +97,7 @@ function buildProdutoVariables(
     palavrasChave: string | null;
   },
   estampa: {
+    codigo: string;
     extra: string | null;
     descricao: string | null;
     palavrasChave: string | null;
@@ -109,6 +110,8 @@ function buildProdutoVariables(
 ) {
   return {
     TAMANHO: variante?.codigo,
+    ESTAMPA: estampa.codigo,
+    VARIANTE: variante?.codigo,
     EXTRA: estampa.extra,
     PALAVRAS_CHAVE_ESTAMPA: estampa.palavrasChave,
     PALAVRAS_CHAVE_PRODUTO: tipoProduto.palavrasChave,
@@ -143,6 +146,11 @@ Se a estampa possuir texto, letras, numeros, logotipos, frases, simbolos ou assi
 - nao borrar texto
 - nao omitir textos pequenos quando estiverem visiveis na arte original
 - nao substituir texto por pseudo-texto
+
+Antes de gerar a imagem, interprete cuidadosamente as duas referencias:
+- a primeira imagem define camera, enquadramento, angulo, distancia focal aparente, fundo, iluminacao, volume do produto e acabamento fotografico
+- a segunda imagem define a arte final que deve ser aplicada, com cores, contraste, limites, detalhes finos, textos e proporcoes originais
+- quando houver conflito, preserve a estrutura fotografica do mockup e preserve a identidade visual da estampa
 
 Aplique a estampa da segunda imagem no produto do mockup mantendo:
 
@@ -179,6 +187,7 @@ NUNCA alterar:
 - modelagem do produto
 - proporcao do produto
 - posicionamento principal
+- bordas, costuras, barras, amarracoes, alcas, acabamento e formato original do item
 - identidade da estampa
 - cores originais da arte
 - textos, letras, palavras, numeros, logotipos ou simbolos da arte
@@ -187,6 +196,8 @@ NUNCA alterar:
 Ajuste obrigatoriamente a proporcao e escala da arte conforme o tamanho real informado do produto, respeitando:
 - area util de impressao
 - caimento natural do tecido
+- dobras, ondulacoes, rugas, vincos e curvas naturais do material
+- deformacao perspectiva da arte acompanhando a superficie real do produto
 - proporcao correta da estampa
 - densidade visual adequada
 - tamanho real do produto
@@ -224,6 +235,17 @@ Regras obrigatorias:
 - textura natural do tecido
 - sombras coerentes
 - perspectiva realista
+- iluminacao integrada entre mockup e estampa
+- contato natural da arte com a textura do tecido, sem parecer adesivo plano
+- nitidez suficiente para uso em anuncio de marketplace
+- nao adicionar textos, marcas d'agua, etiquetas, logos ou elementos graficos que nao existam nas imagens de referencia
+- nao transformar o produto em outro tipo de item
+
+Orientacao por tipo de produto:
+- bandeira: aplicar a arte acompanhando ondulacoes do tecido, mantendo bordas e caimento, sem endurecer a superficie
+- lenco: respeitar dobras, cantos, maleabilidade e escala da estampa, mantendo aparencia de tecido leve
+- forro de mesa: manter a perspectiva da mesa, queda lateral, bordas visiveis e repeticao/centralizacao proporcional da arte
+- avental: preservar alcas, costuras, bolso quando existir, torso/modelo quando existir e deformar a arte conforme volume do corpo
 
 Produto:
 ${input.nomeProduto}
@@ -301,7 +323,7 @@ async function buildProdutoMockupStorageInfo(produtoId: string, mockupIndex: num
     descricaoVariante: produto.variante.descricao ?? "",
     mockupUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${tamanhoSku}/mockup-${mockupIndex}.jpg`,
     estampaUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-0.jpg`,
-    outputPath: `${tipoSku}/${estampaCodigo}/ia/${estampaCodigo}-${varianteCodigo}-${mockupIndex - 1}.jpg`,
+    outputPath: `${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-${mockupIndex - 1}.jpg`,
   };
 }
 
@@ -448,6 +470,7 @@ function normalizeTamanho(tamanho: {
 
 function normalizeProdutoOlist(produto: {
   id: string;
+  produtoId: string | null;
   skuFinal: string;
   tituloFinal: string;
   descricaoFinal: string | null;
@@ -463,6 +486,11 @@ function normalizeProdutoOlist(produto: {
   alturaEmbalagem: unknown;
   comprimentoEmbalagem: unknown;
   createdAt: Date;
+  produto: {
+    id: string;
+    sku: string;
+    idCadastroOlist: string | null;
+  } | null;
   tipoProduto: {
     id: string;
     titulo: string;
@@ -499,6 +527,7 @@ function normalizeProdutoOlist(produto: {
 }) {
   return {
     id: produto.id,
+    produtoId: produto.produtoId,
     sku: produto.skuFinal,
     skuFinal: produto.skuFinal,
     titulo: produto.tituloFinal,
@@ -519,6 +548,13 @@ function normalizeProdutoOlist(produto: {
     quantidade: 0,
     status: "pronto_para_exportar",
     createdAt: produto.createdAt.toISOString(),
+    produto: produto.produto
+      ? {
+          id: produto.produto.id,
+          sku: produto.produto.sku,
+          idCadastroOlist: produto.produto.idCadastroOlist,
+        }
+      : null,
     tipoProduto: {
       id: produto.tipoProduto.id,
       titulo: produto.tipoProduto.titulo,
@@ -596,6 +632,7 @@ async function carregarDados() {
     }),
     prisma.produtoOlist.findMany({
       include: {
+        produto: { select: { id: true, sku: true, idCadastroOlist: true } },
         tipoProduto: {
           select: {
             id: true,
@@ -840,10 +877,6 @@ export async function POST(request: Request) {
         select: { id: true },
       });
 
-      if (produtoExistente) {
-        throw new Error(`Ja existe um produto final com o SKU ${skuFinal}.`);
-      }
-
       const templateVariables = {
         ...buildProdutoVariables(tipoProduto, estampa, variante),
         TAMANHO: tamanho?.titulo ?? variante?.codigo,
@@ -869,28 +902,142 @@ export async function POST(request: Request) {
         estampa.palavrasChave,
         variante?.palavrasChave,
       ]);
-      const produtoFinal = await prisma.produtoOlist.create({
+      const produtoFinalData = {
+        tipoProdutoId,
+        estampaId,
+        varianteId,
+        tamanhoId,
+        skuFinal,
+        tituloFinal,
+        descricaoFinal: descricaoFinal || null,
+        descricaoSeoFinal: descricaoSeoFinal || null,
+        palavrasChaveFinal: palavrasChaveFinal || null,
+        slugFinal: buildSlugFinal([tipoProduto.slug, tamanho?.slug ?? tamanho?.titulo, estampa.codigo, variante?.codigo]) || null,
+        categoria: tipoProduto.categoria,
+        precoCusto: tamanho?.precoCusto ?? tipoProduto.precoCusto,
+        preco: tamanho?.preco ?? tipoProduto.preco,
+        pesoLiquido: tamanho?.pesoLiquido ?? tipoProduto.pesoLiquido,
+        pesoBruto: tamanho?.pesoBruto ?? tipoProduto.pesoBruto,
+        larguraEmbalagem: tamanho?.larguraEmbalagem ?? tipoProduto.larguraEmbalagem,
+        alturaEmbalagem: tamanho?.alturaEmbalagem ?? tipoProduto.alturaEmbalagem,
+        comprimentoEmbalagem: tamanho?.comprimentoEmbalagem ?? tipoProduto.comprimentoEmbalagem,
+      };
+      const produtoFinal = produtoExistente
+        ? await prisma.produtoOlist.update({
+            where: { id: produtoExistente.id },
+            data: produtoFinalData,
+            include: {
+              produto: { select: { id: true, sku: true, idCadastroOlist: true } },
+              tipoProduto: {
+                select: {
+                  id: true,
+                  titulo: true,
+                  sku: true,
+                  descricao: true,
+                  descricaoSeo: true,
+                  palavrasChave: true,
+                  detalhesPromptIa: true,
+                  slug: true,
+                  categoria: true,
+                  precoCusto: true,
+                  preco: true,
+                  pesoLiquido: true,
+                  pesoBruto: true,
+                  larguraEmbalagem: true,
+                  alturaEmbalagem: true,
+                  comprimentoEmbalagem: true,
+                },
+              },
+              estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
+              variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
+              tamanho: {
+                select: {
+                  id: true,
+                  titulo: true,
+                  sku: true,
+                  slug: true,
+                  precoCusto: true,
+                  preco: true,
+                  pesoLiquido: true,
+                  pesoBruto: true,
+                  larguraEmbalagem: true,
+                  alturaEmbalagem: true,
+                  comprimentoEmbalagem: true,
+                },
+              },
+            },
+          })
+        : await prisma.produtoOlist.create({
+            data: produtoFinalData,
+        include: {
+          produto: { select: { id: true, sku: true, idCadastroOlist: true } },
+          tipoProduto: {
+            select: {
+              id: true,
+              titulo: true,
+              sku: true,
+              descricao: true,
+              descricaoSeo: true,
+              palavrasChave: true,
+              detalhesPromptIa: true,
+              slug: true,
+              categoria: true,
+              precoCusto: true,
+              preco: true,
+              pesoLiquido: true,
+              pesoBruto: true,
+              larguraEmbalagem: true,
+              alturaEmbalagem: true,
+              comprimentoEmbalagem: true,
+            },
+          },
+          estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
+          variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
+          tamanho: {
+            select: {
+              id: true,
+              titulo: true,
+              sku: true,
+              slug: true,
+              precoCusto: true,
+              preco: true,
+              pesoLiquido: true,
+              pesoBruto: true,
+              larguraEmbalagem: true,
+              alturaEmbalagem: true,
+              comprimentoEmbalagem: true,
+            },
+          },
+        },
+          });
+
+      return NextResponse.json({ produtoFinal: normalizeProdutoOlist(produtoFinal) });
+    }
+
+    if (body.action === "salvar-produto-final") {
+      const id = requiredString(payload.id, "id");
+      const skuFinal = requiredString(payload.skuFinal, "skuFinal").toUpperCase();
+      const tituloFinal = requiredString(payload.tituloFinal, "tituloFinal");
+      const produtoComSku = await prisma.produtoOlist.findUnique({
+        where: { skuFinal },
+        select: { id: true },
+      });
+
+      if (produtoComSku && produtoComSku.id !== id) {
+        throw new Error(`Ja existe um produto final com o SKU ${skuFinal}.`);
+      }
+
+      const produtoFinal = await prisma.produtoOlist.update({
+        where: { id },
         data: {
-          tipoProdutoId,
-          estampaId,
-          varianteId,
-          tamanhoId,
           skuFinal,
-          tituloFinal,
-          descricaoFinal: descricaoFinal || null,
-          descricaoSeoFinal: descricaoSeoFinal || null,
-          palavrasChaveFinal: palavrasChaveFinal || null,
-          slugFinal: buildSlugFinal([tipoProduto.slug, tamanho?.slug ?? tamanho?.titulo, estampa.codigo, variante?.codigo]) || null,
-          categoria: tipoProduto.categoria,
-          precoCusto: tamanho?.precoCusto ?? tipoProduto.precoCusto,
-          preco: tamanho?.preco ?? tipoProduto.preco,
-          pesoLiquido: tamanho?.pesoLiquido ?? tipoProduto.pesoLiquido,
-          pesoBruto: tamanho?.pesoBruto ?? tipoProduto.pesoBruto,
-          larguraEmbalagem: tamanho?.larguraEmbalagem ?? tipoProduto.larguraEmbalagem,
-          alturaEmbalagem: tamanho?.alturaEmbalagem ?? tipoProduto.alturaEmbalagem,
-          comprimentoEmbalagem: tamanho?.comprimentoEmbalagem ?? tipoProduto.comprimentoEmbalagem,
+          tituloFinal: cleanText(tituloFinal),
+          categoria: optionalString(payload.categoria),
+          precoCusto: optionalNumber(payload.precoCusto, "precoCusto"),
+          preco: optionalNumber(payload.preco, "preco"),
         },
         include: {
+          produto: { select: { id: true, sku: true, idCadastroOlist: true } },
           tipoProduto: {
             select: {
               id: true,
@@ -934,70 +1081,46 @@ export async function POST(request: Request) {
       return NextResponse.json({ produtoFinal: normalizeProdutoOlist(produtoFinal) });
     }
 
-    if (body.action === "salvar-produto-final") {
-      const id = requiredString(payload.id, "id");
-      const skuFinal = requiredString(payload.skuFinal, "skuFinal").toUpperCase();
-      const tituloFinal = requiredString(payload.tituloFinal, "tituloFinal");
-      const produtoComSku = await prisma.produtoOlist.findUnique({
-        where: { skuFinal },
-        select: { id: true },
-      });
+    if (body.action === "vincular-produtos-finais") {
+      const ids = Array.isArray(payload.ids)
+        ? payload.ids.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+        : [];
 
-      if (produtoComSku && produtoComSku.id !== id) {
-        throw new Error(`Ja existe um produto final com o SKU ${skuFinal}.`);
+      if (ids.length === 0) {
+        throw new Error("Selecione ao menos um produto final para vincular.");
       }
 
-      const produtoFinal = await prisma.produtoOlist.update({
-        where: { id },
-        data: {
-          skuFinal,
-          tituloFinal: cleanText(tituloFinal),
-          categoria: optionalString(payload.categoria),
-          precoCusto: optionalNumber(payload.precoCusto, "precoCusto"),
-          preco: optionalNumber(payload.preco, "preco"),
-        },
-        include: {
-          tipoProduto: {
-            select: {
-              id: true,
-              titulo: true,
-              sku: true,
-              descricao: true,
-              descricaoSeo: true,
-              palavrasChave: true,
-              detalhesPromptIa: true,
-              slug: true,
-              categoria: true,
-              precoCusto: true,
-              preco: true,
-              pesoLiquido: true,
-              pesoBruto: true,
-              larguraEmbalagem: true,
-              alturaEmbalagem: true,
-              comprimentoEmbalagem: true,
-            },
-          },
-          estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
-          variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
-          tamanho: {
-            select: {
-              id: true,
-              titulo: true,
-              sku: true,
-              slug: true,
-              precoCusto: true,
-              preco: true,
-              pesoLiquido: true,
-              pesoBruto: true,
-              larguraEmbalagem: true,
-              alturaEmbalagem: true,
-              comprimentoEmbalagem: true,
-            },
-          },
-        },
+      const produtosFinais = await prisma.produtoOlist.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, skuFinal: true },
       });
+      const produtosPorSku = new Map(
+        (
+          await prisma.produto.findMany({
+            where: { sku: { in: produtosFinais.map((produto) => produto.skuFinal) } },
+            select: { id: true, sku: true },
+          })
+        ).map((produto) => [produto.sku, produto]),
+      );
+      const naoEncontrados: string[] = [];
+      let vinculados = 0;
 
-      return NextResponse.json({ produtoFinal: normalizeProdutoOlist(produtoFinal) });
+      for (const produtoFinal of produtosFinais) {
+        const produto = produtosPorSku.get(produtoFinal.skuFinal);
+
+        if (!produto) {
+          naoEncontrados.push(produtoFinal.skuFinal);
+          continue;
+        }
+
+        await prisma.produtoOlist.update({
+          where: { id: produtoFinal.id },
+          data: { produtoId: produto.id },
+        });
+        vinculados += 1;
+      }
+
+      return NextResponse.json({ vinculados, naoEncontrados });
     }
 
     if (body.action === "excluir-produto-final") {
@@ -1049,7 +1172,7 @@ export async function POST(request: Request) {
         mockupUrl,
         estampaUrl,
         prompt,
-        model: quality === "high" ? undefined : PREVIEW_IMAGE_MODEL,
+        model: quality === "low" ? PREVIEW_IMAGE_MODEL : undefined,
         size: "1024x1024",
         quality,
         outputFormat: "jpeg",

@@ -1,10 +1,11 @@
 import { Buffer } from "node:buffer";
 
 const OPENAI_IMAGES_EDIT_URL = "https://api.openai.com/v1/images/edits";
-const DEFAULT_IMAGE_MODEL = "gpt-image-1";
+const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+const DEFAULT_IMAGE_SIZE: OpenAIImageSize = "1024x1024";
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 
-type OpenAIImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+type OpenAIImageSize = "1024x1024";
 type OpenAIImageQuality = "low" | "medium" | "high" | "auto";
 type OpenAIImageBackground = "transparent" | "opaque" | "auto";
 type OpenAIImageOutputFormat = "png" | "jpeg" | "webp";
@@ -122,7 +123,7 @@ export async function gerarImagemOpenAI(
     const formData = new FormData();
     formData.append("model", model);
     formData.append("prompt", prompt);
-    appendIfDefined(formData, "size", input.size);
+    formData.append("size", DEFAULT_IMAGE_SIZE);
     appendIfDefined(formData, "quality", input.quality);
     appendIfDefined(formData, "background", input.background);
     appendIfDefined(formData, "output_format", input.outputFormat);

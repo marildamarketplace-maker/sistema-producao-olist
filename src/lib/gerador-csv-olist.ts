@@ -72,6 +72,7 @@ export type TamanhoOlist = {
 
 export type ProdutoFinalOlist = {
   id: string;
+  produtoId: string | null;
   sku: string;
   skuFinal: string;
   titulo: string;
@@ -92,6 +93,11 @@ export type ProdutoFinalOlist = {
   quantidade: number;
   status: string;
   createdAt: string;
+  produto: {
+    id: string;
+    sku: string;
+    idCadastroOlist: string | null;
+  } | null;
   tipoProduto: Pick<
     TipoProdutoOlist,
     | "id"
@@ -300,6 +306,16 @@ export function excluirProdutoFinalOlist(id: string) {
   });
 }
 
+export function vincularProdutosFinaisOlist(ids: string[]) {
+  return requestGeradorCsv<{
+    vinculados: number;
+    naoEncontrados: string[];
+  }>({
+    method: "POST",
+    body: JSON.stringify({ action: "vincular-produtos-finais", payload: { ids } }),
+  });
+}
+
 export function gerarMockupProdutoOlist(payload: {
   produtoId: string;
   mockupIndex: number;
@@ -362,6 +378,7 @@ function joinClean(parts: Array<string | null | undefined>, separator = " ") {
     .join(separator)
     .replace(/\s+/g, " ")
     .replace(/-+/g, "-")
+    .replace(/\s+-\s*$/g, "")
     .trim();
 }
 
@@ -434,9 +451,27 @@ function hasTemplateVariable(value: string | null | undefined) {
   return Boolean(value?.match(/\$\{[A-Z_]+\}/));
 }
 
+function buildParentDescricaoCsv(produto: ProdutoFinalOlist, variables: Record<string, string | null | undefined>) {
+  if (hasTemplateVariable(produto.tipoProduto.titulo)) {
+    return renderTemplateCsv(produto.tipoProduto.titulo.replace(/\s*-\s*\$\{VARIANTE\}/g, " ${VARIANTE}"), {
+      ...variables,
+      ESTAMPA: produto.estampa?.codigo,
+      VARIANTE: undefined,
+    });
+  }
+
+  return joinCleanUnique([
+    produto.tipoProduto.titulo,
+    produto.tamanho?.titulo,
+    produto.estampa?.codigo,
+  ]);
+}
+
 function produtoCsvVariables(produto: ProdutoFinalOlist) {
   return {
     TAMANHO: produto.tamanho?.titulo,
+    ESTAMPA: produto.estampa?.codigo,
+    VARIANTE: produto.variante?.codigo,
     EXTRA: produto.estampa?.extra,
     PALAVRAS_CHAVE_ESTAMPA: produto.estampa?.palavrasChave,
     PALAVRAS_CHAVE_PRODUTO: produto.tipoProduto.palavrasChave,
@@ -473,7 +508,7 @@ function storageAiImageUrl(produto: ProdutoFinalOlist, index: number, options?: 
   if (!tipoSku || !estampa || !variante) return "";
 
   return withCacheBust(
-    `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/ia/${estampa}-${variante}-${index}.jpg`,
+    `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/${estampa}-${variante}-${index}.jpg`,
     options?.cacheKey,
   );
 }
@@ -566,11 +601,7 @@ export function montarLinhaCsvProdutoOlist(
     const codigoPai = !isParent && temVariacao ? parentSku : "";
     const variacoes = !isParent && produto.variante ? `Cor:${produto.variante.codigo}` : "";
     const descricaoBase = isParent
-      ? joinCleanUnique([
-          produto.tipoProduto.titulo,
-          produto.tamanho?.titulo,
-          produto.estampa?.codigo,
-        ])
+      ? buildParentDescricaoCsv(produto, variables)
       : produto.tituloFinal || joinClean([
           produto.tipoProduto.titulo,
           produto.tamanho?.titulo,
@@ -675,7 +706,7 @@ export function montarLinhaCsvProdutoOlist(
       "",
       "Não",
       0,
-      storageImageUrl(produto, 6),
+      "",
       "",
       "",
       "",
@@ -732,6 +763,37 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[], options?: 
 
     rows.push(montarLinhaCsvProdutoOlist(produto, false, options));
   }
+
+  return [headers, ...rows]
+    .map((row) => row.map((value) => csvValue(value)).join(","))
+    .join("\r\n");
+}
+
+export function montarCsvProdutosFabricadosOlist(
+  produtos: ProdutoFinalOlist[],
+  input: {
+    componenteId: string;
+    quantidade: string | number;
+  },
+) {
+  const headers = [
+    "ID kit/fabricado",
+    "SKU kit/fabricado",
+    "Descrição kit/fabricado",
+    "ID componente",
+    "SKU componente",
+    "Descrição componente",
+    "Quantidade componente",
+  ];
+  const rows = produtos.map((produto) => [
+    produto.produto?.idCadastroOlist ?? "",
+    produto.skuFinal,
+    "",
+    input.componenteId,
+    "",
+    "",
+    input.quantidade,
+  ]);
 
   return [headers, ...rows]
     .map((row) => row.map((value) => csvValue(value)).join(","))

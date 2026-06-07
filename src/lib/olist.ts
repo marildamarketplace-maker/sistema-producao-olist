@@ -459,6 +459,7 @@ async function listarProdutosOlist(token: string, offset: number, limite: number
 
 function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
   const sku = String(produto.sku ?? "").trim();
+  const idCadastroOlist = produto.id === null || produto.id === undefined ? null : String(produto.id).trim() || null;
   const situacao = String(produto.situacao ?? "A").toUpperCase();
 
   if (!sku || situacao !== SITUACAO_PRODUTO_ATIVO) {
@@ -467,6 +468,7 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
 
   return {
     sku,
+    idCadastroOlist,
     imagemUrl: null,
     ativo: true,
   };
@@ -515,10 +517,12 @@ export async function importarProdutosOlist() {
         where: { sku: produto.sku },
         create: {
           sku: produto.sku,
+          idCadastroOlist: produto.idCadastroOlist,
           imagemUrl: produto.imagemUrl,
           ativo: produto.ativo,
         },
         update: {
+          idCadastroOlist: produto.idCadastroOlist,
           imagemUrl: produto.imagemUrl,
           ativo: produto.ativo,
         },

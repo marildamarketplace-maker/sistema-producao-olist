@@ -59,6 +59,7 @@ model Usuario {
 model Produto {
   id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku           String      @unique
+  idCadastroOlist String?   @map("id_cadastro_olist")
   imagemUrl     String?     @map("imagem_url")
   metaEstoque   Int?        @map("meta_estoque")
   ativo         Boolean     @default(true)
@@ -66,6 +67,7 @@ model Produto {
   minimoEstoque Int?        @map("minimo_estoque")
   aplicativoId  String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   aplicativo    Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produtosOlist ProdutoOlist[]
 
   @@index([aplicativoId], map: "idx_produtos_aplicativo_id")
   @@map("produtos")
@@ -327,6 +329,7 @@ model Tamanho {
 
 model ProdutoOlist {
   id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  produtoId             String?      @map("produto_id") @db.Uuid
   tipoProdutoId         String       @map("tipo_produto_id") @db.Uuid
   estampaId             String       @map("estampa_id") @db.Uuid
   varianteId            String?      @map("variante_id") @db.Uuid
@@ -347,11 +350,13 @@ model ProdutoOlist {
   comprimentoEmbalagem  Decimal?     @map("comprimento_embalagem") @db.Decimal(10, 2)
   createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  produto               Produto?     @relation(fields: [produtoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   tipoProduto           TipoProduto  @relation(fields: [tipoProdutoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   estampa               Estampa      @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   variante              Variante?    @relation(fields: [varianteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   tamanho               Tamanho?     @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
+  @@index([produtoId], map: "idx_produto_olist_produto_id")
   @@index([tipoProdutoId], map: "idx_produto_olist_tipo_produto_id")
   @@index([estampaId], map: "idx_produto_olist_estampa_id")
   @@index([varianteId], map: "idx_produto_olist_variante_id")
