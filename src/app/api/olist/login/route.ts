@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getAplicativoOlistConfig } from "@/lib/aplicativo";
+import { getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
 
 export async function GET(req: Request) {
   const olistConfig = await getAplicativoOlistConfig();
   const clientId = olistConfig.clientId;
-  const redirectUri = olistConfig.redirectUri;
+  const redirectUri = getOlistRedirectUri(req);
 
-  if (!clientId || !redirectUri) {
-    return NextResponse.json({ error: "Configure client ID e redirect URI da Olist no aplicativo." }, { status: 500 });
+  if (!clientId) {
+    return NextResponse.json({ error: "Configure client ID da Olist no aplicativo." }, { status: 500 });
   }
 
   const url = new URL(olistConfig.oauthAuthorizeUrl);

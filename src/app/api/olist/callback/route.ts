@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
-import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig } from "@/lib/aplicativo";
+import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 
 const usedAuthorizationCodes = new Set<string>();
@@ -16,10 +16,10 @@ export async function GET(req: NextRequest) {
   const olistConfig = await getAplicativoOlistConfig();
   const clientId = olistConfig.clientId;
   const clientSecret = olistConfig.clientSecret;
-  const redirectUri = olistConfig.redirectUri;
+  const redirectUri = getOlistRedirectUri(req);
 
-  if (!clientId || !clientSecret || !redirectUri) {
-    return NextResponse.json({ error: "Configure client ID, client secret e redirect URI da Olist no aplicativo." }, { status: 500 });
+  if (!clientId || !clientSecret) {
+    return NextResponse.json({ error: "Configure client ID e client secret da Olist no aplicativo." }, { status: 500 });
   }
 
   const grantType = refreshToken ? "refresh_token" : "authorization_code";

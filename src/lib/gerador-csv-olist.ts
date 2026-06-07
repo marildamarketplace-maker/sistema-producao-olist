@@ -481,14 +481,6 @@ function produtoCsvVariables(produto: ProdutoFinalOlist) {
   };
 }
 
-function storageImageUrl(produto: ProdutoFinalOlist, index: number) {
-  const tipoSku = produto.tipoProduto.sku;
-  const estampa = produto.estampa?.codigo ?? "";
-  const variante = produto.variante?.codigo ?? "";
-
-  return `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampa}/${estampa}-${variante}-${index}.jpg`;
-}
-
 type ProdutoOlistCsvOptions = {
   cacheKey?: number;
 };
