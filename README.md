@@ -23,7 +23,7 @@
    - `OLIST_OAUTH_URL` (opcional)
 3. Deploy.
 
-O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/callback`.
+O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/callback?`.
 
 ## Observações de segurança
 - `SUPABASE_SERVICE_ROLE_KEY`, `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET` devem ficar somente no servidor (Vercel), nunca no browser.

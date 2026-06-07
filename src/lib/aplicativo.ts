@@ -17,7 +17,7 @@ export function getOlistRedirectUri(req: Request) {
   const protocol = primeiroHeader(req.headers.get("x-forwarded-proto")) ?? requestUrl.protocol.replace(":", "");
   const origin = host ? `${protocol}://${host}` : requestUrl.origin;
 
-  return new URL("/api/olist/callback", origin).toString();
+  return `${new URL("/api/olist/callback", origin).toString()}?`;
 }
 
 export async function getAplicativoOlistConfig(aplicativoId = APLICATIVO_PADRAO_ID) {
