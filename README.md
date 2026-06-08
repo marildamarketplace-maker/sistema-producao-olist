@@ -19,11 +19,12 @@
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `OLIST_CLIENT_ID`
    - `OLIST_CLIENT_SECRET`
+   - `OLIST_REDIRECT_URI` (opcional; use somente se precisar bater exatamente com o cadastro da Tiny/Olist)
    - `OLIST_API_BASE_URL` (opcional)
    - `OLIST_OAUTH_URL` (opcional)
 3. Deploy.
 
-O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/callback?`.
+O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/callback?`, a menos que `OLIST_REDIRECT_URI` esteja configurada.
 
 ## Observações de segurança
 - `SUPABASE_SERVICE_ROLE_KEY`, `OLIST_CLIENT_ID` e `OLIST_CLIENT_SECRET` devem ficar somente no servidor (Vercel), nunca no browser.

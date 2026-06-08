@@ -12,6 +12,9 @@ function primeiroHeader(header: string | null) {
 }
 
 export function getOlistRedirectUri(req: Request) {
+  const configuredRedirectUri = process.env.OLIST_REDIRECT_URI?.trim();
+  if (configuredRedirectUri) return configuredRedirectUri;
+
   const requestUrl = new URL(req.url);
   const host = primeiroHeader(req.headers.get("x-forwarded-host")) ?? primeiroHeader(req.headers.get("host"));
   const protocol = primeiroHeader(req.headers.get("x-forwarded-proto")) ?? requestUrl.protocol.replace(":", "");
