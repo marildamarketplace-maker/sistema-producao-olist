@@ -24,6 +24,29 @@ export type TipoProdutoOlist = {
   comprimentoCm: number | null;
   ativo: boolean;
   createdAt: string;
+  produtosFornecidos: TipoProdutoProdutoFornecedorOlist[];
+};
+
+export type ProdutoFornecedorOlist = {
+  id: string;
+  fornecedorId: string;
+  fornecedorNome: string;
+  nome: string;
+  descricao: string | null;
+  referencia: string | null;
+  precoUnitarioMetro: number;
+  pesoLiquidoMetro: number | null;
+  pesoBrutoMetro: number | null;
+  larguraEmbalagemMetro: number | null;
+  alturaEmbalagemMetro: number | null;
+  comprimentoEmbalagemMetro: number | null;
+};
+
+export type TipoProdutoProdutoFornecedorOlist = {
+  id: string;
+  produtoFornecedorId: string;
+  quantidadeUsada: number;
+  produtoFornecedor: ProdutoFornecedorOlist;
 };
 
 export type EstampaOlist = {
@@ -66,8 +89,18 @@ export type TamanhoOlist = {
   larguraEmbalagem: number | null;
   alturaEmbalagem: number | null;
   comprimentoEmbalagem: number | null;
+  quantidadeProdutoFornecedor: number | null;
   ativo: boolean;
   createdAt: string;
+  custoPorProdutoFornecedor: boolean;
+  produtosFornecidos: TamanhoProdutoFornecedorOlist[];
+};
+
+export type TamanhoProdutoFornecedorOlist = {
+  id: string;
+  produtoFornecedorId: string;
+  quantidadeUsada: number;
+  produtoFornecedor: ProdutoFornecedorOlist;
 };
 
 export type ProdutoFinalOlist = {
@@ -142,6 +175,7 @@ export type ProdutoFinalOlist = {
 
 export type GeradorCsvOlistData = {
   tiposProduto: TipoProdutoOlist[];
+  produtosFornecedor: ProdutoFornecedorOlist[];
   estampas: EstampaOlist[];
   variantes: VarianteOlist[];
   tamanhos: TamanhoOlist[];
@@ -181,13 +215,10 @@ export function salvarTipoProdutoOlist(payload: {
   detalhesPromptIa?: string | null;
   slug?: string | null;
   categoria?: string | null;
-  precoCusto?: number | null;
-  preco?: number | null;
-  pesoLiquido?: number | null;
-  pesoBruto?: number | null;
-  larguraEmbalagem?: number | null;
-  alturaEmbalagem?: number | null;
-  comprimentoEmbalagem?: number | null;
+  produtosFornecidos?: Array<{
+    produtoFornecedorId: string;
+    quantidadeUsada: number;
+  }>;
 }) {
   return requestGeradorCsv<{ tipoProduto: TipoProdutoOlist }>({
     method: "POST",
@@ -248,13 +279,7 @@ export function salvarTamanhoOlist(payload: {
   titulo: string;
   sku: string;
   slug?: string | null;
-  precoCusto?: number | null;
-  preco?: number | null;
-  pesoLiquido?: number | null;
-  pesoBruto?: number | null;
-  larguraEmbalagem?: number | null;
-  alturaEmbalagem?: number | null;
-  comprimentoEmbalagem?: number | null;
+  quantidadeProdutoFornecedor?: number | null;
 }) {
   return requestGeradorCsv<{ tamanho: TamanhoOlist }>({
     method: "POST",
@@ -276,7 +301,13 @@ export function gerarProdutoFinalOlist(payload: {
   tamanhoId?: string | null;
   titulo?: string | null;
   descricao?: string | null;
+  precoCusto?: number | null;
   preco?: number | null;
+  pesoLiquido?: number | null;
+  pesoBruto?: number | null;
+  larguraEmbalagem?: number | null;
+  alturaEmbalagem?: number | null;
+  comprimentoEmbalagem?: number | null;
   quantidade?: number;
 }) {
   return requestGeradorCsv<{ produtoFinal: ProdutoFinalOlist }>({

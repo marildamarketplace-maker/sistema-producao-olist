@@ -39,6 +39,16 @@ function optionalNumber(value: unknown, field: string) {
   return numberValue;
 }
 
+function requiredPositiveNumber(value: unknown, field: string) {
+  const numberValue = optionalNumber(value, field);
+
+  if (numberValue === null || numberValue <= 0) {
+    throw new Error(`Campo numerico invalido: ${field}.`);
+  }
+
+  return numberValue;
+}
+
 function cleanText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -345,6 +355,27 @@ function normalizeTipoProduto(tipoProduto: {
   alturaEmbalagem: unknown;
   comprimentoEmbalagem: unknown;
   createdAt: Date;
+  produtosFornecedor?: Array<{
+    id: string;
+    produtoFornecedorId: string;
+    quantidadeUsada: unknown;
+    produtoFornecedor: {
+      id: string;
+      fornecedorId: string;
+      nome: string;
+      descricao: string | null;
+      referencia: string | null;
+      precoUnitarioMetro: unknown;
+      pesoLiquidoMetro?: unknown;
+      pesoBrutoMetro?: unknown;
+      larguraEmbalagemMetro?: unknown;
+      alturaEmbalagemMetro?: unknown;
+      comprimentoEmbalagemMetro?: unknown;
+      fornecedor: {
+        nome: string;
+      };
+    };
+  }>;
 }) {
   return {
     id: tipoProduto.id,
@@ -372,6 +403,44 @@ function normalizeTipoProduto(tipoProduto: {
     comprimentoCm: decimalToNumber(tipoProduto.comprimentoEmbalagem),
     ativo: true,
     createdAt: tipoProduto.createdAt.toISOString(),
+    produtosFornecidos: (tipoProduto.produtosFornecedor ?? []).map((associacao) => ({
+      id: associacao.id,
+      produtoFornecedorId: associacao.produtoFornecedorId,
+      quantidadeUsada: decimalToNumber(associacao.quantidadeUsada) ?? 0,
+      produtoFornecedor: normalizeProdutoFornecedor(associacao.produtoFornecedor),
+    })),
+  };
+}
+
+function normalizeProdutoFornecedor(produto: {
+  id: string;
+  fornecedorId: string;
+  nome: string;
+  descricao: string | null;
+  referencia: string | null;
+  precoUnitarioMetro: unknown;
+  pesoLiquidoMetro?: unknown;
+  pesoBrutoMetro?: unknown;
+  larguraEmbalagemMetro?: unknown;
+  alturaEmbalagemMetro?: unknown;
+  comprimentoEmbalagemMetro?: unknown;
+  fornecedor: {
+    nome: string;
+  };
+}) {
+  return {
+    id: produto.id,
+    fornecedorId: produto.fornecedorId,
+    fornecedorNome: produto.fornecedor.nome,
+    nome: produto.nome,
+    descricao: produto.descricao,
+    referencia: produto.referencia,
+    precoUnitarioMetro: decimalToNumber(produto.precoUnitarioMetro) ?? 0,
+    pesoLiquidoMetro: decimalToNumber(produto.pesoLiquidoMetro),
+    pesoBrutoMetro: decimalToNumber(produto.pesoBrutoMetro),
+    larguraEmbalagemMetro: decimalToNumber(produto.larguraEmbalagemMetro),
+    alturaEmbalagemMetro: decimalToNumber(produto.alturaEmbalagemMetro),
+    comprimentoEmbalagemMetro: decimalToNumber(produto.comprimentoEmbalagemMetro),
   };
 }
 
@@ -449,8 +518,37 @@ function normalizeTamanho(tamanho: {
   larguraEmbalagem: unknown;
   alturaEmbalagem: unknown;
   comprimentoEmbalagem: unknown;
+  quantidadeProdutoFornecedor: unknown;
   createdAt: Date;
+  produtosFornecedor?: Array<{
+    id: string;
+    produtoFornecedorId: string;
+    quantidadeUsada: unknown;
+    produtoFornecedor: {
+      id: string;
+      fornecedorId: string;
+      nome: string;
+      descricao: string | null;
+      referencia: string | null;
+      precoUnitarioMetro: unknown;
+      pesoLiquidoMetro?: unknown;
+      pesoBrutoMetro?: unknown;
+      larguraEmbalagemMetro?: unknown;
+      alturaEmbalagemMetro?: unknown;
+      comprimentoEmbalagemMetro?: unknown;
+      fornecedor: {
+        nome: string;
+      };
+    };
+  }>;
 }) {
+  const produtosFornecidos = (tamanho.produtosFornecedor ?? []).map((associacao) => ({
+    id: associacao.id,
+    produtoFornecedorId: associacao.produtoFornecedorId,
+    quantidadeUsada: decimalToNumber(associacao.quantidadeUsada) ?? 0,
+    produtoFornecedor: normalizeProdutoFornecedor(associacao.produtoFornecedor),
+  }));
+
   return {
     id: tamanho.id,
     titulo: tamanho.titulo,
@@ -463,8 +561,11 @@ function normalizeTamanho(tamanho: {
     larguraEmbalagem: decimalToNumber(tamanho.larguraEmbalagem),
     alturaEmbalagem: decimalToNumber(tamanho.alturaEmbalagem),
     comprimentoEmbalagem: decimalToNumber(tamanho.comprimentoEmbalagem),
+    quantidadeProdutoFornecedor: decimalToNumber(tamanho.quantidadeProdutoFornecedor),
     ativo: true,
     createdAt: tamanho.createdAt.toISOString(),
+    custoPorProdutoFornecedor: produtosFornecidos.length > 0,
+    produtosFornecidos,
   };
 }
 
@@ -613,9 +714,27 @@ function normalizeProdutoOlist(produto: {
 }
 
 async function carregarDados() {
-  const [tiposProduto, estampas, variantes, tamanhos, produtosFinais] = await Promise.all([
+  const [tiposProduto, produtosFornecedor, estampas, variantes, tamanhos, produtosFinais] = await Promise.all([
     prisma.tipoProduto.findMany({
+      include: {
+        produtosFornecedor: {
+          include: {
+            produtoFornecedor: {
+              include: {
+                fornecedor: { select: { nome: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+      },
       orderBy: { titulo: "asc" },
+    }),
+    prisma.produtoFornecedor.findMany({
+      include: {
+        fornecedor: { select: { nome: true } },
+      },
+      orderBy: { nome: "asc" },
     }),
     prisma.estampa.findMany({
       orderBy: { codigo: "asc" },
@@ -628,6 +747,18 @@ async function carregarDados() {
       orderBy: { codigo: "asc" },
     }),
     prisma.tamanho.findMany({
+      include: {
+        produtosFornecedor: {
+          include: {
+            produtoFornecedor: {
+              include: {
+                fornecedor: { select: { nome: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+      },
       orderBy: { titulo: "asc" },
     }),
     prisma.produtoOlist.findMany({
@@ -681,6 +812,7 @@ async function carregarDados() {
 
   return {
     tiposProduto: tiposProduto.map(normalizeTipoProduto),
+    produtosFornecedor: produtosFornecedor.map(normalizeProdutoFornecedor),
     estampas: estampas.map(normalizeEstampa),
     variantes: variantes.map(normalizeVariante),
     tamanhos: tamanhos.map(normalizeTamanho),
@@ -707,6 +839,47 @@ export async function POST(request: Request) {
     if (body.action === "salvar-tipo-produto") {
       const titulo = requiredString(payload.nome ?? payload.titulo, "titulo");
       const sku = requiredString(payload.prefixoSku ?? payload.sku, "sku").toUpperCase();
+      const produtosFornecidosPayload = Array.isArray(payload.produtosFornecidos)
+        ? payload.produtosFornecidos
+        : [];
+      const produtosFornecidos = produtosFornecidosPayload.map((item, index) => {
+        if (!item || typeof item !== "object") {
+          throw new Error(`Produto fornecido invalido na linha ${index + 1}.`);
+        }
+
+        const produtoFornecedorId = requiredString(
+          (item as Record<string, unknown>).produtoFornecedorId,
+          `produtosFornecidos[${index}].produtoFornecedorId`,
+        );
+        const quantidadeUsada = requiredPositiveNumber(
+          (item as Record<string, unknown>).quantidadeUsada,
+          `produtosFornecidos[${index}].quantidadeUsada`,
+        );
+
+        return { produtoFornecedorId, quantidadeUsada };
+      });
+      const produtosFornecidosUnicos = new Set<string>();
+      for (const item of produtosFornecidos) {
+        if (produtosFornecidosUnicos.has(item.produtoFornecedorId)) {
+          throw new Error("Nao associe o mesmo produto fornecido mais de uma vez.");
+        }
+
+        produtosFornecidosUnicos.add(item.produtoFornecedorId);
+      }
+      if (produtosFornecidos.length !== 1) {
+        throw new Error("Associe um produto fornecido ao tipo de produto.");
+      }
+
+      const produtoFornecedorExiste =
+        produtosFornecidos.length > 0
+          ? await prisma.produtoFornecedor.count({
+              where: { id: produtosFornecidos[0].produtoFornecedorId },
+            })
+          : 0;
+
+      if (produtosFornecidos.length > 0 && produtoFornecedorExiste !== 1) {
+        throw new Error("Produto fornecido nao encontrado.");
+      }
       const data = {
         titulo,
         sku,
@@ -716,22 +889,44 @@ export async function POST(request: Request) {
         detalhesPromptIa: optionalString(payload.detalhesPromptIa),
         slug: buildSlugFinal([optionalString(payload.slug) ?? titulo]),
         categoria: optionalString(payload.categoria),
-        precoCusto: optionalNumber(payload.precoCusto, "precoCusto"),
-        preco: optionalNumber(payload.preco ?? payload.precoBase, "preco"),
-        pesoLiquido: optionalNumber(payload.pesoLiquido, "pesoLiquido"),
-        pesoBruto: optionalNumber(payload.pesoBruto ?? payload.pesoGramas, "pesoBruto"),
-        larguraEmbalagem: optionalNumber(payload.larguraEmbalagem ?? payload.larguraCm, "larguraEmbalagem"),
-        alturaEmbalagem: optionalNumber(payload.alturaEmbalagem ?? payload.alturaCm, "alturaEmbalagem"),
-        comprimentoEmbalagem: optionalNumber(
-          payload.comprimentoEmbalagem ?? payload.comprimentoCm,
-          "comprimentoEmbalagem",
-        ),
       };
 
-      const tipoProduto =
-        typeof payload.id === "string" && payload.id
-          ? await prisma.tipoProduto.update({ where: { id: payload.id }, data })
-          : await prisma.tipoProduto.create({ data });
+      const tipoProduto = await prisma.$transaction(async (tx) => {
+        const salvo =
+          typeof payload.id === "string" && payload.id
+            ? await tx.tipoProduto.update({ where: { id: payload.id }, data })
+            : await tx.tipoProduto.create({ data });
+
+        await tx.tipoProdutoProdutoFornecedor.deleteMany({
+          where: { tipoProdutoId: salvo.id },
+        });
+
+        if (produtosFornecidos.length > 0) {
+          await tx.tipoProdutoProdutoFornecedor.createMany({
+            data: produtosFornecidos.map((item) => ({
+              tipoProdutoId: salvo.id,
+              produtoFornecedorId: item.produtoFornecedorId,
+              quantidadeUsada: item.quantidadeUsada,
+            })),
+          });
+        }
+
+        return tx.tipoProduto.findUniqueOrThrow({
+          where: { id: salvo.id },
+          include: {
+            produtosFornecedor: {
+              include: {
+                produtoFornecedor: {
+                  include: {
+                    fornecedor: { select: { nome: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+      });
 
       return NextResponse.json({ tipoProduto: normalizeTipoProduto(tipoProduto) });
     }
@@ -812,23 +1007,43 @@ export async function POST(request: Request) {
 
     if (body.action === "salvar-tamanho") {
       const titulo = requiredString(payload.titulo, "titulo");
+      const quantidadeProdutoFornecedor = requiredPositiveNumber(
+        payload.quantidadeProdutoFornecedor,
+        "quantidadeProdutoFornecedor",
+      );
       const data = {
         titulo,
         sku: requiredString(payload.sku, "sku").toUpperCase(),
         slug: buildSlugFinal([optionalString(payload.slug) ?? titulo]),
-        precoCusto: optionalNumber(payload.precoCusto, "precoCusto"),
-        preco: optionalNumber(payload.preco, "preco"),
-        pesoLiquido: optionalNumber(payload.pesoLiquido, "pesoLiquido"),
-        pesoBruto: optionalNumber(payload.pesoBruto, "pesoBruto"),
-        larguraEmbalagem: optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem"),
-        alturaEmbalagem: optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem"),
-        comprimentoEmbalagem: optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem"),
+        quantidadeProdutoFornecedor,
       };
 
-      const tamanho =
-        typeof payload.id === "string" && payload.id
-          ? await prisma.tamanho.update({ where: { id: payload.id }, data })
-          : await prisma.tamanho.create({ data });
+      const tamanho = await prisma.$transaction(async (tx) => {
+        const salvo =
+          typeof payload.id === "string" && payload.id
+            ? await tx.tamanho.update({ where: { id: payload.id }, data })
+            : await tx.tamanho.create({ data });
+
+        await tx.tamanhoProdutoFornecedor.deleteMany({
+          where: { tamanhoId: salvo.id },
+        });
+
+        return tx.tamanho.findUniqueOrThrow({
+          where: { id: salvo.id },
+          include: {
+            produtosFornecedor: {
+              include: {
+                produtoFornecedor: {
+                  include: {
+                    fornecedor: { select: { nome: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+      });
 
       return NextResponse.json({ tamanho: normalizeTamanho(tamanho) });
     }
@@ -845,9 +1060,26 @@ export async function POST(request: Request) {
       const estampaId = requiredString(payload.estampaId, "estampaId");
       const varianteId = optionalString(payload.varianteId);
       const tamanhoId = optionalString(payload.tamanhoId);
+      const precoCusto = optionalNumber(payload.precoCusto, "precoCusto");
+      const preco = optionalNumber(payload.preco, "preco");
+      const pesoLiquido = optionalNumber(payload.pesoLiquido, "pesoLiquido");
+      const pesoBruto = optionalNumber(payload.pesoBruto, "pesoBruto");
+      const larguraEmbalagem = optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem");
+      const alturaEmbalagem = optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem");
+      const comprimentoEmbalagem = optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem");
 
       const [tipoProduto, estampa, variante, tamanhoSelecionado] = await Promise.all([
-        prisma.tipoProduto.findUniqueOrThrow({ where: { id: tipoProdutoId } }),
+        prisma.tipoProduto.findUniqueOrThrow({
+          where: { id: tipoProdutoId },
+          include: {
+            produtosFornecedor: {
+              include: {
+                produtoFornecedor: true,
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        }),
         prisma.estampa.findUniqueOrThrow({ where: { id: estampaId } }),
         varianteId
           ? prisma.variante.findUniqueOrThrow({
@@ -858,12 +1090,24 @@ export async function POST(request: Request) {
         tamanhoId ? prisma.tamanho.findUniqueOrThrow({ where: { id: tamanhoId } }) : null,
       ]);
       const tamanho = variante?.tamanho ?? tamanhoSelecionado;
+      const produtoFornecedorTipo = tipoProduto.produtosFornecedor[0]?.produtoFornecedor ?? null;
+      const quantidadeProdutoFornecedor = decimalToNumber(tamanho?.quantidadeProdutoFornecedor ?? null);
+      const precoCustoCalculado =
+        produtoFornecedorTipo && quantidadeProdutoFornecedor !== null
+          ? Number(produtoFornecedorTipo.precoUnitarioMetro) * quantidadeProdutoFornecedor
+          : null;
 
       if (variante && variante.estampaId !== estampaId) {
         throw new Error("A variante selecionada nao pertence a estampa informada.");
       }
       if (variante && tamanhoId && variante.tamanhoId !== tamanhoId) {
         throw new Error("A variante selecionada nao pertence ao tamanho informado.");
+      }
+      if (!produtoFornecedorTipo) {
+        throw new Error("O tipo de produto selecionado nao possui produto fornecido associado.");
+      }
+      if (quantidadeProdutoFornecedor === null || quantidadeProdutoFornecedor <= 0) {
+        throw new Error("O tamanho selecionado nao possui quantidade usada do produto fornecido.");
       }
 
       const skuFinal = [tipoProduto.sku, tamanho?.sku, estampa.codigo, variante?.codigo]
@@ -914,13 +1158,13 @@ export async function POST(request: Request) {
         palavrasChaveFinal: palavrasChaveFinal || null,
         slugFinal: buildSlugFinal([tipoProduto.slug, tamanho?.slug ?? tamanho?.titulo, estampa.codigo, variante?.codigo]) || null,
         categoria: tipoProduto.categoria,
-        precoCusto: tamanho?.precoCusto ?? tipoProduto.precoCusto,
-        preco: tamanho?.preco ?? tipoProduto.preco,
-        pesoLiquido: tamanho?.pesoLiquido ?? tipoProduto.pesoLiquido,
-        pesoBruto: tamanho?.pesoBruto ?? tipoProduto.pesoBruto,
-        larguraEmbalagem: tamanho?.larguraEmbalagem ?? tipoProduto.larguraEmbalagem,
-        alturaEmbalagem: tamanho?.alturaEmbalagem ?? tipoProduto.alturaEmbalagem,
-        comprimentoEmbalagem: tamanho?.comprimentoEmbalagem ?? tipoProduto.comprimentoEmbalagem,
+        precoCusto: precoCustoCalculado ?? precoCusto,
+        preco,
+        pesoLiquido,
+        pesoBruto,
+        larguraEmbalagem,
+        alturaEmbalagem,
+        comprimentoEmbalagem,
       };
       const produtoFinal = produtoExistente
         ? await prisma.produtoOlist.update({

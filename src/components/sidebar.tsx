@@ -65,6 +65,19 @@ const menuItems: MenuItem[] = [
     ],
   },
   {
+    label: "Fornecedor",
+    items: [
+      {
+        label: "Fornecedores",
+        href: "/fornecedor/fornecedores",
+      },
+      {
+        label: "Produtos",
+        href: "/fornecedor/produtos",
+      },
+    ],
+  },
+  {
     label: "Configurações",
     href: "/configuracoes",
     permissions: ["podeVisualizarConfiguracao", "podeEditarConfiguracao"],

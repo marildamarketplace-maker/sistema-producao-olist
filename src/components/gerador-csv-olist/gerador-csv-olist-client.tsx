@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import {
   EstampaOlist,
   GeradorCsvOlistData,
+  ProdutoFornecedorOlist,
   ProdutoFinalOlist,
   TamanhoOlist,
   TipoProdutoOlist,
@@ -64,13 +65,10 @@ const tipoInicial = {
   detalhesPromptIa: "",
   slug: "",
   categoria: "",
-  precoCusto: "",
-  preco: "",
-  pesoLiquido: "",
-  pesoBruto: "",
-  larguraEmbalagem: "",
-  alturaEmbalagem: "",
-  comprimentoEmbalagem: "",
+  produtosFornecidos: [] as Array<{
+    produtoFornecedorId: string;
+    quantidadeUsada: string;
+  }>,
 };
 
 const estampaInicial = {
@@ -92,13 +90,7 @@ const tamanhoInicial = {
   titulo: "",
   sku: "",
   slug: "",
-  precoCusto: "",
-  preco: "",
-  pesoLiquido: "",
-  pesoBruto: "",
-  larguraEmbalagem: "",
-  alturaEmbalagem: "",
-  comprimentoEmbalagem: "",
+  quantidadeProdutoFornecedor: "",
 };
 
 type EstampaImportadaInput = {
@@ -145,6 +137,19 @@ function normalizeDecimalText(value: string, digits: number) {
 
   const numberValue = Number(normalized);
   return Number.isNaN(numberValue) ? value : formatNumberForInput(numberValue, digits);
+}
+
+function parseDecimalText(value: string) {
+  const normalized = value.trim().replace(/\./g, "").replace(",", ".");
+  if (!normalized) return null;
+
+  const numberValue = Number(normalized);
+  return Number.isNaN(numberValue) ? null : numberValue;
+}
+
+function parsePercentText(value: string) {
+  const numberValue = parseDecimalText(value);
+  return numberValue === null ? null : numberValue / 100;
 }
 
 function cleanSkuPart(value: string) {
@@ -312,6 +317,7 @@ export function GeradorCsvOlistClient() {
   const [abaAtiva, setAbaAtiva] = useState<Aba>("tipos");
   const [dados, setDados] = useState<GeradorCsvOlistData>({
     tiposProduto: [],
+    produtosFornecedor: [],
     estampas: [],
     variantes: [],
     tamanhos: [],
@@ -417,6 +423,9 @@ export function GeradorCsvOlistClient() {
       if (!tipoForm.titulo.trim() || !tipoForm.sku.trim()) {
         throw new Error("Preencha os campos obrigatorios: Titulo e SKU.");
       }
+      if (!tipoForm.produtosFornecidos[0]?.produtoFornecedorId) {
+        throw new Error("Selecione o produto fornecido do tipo de produto.");
+      }
 
       await salvarTipoProdutoOlist({
         id: tipoEditId,
@@ -428,13 +437,10 @@ export function GeradorCsvOlistClient() {
         detalhesPromptIa: tipoForm.detalhesPromptIa || null,
         slug: tipoForm.slug || null,
         categoria: tipoForm.categoria || null,
-        precoCusto: toNumberOrNull(tipoForm.precoCusto),
-        preco: toNumberOrNull(tipoForm.preco),
-        pesoLiquido: toNumberOrNull(tipoForm.pesoLiquido),
-        pesoBruto: toNumberOrNull(tipoForm.pesoBruto),
-        larguraEmbalagem: toNumberOrNull(tipoForm.larguraEmbalagem),
-        alturaEmbalagem: toNumberOrNull(tipoForm.alturaEmbalagem),
-        comprimentoEmbalagem: toNumberOrNull(tipoForm.comprimentoEmbalagem),
+        produtosFornecidos: tipoForm.produtosFornecidos.slice(0, 1).map((item) => ({
+          produtoFornecedorId: item.produtoFornecedorId,
+          quantidadeUsada: 1,
+        })),
       });
       setTipoForm(tipoInicial);
       setTipoEditId(null);
@@ -671,19 +677,16 @@ export function GeradorCsvOlistClient() {
       if (skuDuplicado) {
         throw new Error("Ja existe um tamanho cadastrado com este SKU.");
       }
+      if (!tamanhoForm.quantidadeProdutoFornecedor) {
+        throw new Error("Informe a quantidade usada do produto fornecido.");
+      }
 
       await salvarTamanhoOlist({
         id: tamanhoEditId,
         titulo,
         sku,
         slug: tamanhoForm.slug || null,
-        precoCusto: toNumberOrNull(tamanhoForm.precoCusto),
-        preco: toNumberOrNull(tamanhoForm.preco),
-        pesoLiquido: toNumberOrNull(tamanhoForm.pesoLiquido),
-        pesoBruto: toNumberOrNull(tamanhoForm.pesoBruto),
-        larguraEmbalagem: toNumberOrNull(tamanhoForm.larguraEmbalagem),
-        alturaEmbalagem: toNumberOrNull(tamanhoForm.alturaEmbalagem),
-        comprimentoEmbalagem: toNumberOrNull(tamanhoForm.comprimentoEmbalagem),
+        quantidadeProdutoFornecedor: toNumberOrNull(tamanhoForm.quantidadeProdutoFornecedor) ?? 0,
       });
       setTamanhoForm(tamanhoInicial);
       setTamanhoEditId(null);
@@ -700,7 +703,14 @@ export function GeradorCsvOlistClient() {
     tipoProdutoId: string;
     estampaIds: string[];
     varianteIds?: string[];
-    tamanhoIds?: string[];
+    tamanhoId?: string;
+    precoCusto?: string;
+    preco?: string;
+    pesoLiquido?: string;
+    pesoBruto?: string;
+    larguraEmbalagem?: string;
+    alturaEmbalagem?: string;
+    comprimentoEmbalagem?: string;
   }) {
     setSaving(true);
     setMessage(null);
@@ -714,11 +724,11 @@ export function GeradorCsvOlistClient() {
       if (payload.estampaIds.length === 0) {
         throw new Error("Selecione ao menos uma estampa.");
       }
-      if (!payload.tamanhoIds || payload.tamanhoIds.length === 0) {
-        throw new Error("Selecione ao menos um tamanho.");
+      if (!payload.tamanhoId) {
+        throw new Error("Selecione um tamanho.");
       }
 
-      const tamanhoIds = payload.tamanhoIds;
+      const tamanhoId = payload.tamanhoId;
       const skusNovos = new Set<string>();
       const combinacoes = [];
 
@@ -727,7 +737,7 @@ export function GeradorCsvOlistClient() {
         if (!estampa) continue;
 
         const variantesParaGerar = dados.variantes.filter(
-          (item) => item.estampaId === estampa.id && item.tamanhoId && tamanhoIds.includes(item.tamanhoId),
+          (item) => item.estampaId === estampa.id && item.tamanhoId === tamanhoId,
         );
 
         for (const variante of variantesParaGerar) {
@@ -760,6 +770,13 @@ export function GeradorCsvOlistClient() {
           estampaId: combinacao.estampa.id,
           varianteId: combinacao.variante?.id ?? null,
           tamanhoId: combinacao.tamanho?.id ?? null,
+          precoCusto: toNumberOrNull(payload.precoCusto ?? ""),
+          preco: toNumberOrNull(payload.preco ?? ""),
+          pesoLiquido: toNumberOrNull(payload.pesoLiquido ?? ""),
+          pesoBruto: toNumberOrNull(payload.pesoBruto ?? ""),
+          larguraEmbalagem: toNumberOrNull(payload.larguraEmbalagem ?? ""),
+          alturaEmbalagem: toNumberOrNull(payload.alturaEmbalagem ?? ""),
+          comprimentoEmbalagem: toNumberOrNull(payload.comprimentoEmbalagem ?? ""),
         });
 
         if (jaExiste) {
@@ -790,13 +807,10 @@ export function GeradorCsvOlistClient() {
       detalhesPromptIa: tipo.detalhesPromptIa ?? "",
       slug: tipo.slug ?? "",
       categoria: tipo.categoria ?? "",
-      precoCusto: formatNumberForInput(tipo.precoCusto, 2),
-      preco: formatNumberForInput(tipo.preco, 2),
-      pesoLiquido: formatNumberForInput(tipo.pesoLiquido, 3),
-      pesoBruto: formatNumberForInput(tipo.pesoBruto, 3),
-      larguraEmbalagem: formatNumberForInput(tipo.larguraEmbalagem, 2),
-      alturaEmbalagem: formatNumberForInput(tipo.alturaEmbalagem, 2),
-      comprimentoEmbalagem: formatNumberForInput(tipo.comprimentoEmbalagem, 2),
+      produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
+        produtoFornecedorId: item.produtoFornecedorId,
+        quantidadeUsada: formatNumberForInput(item.quantidadeUsada, 4),
+      })),
     });
   }
 
@@ -811,13 +825,10 @@ export function GeradorCsvOlistClient() {
       detalhesPromptIa: tipo.detalhesPromptIa ?? "",
       slug: withSlugCopySuffix(tipo.slug),
       categoria: tipo.categoria ?? "",
-      precoCusto: formatNumberForInput(tipo.precoCusto, 2),
-      preco: formatNumberForInput(tipo.preco, 2),
-      pesoLiquido: formatNumberForInput(tipo.pesoLiquido, 3),
-      pesoBruto: formatNumberForInput(tipo.pesoBruto, 3),
-      larguraEmbalagem: formatNumberForInput(tipo.larguraEmbalagem, 2),
-      alturaEmbalagem: formatNumberForInput(tipo.alturaEmbalagem, 2),
-      comprimentoEmbalagem: formatNumberForInput(tipo.comprimentoEmbalagem, 2),
+      produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
+        produtoFornecedorId: item.produtoFornecedorId,
+        quantidadeUsada: formatNumberForInput(item.quantidadeUsada, 4),
+      })),
     });
   }
 
@@ -915,13 +926,7 @@ export function GeradorCsvOlistClient() {
       titulo: tamanho.titulo,
       sku: tamanho.sku,
       slug: tamanho.slug ?? "",
-      precoCusto: formatNumberForInput(tamanho.precoCusto, 2),
-      preco: formatNumberForInput(tamanho.preco, 2),
-      pesoLiquido: formatNumberForInput(tamanho.pesoLiquido, 3),
-      pesoBruto: formatNumberForInput(tamanho.pesoBruto, 3),
-      larguraEmbalagem: formatNumberForInput(tamanho.larguraEmbalagem, 2),
-      alturaEmbalagem: formatNumberForInput(tamanho.alturaEmbalagem, 2),
-      comprimentoEmbalagem: formatNumberForInput(tamanho.comprimentoEmbalagem, 2),
+      quantidadeProdutoFornecedor: formatNumberForInput(tamanho.quantidadeProdutoFornecedor, 4),
     });
   }
 
@@ -931,13 +936,7 @@ export function GeradorCsvOlistClient() {
       titulo: `${tamanho.titulo} Copia`,
       sku: withCopySuffix(tamanho.sku),
       slug: withSlugCopySuffix(tamanho.slug),
-      precoCusto: formatNumberForInput(tamanho.precoCusto, 2),
-      preco: formatNumberForInput(tamanho.preco, 2),
-      pesoLiquido: formatNumberForInput(tamanho.pesoLiquido, 3),
-      pesoBruto: formatNumberForInput(tamanho.pesoBruto, 3),
-      larguraEmbalagem: formatNumberForInput(tamanho.larguraEmbalagem, 2),
-      alturaEmbalagem: formatNumberForInput(tamanho.alturaEmbalagem, 2),
-      comprimentoEmbalagem: formatNumberForInput(tamanho.comprimentoEmbalagem, 2),
+      quantidadeProdutoFornecedor: formatNumberForInput(tamanho.quantidadeProdutoFornecedor, 4),
     });
   }
 
@@ -1111,6 +1110,7 @@ export function GeradorCsvOlistClient() {
           {abaAtiva === "tipos" && (
             <TiposProdutoTab
               tipos={dados.tiposProduto}
+              produtosFornecedor={dados.produtosFornecedor}
               form={tipoForm}
               setForm={setTipoForm}
               editingId={tipoEditId}
@@ -1213,6 +1213,7 @@ export function GeradorCsvOlistClient() {
 
 function TiposProdutoTab({
   tipos,
+  produtosFornecedor,
   form,
   setForm,
   editingId,
@@ -1224,6 +1225,7 @@ function TiposProdutoTab({
   onDelete,
 }: {
   tipos: TipoProdutoOlist[];
+  produtosFornecedor: ProdutoFornecedorOlist[];
   form: typeof tipoInicial;
   setForm: Dispatch<SetStateAction<typeof tipoInicial>>;
   editingId: string | null;
@@ -1234,8 +1236,9 @@ function TiposProdutoTab({
   onDuplicate: (tipo: TipoProdutoOlist) => void;
   onDelete: (id: string) => void | Promise<void>;
 }) {
+  type TipoProdutoTextField = Exclude<keyof typeof tipoInicial, "produtosFornecidos">;
   const textFields: {
-    key: keyof typeof tipoInicial;
+    key: TipoProdutoTextField;
     label: string;
     required?: boolean;
     placeholder?: string;
@@ -1247,21 +1250,6 @@ function TiposProdutoTab({
     { key: "categoria", label: "Categoria", placeholder: "Moda > Camisetas", className: "md:col-span-2" },
     { key: "palavrasChave", label: "Palavras-chave", placeholder: "camiseta, algodao, basica", className: "md:col-span-2" },
   ];
-  const decimalFields: {
-    key: keyof typeof tipoInicial;
-    label: string;
-    digits: number;
-    placeholder?: string;
-  }[] = [
-    { key: "precoCusto", label: "Preco de custo", digits: 2, placeholder: "0,00" },
-    { key: "preco", label: "Preco", digits: 2, placeholder: "0,00" },
-    { key: "pesoLiquido", label: "Peso liquido", digits: 3, placeholder: "0,000" },
-    { key: "pesoBruto", label: "Peso bruto", digits: 3, placeholder: "0,000" },
-    { key: "larguraEmbalagem", label: "Largura da embalagem", digits: 2, placeholder: "0,00" },
-    { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "0,00" },
-    { key: "comprimentoEmbalagem", label: "Comprimento da embalagem", digits: 2, placeholder: "0,00" },
-  ];
-
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
@@ -1306,24 +1294,29 @@ function TiposProdutoTab({
               placeholder="Ex.: Produto em tecido fourway com leve elasticidade. A arte deve acompanhar o caimento natural do tecido."
             />
           </label>
-          {decimalFields.map((field) => (
-            <label key={field.key} className="text-sm text-slate-700">
-              {field.label}
-              <input
-                inputMode="decimal"
-                value={form[field.key]}
-                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
-                onBlur={() =>
-                  setForm((prev) => ({
-                    ...prev,
-                    [field.key]: normalizeDecimalText(prev[field.key], field.digits),
-                  }))
-                }
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-                placeholder={field.placeholder}
-              />
-            </label>
-          ))}
+          <label className="text-sm text-slate-700 md:col-span-4">
+            Produto fornecido
+            <select
+              required
+              value={form.produtosFornecidos[0]?.produtoFornecedorId ?? ""}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  produtosFornecidos: event.target.value
+                    ? [{ produtoFornecedorId: event.target.value, quantidadeUsada: "1" }]
+                    : [],
+                }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Selecione o produto fornecido</option>
+              {produtosFornecedor.map((produtoFornecedor) => (
+                <option key={produtoFornecedor.id} value={produtoFornecedor.id}>
+                  {produtoFornecedor.nome} - {produtoFornecedor.fornecedorNome}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="flex gap-2 md:col-span-4">
             <button
               type="submit"
@@ -1359,9 +1352,7 @@ function TiposProdutoTab({
                   <th className="p-3">Titulo</th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Categoria</th>
-                  <th className="p-3">Preco custo</th>
-                  <th className="p-3">Preco</th>
-                  <th className="p-3">Embalagem</th>
+                  <th className="p-3">Produto fornecido</th>
                   <th className="p-3">Acoes</th>
                 </tr>
               </thead>
@@ -1374,14 +1365,8 @@ function TiposProdutoTab({
                     </td>
                     <td className="p-3 text-slate-700">{tipo.sku}</td>
                     <td className="p-3 text-slate-700">{tipo.categoria ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{formatMoney(tipo.precoCusto)}</td>
-                    <td className="p-3 text-slate-700">{formatMoney(tipo.preco)}</td>
                     <td className="p-3 text-slate-700">
-                      {[
-                        formatDecimal(tipo.larguraEmbalagem, 2),
-                        formatDecimal(tipo.alturaEmbalagem, 2),
-                        formatDecimal(tipo.comprimentoEmbalagem, 2),
-                      ].join(" x ")}
+                      {tipo.produtosFornecidos[0]?.produtoFornecedor.nome ?? "-"}
                     </td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -1447,21 +1432,6 @@ function TamanhosTab({
   onDuplicate: (tamanho: TamanhoOlist) => void;
   onDelete: (id: string) => void;
 }) {
-  const decimalFields: {
-    key: keyof typeof tamanhoInicial;
-    label: string;
-    digits: number;
-    placeholder?: string;
-  }[] = [
-    { key: "precoCusto", label: "Preco de custo", digits: 2, placeholder: "0,00" },
-    { key: "preco", label: "Preco", digits: 2, placeholder: "0,00" },
-    { key: "pesoLiquido", label: "Peso liquido", digits: 3, placeholder: "0,000" },
-    { key: "pesoBruto", label: "Peso bruto", digits: 3, placeholder: "0,000" },
-    { key: "larguraEmbalagem", label: "Largura da embalagem", digits: 2, placeholder: "0,00" },
-    { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "0,00" },
-    { key: "comprimentoEmbalagem", label: "Comprimento da embalagem", digits: 2, placeholder: "0,00" },
-  ];
-
   return (
     <div className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
@@ -1498,24 +1468,28 @@ function TamanhosTab({
               placeholder="pequeno"
             />
           </label>
-          {decimalFields.map((field) => (
-            <label key={field.key} className="text-sm text-slate-700">
-              {field.label}
-              <input
-                inputMode="decimal"
-                value={form[field.key]}
-                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
-                onBlur={() =>
-                  setForm((prev) => ({
-                    ...prev,
-                    [field.key]: normalizeDecimalText(prev[field.key], field.digits),
-                  }))
-                }
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-                placeholder={field.placeholder}
-              />
-            </label>
-          ))}
+          <label className="text-sm text-slate-700">
+            Quantidade usada
+            <input
+              required
+              inputMode="decimal"
+              value={form.quantidadeProdutoFornecedor}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  quantidadeProdutoFornecedor: event.target.value,
+                }))
+              }
+              onBlur={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  quantidadeProdutoFornecedor: normalizeDecimalText(prev.quantidadeProdutoFornecedor, 4),
+                }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="Ex.: 1,4500"
+            />
+          </label>
           <div className="flex gap-2 md:col-span-3">
             <button
               type="submit"
@@ -1563,9 +1537,7 @@ function TamanhosTab({
                   <th className="p-3">Titulo</th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Slug</th>
-                  <th className="p-3">Preco custo</th>
-                  <th className="p-3">Preco</th>
-                  <th className="p-3">Embalagem</th>
+                  <th className="p-3">Quantidade usada</th>
                   <th className="p-3">Acoes</th>
                 </tr>
               </thead>
@@ -1575,14 +1547,8 @@ function TamanhosTab({
                     <td className="p-3 font-medium text-slate-700">{tamanho.titulo}</td>
                     <td className="p-3 text-slate-700">{tamanho.sku}</td>
                     <td className="p-3 text-slate-700">{tamanho.slug ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{formatMoney(tamanho.precoCusto)}</td>
-                    <td className="p-3 text-slate-700">{formatMoney(tamanho.preco)}</td>
                     <td className="p-3 text-slate-700">
-                      {[
-                        formatDecimal(tamanho.larguraEmbalagem, 2),
-                        formatDecimal(tamanho.alturaEmbalagem, 2),
-                        formatDecimal(tamanho.comprimentoEmbalagem, 2),
-                      ].join(" x ")}
+                      {formatDecimal(tamanho.quantidadeProdutoFornecedor, 4)}
                     </td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -3090,7 +3056,14 @@ function GerarProdutoTab({
     tipoProdutoId: string;
     estampaIds: string[];
     varianteIds?: string[];
-    tamanhoIds?: string[];
+    tamanhoId?: string;
+    precoCusto?: string;
+    preco?: string;
+    pesoLiquido?: string;
+    pesoBruto?: string;
+    larguraEmbalagem?: string;
+    alturaEmbalagem?: string;
+    comprimentoEmbalagem?: string;
   }) => Promise<void>;
   onDownloadCsv: () => void;
 }) {
@@ -3101,13 +3074,99 @@ function GerarProdutoTab({
   const [produtoPagina, setProdutoPagina] = useState(1);
   const [estampaBusca, setEstampaBusca] = useState("");
   const [estampaIds, setEstampaIds] = useState<string[]>([]);
-  const [tamanhoIds, setTamanhoIds] = useState<string[]>([]);
+  const [tamanhoId, setTamanhoId] = useState("");
+  const [precificacaoForm, setPrecificacaoForm] = useState({
+    taxaMktFixa: "6,75",
+    impostoPercent: "4,00",
+    taxaMktPercent: "15,00",
+    campanhasPercent: "15,00",
+    margemDesejadaPercent: "10,00",
+  });
+  const [geracaoForm, setGeracaoForm] = useState({
+    preco: "",
+    pesoLiquido: "",
+    pesoBruto: "",
+    larguraEmbalagem: "",
+    alturaEmbalagem: "",
+    comprimentoEmbalagem: "",
+  });
   const totalCombinacoes = estampaIds.reduce((total, estampaId) => {
     return total + variantes.filter(
-      (variante) => variante.estampaId === estampaId && variante.tamanhoId && tamanhoIds.includes(variante.tamanhoId),
+      (variante) => variante.estampaId === estampaId && variante.tamanhoId === tamanhoId,
     ).length;
   }, 0);
+  const valoresGeracaoPreenchidos = Object.values(geracaoForm).every((value) => value.trim());
   const tipoSelecionado = tipos.find((tipo) => tipo.id === tipoProdutoId) ?? null;
+  const tamanhoSelecionadoGeracao = tamanhos.find((tamanho) => tamanho.id === tamanhoId) ?? null;
+  const produtoFornecedorTipo = tipoSelecionado?.produtosFornecidos[0]?.produtoFornecedor ?? null;
+  const custoProdutoFornecido =
+    produtoFornecedorTipo && tamanhoSelecionadoGeracao?.quantidadeProdutoFornecedor
+      ? produtoFornecedorTipo.precoUnitarioMetro * tamanhoSelecionadoGeracao.quantidadeProdutoFornecedor
+      : null;
+  const valoresProdutoFornecidoCalculados = useMemo(() => {
+    const quantidade = tamanhoSelecionadoGeracao?.quantidadeProdutoFornecedor ?? null;
+    const calcularPorMetro = (valorPorMetro: number | null) =>
+      produtoFornecedorTipo && quantidade && valorPorMetro !== null ? valorPorMetro * quantidade : null;
+
+    return {
+      pesoLiquido: calcularPorMetro(produtoFornecedorTipo?.pesoLiquidoMetro ?? null),
+      pesoBruto: calcularPorMetro(produtoFornecedorTipo?.pesoBrutoMetro ?? null),
+      larguraEmbalagem: produtoFornecedorTipo?.larguraEmbalagemMetro ?? null,
+      alturaEmbalagem: calcularPorMetro(produtoFornecedorTipo?.alturaEmbalagemMetro ?? null),
+      comprimentoEmbalagem: produtoFornecedorTipo?.comprimentoEmbalagemMetro ?? null,
+    };
+  }, [produtoFornecedorTipo, tamanhoSelecionadoGeracao?.quantidadeProdutoFornecedor]);
+  const precificacao = useMemo(() => {
+    const custo = custoProdutoFornecido;
+    const taxaMktFixa = parseDecimalText(precificacaoForm.taxaMktFixa);
+    const imposto = parsePercentText(precificacaoForm.impostoPercent);
+    const taxaMkt = parsePercentText(precificacaoForm.taxaMktPercent);
+    const campanhas = parsePercentText(precificacaoForm.campanhasPercent);
+    const margemDesejada = parsePercentText(precificacaoForm.margemDesejadaPercent);
+
+    if (
+      custo === null ||
+      taxaMktFixa === null ||
+      imposto === null ||
+      taxaMkt === null ||
+      campanhas === null ||
+      margemDesejada === null
+    ) {
+      return {
+        precoMinimo: null,
+        precoSugerido: null,
+        lucroPrevisto: null,
+        margemPrevista: null,
+        impostoValor: null,
+        taxaMktValor: null,
+        campanhasValor: null,
+        denominadorMinimo: null,
+        denominadorSugerido: null,
+      };
+    }
+
+    const denominadorMinimo = 1 - imposto - taxaMkt;
+    const denominadorSugerido = 1 - imposto - taxaMkt - campanhas - margemDesejada;
+    const precoMinimo = denominadorMinimo > 0 ? (custo + taxaMktFixa) / denominadorMinimo : null;
+    const precoSugerido = denominadorSugerido > 0 ? (custo + taxaMktFixa) / denominadorSugerido : null;
+    const lucroPrevisto =
+      precoSugerido === null
+        ? null
+        : precoSugerido - custo - taxaMktFixa - precoSugerido * (imposto + taxaMkt + campanhas);
+
+    return {
+      precoMinimo,
+      precoSugerido,
+      lucroPrevisto,
+      margemPrevista: precoSugerido && lucroPrevisto !== null ? lucroPrevisto / precoSugerido : null,
+      impostoValor: precoSugerido === null ? null : precoSugerido * imposto,
+      taxaMktValor: precoSugerido === null ? null : precoSugerido * taxaMkt,
+      campanhasValor: precoSugerido === null ? null : precoSugerido * campanhas,
+      denominadorMinimo,
+      denominadorSugerido,
+    };
+  }, [custoProdutoFornecido, precificacaoForm]);
+  const precoSugeridoTexto = formatNumberForInput(precificacao.precoSugerido, 2);
   const skusExistentes = useMemo(() => new Set(produtos.map((produto) => produto.sku)), [produtos]);
   const produtosFiltrados = useMemo(() => {
     const busca = produtoSkuBusca.trim().toLowerCase();
@@ -3129,7 +3188,7 @@ function GerarProdutoTab({
       if (!estampa) return [];
 
       const variantesParaGerar = variantes.filter(
-        (variante) => variante.estampaId === estampa.id && variante.tamanhoId && tamanhoIds.includes(variante.tamanhoId),
+        (variante) => variante.estampaId === estampa.id && variante.tamanhoId === tamanhoId,
       );
 
       return variantesParaGerar.flatMap((variante) =>
@@ -3149,23 +3208,63 @@ function GerarProdutoTab({
         }),
       );
     });
-  }, [estampaIds, estampas, skusExistentes, tamanhoIds, tamanhos, tipoSelecionado, variantes]);
+  }, [estampaIds, estampas, skusExistentes, tamanhoId, tamanhos, tipoSelecionado, variantes]);
   const estampasFiltradas = useMemo(() => {
     const busca = estampaBusca.trim().toLowerCase();
-    if (!busca) return estampas;
 
-    return estampas.filter((estampa) =>
-      [estampa.codigo, estampa.descricao, estampa.palavrasChave, estampa.extra].some((value) =>
+    return estampas.filter((estampa) => {
+      const temVarianteNoTamanho =
+        !tamanhoId ||
+        variantes.some((variante) => variante.estampaId === estampa.id && variante.tamanhoId === tamanhoId);
+
+      if (!temVarianteNoTamanho) return false;
+      if (!busca) return true;
+
+      return [estampa.codigo, estampa.descricao, estampa.palavrasChave, estampa.extra].some((value) =>
         value?.toLowerCase().includes(busca),
-      ),
-    );
-  }, [estampaBusca, estampas]);
+      );
+    });
+  }, [estampaBusca, estampas, tamanhoId, variantes]);
   const todasEstampasFiltradasSelecionadas =
     estampasFiltradas.length > 0 && estampasFiltradas.every((estampa) => estampaIds.includes(estampa.id));
 
   useEffect(() => {
     setProdutoPagina(1);
   }, [produtoPageSize, produtoSkuBusca]);
+
+  useEffect(() => {
+    if (!tamanhoId) return;
+
+    const estampasComVarianteNoTamanho = new Set(
+      variantes
+        .filter((variante) => variante.tamanhoId === tamanhoId)
+        .map((variante) => variante.estampaId)
+        .filter((estampaId): estampaId is string => Boolean(estampaId)),
+    );
+
+    setEstampaIds((selecionados) =>
+      selecionados.every((id) => estampasComVarianteNoTamanho.has(id))
+        ? selecionados
+        : selecionados.filter((id) => estampasComVarianteNoTamanho.has(id)),
+    );
+  }, [tamanhoId, variantes]);
+
+  useEffect(() => {
+    const valoresCalculados = {
+      preco: precoSugeridoTexto,
+      pesoLiquido: formatNumberForInput(valoresProdutoFornecidoCalculados.pesoLiquido, 3),
+      pesoBruto: formatNumberForInput(valoresProdutoFornecidoCalculados.pesoBruto, 3),
+      larguraEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.larguraEmbalagem, 2),
+      alturaEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.alturaEmbalagem, 2),
+      comprimentoEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.comprimentoEmbalagem, 2),
+    };
+
+    setGeracaoForm((prev) =>
+      Object.entries(valoresCalculados).every(([key, value]) => prev[key as keyof typeof geracaoForm] === value)
+        ? prev
+        : { ...prev, ...valoresCalculados },
+    );
+  }, [precoSugeridoTexto, valoresProdutoFornecidoCalculados]);
 
   function toggleSelecionado(id: string, selecionados: string[], setSelecionados: Dispatch<SetStateAction<string[]>>) {
     setSelecionados(
@@ -3186,12 +3285,33 @@ function GerarProdutoTab({
   }
 
   async function confirmarGeracao() {
-    await onGenerate({ tipoProdutoId, estampaIds, tamanhoIds });
+    await onGenerate({
+      tipoProdutoId,
+      estampaIds,
+      tamanhoId,
+      ...geracaoForm,
+      precoCusto: formatNumberForInput(custoProdutoFornecido, 2),
+    });
     setModalAberto(false);
     setTipoProdutoId("");
     setEstampaBusca("");
     setEstampaIds([]);
-    setTamanhoIds([]);
+    setTamanhoId("");
+    setPrecificacaoForm({
+      taxaMktFixa: "6,75",
+      impostoPercent: "4,00",
+      taxaMktPercent: "15,00",
+      campanhasPercent: "15,00",
+      margemDesejadaPercent: "10,00",
+    });
+    setGeracaoForm({
+      preco: "",
+      pesoLiquido: "",
+      pesoBruto: "",
+      larguraEmbalagem: "",
+      alturaEmbalagem: "",
+      comprimentoEmbalagem: "",
+    });
   }
 
   return (
@@ -3375,9 +3495,10 @@ function GerarProdutoTab({
                           className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 text-sm text-slate-700 last:border-b-0 hover:bg-slate-50"
                         >
                           <input
-                            type="checkbox"
-                            checked={tamanhoIds.includes(tamanho.id)}
-                            onChange={() => toggleSelecionado(tamanho.id, tamanhoIds, setTamanhoIds)}
+                            type="radio"
+                            name="tamanho-geracao"
+                            checked={tamanhoId === tamanho.id}
+                            onChange={() => setTamanhoId(tamanho.id)}
                             className="mt-1"
                           />
                           <span>
@@ -3389,6 +3510,170 @@ function GerarProdutoTab({
                       ))
                     )}
                   </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-slate-900">
+                    Valores do produto final
+                  </h4>
+                  <div className="mb-3 grid grid-cols-1 gap-3 rounded-md border border-slate-200 bg-white p-4 text-sm md:grid-cols-3">
+                    <div>
+                      <span className="block text-slate-500">Produto fornecido</span>
+                      <strong className="text-slate-900">
+                        {produtoFornecedorTipo
+                          ? `${produtoFornecedorTipo.nome} - ${produtoFornecedorTipo.fornecedorNome}`
+                          : "Selecione um tipo com produto fornecido"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Quantidade do tamanho</span>
+                      <strong className="text-slate-900">
+                        {formatDecimal(tamanhoSelecionadoGeracao?.quantidadeProdutoFornecedor ?? null, 4)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Preco de custo calculado</span>
+                      <strong className="text-slate-900">{formatMoney(custoProdutoFornecido)}</strong>
+                    </div>
+                  </div>
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                      {[
+                        { key: "taxaMktFixa", label: "Taxa MKT R$", digits: 2, placeholder: "6,75" },
+                        {
+                          key: "impostoPercent",
+                          label: "Imposto %",
+                          digits: 2,
+                          placeholder: "4,00",
+                          valorConvertido: precificacao.impostoValor,
+                        },
+                        {
+                          key: "taxaMktPercent",
+                          label: "Taxa MKT %",
+                          digits: 2,
+                          placeholder: "15,00",
+                          valorConvertido: precificacao.taxaMktValor,
+                        },
+                        {
+                          key: "campanhasPercent",
+                          label: "Campanhas %",
+                          digits: 2,
+                          placeholder: "15,00",
+                          valorConvertido: precificacao.campanhasValor,
+                        },
+                        { key: "margemDesejadaPercent", label: "Margem desejada %", digits: 2, placeholder: "10,00" },
+                      ].map((field) => (
+                        <label key={field.key} className="text-sm text-slate-700">
+                          <span className="flex items-baseline justify-between gap-2">
+                            <span>{field.label}</span>
+                            {"valorConvertido" in field && (
+                              <span className="text-[10px] font-normal text-slate-500">
+                                {formatMoney(field.valorConvertido ?? null)}
+                              </span>
+                            )}
+                          </span>
+                          <input
+                            inputMode="decimal"
+                            value={precificacaoForm[field.key as keyof typeof precificacaoForm]}
+                            onChange={(event) =>
+                              setPrecificacaoForm((prev) => ({
+                                ...prev,
+                                [field.key]: event.target.value,
+                              }))
+                            }
+                            onBlur={() =>
+                              setPrecificacaoForm((prev) => ({
+                                ...prev,
+                                [field.key]: normalizeDecimalText(
+                                  prev[field.key as keyof typeof precificacaoForm],
+                                  field.digits,
+                                ),
+                              }))
+                            }
+                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                            placeholder={field.placeholder}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+                      <div className="rounded-md border border-slate-200 bg-white p-3">
+                        <span className="block text-slate-500">Preco min.</span>
+                        <strong className="text-slate-900">{formatMoney(precificacao.precoMinimo)}</strong>
+                        <span className="mt-1 block text-xs text-slate-500">=(custo + taxa fixa) / (1 - imposto - taxa mkt)</span>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-white p-3">
+                        <span className="block text-slate-500">Preco sug.</span>
+                        <strong className="text-slate-900">{formatMoney(precificacao.precoSugerido)}</strong>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          =(custo + taxa fixa) / (1 - imposto - taxa mkt - campanhas - margem)
+                        </span>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-white p-3">
+                        <span className="block text-slate-500">Lucro previsto</span>
+                        <strong className="text-slate-900">{formatMoney(precificacao.lucroPrevisto)}</strong>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          Margem prevista: {formatDecimal(
+                            precificacao.margemPrevista === null ? null : precificacao.margemPrevista * 100,
+                            2,
+                          )}%
+                        </span>
+                      </div>
+                    </div>
+                    {(precificacao.denominadorMinimo !== null && precificacao.denominadorMinimo <= 0) ||
+                    (precificacao.denominadorSugerido !== null && precificacao.denominadorSugerido <= 0) ? (
+                      <p className="mt-3 text-xs text-red-600">
+                        Revise os percentuais: a soma das taxas nao pode deixar o denominador menor ou igual a zero.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+                    {[
+                      { key: "pesoLiquido", label: "Peso liquido", digits: 3, placeholder: "0,000" },
+                      { key: "pesoBruto", label: "Peso bruto", digits: 3, placeholder: "0,000" },
+                      { key: "larguraEmbalagem", label: "Largura da embalagem", digits: 2, placeholder: "0,00" },
+                      { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "0,00" },
+                      { key: "comprimentoEmbalagem", label: "Comprimento da embalagem", digits: 2, placeholder: "0,00" },
+                    ].map((field) => (
+                      <label key={field.key} className="text-sm text-slate-700">
+                        {field.label}
+                        <input
+                          inputMode="decimal"
+                          value={geracaoForm[field.key as keyof typeof geracaoForm]}
+                          onChange={(event) =>
+                            setGeracaoForm((prev) => ({
+                              ...prev,
+                              [field.key]: event.target.value,
+                            }))
+                          }
+                          onBlur={() =>
+                            setGeracaoForm((prev) => ({
+                              ...prev,
+                              [field.key]: normalizeDecimalText(
+                                prev[field.key as keyof typeof geracaoForm],
+                                field.digits,
+                              ),
+                            }))
+                          }
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                          placeholder={field.placeholder}
+                        />
+                      </label>
+                    ))}
+                    <label className="text-sm text-slate-700">
+                      Preco aplicado
+                      <input
+                        inputMode="decimal"
+                        value={geracaoForm.preco}
+                        readOnly
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-700"
+                        placeholder="0,00"
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Todos os valores desta secao serao aplicados em cada produto gerado.
+                  </p>
                 </div>
 
                 <div>
@@ -3433,7 +3718,9 @@ function GerarProdutoTab({
                           <span>
                             <span className="font-medium">{estampa.codigo}</span>
                             <span className="ml-2 text-xs text-slate-500">
-                              {variantes.filter((variante) => variante.estampaId === estampa.id).length} variante(s)
+                              {variantes.filter(
+                                (variante) => variante.estampaId === estampa.id && variante.tamanhoId === tamanhoId,
+                              ).length} variante(s)
                             </span>
                             {estampa.descricao && (
                               <span className="block text-xs text-slate-500">{estampa.descricao}</span>
@@ -3503,7 +3790,10 @@ function GerarProdutoTab({
                   saving ||
                   !tipoProdutoId ||
                   estampaIds.length === 0 ||
-                  tamanhoIds.length === 0 ||
+                  !tamanhoId ||
+                  !produtoFornecedorTipo ||
+                  custoProdutoFornecido === null ||
+                  !valoresGeracaoPreenchidos ||
                   previewProdutos.length === 0
                 }
                 className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"

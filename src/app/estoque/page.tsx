@@ -52,6 +52,25 @@ const SORT_LABELS: Record<SortKey, string> = {
   qtd_movimentacoes: "Movimentacoes",
 };
 
+const ESTOQUE_CSV_HEADERS = [
+  "SKU",
+  "Total de entradas",
+  "Total de saidas",
+  "Saldo atual",
+  "Meta aplicada",
+  "Movimentacoes",
+];
+
+function formatarCampoCsv(valor: string | number | null | undefined) {
+  const texto = String(valor ?? "");
+
+  if (/[",\r\n;]/.test(texto)) {
+    return `"${texto.replace(/"/g, '""')}"`;
+  }
+
+  return texto;
+}
+
 export default function EstoquePage() {
   const { usuario } = useAuth();
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([]);
@@ -258,6 +277,49 @@ export default function EstoquePage() {
     );
 
     setProdutoId(produto?.id ?? "");
+  }
+
+  function exportarItensComMovimentacoesCsv() {
+    const linhasComMovimentacoes = linhasOrdenadas.filter(
+      (linha) => linha.qtd_movimentacoes > 0,
+    );
+
+    if (linhasComMovimentacoes.length === 0) {
+      setErrorMessage("Nenhum item com movimentacoes para exportar.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const linhasCsv = linhasComMovimentacoes.map((linha) =>
+      [
+        linha.sku,
+        linha.total_entradas,
+        linha.total_saidas,
+        linha.saldo_atual,
+        linha.meta_aplicada,
+        linha.qtd_movimentacoes,
+      ]
+        .map(formatarCampoCsv)
+        .join(";"),
+    );
+    const csv = [
+      ESTOQUE_CSV_HEADERS.map(formatarCampoCsv).join(";"),
+      ...linhasCsv,
+    ].join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "estoque-itens-com-movimentacoes.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function selecionarProduto(produto: Produto) {
@@ -491,9 +553,19 @@ export default function EstoquePage() {
       )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          Posicao de estoque
-        </h3>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">
+            Posicao de estoque
+          </h3>
+          <button
+            type="button"
+            onClick={exportarItensComMovimentacoesCsv}
+            disabled={loading || totaisEstoque.qtd_movimentacoes === 0}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Exportar CSV com movimentacoes
+          </button>
+        </div>
         {loading ? (
           <p className="text-sm text-slate-600">Carregando estoque...</p>
         ) : linhas.length === 0 ? (
