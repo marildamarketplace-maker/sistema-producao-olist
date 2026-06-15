@@ -1,4 +1,4 @@
-# Sistema de Produção e Estoque (Olist + Supabase)
+# ERP Shop (Olist + Supabase)
 
 ## Deploy em Produção
 

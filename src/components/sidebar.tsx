@@ -125,7 +125,7 @@ export function Sidebar() {
   const renderSidebarContent = () => (
     <>
       <div className="mb-8 pr-10 md:pr-0">
-        <h1 className="text-lg font-semibold text-slate-900">Produção Olist</h1>
+        <h1 className="text-lg font-semibold text-slate-900">ERP Shop</h1>
         <p className="mt-1 text-xs text-slate-500">
           {nomeAplicativo}
         </p>
@@ -184,7 +184,7 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold text-slate-900">Produção Olist</h1>
+          <h1 className="truncate text-base font-semibold text-slate-900">ERP Shop</h1>
           <p className="truncate text-xs text-slate-500">
             {nomeAplicativo}
           </p>
