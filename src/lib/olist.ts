@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
  * ======================================================= */
 
 const SITUACOES_PADRAO = ["3", "4", "1"];
-const SITUACOES_PERMITIDAS = new Set(["3", "4", "1", "7", "5", "6"]);
+const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2", "9"]);
 const CONTROLE_BUSCA_BAIXA_ESTOQUE = "baixa_estoque_olist";
 const SITUACOES_BAIXA_ESTOQUE = ["7", "5", "6"];
 const SITUACAO_PRODUTO_ATIVO = "A";
@@ -1465,4 +1465,3 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     motivo_pedidos_ignorados: "Pedido já processado anteriormente.",
   };
 }
-

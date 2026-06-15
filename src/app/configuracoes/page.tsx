@@ -5,6 +5,7 @@ import axios from "axios";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { useTheme } from "@/components/theme-provider";
 import { supabase } from "@/lib/supabase";
 
 const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
@@ -12,6 +13,7 @@ const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
 
 export default function ConfiguracoesPage() {
   const { usuario } = useAuth();
+  const { isDarkMode, toggleDarkMode } = useTheme();
   const [metaGeral, setMetaGeral] = useState("0");
   const [minimoGeral, setMinimoGeral] = useState("0");
   const [loading, setLoading] = useState(true);
@@ -130,6 +132,34 @@ export default function ConfiguracoesPage() {
         title="Configurações"
         description="Defina parâmetros globais do sistema de produção e estoque."
       />
+
+      <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Aparência</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Ajuste o tema visual usado em todas as telas do sistema.
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-3 text-sm font-medium text-slate-700">
+            <span>{isDarkMode ? "Dark mode ativo" : "Dark mode inativo"}</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isDarkMode}
+              aria-label="Alternar dark mode"
+              onClick={toggleDarkMode}
+              className={`theme-switch relative h-7 w-12 rounded-full transition ${isDarkMode ? "is-active" : ""}`}
+            >
+              <span
+                className={`theme-switch-thumb absolute top-1 h-5 w-5 rounded-full shadow transition ${
+                  isDarkMode ? "left-6" : "left-1"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Parametros de estoque</h3>

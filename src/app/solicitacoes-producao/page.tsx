@@ -97,7 +97,19 @@ type ItemDashboardPendente = {
 
 const FILTRO_DATA_BASE_OLIST = "APROVACAO_PEDIDO";
 const TIME_ZONE = "America/Sao_Paulo";
-const SITUACOES_OLIST_PADRAO = ["3", "4", "1"];
+const SITUACOES_OLIST_PADRAO = ["1", "3", "4"];
+const SITUACOES_OLIST_OPCOES = [
+  { value: "8", label: "8 - Dados Incompletos" },
+  { value: "0", label: "0 - Aberta" },
+  { value: "3", label: "3 - Aprovada" },
+  { value: "4", label: "4 - Preparando Envio" },
+  { value: "1", label: "1 - Faturada" },
+  { value: "7", label: "7 - Pronto Envio" },
+  { value: "5", label: "5 - Enviada" },
+  { value: "6", label: "6 - Entregue" },
+  { value: "2", label: "2 - Cancelada" },
+  { value: "9", label: "9 - Nao Entregue" },
+];
 const DASHBOARD_SOLICITACAO_KEY = "dashboard_solicitacao_manual_itens";
 
 function formatarDataLocal(date: Date) {
@@ -180,7 +192,7 @@ export default function SolicitacoesProducaoPage() {
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
 
-  const situacoesOlistSelecionadas = SITUACOES_OLIST_PADRAO;
+  const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
   const [processamentoOlistPendente, setProcessamentoOlistPendente] = useState<ProcessamentoOlistPendente | null>(null);
@@ -293,6 +305,14 @@ export default function SolicitacoesProducaoPage() {
       produto_busca: produto.sku,
     });
     setProdutoBuscaAberta(null);
+  }
+
+  function alternarSituacaoOlist(situacao: string) {
+    setSituacoesOlistSelecionadas((anteriores) =>
+      anteriores.includes(situacao)
+        ? anteriores.filter((item) => item !== situacao)
+        : [...anteriores, situacao],
+    );
   }
 
   function normalizarQuantidadeItem(index: number) {
@@ -519,6 +539,11 @@ export default function SolicitacoesProducaoPage() {
 
   async function gerarViaOlist() {
     if (!podeSolicitarProducao) return;
+
+    if (situacoesOlistSelecionadas.length === 0) {
+      setErrorMessage("Selecione ao menos uma situação para consultar pedidos.");
+      return;
+    }
 
     const dataProcessamento = new Date();
 
@@ -930,12 +955,23 @@ export default function SolicitacoesProducaoPage() {
             Tipo de data
             <input readOnly value="Aprovação do pedido" className="mt-1 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600" />
           </label>
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <p>
-              <strong>Situações consultadas:</strong> {situacoesOlistSelecionadas.join(", ")}
-            </p>
+          <div className="text-sm text-slate-700">
+            <span className="font-medium">Situações consultadas</span>
+            <div className="mt-2 grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+              {SITUACOES_OLIST_OPCOES.map((situacao) => (
+                <label key={situacao.value} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-slate-100">
+                  <input
+                    type="checkbox"
+                    checked={situacoesOlistSelecionadas.includes(situacao.value)}
+                    onChange={() => alternarSituacaoOlist(situacao.value)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  {situacao.label}
+                </label>
+              ))}
+            </div>
           </div>
-          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist || situacoesOlistSelecionadas.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
             {integrandoOlist ? "Integrando..." : "Gerar solicitação automaticamente"}
           </button>
           {resumoImportacaoOlist && (
