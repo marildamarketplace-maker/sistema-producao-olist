@@ -92,6 +92,7 @@ model ProdutoFornecedor {
   fornecedor         Fornecedor                     @relation(fields: [fornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tamanhos           TamanhoProdutoFornecedor[]
   tiposProduto       TipoProdutoProdutoFornecedor[]
+  produtosOlist      ProdutoOlistProdutoFornecedor[]
 
   @@index([aplicativoId], map: "idx_produtos_fornecedor_aplicativo_id")
   @@index([fornecedorId], map: "idx_produtos_fornecedor_fornecedor_id")
@@ -111,6 +112,7 @@ model Produto {
   aplicativoId    String?        @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   aplicativo      Aplicativo?    @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   produtosOlist   ProdutoOlist[]
+  produtoFornecedorOlist ProdutoOlistProdutoFornecedor?
 
   @@index([aplicativoId], map: "idx_produtos_aplicativo_id")
   @@map("produtos")
@@ -431,6 +433,7 @@ model ProdutoOlist {
   estampa              Estampa     @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   variante             Variante?   @relation(fields: [varianteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   tamanho              Tamanho?    @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  produtosFornecedor   ProdutoOlistProdutoFornecedor[]
 
   @@index([produtoId], map: "idx_produto_olist_produto_id")
   @@index([tipoProdutoId], map: "idx_produto_olist_tipo_produto_id")
@@ -438,4 +441,21 @@ model ProdutoOlist {
   @@index([varianteId], map: "idx_produto_olist_variante_id")
   @@index([tamanhoId], map: "idx_produto_olist_tamanho_id")
   @@map("produto_olist")
+}
+
+model ProdutoOlistProdutoFornecedor {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  produtoId           String            @unique(map: "uq_produto_olist_produto_fornecedor_produto_id") @map("produto_id") @db.Uuid
+  produtoOlistId      String?           @map("produto_olist_id") @db.Uuid
+  produtoFornecedorId String            @map("produto_fornecedor_id") @db.Uuid
+  quantidadeUsada     Decimal           @map("quantidade_usada") @db.Decimal(10, 4)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  produto              Produto           @relation(fields: [produtoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produtoOlist        ProdutoOlist?     @relation(fields: [produtoOlistId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([produtoOlistId], map: "idx_produto_olist_produto_fornecedor_produto_olist_id")
+  @@index([produtoFornecedorId], map: "idx_produto_olist_produto_fornecedor_produto_id")
+  @@map("produto_olist_produto_fornecedor")
 }

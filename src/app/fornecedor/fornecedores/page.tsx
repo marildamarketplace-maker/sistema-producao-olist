@@ -26,6 +26,7 @@ export default function FornecedoresPage() {
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -60,10 +61,12 @@ export default function FornecedoresPage() {
   function resetForm() {
     setFormData(INITIAL_FORM);
     setEditingId(null);
+    setFormOpen(false);
   }
 
   function handleEdit(fornecedor: Fornecedor) {
     setEditingId(fornecedor.id);
+    setFormOpen(true);
     setFormData({
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
@@ -149,11 +152,29 @@ export default function FornecedoresPage() {
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {isEditing ? "Editar fornecedor" : "Cadastrar fornecedor"}
-        </h3>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-slate-900">
+            {isEditing ? "Editar fornecedor" : "Cadastrar fornecedor"}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              if (formOpen) {
+                resetForm();
+                return;
+              }
 
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
+              setFormOpen(true);
+            }}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-expanded={formOpen}
+          >
+            {formOpen ? "Fechar" : "Abrir"}
+          </button>
+        </div>
+
+        {formOpen && (
+        <form className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <label className="text-sm text-slate-700">
             Nome
             <input
@@ -205,6 +226,7 @@ export default function FornecedoresPage() {
             )}
           </div>
         </form>
+        )}
 
         {errorMessage && (
           <p className="mt-4 text-sm text-red-600">{errorMessage}</p>

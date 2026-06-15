@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useState } from "react";
 import axios from "axios";
 import { ChevronDown, Download, Pencil, Printer, XCircle } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
@@ -12,6 +12,24 @@ type Produto = {
   id: string;
   sku: string;
   imagem_url: string | null;
+  produto_fornecido?: ProdutoFornecidoInfo | null;
+};
+
+type ProdutoFornecidoInfo = {
+  id: string;
+  nome: string;
+  quantidade_por_produto: number;
+};
+
+type ProdutoOlistProdutoFornecedorRow = {
+  produto_fornecedor_id: string;
+  quantidade_usada: number | string | null;
+};
+
+type ProdutoFornecedorRow = {
+  id: string;
+  nome: string;
+  referencia: string | null;
 };
 
 type Solicitacao = {
@@ -39,6 +57,7 @@ type ItemForm = {
   id?: string;
   produto_id: string;
   produto_busca: string;
+  produto_fornecido?: ProdutoFornecidoInfo | null;
   quantidade_solicitada: string;
   corte_laser: boolean;
   observacao: string;
@@ -111,6 +130,12 @@ const SITUACOES_OLIST_OPCOES = [
   { value: "9", label: "9 - Nao Entregue" },
 ];
 const DASHBOARD_SOLICITACAO_KEY = "dashboard_solicitacao_manual_itens";
+const OBS_PRODUTO_FORNECIDO_PREFIXES = ["Produto fornecido:"];
+const OBS_PRODUTO_FORNECIDO_START = "<!--produto-fornecido:start-->";
+const OBS_PRODUTO_FORNECIDO_END = "<!--produto-fornecido:end-->";
+const OBS_PRODUTO_FORNECIDO_LINHA_REGEX =
+  /^\d+(?:[,.]\d+)?\s*m\s+de\s+.+\(\d+\s*x\s*\d+(?:[,.]\d+)?\s*m\)\.$/i;
+const LIMITE_SOLICITACOES_RESUMO = 80;
 
 function formatarDataLocal(date: Date) {
   const partes = new Intl.DateTimeFormat("en-CA", {
@@ -142,16 +167,55 @@ function formatarDataEntrega(dataEntrega: string) {
   return new Date(`${dataEntrega}T00:00:00`).toLocaleDateString("pt-BR");
 }
 
-function arredondarParaPar(valor: number) {
-  return valor % 2 === 0 ? valor : valor + 1;
-}
-
-function normalizarQuantidadePar(valor: string) {
+function normalizarQuantidadeInteira(valor: string) {
   const quantidade = Number(valor);
 
   if (Number.isNaN(quantidade) || quantidade < 0) return "0";
 
-  return String(arredondarParaPar(Math.ceil(quantidade)));
+  return String(Math.ceil(quantidade));
+}
+
+function numeroDecimal(valor: number | string | null | undefined) {
+  if (valor === null || valor === undefined || valor === "") return null;
+
+  const numero = typeof valor === "number" ? valor : Number(String(valor).replace(",", "."));
+  return Number.isNaN(numero) ? null : numero;
+}
+
+function formatarDecimal(valor: number, casas = 4) {
+  return new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: casas,
+  }).format(valor);
+}
+
+function removerObservacaoProdutoFornecido(observacao: string) {
+  const semBlocosMarcados = observacao.replace(
+    new RegExp(`${OBS_PRODUTO_FORNECIDO_START}[\\s\\S]*?${OBS_PRODUTO_FORNECIDO_END}`, "g"),
+    "",
+  );
+
+  return semBlocosMarcados
+    .split(/\r?\n/)
+    .filter(
+      (linha) => {
+        const linhaNormalizada = linha.trim();
+
+        return (
+          !OBS_PRODUTO_FORNECIDO_PREFIXES.some((prefixo) => linhaNormalizada.startsWith(prefixo)) &&
+          !OBS_PRODUTO_FORNECIDO_LINHA_REGEX.test(linhaNormalizada)
+        );
+      },
+    )
+    .join("\n")
+    .trim();
+}
+
+function ocultarMarcadoresObservacaoProdutoFornecido(observacao: string) {
+  return observacao
+    .replaceAll(OBS_PRODUTO_FORNECIDO_START, "")
+    .replaceAll(OBS_PRODUTO_FORNECIDO_END, "")
+    .trim();
 }
 
 const ITEM_INICIAL: ItemForm = {
@@ -181,7 +245,8 @@ export default function SolicitacoesProducaoPage() {
   const { usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
-  const [itens, setItens] = useState<ItemSolicitacao[]>([]);
+  const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
+  const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
   const [dataEntrega, setDataEntrega] = useState("");
   const [observacaoGeral, setObservacaoGeral] = useState("");
   const [itensForm, setItensForm] = useState<ItemForm[]>([{ ...ITEM_INICIAL }]);
@@ -199,42 +264,148 @@ export default function SolicitacoesProducaoPage() {
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
   const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
 
-  const qtdItensPorSolicitacao = useMemo(() => {
-    return itens.reduce<Record<string, number>>((acc, item) => {
-      acc[item.solicitacao_id] = (acc[item.solicitacao_id] ?? 0) + 1;
-      return acc;
-    }, {});
-  }, [itens]);
-
-  const itensPorSolicitacao = useMemo(() => {
-    return itens.reduce<Record<string, ItemSolicitacao[]>>((acc, item) => {
-      acc[item.solicitacao_id] = [...(acc[item.solicitacao_id] ?? []), item];
-      return acc;
-    }, {});
-  }, [itens]);
-
   async function carregarDados() {
     setLoading(true);
     setErrorMessage(null);
+    const produtosPromise = supabase.from("produtos").select("id, sku, imagem_url").eq("ativo", true).order("sku");
 
-    const [produtosResp, solicitacoesResp, itensResp] = await Promise.all([
-      supabase.from("produtos").select("id, sku, imagem_url").eq("ativo", true).order("sku"),
-      supabase.from("solicitacoes_producao").select("id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim").order("created_at", { ascending: false }),
-      supabase.from("itens_solicitacao_producao").select("id, solicitacao_id, produto_id, sku, quantidade_solicitada, tipo_corte, observacao").order("sku"),
-    ]);
+    try {
+      const [solicitacoesProducaoResp, demaisSolicitacoesResp] = await Promise.all([
+        supabase
+          .from("solicitacoes_producao")
+          .select("id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim")
+          .eq("status", "em_producao")
+          .order("prioridade_producao", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(LIMITE_SOLICITACOES_RESUMO),
+        supabase
+          .from("solicitacoes_producao")
+          .select("id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim")
+          .neq("status", "em_producao")
+          .order("created_at", { ascending: false })
+          .limit(LIMITE_SOLICITACOES_RESUMO),
+      ]);
 
-    if (produtosResp.error || solicitacoesResp.error || itensResp.error) {
-      setErrorMessage(produtosResp.error?.message ?? solicitacoesResp.error?.message ?? itensResp.error?.message ?? "Erro ao carregar dados.");
+      if (solicitacoesProducaoResp.error || demaisSolicitacoesResp.error) {
+        setErrorMessage(
+          solicitacoesProducaoResp.error?.message ??
+            demaisSolicitacoesResp.error?.message ??
+            "Erro ao carregar dados.",
+        );
+        return [];
+      }
+
+      const solicitacoesCarregadas = [
+        ...((solicitacoesProducaoResp.data as Solicitacao[]) ?? []),
+        ...((demaisSolicitacoesResp.data as Solicitacao[]) ?? []),
+      ];
+
+      setSolicitacoes(solicitacoesCarregadas.sort(ordenarSolicitacoes));
+      setItensPorSolicitacao({});
+      setItensCarregando({});
       setLoading(false);
+
+      const produtosResp = await produtosPromise;
+
+      if (produtosResp.error) {
+        setErrorMessage(`Solicitações carregadas, mas erro ao carregar produtos: ${produtosResp.error.message}`);
+        return [];
+      }
+
+      const produtosCarregados = (produtosResp.data as Produto[]) ?? [];
+      setProdutos(produtosCarregados);
+      return produtosCarregados;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao carregar dados.");
       return [];
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function carregarItensSolicitacao(solicitacaoId: string, force = false) {
+    if (!force && itensPorSolicitacao[solicitacaoId]) {
+      return itensPorSolicitacao[solicitacaoId];
     }
 
-    const produtosCarregados = (produtosResp.data as Produto[]) ?? [];
-    setProdutos(produtosCarregados);
-    setSolicitacoes([...((solicitacoesResp.data as Solicitacao[]) ?? [])].sort(ordenarSolicitacoes));
-    setItens((itensResp.data as ItemSolicitacao[]) ?? []);
-    setLoading(false);
-    return produtosCarregados;
+    setItensCarregando((anterior) => ({ ...anterior, [solicitacaoId]: true }));
+    setErrorMessage(null);
+
+    const { data, error } = await supabase
+      .from("itens_solicitacao_producao")
+      .select("id, solicitacao_id, produto_id, sku, quantidade_solicitada, tipo_corte, observacao")
+      .eq("solicitacao_id", solicitacaoId)
+      .order("sku");
+
+    setItensCarregando((anterior) => ({ ...anterior, [solicitacaoId]: false }));
+
+    if (error) {
+      setErrorMessage(`Erro ao carregar itens da solicitacao: ${error.message}`);
+      return null;
+    }
+
+    const itensCarregados = (data as ItemSolicitacao[]) ?? [];
+    setItensPorSolicitacao((anterior) => ({ ...anterior, [solicitacaoId]: itensCarregados }));
+
+    return itensCarregados;
+  }
+
+  async function carregarProdutoFornecido(produtoId: string, produtosBase = produtos) {
+    const produtoEmCache = produtosBase.find((produto) => produto.id === produtoId);
+
+    if (!produtoEmCache) return null;
+    if (produtoEmCache.produto_fornecido !== undefined) {
+      return produtoEmCache.produto_fornecido;
+    }
+
+    const salvarCache = (produtoFornecido: ProdutoFornecidoInfo | null) => {
+      setProdutos((anteriores) =>
+        anteriores.map((produto) =>
+          produto.id === produtoId ? { ...produto, produto_fornecido: produtoFornecido } : produto,
+        ),
+      );
+
+      return produtoFornecido;
+    };
+
+    const { data: associacoesData, error: associacoesError } = await supabase
+      .from("produto_olist_produto_fornecedor")
+      .select("produto_fornecedor_id, quantidade_usada")
+      .eq("produto_id", produtoId)
+      .limit(1);
+
+    if (associacoesError) {
+      setErrorMessage(`Erro ao validar produto fornecido: ${associacoesError.message}`);
+      return null;
+    }
+
+    const associacao = ((associacoesData as ProdutoOlistProdutoFornecedorRow[]) ?? [])[0];
+
+    if (!associacao) return salvarCache(null);
+
+    const { data: fornecedorData, error: fornecedorError } = await supabase
+      .from("produtos_fornecedor")
+      .select("id, nome, referencia")
+      .eq("id", associacao.produto_fornecedor_id)
+      .maybeSingle();
+
+    if (fornecedorError) {
+      setErrorMessage(`Erro ao validar produto fornecido: ${fornecedorError.message}`);
+      return null;
+    }
+
+    const fornecedor = fornecedorData as ProdutoFornecedorRow | null;
+    const quantidadePorProduto = numeroDecimal(associacao.quantidade_usada);
+
+    if (!fornecedor || quantidadePorProduto === null || quantidadePorProduto <= 0) {
+      return salvarCache(null);
+    }
+
+    return salvarCache({
+      id: fornecedor.id,
+      nome: fornecedor.nome,
+      quantidade_por_produto: quantidadePorProduto,
+    });
   }
 
   useEffect(() => {
@@ -258,7 +429,7 @@ export default function SolicitacoesProducaoPage() {
           itensValidos.map((item) => ({
             produto_id: item.produto_id,
             produto_busca: item.sku,
-            quantidade_solicitada: String(arredondarParaPar(Number(item.quantidade_solicitada))),
+            quantidade_solicitada: normalizarQuantidadeInteira(String(item.quantidade_solicitada)),
             corte_laser: true,
             observacao: item.observacao ?? "Gerado pelo dashboard",
           })),
@@ -274,8 +445,40 @@ export default function SolicitacoesProducaoPage() {
     }
   }, [produtos]);
 
+  function montarObservacaoProdutoFornecido(item: ItemForm) {
+    const produto = produtos.find((produtoAtual) => produtoAtual.id === item.produto_id);
+    const produtoFornecido = item.produto_fornecido ?? produto?.produto_fornecido;
+    const quantidadeSolicitada = Math.ceil(Number(item.quantidade_solicitada));
+
+    if (
+      !produtoFornecido ||
+      Number.isNaN(quantidadeSolicitada) ||
+      quantidadeSolicitada <= 0
+    ) {
+      return null;
+    }
+
+    const quantidadeTotal = quantidadeSolicitada * produtoFornecido.quantidade_por_produto;
+
+    return `${OBS_PRODUTO_FORNECIDO_START}${formatarDecimal(quantidadeTotal)} m de ${produtoFornecido.nome} (${quantidadeSolicitada} x ${formatarDecimal(produtoFornecido.quantidade_por_produto)} m).${OBS_PRODUTO_FORNECIDO_END}`;
+  }
+
+  function aplicarObservacaoProdutoFornecido(item: ItemForm) {
+    const observacaoManual = removerObservacaoProdutoFornecido(item.observacao);
+    const observacaoProdutoFornecido = montarObservacaoProdutoFornecido(item);
+
+    return {
+      ...item,
+      observacao: [observacaoManual, observacaoProdutoFornecido].filter(Boolean).join("\n"),
+    };
+  }
+
   function alterarItem(index: number, patch: Partial<ItemForm>) {
-    setItensForm((anterior) => anterior.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+    setItensForm((anterior) =>
+      anterior.map((item, i) =>
+        i === index ? aplicarObservacaoProdutoFornecido({ ...item, ...patch }) : item,
+      ),
+    );
   }
 
   function produtosFiltrados(busca: string) {
@@ -287,22 +490,27 @@ export default function SolicitacoesProducaoPage() {
     return lista.slice(0, 12);
   }
 
-  function alterarProdutoBusca(index: number, valor: string) {
+  async function alterarProdutoBusca(index: number, valor: string) {
     const produto = produtos.find(
       (item) => item.sku.toLowerCase() === valor.trim().toLowerCase(),
     );
+    const produtoFornecido = produto ? await carregarProdutoFornecido(produto.id) : null;
 
     alterarItem(index, {
       produto_busca: valor,
       produto_id: produto?.id ?? "",
+      produto_fornecido: produtoFornecido,
     });
     setProdutoBuscaAberta(index);
   }
 
-  function selecionarProduto(index: number, produto: Produto) {
+  async function selecionarProduto(index: number, produto: Produto) {
+    const produtoFornecido = await carregarProdutoFornecido(produto.id);
+
     alterarItem(index, {
       produto_id: produto.id,
       produto_busca: produto.sku,
+      produto_fornecido: produtoFornecido,
     });
     setProdutoBuscaAberta(null);
   }
@@ -319,10 +527,10 @@ export default function SolicitacoesProducaoPage() {
     setItensForm((anterior) =>
       anterior.map((item, i) =>
         i === index
-          ? {
+          ? aplicarObservacaoProdutoFornecido({
               ...item,
-              quantidade_solicitada: normalizarQuantidadePar(item.quantidade_solicitada),
-            }
+              quantidade_solicitada: normalizarQuantidadeInteira(item.quantidade_solicitada),
+            })
           : item,
       ),
     );
@@ -336,11 +544,17 @@ export default function SolicitacoesProducaoPage() {
     setItensForm((anterior) => (anterior.length > 1 ? anterior.filter((_, i) => i !== index) : anterior));
   }
 
-  function alternarDetalhesSolicitacao(solicitacaoId: string) {
+  async function alternarDetalhesSolicitacao(solicitacaoId: string) {
+    const vaiAbrir = !solicitacoesAbertas[solicitacaoId];
+
     setSolicitacoesAbertas((anterior) => ({
       ...anterior,
-      [solicitacaoId]: !anterior[solicitacaoId],
+      [solicitacaoId]: vaiAbrir,
     }));
+
+    if (vaiAbrir) {
+      await carregarItensSolicitacao(solicitacaoId);
+    }
   }
 
   function limparFormulario() {
@@ -372,7 +586,7 @@ export default function SolicitacoesProducaoPage() {
         id: item.id,
         produto_id: item.produto_id,
         produto_busca: item.sku,
-        quantidade_solicitada: String(arredondarParaPar(Number(item.quantidade_solicitada))),
+        quantidade_solicitada: normalizarQuantidadeInteira(String(item.quantidade_solicitada)),
         corte_laser: item.tipo_corte === "LASER",
         observacao: item.observacao ?? "",
       })),
@@ -589,24 +803,31 @@ export default function SolicitacoesProducaoPage() {
       return;
     }
 
-    await carregarDados();
+    const produtosAtualizados = await carregarDados();
     setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
-    setObservacaoGeral(String(json.observacao_geral ?? "Gerada via Olist. Revise os itens antes de salvar."));
+    setObservacaoGeral("MV:");
     setPrioridadeProducao(Boolean(json.prioridade_producao));
-    setItensForm(
-      itensPreparados.map((item) => ({
-        produto_id: item.produto_id,
-        produto_busca: produtos.find((produto) => produto.id === item.produto_id)?.sku ?? "",
-        quantidade_solicitada: String(arredondarParaPar(Number(item.quantidade_solicitada))),
-        corte_laser: true,
-        observacao: "Gerado por integracao Olist",
-        prioridade_producao: Boolean(item.prioridade_producao),
-        existe_em_producao: Boolean(item.existe_em_producao),
-        quantidade_em_producao: Number(item.quantidade_em_producao ?? 0),
-        quantidade_pedidos: Number(item.quantidade_pedidos ?? 0),
-        estoque_atual: Number(item.estoque_atual ?? 0),
-      })),
+    const itensComProdutoFornecido = await Promise.all(
+      itensPreparados.map(async (item) => {
+        const produto = produtosAtualizados.find((produtoAtual) => produtoAtual.id === item.produto_id);
+        const produtoFornecido = await carregarProdutoFornecido(item.produto_id, produtosAtualizados);
+
+        return aplicarObservacaoProdutoFornecido({
+          produto_id: item.produto_id,
+          produto_busca: produto?.sku ?? "",
+          produto_fornecido: produtoFornecido,
+          quantidade_solicitada: normalizarQuantidadeInteira(String(item.quantidade_solicitada)),
+          corte_laser: true,
+          observacao: "",
+          prioridade_producao: Boolean(item.prioridade_producao),
+          existe_em_producao: Boolean(item.existe_em_producao),
+          quantidade_em_producao: Number(item.quantidade_em_producao ?? 0),
+          quantidade_pedidos: Number(item.quantidade_pedidos ?? 0),
+          estoque_atual: Number(item.estoque_atual ?? 0),
+        });
+      }),
     );
+    setItensForm(itensComProdutoFornecido);
     setProcessamentoOlistPendente({
       periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
       periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
@@ -636,10 +857,14 @@ export default function SolicitacoesProducaoPage() {
       return;
     }
 
-    const itensNormalizados = itensForm.map((item) => ({
-      ...item,
-      quantidade: arredondarParaPar(Number(item.quantidade_solicitada)),
-    }));
+    const itensNormalizados = itensForm.map((item) => {
+      const itemComObservacao = aplicarObservacaoProdutoFornecido(item);
+
+      return {
+        ...itemComObservacao,
+        quantidade: Math.ceil(Number(itemComObservacao.quantidade_solicitada)),
+      };
+    });
 
     const itemInvalido = itensNormalizados.find((item) => !item.produto_id || Number.isNaN(item.quantidade) || item.quantidade < 0);
 
@@ -693,7 +918,7 @@ export default function SolicitacoesProducaoPage() {
           imagem_url: produto?.imagem_url ?? null,
           quantidade_solicitada: item.quantidade,
           tipo_corte: item.corte_laser ? "LASER" : "PADRAO",
-          observacao: item.observacao.trim() || null,
+          observacao: ocultarMarcadoresObservacaoProdutoFornecido(item.observacao).trim() || null,
         };
 
         const { error: itemErro } = item.id
@@ -759,7 +984,7 @@ export default function SolicitacoesProducaoPage() {
           quantidade_solicitada: item.quantidade,
           quantidade_produzida: 0,
           tipo_corte: item.corte_laser ? "LASER" : "PADRAO",
-          observacao: item.observacao.trim() || null,
+          observacao: ocultarMarcadoresObservacaoProdutoFornecido(item.observacao).trim() || null,
           status_item: "em_producao",
         };
       });
@@ -822,6 +1047,8 @@ export default function SolicitacoesProducaoPage() {
             {solicitacoesTabela.map((solicitacao) => {
               const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
               const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+              const itensJaCarregados = Boolean(itensPorSolicitacao[solicitacao.id]);
+              const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
               const podeAlterar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
 
               return (
@@ -839,15 +1066,20 @@ export default function SolicitacoesProducaoPage() {
                     </td>
                     <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
                     <td className="p-3 text-slate-700">{solicitacao.observacao_geral || "-"}</td>
-                    <td className="p-3 text-slate-700">{qtdItensPorSolicitacao[solicitacao.id] ?? 0}</td>
+                    <td className="p-3 text-slate-700">
+                      {itensJaCarregados ? itensSolicitacao.length : "Ao abrir"}
+                    </td>
                     <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
                     <td className="p-3">
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => imprimirSolicitacao(solicitacao, itensSolicitacao)}
+                          onClick={async () => {
+                            const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
+                            if (itensCarregados?.length) imprimirSolicitacao(solicitacao, itensCarregados);
+                          }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={itensSolicitacao.length === 0}
+                          disabled={carregandoItens}
                           title="Imprimir detalhes"
                           aria-label="Imprimir detalhes da solicitação"
                         >
@@ -855,9 +1087,12 @@ export default function SolicitacoesProducaoPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => baixarImagemSolicitacao(solicitacao, itensSolicitacao)}
+                          onClick={async () => {
+                            const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
+                            if (itensCarregados?.length) baixarImagemSolicitacao(solicitacao, itensCarregados);
+                          }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={itensSolicitacao.length === 0}
+                          disabled={carregandoItens}
                           title="Salvar imagem"
                           aria-label="Salvar imagem dos detalhes da solicitação"
                         >
@@ -867,9 +1102,12 @@ export default function SolicitacoesProducaoPage() {
                           <>
                             <button
                               type="button"
-                              onClick={() => editarSolicitacao(solicitacao, itensSolicitacao)}
+                              onClick={async () => {
+                                const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
+                                if (itensCarregados?.length) editarSolicitacao(solicitacao, itensCarregados);
+                              }}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={itensSolicitacao.length === 0 || saving || !podeAlterar}
+                              disabled={carregandoItens || saving || !podeAlterar}
                               title="Editar solicitação"
                               aria-label="Editar solicitação"
                             >
@@ -891,7 +1129,7 @@ export default function SolicitacoesProducaoPage() {
                           type="button"
                           onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={itensSolicitacao.length === 0}
+                          disabled={carregandoItens}
                           title={aberta ? "Ocultar produtos" : "Ver produtos"}
                           aria-label={aberta ? "Ocultar produtos da solicitação" : "Ver produtos da solicitação"}
                           aria-expanded={aberta}
@@ -904,6 +1142,15 @@ export default function SolicitacoesProducaoPage() {
                   {aberta && (
                     <tr className={`border-b bg-slate-50 ${destacarDivisao ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
                       <td className="p-3" colSpan={7}>
+                        {carregandoItens ? (
+                          <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                            Carregando itens da solicitacao...
+                          </p>
+                        ) : itensSolicitacao.length === 0 ? (
+                          <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                            Solicitacao sem itens cadastrados.
+                          </p>
+                        ) : (
                         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
                           <table className="min-w-full border-collapse text-sm">
                             <thead>
@@ -926,6 +1173,7 @@ export default function SolicitacoesProducaoPage() {
                             </tbody>
                           </table>
                         </div>
+                        )}
                       </td>
                     </tr>
                   )}
@@ -945,6 +1193,12 @@ export default function SolicitacoesProducaoPage() {
         title="Solicitações de Produção"
         description="Crie novas solicitações e acompanhe as solicitações já abertas."
       />
+
+      {errorMessage && (
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {errorMessage}
+        </p>
+      )}
 
 
       {podeSolicitarProducao && (
@@ -1065,7 +1319,7 @@ export default function SolicitacoesProducaoPage() {
                   <input
                     required
                     value={item.produto_busca}
-                    onChange={(event) => alterarProdutoBusca(index, event.target.value)}
+                    onChange={(event) => void alterarProdutoBusca(index, event.target.value)}
                     onFocus={() => setProdutoBuscaAberta(index)}
                     onBlur={() => {
                       window.setTimeout(() => setProdutoBuscaAberta(null), 120);
@@ -1081,7 +1335,7 @@ export default function SolicitacoesProducaoPage() {
                             key={produto.id}
                             type="button"
                             onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => selecionarProduto(index, produto)}
+                            onClick={() => void selecionarProduto(index, produto)}
                             className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
                           >
                             {produto.sku}
@@ -1102,7 +1356,7 @@ export default function SolicitacoesProducaoPage() {
                     required
                     type="number"
                     min={0}
-                    step={2}
+                    step={1}
                     value={item.quantidade_solicitada}
                     onChange={(event) => alterarItem(index, { quantidade_solicitada: event.target.value })}
                     onBlur={() => normalizarQuantidadeItem(index)}
@@ -1121,10 +1375,10 @@ export default function SolicitacoesProducaoPage() {
 
                 <label className="text-sm text-slate-700">
                   Observação
-                  <input
-                    value={item.observacao}
+                  <textarea
+                    value={ocultarMarcadoresObservacaoProdutoFornecido(item.observacao)}
                     onChange={(event) => alterarItem(index, { observacao: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                    className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
                   />
                 </label>
 

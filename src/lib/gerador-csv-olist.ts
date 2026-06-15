@@ -794,10 +794,16 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[], options?: 
 
 export function montarCsvProdutosFabricadosOlist(
   produtos: ProdutoFinalOlist[],
-  input: {
-    componenteId: string;
-    quantidade: string | number;
-  },
+  input:
+    | {
+        componenteId: string;
+        quantidade: string | number;
+      }
+    | Array<{
+        produto: ProdutoFinalOlist;
+        componenteId: string;
+        quantidade: string | number;
+      }>,
 ) {
   const headers = [
     "ID kit/fabricado",
@@ -808,15 +814,25 @@ export function montarCsvProdutosFabricadosOlist(
     "Descrição componente",
     "Quantidade componente",
   ];
-  const rows = produtos.map((produto) => [
-    produto.produto?.idCadastroOlist ?? "",
-    produto.skuFinal,
-    "",
-    input.componenteId,
-    "",
-    "",
-    input.quantidade,
-  ]);
+  const rows = Array.isArray(input)
+    ? input.map((item) => [
+        item.produto.produto?.idCadastroOlist ?? "",
+        item.produto.skuFinal,
+        "",
+        item.componenteId,
+        "",
+        "",
+        item.quantidade,
+      ])
+    : produtos.map((produto) => [
+        produto.produto?.idCadastroOlist ?? "",
+        produto.skuFinal,
+        "",
+        input.componenteId,
+        "",
+        "",
+        input.quantidade,
+      ]);
 
   return [headers, ...rows]
     .map((row) => row.map((value) => csvValue(value)).join(","))

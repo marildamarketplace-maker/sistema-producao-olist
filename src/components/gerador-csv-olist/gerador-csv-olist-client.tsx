@@ -147,6 +147,23 @@ function parseDecimalText(value: string) {
   return Number.isNaN(numberValue) ? null : numberValue;
 }
 
+function parseFlexibleDecimalText(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.includes(",")
+    ? trimmed.replace(/\./g, "").replace(",", ".")
+    : trimmed;
+  const numberValue = Number(normalized);
+
+  return Number.isNaN(numberValue) ? null : numberValue;
+}
+
+function normalizeFlexibleDecimalText(value: string, digits: number) {
+  const numberValue = parseFlexibleDecimalText(value);
+  return numberValue === null ? value : formatNumberForInput(numberValue, digits);
+}
+
 function parsePercentText(value: string) {
   const numberValue = parseDecimalText(value);
   return numberValue === null ? null : numberValue / 100;
@@ -2374,16 +2391,25 @@ function ProdutosCriadosTab({
     await onLinkProdutos(produtosSelecionados.map((produto) => produto.id));
   }
 
+  function abrirModalFabricado() {
+    setFabricadoErro(null);
+    setFabricadoModalOpen(true);
+  }
+
   function exportarFabricado(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFabricadoErro(null);
 
     const componenteId = fabricadoComponenteId.trim();
-    const quantidade = fabricadoQuantidade.trim() || "1";
+    const quantidadeNumber = parseFlexibleDecimalText(fabricadoQuantidade.trim() || "1");
     const semProdutoVinculado = produtosSelecionados.filter((produto) => !produto.produto?.idCadastroOlist);
 
     if (!componenteId) {
       setFabricadoErro("Informe o ID componente.");
+      return;
+    }
+    if (quantidadeNumber === null || quantidadeNumber <= 0) {
+      setFabricadoErro("Informe uma quantidade decimal valida.");
       return;
     }
     if (semProdutoVinculado.length > 0) {
@@ -2391,7 +2417,10 @@ function ProdutosCriadosTab({
       return;
     }
 
-    const csv = montarCsvProdutosFabricadosOlist(produtosSelecionados, { componenteId, quantidade });
+    const csv = montarCsvProdutosFabricadosOlist(produtosSelecionados, {
+      componenteId,
+      quantidade: formatNumberForInput(quantidadeNumber, 4),
+    });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -2431,10 +2460,7 @@ function ProdutosCriadosTab({
             </button>
             <button
               type="button"
-              onClick={() => {
-                setFabricadoErro(null);
-                setFabricadoModalOpen(true);
-              }}
+              onClick={abrirModalFabricado}
               disabled={produtosSelecionados.length === 0}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
@@ -2690,8 +2716,10 @@ function ProdutosCriadosTab({
                 Quantidade componente
                 <input
                   required
+                  inputMode="decimal"
                   value={fabricadoQuantidade}
                   onChange={(event) => setFabricadoQuantidade(event.target.value)}
+                  onBlur={() => setFabricadoQuantidade((prev) => normalizeFlexibleDecimalText(prev, 4))}
                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
                   placeholder="1"
                 />

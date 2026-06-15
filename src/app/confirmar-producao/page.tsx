@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AccessGuard } from "@/components/access-guard";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
@@ -38,43 +38,30 @@ function formatarDataEntrega(dataEntrega: string) {
 
 export default function ConfirmarProducaoPage() {
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
-  const [itens, setItens] = useState<ItemSolicitacao[]>([]);
+  const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
+  const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
+  const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [produzidas, setProduzidas] = useState<Record<string, string>>({});
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState("+55 37 8803-2390");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const itensPorSolicitacao = useMemo(() => {
-    return itens.reduce<Record<string, ItemSolicitacao[]>>((acc, item) => {
-      acc[item.solicitacao_id] = [...(acc[item.solicitacao_id] ?? []), item];
-      return acc;
-    }, {});
-  }, [itens]);
-
   async function carregarDados() {
     setLoading(true);
     setMessage(null);
 
-    const [solicitacoesResp, itensResp] = await Promise.all([
-      supabase
-        .from("solicitacoes_producao")
-        .select(
-          "id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim",
-        )
-        .eq("status", "em_producao")
-        .order("prioridade_producao", { ascending: false })
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("itens_solicitacao_producao")
-        .select(
-          "id, solicitacao_id, produto_id, sku, imagem_url, quantidade_solicitada, quantidade_produzida, tipo_corte, observacao",
-        )
-        .order("created_at", { ascending: true }),
-    ]);
+    const solicitacoesResp = await supabase
+      .from("solicitacoes_producao")
+      .select(
+        "id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim",
+      )
+      .eq("status", "em_producao")
+      .order("prioridade_producao", { ascending: false })
+      .order("created_at", { ascending: false });
 
-    if (solicitacoesResp.error || itensResp.error) {
-      setMessage(solicitacoesResp.error?.message ?? itensResp.error?.message ?? "Erro ao carregar dados.");
+    if (solicitacoesResp.error) {
+      setMessage(solicitacoesResp.error.message ?? "Erro ao carregar dados.");
       setLoading(false);
       return;
     }
@@ -87,20 +74,61 @@ export default function ConfirmarProducaoPage() {
 
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
-    const solicitacoesIds = new Set(listaSolicitacoes.map((solicitacao) => solicitacao.id));
-    const listaItens = ((itensResp.data as ItemSolicitacao[]) ?? []).filter((item) =>
-      solicitacoesIds.has(item.solicitacao_id),
-    );
 
     setSolicitacoes(listaSolicitacoes);
-    setItens(listaItens);
-
-    const inicial: Record<string, string> = {};
-    listaItens.forEach((item) => {
-      inicial[item.id] = String(item.quantidade_produzida ?? 0);
-    });
-    setProduzidas(inicial);
+    setItensPorSolicitacao({});
+    setItensCarregando({});
+    setSolicitacoesAbertas({});
+    setProduzidas({});
     setLoading(false);
+  }
+
+  async function carregarItensSolicitacao(solicitacaoId: string, force = false) {
+    if (!force && itensPorSolicitacao[solicitacaoId]) {
+      return itensPorSolicitacao[solicitacaoId];
+    }
+
+    setItensCarregando((prev) => ({ ...prev, [solicitacaoId]: true }));
+    setMessage(null);
+
+    const { data, error } = await supabase
+      .from("itens_solicitacao_producao")
+      .select(
+        "id, solicitacao_id, produto_id, sku, imagem_url, quantidade_solicitada, quantidade_produzida, tipo_corte, observacao",
+      )
+      .eq("solicitacao_id", solicitacaoId)
+      .order("created_at", { ascending: true });
+
+    setItensCarregando((prev) => ({ ...prev, [solicitacaoId]: false }));
+
+    if (error) {
+      setMessage(`Erro ao carregar itens: ${error.message}`);
+      return null;
+    }
+
+    const itensCarregados = (data as ItemSolicitacao[]) ?? [];
+    setItensPorSolicitacao((prev) => ({ ...prev, [solicitacaoId]: itensCarregados }));
+    setProduzidas((prev) => {
+      const proximo = { ...prev };
+
+      itensCarregados.forEach((item) => {
+        proximo[item.id] = proximo[item.id] ?? String(item.quantidade_produzida ?? 0);
+      });
+
+      return proximo;
+    });
+
+    return itensCarregados;
+  }
+
+  async function alternarDetalhesSolicitacao(solicitacaoId: string) {
+    const vaiAbrir = !solicitacoesAbertas[solicitacaoId];
+
+    setSolicitacoesAbertas((prev) => ({ ...prev, [solicitacaoId]: vaiAbrir }));
+
+    if (vaiAbrir) {
+      await carregarItensSolicitacao(solicitacaoId);
+    }
   }
 
   useEffect(() => {
@@ -137,9 +165,24 @@ export default function ConfirmarProducaoPage() {
     return `https://wa.me/${telefone}?text=${encodeURIComponent(texto)}`;
   }
 
+  async function cobrarWhatsapp(solicitacao: Solicitacao) {
+    const itensSolicitacao = await carregarItensSolicitacao(solicitacao.id);
+
+    if (!itensSolicitacao?.length) {
+      setMessage("Solicitação sem itens cadastrados.");
+      return;
+    }
+
+    const link = montarLinkWhatsapp(solicitacao, itensSolicitacao);
+    window.open(link, "_blank", "noopener,noreferrer");
+  }
+
   async function confirmarProducao(solicitacao: Solicitacao) {
-    const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
-    if (itensSolicitacao.length === 0) return;
+    const itensSolicitacao = await carregarItensSolicitacao(solicitacao.id);
+    if (!itensSolicitacao?.length) {
+      setMessage("Solicitação sem itens cadastrados.");
+      return;
+    }
 
     setSavingId(solicitacao.id);
     setMessage(null);
@@ -242,6 +285,9 @@ export default function ConfirmarProducaoPage() {
       {!loading &&
         solicitacoes.map((solicitacao) => {
           const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
+          const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
+          const itensJaCarregados = Boolean(itensPorSolicitacao[solicitacao.id]);
+          const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
           const saving = savingId === solicitacao.id;
 
           return (
@@ -268,7 +314,7 @@ export default function ConfirmarProducaoPage() {
                       <strong>Criada em:</strong> {new Date(solicitacao.created_at).toLocaleString("pt-BR")}
                     </p>
                     <p>
-                      <strong>Itens:</strong> {itensSolicitacao.length}
+                      <strong>Itens:</strong> {itensJaCarregados ? itensSolicitacao.length : "Ao abrir"}
                     </p>
                     <p className="md:col-span-2">
                       <strong>Observação geral:</strong> {solicitacao.observacao_geral || "-"}
@@ -287,22 +333,26 @@ export default function ConfirmarProducaoPage() {
                 </div>
 
                 <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
-                  <a
-                    href={montarLinkWhatsapp(solicitacao, itensSolicitacao)}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-disabled={itensSolicitacao.length === 0 || telefoneWhatsapp.replace(/\D/g, "").length === 0}
-                    className={`rounded-md border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 hover:bg-slate-50 ${
-                      itensSolicitacao.length === 0 || telefoneWhatsapp.replace(/\D/g, "").length === 0
-                        ? "pointer-events-none opacity-50"
-                        : ""
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
+                    disabled={carregandoItens}
+                    className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    aria-expanded={aberta}
+                  >
+                    {aberta ? "Ocultar itens" : carregandoItens ? "Carregando..." : "Ver itens"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cobrarWhatsapp(solicitacao)}
+                    disabled={carregandoItens || telefoneWhatsapp.replace(/\D/g, "").length === 0}
+                    className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     Cobrar no WhatsApp
-                  </a>
+                  </button>
                   <button
                     onClick={() => confirmarProducao(solicitacao)}
-                    disabled={savingId !== null || itensSolicitacao.length === 0}
+                    disabled={savingId !== null || carregandoItens}
                     className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {saving ? "Confirmando..." : "Confirmar produção"}
@@ -310,7 +360,11 @@ export default function ConfirmarProducaoPage() {
                 </div>
               </div>
 
-              {itensSolicitacao.length === 0 ? (
+              {!aberta ? (
+                <p className="text-sm text-slate-600">Abra os itens para conferir os produtos desta solicitação.</p>
+              ) : carregandoItens ? (
+                <p className="text-sm text-slate-600">Carregando itens...</p>
+              ) : itensSolicitacao.length === 0 ? (
                 <p className="text-sm text-slate-600">Solicitação sem itens cadastrados.</p>
               ) : (
                 <div className="overflow-x-auto">

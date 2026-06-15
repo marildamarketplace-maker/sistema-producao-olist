@@ -65,10 +65,24 @@ const INITIAL_FORM: ProdutoFornecedorFormData = {
 };
 
 function normalizarNumero(valor: string) {
-  const normalizado = valor.trim().replace(/\./g, "").replace(",", ".");
+  const trimmed = valor.trim();
+  const normalizado = trimmed.includes(",")
+    ? trimmed.replace(/\./g, "").replace(",", ".")
+    : trimmed;
+
   if (!normalizado) return null;
 
   return Number(normalizado);
+}
+
+function formatarNumeroParaInput(valor: number | string | null, casas: number) {
+  if (valor === null) return "";
+
+  const numero = Number(valor);
+
+  if (Number.isNaN(numero)) return String(valor);
+
+  return numero.toFixed(casas).replace(".", ",");
 }
 
 function formatarPreco(valor: number | string) {
@@ -112,6 +126,7 @@ export default function ProdutosFornecedorPage() {
   const [formData, setFormData] =
     useState<ProdutoFornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -162,22 +177,23 @@ export default function ProdutosFornecedorPage() {
   function resetForm() {
     setFormData(INITIAL_FORM);
     setEditingId(null);
+    setFormOpen(false);
   }
 
   function handleEdit(produto: ProdutoFornecedor) {
     setEditingId(produto.id);
+    setFormOpen(true);
     setFormData({
       fornecedor_id: produto.fornecedor_id,
       nome: produto.nome,
       descricao: produto.descricao ?? "",
       referencia: produto.referencia ?? "",
-      preco_unitario_metro: String(produto.preco_unitario_metro),
-      peso_liquido_metro: produto.peso_liquido_metro === null ? "" : String(produto.peso_liquido_metro),
-      peso_bruto_metro: produto.peso_bruto_metro === null ? "" : String(produto.peso_bruto_metro),
-      largura_embalagem_metro: produto.largura_embalagem_metro === null ? "" : String(produto.largura_embalagem_metro),
-      altura_embalagem_metro: produto.altura_embalagem_metro === null ? "" : String(produto.altura_embalagem_metro),
-      comprimento_embalagem_metro:
-        produto.comprimento_embalagem_metro === null ? "" : String(produto.comprimento_embalagem_metro),
+      preco_unitario_metro: formatarNumeroParaInput(produto.preco_unitario_metro, 2),
+      peso_liquido_metro: formatarNumeroParaInput(produto.peso_liquido_metro, 3),
+      peso_bruto_metro: formatarNumeroParaInput(produto.peso_bruto_metro, 3),
+      largura_embalagem_metro: formatarNumeroParaInput(produto.largura_embalagem_metro, 2),
+      altura_embalagem_metro: formatarNumeroParaInput(produto.altura_embalagem_metro, 2),
+      comprimento_embalagem_metro: formatarNumeroParaInput(produto.comprimento_embalagem_metro, 2),
     });
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -289,11 +305,29 @@ export default function ProdutosFornecedorPage() {
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {isEditing ? "Editar produto" : "Cadastrar produto"}
-        </h3>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-slate-900">
+            {isEditing ? "Editar produto" : "Cadastrar produto"}
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              if (formOpen) {
+                resetForm();
+                return;
+              }
 
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
+              setFormOpen(true);
+            }}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-expanded={formOpen}
+          >
+            {formOpen ? "Fechar" : "Abrir"}
+          </button>
+        </div>
+
+        {formOpen && (
+        <form className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <label className="text-sm text-slate-700">
             Fornecedor
             <select
@@ -423,6 +457,7 @@ export default function ProdutosFornecedorPage() {
             )}
           </div>
         </form>
+        )}
 
         {fornecedores.length === 0 && !isLoading && (
           <p className="mt-4 text-sm text-amber-700">
@@ -451,6 +486,7 @@ export default function ProdutosFornecedorPage() {
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
+                  <th className="p-3">ID</th>
                   <th className="p-3">Fornecedor</th>
                   <th className="p-3">Nome</th>
                   <th className="p-3">Referencia</th>
@@ -464,6 +500,9 @@ export default function ProdutosFornecedorPage() {
               <tbody>
                 {produtos.map((produto) => (
                   <tr key={produto.id} className="border-b border-slate-100">
+                    <td className="max-w-48 break-all p-3 font-mono text-xs text-slate-600">
+                      {produto.id}
+                    </td>
                     <td className="p-3 text-slate-700">
                       {produto.fornecedores?.nome ?? "-"}
                     </td>

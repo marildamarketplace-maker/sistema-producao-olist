@@ -1451,7 +1451,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     filtro_data_base: input.filtroDataBase,
     periodo_inicio: processamentoEm,
     periodo_fim: processamentoEm,
-    observacao_geral: "Gerada via Olist. Revise os itens antes de salvar.",
+    observacao_geral: "MV:",
     prioridade_producao: prioridadeProducao,
     itens: itensComStatusProducao,
     total_itens: itensComStatusProducao.length,

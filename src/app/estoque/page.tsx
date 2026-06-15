@@ -81,6 +81,7 @@ export default function EstoquePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importingProdutos, setImportingProdutos] = useState(false);
+  const [manualFormOpen, setManualFormOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -452,11 +453,22 @@ export default function EstoquePage() {
 
       {podeEditarEstoque && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          Adicionar movimentacao manual
-        </h3>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-slate-900">
+            Adicionar movimentacao manual
+          </h3>
+          <button
+            type="button"
+            onClick={() => setManualFormOpen((prev) => !prev)}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-expanded={manualFormOpen}
+          >
+            {manualFormOpen ? "Fechar" : "Abrir"}
+          </button>
+        </div>
+        {manualFormOpen && (
         <form
-          className="grid grid-cols-1 gap-4 md:grid-cols-3"
+          className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3"
           onSubmit={handleAdicionarMovimentacao}
         >
           <label className="relative text-sm text-slate-700">
@@ -546,6 +558,7 @@ export default function EstoquePage() {
             </button>
           </div>
         </form>
+        )}
         {errorMessage && (
           <p className="mt-4 text-sm text-red-600">{errorMessage}</p>
         )}

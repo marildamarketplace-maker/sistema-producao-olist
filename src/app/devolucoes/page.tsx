@@ -68,6 +68,7 @@ export default function DevolucoesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
+  const [formSolicitacaoOpen, setFormSolicitacaoOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const podeSolicitarDevolucao = Boolean(usuario?.podeSolicitarDevolucao);
 
@@ -166,6 +167,7 @@ export default function DevolucoesPage() {
   function adicionarItem() {
     if (!podeSolicitarDevolucao) return;
 
+    setFormSolicitacaoOpen(true);
     setItensForm((anterior) => [...anterior, { ...ITEM_INICIAL }]);
   }
 
@@ -179,6 +181,7 @@ export default function DevolucoesPage() {
     setPedidoReferencia("");
     setObservacaoGeral("");
     setItensForm([{ ...ITEM_INICIAL }]);
+    setFormSolicitacaoOpen(false);
   }
 
   async function criarSolicitacao(event: FormEvent<HTMLFormElement>) {
@@ -324,9 +327,20 @@ export default function DevolucoesPage() {
 
       {podeSolicitarDevolucao && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Nova solicitação de devolução</h3>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-slate-900">Nova solicitação de devolução</h3>
+          <button
+            type="button"
+            onClick={() => setFormSolicitacaoOpen((prev) => !prev)}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-expanded={formSolicitacaoOpen}
+          >
+            {formSolicitacaoOpen ? "Fechar" : "Abrir"}
+          </button>
+        </div>
 
-        <form className="space-y-4" onSubmit={criarSolicitacao}>
+        {formSolicitacaoOpen && (
+        <form className="mt-4 space-y-4" onSubmit={criarSolicitacao}>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-700">
               Pedido ou referência
@@ -439,6 +453,7 @@ export default function DevolucoesPage() {
             {saving ? "Salvando..." : "Criar solicitação"}
           </button>
         </form>
+        )}
 
         {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
       </section>

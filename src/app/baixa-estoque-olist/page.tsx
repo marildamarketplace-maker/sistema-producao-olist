@@ -77,6 +77,7 @@ export default function BaixaEstoqueOlistPage() {
   const [buscando, setBuscando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [pedidoSincronizando, setPedidoSincronizando] = useState<string | null>(null);
+  const [formBaixaOpen, setFormBaixaOpen] = useState(false);
   const [historicoBaixas, setHistoricoBaixas] = useState<BaixaHistorico[]>([]);
   const [itensHistorico, setItensHistorico] = useState<ItemBaixaHistorico[]>([]);
   const [historicoAberto, setHistoricoAberto] = useState<Record<string, boolean>>({});
@@ -148,6 +149,7 @@ export default function BaixaEstoqueOlistPage() {
     setPedidosSelecionados([]);
     setItensForm([{ ...ITEM_INICIAL }]);
     setModoAtual("automatica");
+    setFormBaixaOpen(false);
     setMessage(
       data.aviso ||
         `Busca concluida. Pedidos encontrados: ${data.pedidos_encontrados}. Ignorados por baixa anterior: ${data.pedidos_ignorados}.`,
@@ -183,6 +185,7 @@ export default function BaixaEstoqueOlistPage() {
     setPedidosSelecionados(proximos);
     preencherItensSelecionados(proximos);
     setModoAtual("automatica");
+    setFormBaixaOpen(true);
   }
 
   function alternarTodosPedidos() {
@@ -196,6 +199,7 @@ export default function BaixaEstoqueOlistPage() {
     setPedidosSelecionados(proximos);
     preencherItensSelecionados(proximos);
     setModoAtual("automatica");
+    setFormBaixaOpen(true);
   }
 
   function alterarItem(index: number, patch: Partial<ItemBaixaForm>) {
@@ -294,6 +298,7 @@ export default function BaixaEstoqueOlistPage() {
     setModoAtual("manual");
     setPedidosSelecionados([]);
     setItensForm([{ ...ITEM_INICIAL, produto_cadastrado: undefined }]);
+    setFormBaixaOpen(true);
     setMessage(null);
     setErrorMessage(null);
   }
@@ -353,6 +358,7 @@ export default function BaixaEstoqueOlistPage() {
     setPedidosSelecionados([]);
     setObservacaoGeral("");
     setModoAtual("manual");
+    setFormBaixaOpen(false);
     await carregarHistoricoBaixas();
     setSalvando(false);
   }
@@ -467,15 +473,26 @@ export default function BaixaEstoqueOlistPage() {
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Formulário de baixa de estoque</h3>
-          <button
-            type="button"
-            onClick={limparParaManual}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          >
-            Nova baixa manual
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={limparParaManual}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            >
+              Nova baixa manual
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormBaixaOpen((prev) => !prev)}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+              aria-expanded={formBaixaOpen}
+            >
+              {formBaixaOpen ? "Fechar" : "Abrir"}
+            </button>
+          </div>
         </div>
 
+        {formBaixaOpen && (
         <form className="space-y-4" onSubmit={confirmarBaixa}>
           <label className="block text-sm text-slate-700">
             Observação geral
@@ -573,6 +590,7 @@ export default function BaixaEstoqueOlistPage() {
             </button>
           </div>
         </form>
+        )}
 
         {message && <p className="mt-4 text-sm text-emerald-700">{message}</p>}
         {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
