@@ -49,12 +49,16 @@ function requiredPositiveNumber(value: unknown, field: string) {
   return numberValue;
 }
 
+function removeTemplateVariables(value: string | null | undefined) {
+  return (value ?? "").replace(/\$\{[^}]+\}/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function cleanText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
 function cleanCodePart(value: string) {
-  return value
+  return removeTemplateVariables(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9]+/g, "-")
@@ -75,7 +79,7 @@ function buildSlugFinal(parts: Array<string | null | undefined>) {
   return parts
     .filter((part): part is string => Boolean(part?.trim()))
     .map((part) =>
-      part
+      removeTemplateVariables(part)
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-zA-Z0-9]+/g, "-")
@@ -838,7 +842,10 @@ export async function POST(request: Request) {
 
     if (body.action === "salvar-tipo-produto") {
       const titulo = requiredString(payload.nome ?? payload.titulo, "titulo");
-      const sku = requiredString(payload.prefixoSku ?? payload.sku, "sku").toUpperCase();
+      const sku = cleanCodePart(optionalString(payload.prefixoSku ?? payload.sku) ?? titulo);
+      if (!sku) {
+        throw new Error("Nao foi possivel gerar SKU a partir do titulo.");
+      }
       const produtosFornecidosPayload = Array.isArray(payload.produtosFornecidos)
         ? payload.produtosFornecidos
         : [];
@@ -1136,11 +1143,13 @@ export async function POST(request: Request) {
             estampa.descricao,
             variante?.descricao,
           ]);
-      const descricaoSeoFinal = joinTextParts([
-        tipoProduto.descricaoSeo,
-        estampa.descricao,
-        variante?.descricao,
-      ]);
+      const descricaoSeoFinal = hasTemplateVariable(tipoProduto.descricaoSeo)
+        ? renderTemplate(tipoProduto.descricaoSeo, templateVariables)
+        : joinTextParts([
+            tipoProduto.descricaoSeo,
+            estampa.descricao,
+            variante?.descricao,
+          ]);
       const palavrasChaveFinal = joinKeywordParts([
         tipoProduto.palavrasChave,
         estampa.palavrasChave,

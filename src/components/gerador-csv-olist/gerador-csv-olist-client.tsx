@@ -179,6 +179,28 @@ function cleanSkuPart(value: string) {
     .toUpperCase();
 }
 
+function removeTemplateVariables(value: string | null | undefined) {
+  return (value ?? "").replace(/\$\{[^}]+\}/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildSlugPart(value: string | null | undefined) {
+  return removeTemplateVariables(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function buildSkuFromTitle(titulo: string) {
+  return cleanSkuPart(removeTemplateVariables(titulo));
+}
+
+function buildSlugFromTitle(titulo: string) {
+  return buildSlugPart(titulo);
+}
+
 function buildSkuFinal(
   tipoProduto: TipoProdutoOlist,
   estampa: EstampaOlist,
@@ -250,6 +272,53 @@ function withCopySuffix(value: string | null | undefined, suffix = "-COPIA") {
 
 function withSlugCopySuffix(value: string | null | undefined) {
   return withCopySuffix(value, "-copia");
+}
+
+function formatImportCsvField(value: string | null | undefined) {
+  return (value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/;/g, ",")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildEstampasImportCsv(estampas: EstampaOlist[]) {
+  return [
+    "codigo;descricao;palavras-chave;extra",
+    ...estampas.map((estampa) =>
+      [
+        estampa.codigo,
+        estampa.descricao,
+        estampa.palavrasChave,
+        estampa.extra,
+      ].map(formatImportCsvField).join(";"),
+    ),
+  ].join("\n");
+}
+
+function buildVariantesImportCsv(variantes: VarianteOlist[]) {
+  return [
+    "codigo;estampa;tamanho;descricao;palavras-chave",
+    ...variantes.map((variante) =>
+      [
+        variante.codigo,
+        variante.estampa?.codigo,
+        variante.tamanho?.sku ?? variante.tamanho?.titulo,
+        variante.descricao,
+        variante.palavrasChave,
+      ].map(formatImportCsvField).join(";"),
+    ),
+  ].join("\n");
 }
 
 function parseEstampasImport(text: string): EstampaImportadaInput[] {
@@ -437,8 +506,12 @@ export function GeradorCsvOlistClient() {
     setErrorMessage(null);
 
     try {
-      if (!tipoForm.titulo.trim() || !tipoForm.sku.trim()) {
-        throw new Error("Preencha os campos obrigatorios: Titulo e SKU.");
+      const titulo = tipoForm.titulo.trim();
+      const sku = buildSkuFromTitle(tipoForm.sku || titulo);
+      const slug = buildSlugPart(tipoForm.slug || titulo);
+
+      if (!titulo || !sku) {
+        throw new Error("Preencha o Titulo para gerar SKU e slug.");
       }
       if (!tipoForm.produtosFornecidos[0]?.produtoFornecedorId) {
         throw new Error("Selecione o produto fornecido do tipo de produto.");
@@ -446,13 +519,13 @@ export function GeradorCsvOlistClient() {
 
       await salvarTipoProdutoOlist({
         id: tipoEditId,
-        titulo: tipoForm.titulo,
-        sku: tipoForm.sku,
+        titulo,
+        sku,
         descricao: tipoForm.descricao || null,
         descricaoSeo: tipoForm.descricaoSeo || null,
         palavrasChave: tipoForm.palavrasChave || null,
         detalhesPromptIa: tipoForm.detalhesPromptIa || null,
-        slug: tipoForm.slug || null,
+        slug: slug || null,
         categoria: tipoForm.categoria || null,
         produtosFornecidos: tipoForm.produtosFornecidos.slice(0, 1).map((item) => ({
           produtoFornecedorId: item.produtoFornecedorId,
@@ -1080,13 +1153,7 @@ export function GeradorCsvOlistClient() {
   function baixarCsv(produtos?: ProdutoFinalOlist[]) {
     const produtosCsv = Array.isArray(produtos) ? produtos : dados.produtosFinais;
     const csv = montarCsvProdutosOlist(produtosCsv, { cacheKey: Date.now() });
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "produtos-olist.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsv("produtos-olist.csv", csv);
   }
 
   return (
@@ -1280,7 +1347,21 @@ function TiposProdutoTab({
               <input
                 required={field.required}
                 value={form[field.key]}
-                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setForm((prev) => {
+                    if (field.key !== "titulo") {
+                      return { ...prev, [field.key]: value };
+                    }
+
+                    return {
+                      ...prev,
+                      titulo: value,
+                      sku: buildSkuFromTitle(value),
+                      slug: buildSlugFromTitle(value),
+                    };
+                  });
+                }}
                 className={`mt-1 w-full rounded-md border border-slate-300 px-3 py-2 ${field.key === "sku" ? "uppercase" : ""}`}
                 placeholder={field.placeholder}
               />
@@ -1738,15 +1819,25 @@ function EstampasTab({
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Estampas cadastradas</h3>
-          <label className="w-full text-sm text-slate-700 md:max-w-xs">
-            Buscar por codigo
-            <input
-              value={busca}
-              onChange={(event) => setBusca(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="Digite codigo, descricao ou extra"
-            />
-          </label>
+          <div className="flex w-full flex-col gap-2 md:max-w-md md:flex-row md:items-end">
+            <label className="w-full text-sm text-slate-700">
+              Buscar por codigo
+              <input
+                value={busca}
+                onChange={(event) => setBusca(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Digite codigo, descricao ou extra"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => downloadCsv("estampas-importacao.csv", buildEstampasImportCsv(estampas))}
+              disabled={estampas.length === 0}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
+            >
+              Exportar CSV
+            </button>
+          </div>
         </div>
 
         <TableEmpty visible={estampas.length === 0} text="Nenhuma estampa encontrada." />
@@ -2021,15 +2112,25 @@ function VariantesTab({
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Variantes cadastradas</h3>
-          <label className="w-full text-sm text-slate-700 md:max-w-xs">
-            Buscar por codigo
-            <input
-              value={busca}
-              onChange={(event) => setBusca(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="Codigo, estampa ou tamanho"
-            />
-          </label>
+          <div className="flex w-full flex-col gap-2 md:max-w-md md:flex-row md:items-end">
+            <label className="w-full text-sm text-slate-700">
+              Buscar por codigo
+              <input
+                value={busca}
+                onChange={(event) => setBusca(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Codigo, estampa ou tamanho"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => downloadCsv("variantes-importacao.csv", buildVariantesImportCsv(variantes))}
+              disabled={variantes.length === 0}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
+            >
+              Exportar CSV
+            </button>
+          </div>
         </div>
 
         <TableEmpty visible={variantes.length === 0} text="Nenhuma variante encontrada." />
