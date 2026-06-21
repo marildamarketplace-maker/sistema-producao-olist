@@ -57,6 +57,7 @@ export type EstampaOlist = {
   palavrasChave: string | null;
   extra: string | null;
   imagemUrl: string | null;
+  imagemUrl2: string | null;
   ativo: boolean;
   createdAt: string;
 };
@@ -152,7 +153,10 @@ export type ProdutoFinalOlist = {
     | "alturaEmbalagem"
     | "comprimentoEmbalagem"
   >;
-  estampa: Pick<EstampaOlist, "id" | "nome" | "codigo" | "descricao" | "palavrasChave" | "extra"> | null;
+  estampa: Pick<
+    EstampaOlist,
+    "id" | "nome" | "codigo" | "descricao" | "palavrasChave" | "extra" | "imagemUrl" | "imagemUrl2"
+  > | null;
   variante: Pick<
     VarianteOlist,
     "id" | "nome" | "codigo" | "descricao" | "palavrasChave" | "atributo" | "valor"
@@ -243,6 +247,50 @@ export function salvarEstampaOlist(payload: {
   return requestGeradorCsv<{ estampa: EstampaOlist }>({
     method: "POST",
     body: JSON.stringify({ action: "salvar-estampa", payload }),
+  });
+}
+
+export async function uploadImagemEstampaOlist(payload: {
+  id: string;
+  codigo: string;
+  file: File;
+  index: 0 | 1;
+}) {
+  const formData = new FormData();
+  formData.append("action", "upload-estampa-imagem");
+  formData.append("id", payload.id);
+  formData.append("codigo", payload.codigo);
+  formData.append("index", String(payload.index));
+  formData.append("file", payload.file);
+
+  const response = await fetch("/api/gerador-csv-olist", {
+    method: "POST",
+    body: formData,
+  });
+  const data = (await response.json()) as ApiResponse<{
+    upload: {
+      uploadedUrl: string;
+      uploadedPath: string;
+    };
+    estampa: EstampaOlist;
+  }>;
+
+  if (!response.ok) {
+    throw new Error("error" in data ? data.error : "Erro desconhecido.");
+  }
+
+  return data;
+}
+
+export function verificarImagensEstampasOlist(ids: string[]) {
+  return requestGeradorCsv<{
+    totalVerificadas: number;
+    imagem0Encontradas: number;
+    imagem1Encontradas: number;
+    estampasAtualizadas: number;
+  }>({
+    method: "POST",
+    body: JSON.stringify({ action: "verificar-estampas-imagens", payload: { ids } }),
   });
 }
 
@@ -536,6 +584,18 @@ function storageAiImageUrl(produto: ProdutoFinalOlist, index: number, options?: 
   );
 }
 
+function produtoCsvImageUrl(produto: ProdutoFinalOlist, index: number, isTipoProdutoV: boolean, options?: ProdutoOlistCsvOptions) {
+  if (isTipoProdutoV && index === 0 && produto.estampa?.imagemUrl) {
+    return withCacheBust(produto.estampa.imagemUrl, options?.cacheKey);
+  }
+
+  if (isTipoProdutoV && index === 1 && produto.estampa?.imagemUrl2) {
+    return withCacheBust(produto.estampa.imagemUrl2, options?.cacheKey);
+  }
+
+  return storageAiImageUrl(produto, index, options);
+}
+
 function storageVideoUrl(produto: ProdutoFinalOlist) {
   const tipoSku = produto.tipoProduto.sku;
   const estampa = produto.estampa?.codigo ?? "";
@@ -685,6 +745,8 @@ export function montarLinhaCsvProdutoOlist(
       hasTemplateVariable(slugBase) ? renderTemplateCsv(slugBase, variables) : slugBase,
     ]);
 
+    const tipoProdutoCsv = isParent || !temVariacao ? "V" : "K";
+
     return [
       "",
       isParent ? parentSku : produto.skuFinal,
@@ -715,9 +777,9 @@ export function montarLinhaCsvProdutoOlist(
       produto.alturaEmbalagem ?? produto.tipoProduto.alturaEmbalagem ?? "",
       produto.comprimentoEmbalagem ?? produto.tipoProduto.comprimentoEmbalagem ?? "",
       0,
-      isParent || !temVariacao ? "V" : "K",
-      storageAiImageUrl(produto, 0, options),
-      storageAiImageUrl(produto, 1, options),
+      tipoProdutoCsv,
+      produtoCsvImageUrl(produto, 0, tipoProdutoCsv === "V", options),
+      produtoCsvImageUrl(produto, 1, tipoProdutoCsv === "V", options),
       storageAiImageUrl(produto, 2, options),
       storageAiImageUrl(produto, 3, options),
       storageAiImageUrl(produto, 4, options),

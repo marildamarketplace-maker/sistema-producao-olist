@@ -9,6 +9,7 @@ import {
 import { gerarImagemMockupComEstampa } from "@/services/openaiImageService";
 
 const PREVIEW_IMAGE_MODEL = "gpt-image-1-mini";
+const ESTAMPA_IMAGEM_TIPO_PRODUTO_SKU = "TECIDO-METRO-TRICOLINE";
 
 function decimalToNumber(value: unknown) {
   if (value === null || value === undefined) return null;
@@ -65,6 +66,19 @@ function cleanCodePart(value: string) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .toUpperCase();
+}
+
+function buildEstampaImagemStoragePath(codigo: string, index: number) {
+  const codigoLimpo = cleanCodePart(codigo);
+
+  if (!codigoLimpo) {
+    throw new Error("Codigo da estampa invalido para upload.");
+  }
+  if (!Number.isInteger(index) || index < 0 || index > 1) {
+    throw new Error("Indice de imagem da estampa invalido.");
+  }
+
+  return `${ESTAMPA_IMAGEM_TIPO_PRODUTO_SKU}/${codigoLimpo}/${codigoLimpo}-${index}.jpg`;
 }
 
 function joinTextParts(parts: Array<string | null | undefined>) {
@@ -310,7 +324,7 @@ async function buildProdutoMockupStorageInfo(produtoId: string, mockupIndex: num
     where: { id: produtoId },
     include: {
       tipoProduto: { select: { sku: true, detalhesPromptIa: true } },
-      estampa: { select: { codigo: true, descricao: true } },
+      estampa: { select: { codigo: true, descricao: true, imagemUrl: true } },
       variante: { select: { codigo: true, descricao: true } },
       tamanho: { select: { sku: true, titulo: true } },
     },
@@ -336,7 +350,9 @@ async function buildProdutoMockupStorageInfo(produtoId: string, mockupIndex: num
     tamanhoTitulo: produto.tamanho.titulo,
     descricaoVariante: produto.variante.descricao ?? "",
     mockupUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${tamanhoSku}/mockup-${mockupIndex}.jpg`,
-    estampaUrl: `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-0.jpg`,
+    estampaUrl:
+      produto.estampa.imagemUrl ??
+      `https://storage.googleapis.com/forro-de-mesa-retangular/${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-0.jpg`,
     outputPath: `${tipoSku}/${estampaCodigo}/${estampaCodigo}-${varianteCodigo}-${mockupIndex - 1}.jpg`,
   };
 }
@@ -454,6 +470,8 @@ function normalizeEstampa(estampa: {
   descricao: string | null;
   palavrasChave: string | null;
   extra: string | null;
+  imagemUrl: string | null;
+  imagemUrl2: string | null;
   createdAt: Date;
 }) {
   return {
@@ -463,7 +481,8 @@ function normalizeEstampa(estampa: {
     descricao: estampa.descricao,
     palavrasChave: estampa.palavrasChave,
     extra: estampa.extra,
-    imagemUrl: null,
+    imagemUrl: estampa.imagemUrl,
+    imagemUrl2: estampa.imagemUrl2,
     ativo: true,
     createdAt: estampa.createdAt.toISOString(),
   };
@@ -614,7 +633,15 @@ function normalizeProdutoOlist(produto: {
     alturaEmbalagem: unknown;
     comprimentoEmbalagem: unknown;
   };
-  estampa: { id: string; codigo: string; descricao: string | null; palavrasChave: string | null; extra: string | null };
+  estampa: {
+    id: string;
+    codigo: string;
+    descricao: string | null;
+    palavrasChave: string | null;
+    extra: string | null;
+    imagemUrl: string | null;
+    imagemUrl2: string | null;
+  };
   variante: { id: string; codigo: string; descricao: string | null; palavrasChave: string | null } | null;
   tamanho: {
     id: string;
@@ -687,6 +714,8 @@ function normalizeProdutoOlist(produto: {
       descricao: produto.estampa.descricao,
       palavrasChave: produto.estampa.palavrasChave,
       extra: produto.estampa.extra,
+      imagemUrl: produto.estampa.imagemUrl,
+      imagemUrl2: produto.estampa.imagemUrl2,
     },
     variante: produto.variante
       ? {
@@ -789,7 +818,15 @@ async function carregarDados() {
           },
         },
         estampa: {
-          select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true },
+          select: {
+            id: true,
+            codigo: true,
+            descricao: true,
+            palavrasChave: true,
+            extra: true,
+            imagemUrl: true,
+            imagemUrl2: true,
+          },
         },
         variante: {
           select: { id: true, codigo: true, descricao: true, palavrasChave: true },
@@ -837,6 +874,57 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const contentType = request.headers.get("content-type") ?? "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const action = String(formData.get("action") ?? "");
+
+      if (action !== "upload-estampa-imagem") {
+        return NextResponse.json({ error: "Acao invalida." }, { status: 400 });
+      }
+
+      const id = requiredString(formData.get("id"), "id");
+      const codigo = requiredString(formData.get("codigo"), "codigo").toUpperCase();
+      const index = Number(formData.get("index") ?? 0);
+      const file = formData.get("file");
+
+      if (!(file instanceof File) || file.size === 0) {
+        throw new Error("Envie uma imagem da estampa.");
+      }
+
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Formato de imagem invalido para upload.");
+      }
+
+      const estampaAtual = await prisma.estampa.findUniqueOrThrow({ where: { id } });
+      if (estampaAtual.codigo.toUpperCase() !== codigo) {
+        throw new Error("Codigo da estampa nao confere com o cadastro salvo.");
+      }
+
+      const outputPath = buildEstampaImagemStoragePath(codigo, index);
+      await deleteGoogleStorageObject(outputPath);
+
+      const uploadedImage = await uploadToGoogleStorage({
+        path: outputPath,
+        buffer: Buffer.from(await file.arrayBuffer()),
+        contentType: file.type || "image/jpeg",
+      });
+
+      const estampa = await prisma.estampa.update({
+        where: { id },
+        data: index === 0 ? { imagemUrl: uploadedImage.publicUrl } : { imagemUrl2: uploadedImage.publicUrl },
+      });
+
+      return NextResponse.json({
+        upload: {
+          uploadedUrl: uploadedImage.publicUrl,
+          uploadedPath: uploadedImage.path,
+        },
+        estampa: normalizeEstampa(estampa),
+      });
+    }
+
     const body = (await request.json()) as { action?: string; payload?: Record<string, unknown> };
     const payload = body.payload ?? {};
 
@@ -943,6 +1031,63 @@ export async function POST(request: Request) {
       await prisma.tipoProduto.delete({ where: { id } });
 
       return NextResponse.json({ ok: true });
+    }
+
+    if (body.action === "verificar-estampas-imagens") {
+      const ids = Array.isArray(payload.ids)
+        ? payload.ids.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+        : [];
+
+      if (!ids.length) {
+        throw new Error("Selecione ao menos uma estampa para verificar.");
+      }
+
+      const estampas = await prisma.estampa.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          codigo: true,
+          imagemUrl: true,
+          imagemUrl2: true,
+        },
+      });
+      let imagem0Encontradas = 0;
+      let imagem1Encontradas = 0;
+      let estampasAtualizadas = 0;
+
+      for (const estampa of estampas) {
+        const [imagem0, imagem1] = await Promise.all([
+          getGoogleStorageObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 0)),
+          getGoogleStorageObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 1)),
+        ]);
+        const data: { imagemUrl?: string; imagemUrl2?: string } = {};
+
+        if (imagem0.exists) {
+          imagem0Encontradas += 1;
+          if (estampa.imagemUrl !== imagem0.publicUrl) {
+            data.imagemUrl = imagem0.publicUrl;
+          }
+        }
+
+        if (imagem1.exists) {
+          imagem1Encontradas += 1;
+          if (estampa.imagemUrl2 !== imagem1.publicUrl) {
+            data.imagemUrl2 = imagem1.publicUrl;
+          }
+        }
+
+        if (Object.keys(data).length > 0) {
+          await prisma.estampa.update({ where: { id: estampa.id }, data });
+          estampasAtualizadas += 1;
+        }
+      }
+
+      return NextResponse.json({
+        totalVerificadas: estampas.length,
+        imagem0Encontradas,
+        imagem1Encontradas,
+        estampasAtualizadas,
+      });
     }
 
     if (body.action === "salvar-estampa") {
@@ -1201,7 +1346,17 @@ export async function POST(request: Request) {
                   comprimentoEmbalagem: true,
                 },
               },
-              estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
+              estampa: {
+                select: {
+                  id: true,
+                  codigo: true,
+                  descricao: true,
+                  palavrasChave: true,
+                  extra: true,
+                  imagemUrl: true,
+                  imagemUrl2: true,
+                },
+              },
               variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
               tamanho: {
                 select: {
@@ -1244,7 +1399,17 @@ export async function POST(request: Request) {
               comprimentoEmbalagem: true,
             },
           },
-          estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
+          estampa: {
+            select: {
+              id: true,
+              codigo: true,
+              descricao: true,
+              palavrasChave: true,
+              extra: true,
+              imagemUrl: true,
+              imagemUrl2: true,
+            },
+          },
           variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
           tamanho: {
             select: {
@@ -1311,7 +1476,17 @@ export async function POST(request: Request) {
               comprimentoEmbalagem: true,
             },
           },
-          estampa: { select: { id: true, codigo: true, descricao: true, palavrasChave: true, extra: true } },
+          estampa: {
+            select: {
+              id: true,
+              codigo: true,
+              descricao: true,
+              palavrasChave: true,
+              extra: true,
+              imagemUrl: true,
+              imagemUrl2: true,
+            },
+          },
           variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
           tamanho: {
             select: {

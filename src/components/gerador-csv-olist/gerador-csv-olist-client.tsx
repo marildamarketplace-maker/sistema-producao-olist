@@ -27,7 +27,9 @@ import {
   salvarTamanhoOlist,
   salvarTipoProdutoOlist,
   salvarVarianteOlist,
+  uploadImagemEstampaOlist,
   uploadMockupProdutoOlist,
+  verificarImagensEstampasOlist,
   vincularProdutosFinaisOlist,
 } from "@/lib/gerador-csv-olist";
 
@@ -417,6 +419,8 @@ export function GeradorCsvOlistClient() {
   const [tipoEditId, setTipoEditId] = useState<string | null>(null);
   const [estampaForm, setEstampaForm] = useState(estampaInicial);
   const [estampaEditId, setEstampaEditId] = useState<string | null>(null);
+  const [estampaImagemFiles, setEstampaImagemFiles] = useState<[File | null, File | null]>([null, null]);
+  const [estampaImagemInputKey, setEstampaImagemInputKey] = useState(0);
   const [estampaBusca, setEstampaBusca] = useState("");
   const [varianteForm, setVarianteForm] = useState(varianteInicial);
   const [varianteEditId, setVarianteEditId] = useState<string | null>(null);
@@ -562,16 +566,33 @@ export function GeradorCsvOlistClient() {
         throw new Error("Ja existe uma estampa cadastrada com este codigo.");
       }
 
-      await salvarEstampaOlist({
+      const resposta = await salvarEstampaOlist({
         id: estampaEditId,
         codigo,
         descricao: estampaForm.descricao || null,
         palavrasChave: estampaForm.palavrasChave || null,
         extra: estampaForm.extra || null,
       });
+      const imagensSelecionadas = estampaImagemFiles.filter((file): file is File => Boolean(file));
+      for (const [index, file] of estampaImagemFiles.entries()) {
+        if (file) {
+          await uploadImagemEstampaOlist({
+            id: resposta.estampa.id,
+            codigo: resposta.estampa.codigo,
+            file,
+            index: index as 0 | 1,
+          });
+        }
+      }
       setEstampaForm(estampaInicial);
       setEstampaEditId(null);
-      setMessage("Estampa salva com sucesso.");
+      setEstampaImagemFiles([null, null]);
+      setEstampaImagemInputKey((key) => key + 1);
+      setMessage(
+        imagensSelecionadas.length
+          ? `Estampa e ${imagensSelecionadas.length} imagem(ns) salvas com sucesso.`
+          : "Estampa salva com sucesso.",
+      );
       await carregar();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar estampa.");
@@ -617,6 +638,26 @@ export function GeradorCsvOlistClient() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao importar estampas.");
       throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function verificarImagensEstampas(ids: string[]) {
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const resultado = await verificarImagensEstampasOlist(ids);
+      setMessage(
+        `Verificacao concluida: ${resultado.totalVerificadas} estampa(s), ` +
+          `${resultado.imagem0Encontradas} imagem(ns) 0 e ${resultado.imagem1Encontradas} imagem(ns) 1 encontradas. ` +
+          `${resultado.estampasAtualizadas} estampa(s) atualizada(s).`,
+      );
+      await carregar();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao verificar imagens das estampas.");
     } finally {
       setSaving(false);
     }
@@ -953,6 +994,8 @@ export function GeradorCsvOlistClient() {
       palavrasChave: estampa.palavrasChave ?? "",
       extra: estampa.extra ?? "",
     });
+    setEstampaImagemFiles([null, null]);
+    setEstampaImagemInputKey((key) => key + 1);
   }
 
   function duplicarEstampa(estampa: EstampaOlist) {
@@ -963,6 +1006,8 @@ export function GeradorCsvOlistClient() {
       palavrasChave: estampa.palavrasChave ?? "",
       extra: estampa.extra ?? "",
     });
+    setEstampaImagemFiles([null, null]);
+    setEstampaImagemInputKey((key) => key + 1);
   }
 
   async function excluirEstampa(id: string) {
@@ -978,6 +1023,8 @@ export function GeradorCsvOlistClient() {
       if (estampaEditId === id) {
         setEstampaForm(estampaInicial);
         setEstampaEditId(null);
+        setEstampaImagemFiles([null, null]);
+        setEstampaImagemInputKey((key) => key + 1);
       }
       setMessage("Estampa excluida com sucesso.");
       await carregar();
@@ -1229,6 +1276,10 @@ export function GeradorCsvOlistClient() {
               estampas={estampasFiltradas}
               form={estampaForm}
               setForm={setEstampaForm}
+              imagemFiles={estampaImagemFiles}
+              setImagemFiles={setEstampaImagemFiles}
+              imagemInputKey={estampaImagemInputKey}
+              resetImagemInput={() => setEstampaImagemInputKey((key) => key + 1)}
               editingId={estampaEditId}
               setEditingId={setEstampaEditId}
               busca={estampaBusca}
@@ -1236,6 +1287,7 @@ export function GeradorCsvOlistClient() {
               saving={saving}
               onSubmit={salvarEstampa}
               onImport={importarEstampas}
+              onVerifyImages={verificarImagensEstampas}
               onEdit={editarEstampa}
               onDuplicate={duplicarEstampa}
               onDelete={excluirEstampa}
@@ -1689,6 +1741,10 @@ function EstampasTab({
   estampas,
   form,
   setForm,
+  imagemFiles,
+  setImagemFiles,
+  imagemInputKey,
+  resetImagemInput,
   editingId,
   setEditingId,
   busca,
@@ -1696,6 +1752,7 @@ function EstampasTab({
   saving,
   onSubmit,
   onImport,
+  onVerifyImages,
   onEdit,
   onDuplicate,
   onDelete,
@@ -1703,6 +1760,10 @@ function EstampasTab({
   estampas: EstampaOlist[];
   form: typeof estampaInicial;
   setForm: Dispatch<SetStateAction<typeof estampaInicial>>;
+  imagemFiles: [File | null, File | null];
+  setImagemFiles: Dispatch<SetStateAction<[File | null, File | null]>>;
+  imagemInputKey: number;
+  resetImagemInput: () => void;
   editingId: string | null;
   setEditingId: Dispatch<SetStateAction<string | null>>;
   busca: string;
@@ -1710,6 +1771,7 @@ function EstampasTab({
   saving: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onImport: (text: string) => Promise<void>;
+  onVerifyImages: (ids: string[]) => Promise<void>;
   onEdit: (estampa: EstampaOlist) => void;
   onDuplicate: (estampa: EstampaOlist) => void;
   onDelete: (id: string) => void;
@@ -1717,6 +1779,27 @@ function EstampasTab({
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const estampasIds = useMemo(() => estampas.map((estampa) => estampa.id), [estampas]);
+  const todasSelecionadas =
+    estampasIds.length > 0 && estampasIds.every((id) => selectedIds.includes(id));
+
+  function toggleEstampa(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  }
+
+  function toggleTodas() {
+    setSelectedIds((prev) =>
+      todasSelecionadas
+        ? prev.filter((id) => !estampasIds.includes(id))
+        : Array.from(new Set([...prev, ...estampasIds])),
+    );
+  }
+
+  async function verificarSelecionadas() {
+    await onVerifyImages(selectedIds);
+    setSelectedIds([]);
+  }
 
   async function submitImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1792,6 +1875,30 @@ function EstampasTab({
             />
           </label>
 
+          {[0, 1].map((index) => (
+            <label key={index} className="text-sm text-slate-700">
+              {index === 0 ? "Imagem da estampa 1" : "Imagem da estampa 2"}
+              <input
+                key={`${imagemInputKey}-${index}`}
+                type="file"
+                accept="image/*"
+                onChange={(event) =>
+                  setImagemFiles((prev) => {
+                    const next: [File | null, File | null] = [...prev];
+                    next[index] = event.target.files?.[0] ?? null;
+                    return next;
+                  })
+                }
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+              <span className="mt-1 block text-xs text-slate-500">
+                {imagemFiles[index]
+                  ? `Arquivo selecionado: ${imagemFiles[index]?.name}`
+                  : `Sera salva como ${form.codigo.trim().toUpperCase() || "{CODIGO}"}-${index}.jpg`}
+              </span>
+            </label>
+          ))}
+
           <div className="flex gap-2 md:col-span-2">
             <button
               type="submit"
@@ -1805,6 +1912,8 @@ function EstampasTab({
                 type="button"
                 onClick={() => {
                   setForm(estampaInicial);
+                  setImagemFiles([null, null]);
+                  resetImagemInput();
                   setEditingId(null);
                 }}
                 className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
@@ -1818,7 +1927,12 @@ function EstampasTab({
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">Estampas cadastradas</h3>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Estampas cadastradas</h3>
+            {selectedIds.length > 0 && (
+              <p className="mt-1 text-sm text-slate-500">{selectedIds.length} selecionada(s)</p>
+            )}
+          </div>
           <div className="flex w-full flex-col gap-2 md:max-w-md md:flex-row md:items-end">
             <label className="w-full text-sm text-slate-700">
               Buscar por codigo
@@ -1840,14 +1954,45 @@ function EstampasTab({
           </div>
         </div>
 
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={verificarSelecionadas}
+            disabled={saving || selectedIds.length === 0}
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            Verificar imagens no Storage
+          </button>
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              disabled={saving}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Limpar selecao
+            </button>
+          )}
+        </div>
+
         <TableEmpty visible={estampas.length === 0} text="Nenhuma estampa encontrada." />
         {estampas.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
+                  <th className="p-3">
+                    <input
+                      type="checkbox"
+                      checked={todasSelecionadas}
+                      onChange={toggleTodas}
+                      className="h-4 w-4 rounded border-slate-300"
+                      aria-label="Selecionar todas as estampas"
+                    />
+                  </th>
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Descricao</th>
+                  <th className="p-3">Imagens</th>
                   <th className="p-3">Palavras-chave</th>
                   <th className="p-3">Extra</th>
                   <th className="p-3">Acoes</th>
@@ -1856,8 +2001,42 @@ function EstampasTab({
               <tbody>
                 {estampas.map((estampa) => (
                   <tr key={estampa.id} className="border-b border-slate-100">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(estampa.id)}
+                        onChange={() => toggleEstampa(estampa.id)}
+                        className="h-4 w-4 rounded border-slate-300"
+                        aria-label={`Selecionar estampa ${estampa.codigo}`}
+                      />
+                    </td>
                     <td className="p-3 font-medium text-slate-700">{estampa.codigo}</td>
                     <td className="p-3 text-slate-700">{estampa.descricao ?? "-"}</td>
+                    <td className="p-3 text-slate-700">
+                      <div className="flex flex-col gap-1">
+                        {estampa.imagemUrl ? (
+                          <a
+                            href={estampa.imagemUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium text-blue-700 hover:underline"
+                          >
+                            Imagem 1
+                          </a>
+                        ) : null}
+                        {estampa.imagemUrl2 ? (
+                          <a
+                            href={estampa.imagemUrl2}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium text-blue-700 hover:underline"
+                          >
+                            Imagem 2
+                          </a>
+                        ) : null}
+                        {!estampa.imagemUrl && !estampa.imagemUrl2 ? "-" : null}
+                      </div>
+                    </td>
                     <td className="p-3 text-slate-700">{estampa.palavrasChave ?? "-"}</td>
                     <td className="p-3 text-slate-700">{estampa.extra ?? "-"}</td>
                     <td className="p-3">
