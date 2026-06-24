@@ -282,6 +282,34 @@ export async function uploadImagemEstampaOlist(payload: {
   return data;
 }
 
+export async function uploadEstampaTemporariaMockupOlist(payload: {
+  produtoId: string;
+  file: File;
+}) {
+  const formData = new FormData();
+  formData.append("action", "upload-estampa-temporaria-mockup");
+  formData.append("produtoId", payload.produtoId);
+  formData.append("file", payload.file);
+
+  const response = await fetch("/api/gerador-csv-olist", {
+    method: "POST",
+    body: formData,
+  });
+  type UploadEstampaTemporariaMockupResponse = {
+    upload: {
+      uploadedUrl: string;
+      uploadedPath: string;
+    };
+  };
+  const data = (await response.json()) as ApiResponse<UploadEstampaTemporariaMockupResponse>;
+
+  if (!response.ok) {
+    throw new Error("error" in data ? data.error : "Erro desconhecido.");
+  }
+
+  return data as UploadEstampaTemporariaMockupResponse;
+}
+
 export function verificarImagensEstampasOlist(ids: string[]) {
   return requestGeradorCsv<{
     totalVerificadas: number;
@@ -401,6 +429,8 @@ export function gerarMockupProdutoOlist(payload: {
   mode?: "preview" | "final";
   quality?: "low" | "medium" | "high";
   mockupUrlOverride?: string | null;
+  estampaUrlOverride?: string | null;
+  promptOverride?: string | null;
   forceRegenerate?: boolean;
 }) {
   return requestGeradorCsv<{

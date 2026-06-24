@@ -1,8 +1,9 @@
 "use client";
 
-import type { Dispatch, FormEvent, SetStateAction } from "react";
+import type { ClipboardEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
+import { buildProdutoMockupPrompt } from "@/lib/mockup-prompt";
 import {
   EstampaOlist,
   GeradorCsvOlistData,
@@ -27,6 +28,7 @@ import {
   salvarTamanhoOlist,
   salvarTipoProdutoOlist,
   salvarVarianteOlist,
+  uploadEstampaTemporariaMockupOlist,
   uploadImagemEstampaOlist,
   uploadMockupProdutoOlist,
   verificarImagensEstampasOlist,
@@ -2489,6 +2491,10 @@ function ProdutosCriadosTab({
   const [mockupErro, setMockupErro] = useState<string | null>(null);
   const [mockupErroIndex, setMockupErroIndex] = useState<number | null>(null);
   const [mockupUrlsSubstitutas, setMockupUrlsSubstitutas] = useState<Record<number, string>>({});
+  const [mockupEstampaUrlSubstituta, setMockupEstampaUrlSubstituta] = useState("");
+  const [mockupEstampaNomeArquivo, setMockupEstampaNomeArquivo] = useState<string | null>(null);
+  const [mockupEstampaUploading, setMockupEstampaUploading] = useState(false);
+  const [mockupPrompt, setMockupPrompt] = useState("");
   const [mockupQuality, setMockupQuality] = useState<MockupQuality>("medium");
   const [csvImageCacheKey, setCsvImageCacheKey] = useState(() => Date.now());
   const [editForm, setEditForm] = useState({
@@ -2559,6 +2565,15 @@ function ProdutosCriadosTab({
   }
 
   function abrirVisualizacao(produto: ProdutoFinalOlist) {
+    const defaultPrompt = buildProdutoMockupPrompt({
+      nomeProduto: produto.tituloFinal,
+      sku: produto.skuFinal,
+      tamanho: produto.tamanho?.titulo ?? "",
+      descricaoEstampa: produto.estampa?.descricao ?? "",
+      descricaoVariante: produto.variante?.descricao ?? "",
+      detalhesPromptIa: produto.tipoProduto.detalhesPromptIa ?? "",
+    });
+
     setProdutoVisualizando(produto);
     setMockupGerado(null);
     setMockupErro(null);
@@ -2566,7 +2581,45 @@ function ProdutosCriadosTab({
     setMockupGerando(null);
     setMockupUploading(false);
     setMockupUrlsSubstitutas({});
+    setMockupEstampaUrlSubstituta("");
+    setMockupEstampaNomeArquivo(null);
+    setMockupEstampaUploading(false);
+    setMockupPrompt(defaultPrompt);
     setCsvImageCacheKey(Date.now());
+  }
+
+  async function colarEstampaMockup(event: ClipboardEvent<HTMLDivElement>) {
+    const produto = produtoVisualizando;
+    if (!produto) return;
+
+    const file =
+      Array.from(event.clipboardData.files).find((item) => item.type.startsWith("image/")) ??
+      Array.from(event.clipboardData.items)
+        .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+        ?.getAsFile();
+
+    if (!file) {
+      setMockupErro("Nenhuma imagem encontrada no clipboard.");
+      return;
+    }
+
+    event.preventDefault();
+    setMockupEstampaUploading(true);
+    setMockupErro(null);
+    setMockupErroIndex(null);
+
+    try {
+      const resposta = await uploadEstampaTemporariaMockupOlist({
+        produtoId: produto.id,
+        file,
+      });
+      setMockupEstampaUrlSubstituta(resposta.upload.uploadedUrl);
+      setMockupEstampaNomeArquivo(file.name || "imagem colada");
+    } catch (error) {
+      setMockupErro(error instanceof Error ? error.message : "Erro ao colar imagem da estampa.");
+    } finally {
+      setMockupEstampaUploading(false);
+    }
   }
 
   async function gerarMockup(
@@ -2580,12 +2633,16 @@ function ProdutosCriadosTab({
 
     try {
       const mockupUrlOverride = mockupUrlsSubstitutas[mockupIndex]?.trim() || null;
+      const estampaUrlOverride = mockupEstampaUrlSubstituta.trim() || null;
+      const promptOverride = mockupPrompt.trim() || null;
       const resposta = await gerarMockupProdutoOlist({
         produtoId: produto.id,
         mockupIndex,
         mode: mockupQuality === "high" ? "final" : "preview",
         quality: mockupQuality,
         mockupUrlOverride,
+        estampaUrlOverride,
+        promptOverride,
         forceRegenerate,
       });
       setMockupGerado({ ...resposta.imagem, mockupIndex, cacheKey: Date.now() });
@@ -2710,6 +2767,9 @@ function ProdutosCriadosTab({
     URL.revokeObjectURL(url);
     setFabricadoModalOpen(false);
   }
+
+  const mockupErroUrl = mockupErro?.match(/URL:\s*(\S+)/)?.[1] ?? null;
+  const mockupErroTipo = mockupErro?.match(/Tipo:\s*(\S+)/)?.[1] ?? null;
 
   return (
     <div className="space-y-8">
@@ -2846,7 +2906,7 @@ function ProdutosCriadosTab({
                 }}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               >
-                {[5, 10, 50, 100].map((size) => (
+                {[5, 10, 50, 100, 1000, 2000].map((size) => (
                   <option key={size} value={size}>
                     {size} itens
                   </option>
@@ -3131,6 +3191,10 @@ function ProdutosCriadosTab({
                   setMockupGerando(null);
                   setMockupUploading(false);
                   setMockupUrlsSubstitutas({});
+                  setMockupEstampaUrlSubstituta("");
+                  setMockupEstampaNomeArquivo(null);
+                  setMockupEstampaUploading(false);
+                  setMockupPrompt("");
                 }}
                 className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
               >
@@ -3175,10 +3239,77 @@ function ProdutosCriadosTab({
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onPaste={colarEstampaMockup}
+                    className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
+                  >
+                    <p className="font-medium text-slate-900">Colar imagem da estampa para aplicar no mockup</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Clique aqui e use Ctrl+V ou Cmd+V com a imagem copiada.
+                    </p>
+                    {mockupEstampaUploading && (
+                      <p className="mt-2 text-xs font-medium text-slate-700">Enviando imagem colada...</p>
+                    )}
+                    {mockupEstampaUrlSubstituta && (
+                      <p className="mt-2 break-all text-xs text-blue-700">
+                        {mockupEstampaNomeArquivo ? `${mockupEstampaNomeArquivo}: ` : ""}
+                        {mockupEstampaUrlSubstituta}
+                      </p>
+                    )}
+                  </div>
+                  {mockupEstampaUrlSubstituta && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMockupEstampaUrlSubstituta("");
+                        setMockupEstampaNomeArquivo(null);
+                      }}
+                      disabled={mockupGerando !== null || mockupEstampaUploading}
+                      className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Usar estampa salva no cadastro
+                    </button>
+                  )}
+                </div>
+
+                <label className="block text-xs font-medium text-slate-700">
+                  Prompt da geracao
+                  <textarea
+                    value={mockupPrompt}
+                    onChange={(event) => setMockupPrompt(event.target.value)}
+                    disabled={mockupGerando !== null}
+                    className="mt-1 min-h-72 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:opacity-50"
+                  />
+                </label>
+
                 {mockupErro && (
                   <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     {mockupErro}
                   </p>
+                )}
+
+                {mockupErroUrl && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3">
+                    <p className="text-xs font-semibold text-red-800">
+                      Imagem nao encontrada{mockupErroTipo ? ` (${mockupErroTipo})` : ""}
+                    </p>
+                    <a
+                      href={mockupErroUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block break-all text-xs text-blue-700 hover:underline"
+                    >
+                      {mockupErroUrl}
+                    </a>
+                    <img
+                      src={mockupErroUrl}
+                      alt="Imagem que nao foi encontrada no Storage"
+                      className="mt-3 h-40 w-40 rounded-md border border-red-200 bg-white object-contain"
+                    />
+                  </div>
                 )}
 
                 {mockupErro?.includes("Nao foi possivel baixar imagem por URL") && mockupErroIndex && (
