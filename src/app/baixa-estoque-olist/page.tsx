@@ -39,6 +39,11 @@ type ResultadoBusca = {
   produtos_ausentes: ProdutoAusente[];
 };
 
+type PeriodoBuscaPadrao = {
+  periodo_inicio: string;
+  periodo_fim: string;
+};
+
 type BaixaHistorico = {
   id: string;
   origem: string;
@@ -67,6 +72,31 @@ const ITEM_INICIAL: ItemBaixaForm = {
   produto_cadastrado: true,
 };
 
+function formatarDateTimeLocal(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  ].join("T");
+}
+
+function isoParaDateTimeLocal(iso: string) {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return formatarDateTimeLocal(date);
+}
+
+function dateTimeLocalParaIso(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString();
+}
+
 export default function BaixaEstoqueOlistPage() {
   const { usuario } = useAuth();
   const [resultadoBusca, setResultadoBusca] = useState<ResultadoBusca | null>(null);
@@ -84,6 +114,7 @@ export default function BaixaEstoqueOlistPage() {
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [periodoInicioBusca, setPeriodoInicioBusca] = useState("");
   const podeSolicitarBaixa = Boolean(usuario?.podeSolicitarBaixa);
 
   const itensPorBaixa = useMemo(() => {
@@ -122,6 +153,21 @@ export default function BaixaEstoqueOlistPage() {
     carregarHistoricoBaixas();
   }, []);
 
+  useEffect(() => {
+    async function carregarPeriodoBuscaPadrao() {
+      if (!podeSolicitarBaixa) return;
+
+      const resp = await axios.get("/api/olist/baixa-estoque/buscar", { validateStatus: () => true });
+
+      if (resp.status < 200 || resp.status >= 300) return;
+
+      const data = resp.data as PeriodoBuscaPadrao;
+      setPeriodoInicioBusca(isoParaDateTimeLocal(data.periodo_inicio));
+    }
+
+    void carregarPeriodoBuscaPadrao();
+  }, [podeSolicitarBaixa]);
+
   function alternarHistoricoBaixa(baixaId: string) {
     setHistoricoAberto((anterior) => ({
       ...anterior,
@@ -136,7 +182,19 @@ export default function BaixaEstoqueOlistPage() {
     setMessage(null);
     setErrorMessage(null);
 
-    const resp = await axios.post("/api/olist/baixa-estoque/buscar", {}, { validateStatus: () => true });
+    const periodoInicio = periodoInicioBusca ? dateTimeLocalParaIso(periodoInicioBusca) : null;
+
+    if (periodoInicioBusca && !periodoInicio) {
+      setErrorMessage("Informe uma data válida para a busca automática.");
+      setBuscando(false);
+      return;
+    }
+
+    const resp = await axios.post(
+      "/api/olist/baixa-estoque/buscar",
+      { periodo_inicio: periodoInicio },
+      { validateStatus: () => true },
+    );
 
     if (resp.status < 200 || resp.status >= 300) {
       setErrorMessage(`Erro ao buscar pedidos Olist: ${resp.data?.error ?? "erro desconhecido"}`);
@@ -146,6 +204,7 @@ export default function BaixaEstoqueOlistPage() {
 
     const data = resp.data as ResultadoBusca;
     setResultadoBusca(data);
+    setPeriodoInicioBusca(isoParaDateTimeLocal(data.periodo_inicio));
     setPedidosSelecionados([]);
     setItensForm([{ ...ITEM_INICIAL }]);
     setModoAtual("automatica");
@@ -373,21 +432,32 @@ export default function BaixaEstoqueOlistPage() {
 
       {podeSolicitarBaixa && (
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Busca automática Olist</h3>
             <p className="mt-1 text-sm text-slate-600">
               Situações consultadas: Pronto envio, Enviada e Entregue.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={buscarPedidosOlist}
-            disabled={buscando}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {buscando ? "Buscando..." : "Buscar pedidos Olist"}
-          </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <label className="text-sm text-slate-700">
+              Buscar desde
+              <input
+                type="datetime-local"
+                value={periodoInicioBusca}
+                onChange={(event) => setPeriodoInicioBusca(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 md:w-56"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={buscarPedidosOlist}
+              disabled={buscando}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {buscando ? "Buscando..." : "Buscar pedidos Olist"}
+            </button>
+          </div>
         </div>
 
         {resultadoBusca && (

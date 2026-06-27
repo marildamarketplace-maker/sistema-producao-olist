@@ -82,6 +82,15 @@ type ItemBaixaEstoqueInput = {
   observacao?: string | null;
 };
 
+function isPrismaUniqueConstraintError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
 type ProdutoOlistListagem = {
   id?: string | number;
   sku?: string | number | null;
@@ -899,8 +908,9 @@ function montarItensSolicitacao(
       continue;
     }
 
+    const quantidadeMinimaPedido = Math.ceil(quantidadePedidosIntegracao);
     const quantidadeAProduzir = arredondarParaPar(
-      Math.max(0, metaEstoque - estoqueAposPedidos),
+      Math.max(0, metaEstoque - estoqueAposPedidos, quantidadeMinimaPedido),
     );
 
     itens.push({
@@ -1044,7 +1054,7 @@ export async function registrarPedidosOlistProcessados(input: {
   });
 }
 
-async function obterPeriodoBuscaBaixaEstoque() {
+export async function obterPeriodoBuscaBaixaEstoque() {
   const controle = await prisma.controleBuscaOlist.findUnique({
     where: { chave: CONTROLE_BUSCA_BAIXA_ESTOQUE },
     select: { ultimaBuscaEm: true },
@@ -1091,30 +1101,50 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
   const produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
   const produtosAusentesMap = new Map<string, { sku: string; }>();
 
-  const pedidos = detalhes.map((pedido) => ({
-    id: String(pedido.id),
-    detalhe_pendente: false,
-    itens: (pedido.itens ?? []).map((item, index) => {
+  const pedidos = detalhes.map((pedido) => {
+    const itensAgrupados = new Map<string, {
+      sku: string;
+      quantidade: number;
+      itemOlistId: string;
+    }>();
+
+    for (const [index, item] of (pedido.itens ?? []).entries()) {
       const sku = String(item.produto.sku).trim();
-      const produto = produtoPorSku.get(sku);
+      const itemOlistId = sku || `${pedido.id}:${index}`;
+      const chave = sku || itemOlistId;
+      const itemAgrupado = itensAgrupados.get(chave);
 
-      if (!produto) {
-        produtosAusentesMap.set(sku, {
-          sku,
-        });
-      }
-
-      return {
+      itensAgrupados.set(chave, {
         sku,
-        quantidade: Number(item.quantidade ?? 0),
-        pedido_olist_id: String(pedido.id),
-        item_olist_id: sku || `${pedido.id}:${index}`,
-        produto_id: produto?.id ?? null,
-        produto_cadastrado: Boolean(produto),
-        detalhe_pendente: false,
-      };
-    }),
-  }));
+        quantidade: (itemAgrupado?.quantidade ?? 0) + Number(item.quantidade ?? 0),
+        itemOlistId,
+      });
+    }
+
+    return {
+      id: String(pedido.id),
+      detalhe_pendente: false,
+      itens: [...itensAgrupados.values()].map((item) => {
+        const produto = produtoPorSku.get(item.sku);
+
+        if (!produto) {
+          produtosAusentesMap.set(item.sku, {
+            sku: item.sku,
+          });
+        }
+
+        return {
+          sku: item.sku,
+          quantidade: item.quantidade,
+          pedido_olist_id: String(pedido.id),
+          item_olist_id: item.itemOlistId,
+          produto_id: produto?.id ?? null,
+          produto_cadastrado: Boolean(produto),
+          detalhe_pendente: false,
+        };
+      }),
+    };
+  });
 
   return {
     pedidos,
@@ -1122,8 +1152,16 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
   };
 }
 
-export async function buscarPedidosParaBaixaEstoqueOlist() {
-  const { periodoInicio, periodoFim } = await obterPeriodoBuscaBaixaEstoque();
+export async function buscarPedidosParaBaixaEstoqueOlist(input?: {
+  periodoInicio?: string | null;
+}) {
+  const periodoPadrao = await obterPeriodoBuscaBaixaEstoque();
+  const periodoInicioInformado = input?.periodoInicio ? new Date(input.periodoInicio) : null;
+  const periodoInicio =
+    periodoInicioInformado && !Number.isNaN(periodoInicioInformado.getTime())
+      ? periodoInicioInformado
+      : periodoPadrao.periodoInicio;
+  const periodoFim = periodoPadrao.periodoFim;
   const token = await getValidOlistAccessToken();
   const pedidos: OlistOrder[] = [];
 
@@ -1222,7 +1260,15 @@ export async function confirmarBaixaEstoqueOlist(input: {
     throw new Error("Informe ao menos um item para baixa.");
   }
 
-  const skusInformados = input.itens.map((item) => item.sku.trim());
+  const itensNormalizados = input.itens.map((item) => ({
+    ...item,
+    sku: item.sku.trim(),
+    pedidoOlistId: item.pedidoOlistId?.trim() || null,
+    itemOlistId: item.itemOlistId?.trim() || null,
+    observacao: item.observacao?.trim() || null,
+  }));
+
+  const skusInformados = itensNormalizados.map((item) => item.sku);
 
   if (skusInformados.some((sku) => !sku)) {
     throw new Error("Todos os itens precisam de SKU/referência.");
@@ -1261,7 +1307,24 @@ export async function confirmarBaixaEstoqueOlist(input: {
     produtoPorSku = new Map(produtosAtualizados.map((produto) => [produto.sku, produto]));
   }
 
-  const itensComPedido = input.itens.filter((item) => item.pedidoOlistId && item.itemOlistId);
+  const itensComPedido = itensNormalizados.filter((item) => item.pedidoOlistId && item.itemOlistId);
+  const chavesPedidoItem = new Set<string>();
+  const duplicadosNoEnvio = new Set<string>();
+
+  for (const item of itensComPedido) {
+    const chave = `${item.pedidoOlistId}/${item.itemOlistId}`;
+
+    if (chavesPedidoItem.has(chave)) {
+      duplicadosNoEnvio.add(chave);
+    }
+
+    chavesPedidoItem.add(chave);
+  }
+
+  if (duplicadosNoEnvio.size > 0) {
+    throw new Error(`Baixa duplicada na lista enviada para pedido/item: ${[...duplicadosNoEnvio].join(", ")}`);
+  }
+
   const baixasExistentes = itensComPedido.length
     ? await prisma.itemBaixaEstoqueOlist.findMany({
         where: {
@@ -1291,8 +1354,8 @@ export async function confirmarBaixaEstoqueOlist(input: {
       select: { id: true },
     });
 
-    for (const item of input.itens) {
-      const produto = produtoPorSku.get(item.sku.trim());
+    for (const item of itensNormalizados) {
+      const produto = produtoPorSku.get(item.sku);
       const quantidade = Number(item.quantidade);
 
       if (!produto || Number.isNaN(quantidade) || quantidade <= 0) {
@@ -1308,30 +1371,38 @@ export async function confirmarBaixaEstoqueOlist(input: {
           origem: input.origem === "automatica" ? "BAIXA_OLIST" : "BAIXA_MANUAL",
           referenciaId: baixa.id,
           observacao:
-            item.observacao?.trim() ||
+            item.observacao ||
             (item.pedidoOlistId ? `Baixa por pedido Olist ${item.pedidoOlistId}` : "Baixa manual de estoque"),
         },
         select: { id: true },
       });
 
-      await tx.itemBaixaEstoqueOlist.create({
-        data: {
-          baixaId: baixa.id,
-          produtoId: produto.id,
-          sku: produto.sku,
-          quantidade,
-          pedidoOlistId: item.pedidoOlistId || null,
-          itemOlistId: item.itemOlistId || null,
-          observacao: item.observacao?.trim() || null,
-          origem: input.origem,
-          movimentacaoId: movimentacao.id,
-        },
-      });
+      try {
+        await tx.itemBaixaEstoqueOlist.create({
+          data: {
+            baixaId: baixa.id,
+            produtoId: produto.id,
+            sku: produto.sku,
+            quantidade,
+            pedidoOlistId: item.pedidoOlistId,
+            itemOlistId: item.itemOlistId,
+            observacao: item.observacao,
+            origem: input.origem,
+            movimentacaoId: movimentacao.id,
+          },
+        });
+      } catch (error) {
+        if (isPrismaUniqueConstraintError(error) && item.pedidoOlistId && item.itemOlistId) {
+          throw new Error(`Baixa duplicada bloqueada para pedido/item: ${item.pedidoOlistId}/${item.itemOlistId}`);
+        }
+
+        throw error;
+      }
     }
 
     return {
       baixa_id: baixa.id,
-      itens: input.itens.length,
+      itens: itensNormalizados.length,
     };
   }, { maxWait: 10000, timeout: 30000 });
 

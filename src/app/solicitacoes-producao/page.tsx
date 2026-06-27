@@ -175,6 +175,17 @@ function normalizarQuantidadeInteira(valor: string) {
   return String(Math.ceil(quantidade));
 }
 
+function quantidadeMinimaProducao(item: Pick<ItemForm, "quantidade_pedidos">) {
+  return Math.max(0, Math.ceil(Number(item.quantidade_pedidos ?? 0)));
+}
+
+function normalizarQuantidadeProducao(item: ItemForm) {
+  const quantidadeNormalizada = Number(normalizarQuantidadeInteira(item.quantidade_solicitada));
+  const quantidadeMinima = quantidadeMinimaProducao(item);
+
+  return String(Math.max(quantidadeNormalizada, quantidadeMinima));
+}
+
 function numeroDecimal(valor: number | string | null | undefined) {
   if (valor === null || valor === undefined || valor === "") return null;
 
@@ -529,7 +540,7 @@ export default function SolicitacoesProducaoPage() {
         i === index
           ? aplicarObservacaoProdutoFornecido({
               ...item,
-              quantidade_solicitada: normalizarQuantidadeInteira(item.quantidade_solicitada),
+              quantidade_solicitada: normalizarQuantidadeProducao(item),
             })
           : item,
       ),
@@ -870,6 +881,14 @@ export default function SolicitacoesProducaoPage() {
 
     if (itemInvalido) {
       setErrorMessage("Preencha produto e quantidade válida para todos os itens.");
+      setSaving(false);
+      return;
+    }
+
+    const itemAbaixoPedido = itensNormalizados.find((item) => item.quantidade < quantidadeMinimaProducao(item));
+
+    if (itemAbaixoPedido) {
+      setErrorMessage(`A quantidade de produção de ${itemAbaixoPedido.produto_busca} deve ser pelo menos a quantidade vendida (${quantidadeMinimaProducao(itemAbaixoPedido)}).`);
       setSaving(false);
       return;
     }
@@ -1355,7 +1374,7 @@ export default function SolicitacoesProducaoPage() {
                   <input
                     required
                     type="number"
-                    min={0}
+                    min={quantidadeMinimaProducao(item)}
                     step={1}
                     value={item.quantidade_solicitada}
                     onChange={(event) => alterarItem(index, { quantidade_solicitada: event.target.value })}
