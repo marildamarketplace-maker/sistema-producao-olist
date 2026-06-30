@@ -95,6 +95,8 @@ const INITIAL_FORM: FormData = {
   ativo: true,
 };
 
+const PRODUTO_SKU_MAX_LENGTH = 50;
+
 const INITIAL_FILTROS: FiltrosData = {
   sku: "",
   status: "todos",
@@ -713,12 +715,13 @@ export default function ProdutosPage() {
 
     if (
       !payload.sku ||
+      payload.sku.length > PRODUTO_SKU_MAX_LENGTH ||
       (payload.meta_estoque !== null &&
         (Number.isNaN(payload.meta_estoque) || payload.meta_estoque < 0)) ||
       (payload.minimo_estoque !== null &&
         (Number.isNaN(payload.minimo_estoque) || payload.minimo_estoque < 0))
     ) {
-      setErrorMessage("Preencha SKU, meta e minimo de estoque validos.");
+      setErrorMessage(`Preencha SKU com ate ${PRODUTO_SKU_MAX_LENGTH} caracteres, meta e minimo de estoque validos.`);
       setIsSaving(false);
       return;
     }
@@ -777,6 +780,7 @@ export default function ProdutosPage() {
             SKU
             <input
               required
+              maxLength={PRODUTO_SKU_MAX_LENGTH}
               value={formData.sku}
               onChange={(event) => setFormData((prev) => ({ ...prev, sku: event.target.value }))}
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"

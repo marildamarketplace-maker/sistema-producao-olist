@@ -482,8 +482,10 @@ export function GeradorCsvOlistClient() {
     try {
       const resposta = await carregarGeradorCsvOlist();
       setDados(resposta);
+      return resposta;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao carregar dados.");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -1191,9 +1193,13 @@ export function GeradorCsvOlistClient() {
         : "";
 
       setMessage(`${resposta.vinculados} produto(s) vinculado(s) com sucesso.${semVinculo}`);
-      await carregar();
+      const dadosAtualizados = await carregar();
+      return (dadosAtualizados?.produtosFinais ?? dados.produtosFinais).filter((produto) =>
+        ids.includes(produto.id),
+      );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao vincular produtos.");
+      return [];
     } finally {
       setSaving(false);
     }
@@ -2454,7 +2460,7 @@ function ProdutosCriadosTab({
   onDelete: (id: string) => void | Promise<void>;
   onDeleteMany: (id: string) => void | Promise<void>;
   onExportCsv: (produtos: ProdutoFinalOlist[]) => void;
-  onLinkProdutos: (ids: string[]) => void | Promise<void>;
+  onLinkProdutos: (ids: string[]) => Promise<ProdutoFinalOlist[]>;
 }) {
   const [buscaSku, setBuscaSku] = useState("");
   const [buscaTitulo, setBuscaTitulo] = useState("");
@@ -2471,6 +2477,7 @@ function ProdutosCriadosTab({
   const [fabricadoComponenteId, setFabricadoComponenteId] = useState("");
   const [fabricadoQuantidade, setFabricadoQuantidade] = useState("1");
   const [fabricadoErro, setFabricadoErro] = useState<string | null>(null);
+  const [fabricadoExportando, setFabricadoExportando] = useState(false);
   const [mockupGerando, setMockupGerando] = useState<number | null>(null);
   const [mockupGerado, setMockupGerado] = useState<{
     dataUrl: string;
@@ -2733,13 +2740,12 @@ function ProdutosCriadosTab({
     setFabricadoModalOpen(true);
   }
 
-  function exportarFabricado(event: FormEvent<HTMLFormElement>) {
+  async function exportarFabricado(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFabricadoErro(null);
 
     const componenteId = fabricadoComponenteId.trim();
     const quantidadeNumber = parseFlexibleDecimalText(fabricadoQuantidade.trim() || "1");
-    const semProdutoVinculado = produtosSelecionados.filter((produto) => !produto.produto?.idCadastroOlist);
 
     if (!componenteId) {
       setFabricadoErro("Informe o ID componente.");
@@ -2749,12 +2755,32 @@ function ProdutosCriadosTab({
       setFabricadoErro("Informe uma quantidade decimal valida.");
       return;
     }
-    if (semProdutoVinculado.length > 0) {
-      setFabricadoErro("Todos os produtos selecionados precisam ter ID produto Olist vinculado.");
+
+    setFabricadoExportando(true);
+    let produtosParaExportar: ProdutoFinalOlist[] = [];
+
+    try {
+      produtosParaExportar = produtosSelecionados.some((produto) => !produto.produto?.idCadastroOlist)
+        ? await onLinkProdutos(produtosSelecionados.map((produto) => produto.id))
+        : produtosSelecionados;
+    } finally {
+      setFabricadoExportando(false);
+    }
+
+    if (produtosParaExportar.length === 0) {
+      setFabricadoErro("Nao foi possivel atualizar os produtos selecionados para exportar.");
       return;
     }
 
-    const csv = montarCsvProdutosFabricadosOlist(produtosSelecionados, {
+    const semProdutoVinculado = produtosParaExportar.filter((produto) => !produto.produto?.idCadastroOlist);
+
+    if (semProdutoVinculado.length > 0) {
+      const skus = semProdutoVinculado.map((produto) => produto.skuFinal).join(", ");
+      setFabricadoErro(`Estes SKUs ainda precisam ter ID produto Olist vinculado: ${skus}.`);
+      return;
+    }
+
+    const csv = montarCsvProdutosFabricadosOlist(produtosParaExportar, {
       componenteId,
       quantidade: formatNumberForInput(quantidadeNumber, 4),
     });
@@ -3081,9 +3107,10 @@ function ProdutosCriadosTab({
                 </button>
                 <button
                   type="submit"
+                  disabled={fabricadoExportando}
                   className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
                 >
-                  Exportar CSV
+                  {fabricadoExportando ? "Exportando..." : "Exportar CSV"}
                 </button>
               </div>
             </form>
