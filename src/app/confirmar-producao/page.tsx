@@ -112,7 +112,7 @@ export default function ConfirmarProducaoPage() {
       const proximo = { ...prev };
 
       itensCarregados.forEach((item) => {
-        proximo[item.id] = proximo[item.id] ?? String(item.quantidade_produzida ?? 0);
+        proximo[item.id] = proximo[item.id] ?? String(item.quantidade_solicitada ?? 0);
       });
 
       return proximo;
@@ -188,7 +188,7 @@ export default function ConfirmarProducaoPage() {
     setMessage(null);
 
     const atualizacoes = itensSolicitacao.map((item) => {
-      const qtd = Number(produzidas[item.id]);
+      const qtd = Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0);
       return { item, qtd };
     });
 
@@ -398,7 +398,7 @@ export default function ConfirmarProducaoPage() {
                             <input
                               type="number"
                               min={0}
-                              value={produzidas[item.id] ?? "0"}
+                              value={produzidas[item.id] ?? String(item.quantidade_solicitada ?? 0)}
                               onChange={(event) =>
                                 setProduzidas((prev) => ({
                                   ...prev,

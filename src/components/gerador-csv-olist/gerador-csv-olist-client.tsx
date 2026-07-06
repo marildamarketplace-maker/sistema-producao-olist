@@ -9,6 +9,7 @@ import {
   GeradorCsvOlistData,
   ProdutoFornecedorOlist,
   ProdutoFinalOlist,
+  ProdutoKitBaseOlist,
   TamanhoOlist,
   TipoProdutoOlist,
   VarianteOlist,
@@ -25,6 +26,7 @@ import {
   montarCsvProdutosOlist,
   salvarEstampaOlist,
   salvarProdutoFinalOlist,
+  salvarProdutoKitFinalOlist,
   salvarTamanhoOlist,
   salvarTipoProdutoOlist,
   salvarVarianteOlist,
@@ -35,7 +37,7 @@ import {
   vincularProdutosFinaisOlist,
 } from "@/lib/gerador-csv-olist";
 
-type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "produtos";
+type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "gerar-kit" | "produtos";
 type MockupQuality = "low" | "medium" | "high";
 
 const ABAS: { id: Aba; label: string }[] = [
@@ -44,6 +46,7 @@ const ABAS: { id: Aba; label: string }[] = [
   { id: "estampas", label: "Estampas" },
   { id: "variantes", label: "Variantes" },
   { id: "gerar", label: "Gerar Produto Final" },
+  { id: "gerar-kit", label: "Gerar Produto Kit Final" },
   { id: "produtos", label: "Produtos Criados" },
 ];
 
@@ -181,6 +184,10 @@ function cleanSkuPart(value: string) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .toUpperCase();
+}
+
+function buildKitSku(produtos: Array<{ sku: string }>) {
+  return ["KIT", ...produtos.map((produto) => produto.sku.trim().toUpperCase()).filter(Boolean)].join("__");
 }
 
 function removeTemplateVariables(value: string | null | undefined) {
@@ -412,6 +419,7 @@ export function GeradorCsvOlistClient() {
     variantes: [],
     tamanhos: [],
     produtosFinais: [],
+    produtos: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -931,6 +939,57 @@ export function GeradorCsvOlistClient() {
     }
   }
 
+  async function gerarProdutoKitFinal(payload: {
+    tipoProdutoId: string;
+    estampaId: string;
+    skuFinal: string;
+    tituloFinal: string;
+    descricaoFinal: string;
+    precoCusto: string;
+    preco: string;
+    pesoLiquido: string;
+    pesoBruto: string;
+    larguraEmbalagem: string;
+    alturaEmbalagem: string;
+    comprimentoEmbalagem: string;
+    componentes: Array<{
+      produtoId: string;
+      quantidade: string;
+    }>;
+  }) {
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      await salvarProdutoKitFinalOlist({
+        tipoProdutoId: payload.tipoProdutoId,
+        estampaId: payload.estampaId,
+        skuFinal: payload.skuFinal,
+        tituloFinal: payload.tituloFinal,
+        descricaoFinal: payload.descricaoFinal || null,
+        precoCusto: toNumberOrNull(payload.precoCusto),
+        preco: toNumberOrNull(payload.preco),
+        pesoLiquido: toNumberOrNull(payload.pesoLiquido),
+        pesoBruto: toNumberOrNull(payload.pesoBruto),
+        larguraEmbalagem: toNumberOrNull(payload.larguraEmbalagem),
+        alturaEmbalagem: toNumberOrNull(payload.alturaEmbalagem),
+        comprimentoEmbalagem: toNumberOrNull(payload.comprimentoEmbalagem),
+        componentes: payload.componentes.map((item) => ({
+          produtoId: item.produtoId,
+          quantidade: parseFlexibleDecimalText(item.quantidade) ?? 0,
+        })),
+      });
+      setMessage("Produto kit final criado em Produtos Criados.");
+      await carregar();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao gerar produto kit final.");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function editarTipo(tipo: TipoProdutoOlist) {
     setTipoEditId(tipo.id);
     setTipoForm({
@@ -1332,6 +1391,17 @@ export function GeradorCsvOlistClient() {
               saving={saving}
               onGenerate={gerarProdutosFinaisEmLote}
               onDownloadCsv={baixarCsv}
+            />
+          )}
+
+          {abaAtiva === "gerar-kit" && (
+            <GerarProdutoKitFinalTab
+              tipos={tiposAtivos}
+              estampas={estampasAtivas}
+              produtos={dados.produtos}
+              produtosFinais={dados.produtosFinais}
+              saving={saving}
+              onGenerate={gerarProdutoKitFinal}
             />
           )}
 
@@ -3498,6 +3568,607 @@ function ProdutosCriadosTab({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function GerarProdutoKitFinalTab({
+  tipos,
+  estampas,
+  produtos,
+  produtosFinais,
+  saving,
+  onGenerate,
+}: {
+  tipos: TipoProdutoOlist[];
+  estampas: EstampaOlist[];
+  produtos: ProdutoKitBaseOlist[];
+  produtosFinais: ProdutoFinalOlist[];
+  saving: boolean;
+  onGenerate: (payload: {
+    tipoProdutoId: string;
+    estampaId: string;
+    skuFinal: string;
+    tituloFinal: string;
+    descricaoFinal: string;
+    precoCusto: string;
+    preco: string;
+    pesoLiquido: string;
+    pesoBruto: string;
+    larguraEmbalagem: string;
+    alturaEmbalagem: string;
+    comprimentoEmbalagem: string;
+    componentes: Array<{
+      produtoId: string;
+      quantidade: string;
+    }>;
+  }) => Promise<void>;
+}) {
+  const [tipoProdutoId, setTipoProdutoId] = useState("");
+  const [estampaId, setEstampaId] = useState("");
+  const [skuFinal, setSkuFinal] = useState("");
+  const [tituloFinal, setTituloFinal] = useState("");
+  const [descricaoFinal, setDescricaoFinal] = useState("");
+  const [buscaProduto, setBuscaProduto] = useState("");
+  const [componentes, setComponentes] = useState<Array<{ produtoId: string; quantidade: string }>>([]);
+  const [precificacaoForm, setPrecificacaoForm] = useState({
+    taxaMktFixa: "6,75",
+    impostoPercent: "4,00",
+    taxaMktPercent: "15,00",
+    campanhasPercent: "15,00",
+    margemDesejadaPercent: "10,00",
+  });
+  const [geracaoForm, setGeracaoForm] = useState({
+    preco: "",
+    pesoLiquido: "",
+    pesoBruto: "",
+    larguraEmbalagem: "",
+    alturaEmbalagem: "",
+    comprimentoEmbalagem: "",
+  });
+  const produtosPorId = useMemo(() => new Map(produtos.map((produto) => [produto.id, produto])), [produtos]);
+  const tipoSelecionado = tipos.find((tipo) => tipo.id === tipoProdutoId) ?? null;
+  const produtosFiltrados = useMemo(() => {
+    const busca = buscaProduto.trim().toLowerCase();
+    const selecionados = new Set(componentes.map((item) => item.produtoId));
+
+    return produtos
+      .filter((produto) => !selecionados.has(produto.id))
+      .filter((produto) => {
+        if (!busca) return true;
+        return [produto.sku, produto.produtoOlist?.tituloFinal, produto.produtoFornecido?.produtoFornecedor.nome].some(
+          (value) => value?.toLowerCase().includes(busca),
+        );
+      })
+      .slice(0, 25);
+  }, [buscaProduto, componentes, produtos]);
+  const componentesDetalhados = useMemo(() => {
+    return componentes
+      .map((item) => {
+        const produto = produtosPorId.get(item.produtoId);
+        const quantidade = parseFlexibleDecimalText(item.quantidade);
+        if (!produto || quantidade === null || quantidade <= 0) return null;
+
+        const custoUnitario =
+          produto.produtoOlist?.precoCusto ??
+          (produto.produtoFornecido
+            ? produto.produtoFornecido.produtoFornecedor.precoUnitarioMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+        const pesoLiquidoUnitario =
+          produto.produtoOlist?.pesoLiquido ??
+          (produto.produtoFornecido?.produtoFornecedor.pesoLiquidoMetro !== null &&
+          produto.produtoFornecido?.produtoFornecedor.pesoLiquidoMetro !== undefined
+            ? produto.produtoFornecido.produtoFornecedor.pesoLiquidoMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+        const pesoBrutoUnitario =
+          produto.produtoOlist?.pesoBruto ??
+          (produto.produtoFornecido?.produtoFornecedor.pesoBrutoMetro !== null &&
+          produto.produtoFornecido?.produtoFornecedor.pesoBrutoMetro !== undefined
+            ? produto.produtoFornecido.produtoFornecedor.pesoBrutoMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+        const larguraEmbalagemUnitario =
+          produto.produtoOlist?.larguraEmbalagem ??
+          (produto.produtoFornecido?.produtoFornecedor.larguraEmbalagemMetro !== null &&
+          produto.produtoFornecido?.produtoFornecedor.larguraEmbalagemMetro !== undefined
+            ? produto.produtoFornecido.produtoFornecedor.larguraEmbalagemMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+        const alturaEmbalagemUnitario =
+          produto.produtoOlist?.alturaEmbalagem ??
+          (produto.produtoFornecido?.produtoFornecedor.alturaEmbalagemMetro !== null &&
+          produto.produtoFornecido?.produtoFornecedor.alturaEmbalagemMetro !== undefined
+            ? produto.produtoFornecido.produtoFornecedor.alturaEmbalagemMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+        const comprimentoEmbalagemUnitario =
+          produto.produtoOlist?.comprimentoEmbalagem ??
+          (produto.produtoFornecido?.produtoFornecedor.comprimentoEmbalagemMetro !== null &&
+          produto.produtoFornecido?.produtoFornecedor.comprimentoEmbalagemMetro !== undefined
+            ? produto.produtoFornecido.produtoFornecedor.comprimentoEmbalagemMetro * produto.produtoFornecido.quantidadeUsada
+            : null);
+
+        return {
+          ...item,
+          produto,
+          quantidade,
+          custoUnitario,
+          custoTotal: custoUnitario === null ? null : custoUnitario * quantidade,
+          pesoLiquidoTotal: pesoLiquidoUnitario === null ? null : pesoLiquidoUnitario * quantidade,
+          pesoBrutoTotal: pesoBrutoUnitario === null ? null : pesoBrutoUnitario * quantidade,
+          larguraEmbalagemTotal: larguraEmbalagemUnitario,
+          alturaEmbalagemTotal: alturaEmbalagemUnitario === null ? null : alturaEmbalagemUnitario * quantidade,
+          comprimentoEmbalagemTotal:
+            comprimentoEmbalagemUnitario,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }, [componentes, produtosPorId]);
+  const custoTotal = componentesDetalhados.reduce(
+    (total, item) => total + (item.custoTotal ?? 0),
+    0,
+  );
+  const custoCalculado = componentesDetalhados.some((item) => item.custoTotal !== null) ? custoTotal : null;
+  const pesoLiquidoCalculado = componentesDetalhados.some((item) => item.pesoLiquidoTotal !== null)
+    ? componentesDetalhados.reduce((total, item) => total + (item.pesoLiquidoTotal ?? 0), 0)
+    : null;
+  const pesoBrutoCalculado = componentesDetalhados.some((item) => item.pesoBrutoTotal !== null)
+    ? componentesDetalhados.reduce((total, item) => total + (item.pesoBrutoTotal ?? 0), 0)
+    : null;
+  const larguraCalculada = componentesDetalhados.some((item) => item.larguraEmbalagemTotal !== null)
+    ? componentesDetalhados.reduce((total, item) => total + (item.larguraEmbalagemTotal ?? 0), 0)
+    : null;
+  const alturaCalculada = componentesDetalhados.some((item) => item.alturaEmbalagemTotal !== null)
+    ? componentesDetalhados.reduce((total, item) => total + (item.alturaEmbalagemTotal ?? 0), 0)
+    : null;
+  const comprimentoCalculado = componentesDetalhados.some((item) => item.comprimentoEmbalagemTotal !== null)
+    ? componentesDetalhados.reduce((total, item) => total + (item.comprimentoEmbalagemTotal ?? 0), 0)
+    : null;
+  const precificacao = useMemo(() => {
+    const custo = custoCalculado;
+    const taxaMktFixa = parseDecimalText(precificacaoForm.taxaMktFixa);
+    const imposto = parsePercentText(precificacaoForm.impostoPercent);
+    const taxaMkt = parsePercentText(precificacaoForm.taxaMktPercent);
+    const campanhas = parsePercentText(precificacaoForm.campanhasPercent);
+    const margemDesejada = parsePercentText(precificacaoForm.margemDesejadaPercent);
+
+    if (
+      custo === null ||
+      taxaMktFixa === null ||
+      imposto === null ||
+      taxaMkt === null ||
+      campanhas === null ||
+      margemDesejada === null
+    ) {
+      return {
+        precoMinimo: null,
+        precoSugerido: null,
+        lucroPrevisto: null,
+        margemPrevista: null,
+        impostoValor: null,
+        taxaMktValor: null,
+        campanhasValor: null,
+        denominadorMinimo: null,
+        denominadorSugerido: null,
+      };
+    }
+
+    const denominadorMinimo = 1 - imposto - taxaMkt;
+    const denominadorSugerido = 1 - imposto - taxaMkt - campanhas - margemDesejada;
+    const precoMinimo = denominadorMinimo > 0 ? (custo + taxaMktFixa) / denominadorMinimo : null;
+    const precoSugerido = denominadorSugerido > 0 ? (custo + taxaMktFixa) / denominadorSugerido : null;
+    const lucroPrevisto =
+      precoSugerido === null
+        ? null
+        : precoSugerido - custo - taxaMktFixa - precoSugerido * (imposto + taxaMkt + campanhas);
+
+    return {
+      precoMinimo,
+      precoSugerido,
+      lucroPrevisto,
+      margemPrevista: precoSugerido && lucroPrevisto !== null ? lucroPrevisto / precoSugerido : null,
+      impostoValor: precoSugerido === null ? null : precoSugerido * imposto,
+      taxaMktValor: precoSugerido === null ? null : precoSugerido * taxaMkt,
+      campanhasValor: precoSugerido === null ? null : precoSugerido * campanhas,
+      denominadorMinimo,
+      denominadorSugerido,
+    };
+  }, [custoCalculado, precificacaoForm]);
+  const skuKitCalculado = buildKitSku(componentesDetalhados.map((item) => item.produto));
+  const skuDuplicado = produtosFinais.some((produto) => produto.skuFinal === skuKitCalculado);
+
+  useEffect(() => {
+    const primeiroComVinculo = componentes
+      .map((item) => produtosPorId.get(item.produtoId)?.produtoOlist)
+      .find(Boolean);
+
+    if (!tipoProdutoId && primeiroComVinculo?.tipoProdutoId) {
+      setTipoProdutoId(primeiroComVinculo.tipoProdutoId);
+    }
+    if (!estampaId && primeiroComVinculo?.estampaId) {
+      setEstampaId(primeiroComVinculo.estampaId);
+    }
+  }, [componentes, estampaId, produtosPorId, tipoProdutoId]);
+
+  useEffect(() => {
+    const valoresCalculados = {
+      preco: formatNumberForInput(precificacao.precoSugerido, 2),
+      pesoLiquido: formatNumberForInput(pesoLiquidoCalculado, 3),
+      pesoBruto: formatNumberForInput(pesoBrutoCalculado, 3),
+      larguraEmbalagem: formatNumberForInput(larguraCalculada, 2),
+      alturaEmbalagem: formatNumberForInput(alturaCalculada, 2),
+      comprimentoEmbalagem: formatNumberForInput(comprimentoCalculado, 2),
+    };
+
+    setGeracaoForm((prev) =>
+      Object.entries(valoresCalculados).every(([key, value]) => prev[key as keyof typeof geracaoForm] === value)
+        ? prev
+        : { ...prev, ...valoresCalculados },
+    );
+  }, [alturaCalculada, comprimentoCalculado, larguraCalculada, pesoBrutoCalculado, pesoLiquidoCalculado, precificacao.precoSugerido]);
+
+  useEffect(() => {
+    setSkuFinal(skuKitCalculado);
+  }, [skuKitCalculado]);
+
+  useEffect(() => {
+    if (tituloFinal || componentesDetalhados.length === 0) return;
+
+    setTituloFinal(`Kit ${componentesDetalhados.map((item) => item.produto.sku).join(" + ")}`);
+  }, [componentesDetalhados, tituloFinal]);
+
+  function adicionarProduto(produtoId: string) {
+    setComponentes((prev) => [...prev, { produtoId, quantidade: "1" }]);
+    setBuscaProduto("");
+  }
+
+  function removerProduto(produtoId: string) {
+    setComponentes((prev) => prev.filter((item) => item.produtoId !== produtoId));
+  }
+
+  async function confirmarGeracao() {
+    await onGenerate({
+      tipoProdutoId,
+      estampaId,
+      skuFinal: skuKitCalculado,
+      tituloFinal,
+      descricaoFinal:
+        descricaoFinal ||
+        `Kit composto por: ${componentesDetalhados
+          .map((item) => `${formatDecimal(item.quantidade, 4)} x ${item.produto.sku}`)
+          .join("; ")}.`,
+      precoCusto: formatNumberForInput(custoCalculado, 2),
+      ...geracaoForm,
+      componentes,
+    });
+    setSkuFinal("");
+    setTituloFinal("");
+    setDescricaoFinal("");
+    setComponentes([]);
+  }
+
+  return (
+    <div className="space-y-8">
+      <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900">Gerar Produto Kit Final</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Monte um kit com produtos cadastrados, calcule custo e preco, e crie o item em Produtos Criados.
+          </p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,480px)]">
+        <div className="space-y-6 rounded-lg border border-slate-200 bg-white p-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className="text-sm text-slate-700">
+              Tipo de Produto
+              <select
+                value={tipoProdutoId}
+                onChange={(event) => setTipoProdutoId(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                <option value="">Selecione um tipo</option>
+                {tipos.map((tipo) => (
+                  <option key={tipo.id} value={tipo.id}>
+                    {tipo.titulo}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-slate-700">
+              Estampa base
+              <select
+                value={estampaId}
+                onChange={(event) => setEstampaId(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                <option value="">Selecione uma estampa</option>
+                {estampas.map((estampa) => (
+                  <option key={estampa.id} value={estampa.id}>
+                    {estampa.codigo}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm text-slate-700">
+              SKU final
+              <input
+                value={skuFinal}
+                readOnly
+                className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-700"
+                placeholder="KIT__SKU1__SKU2"
+              />
+            </label>
+            <label className="text-sm text-slate-700">
+              Titulo final
+              <input
+                value={tituloFinal}
+                onChange={(event) => setTituloFinal(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Kit com produtos selecionados"
+              />
+            </label>
+            <label className="text-sm text-slate-700 md:col-span-2">
+              Descricao final
+              <textarea
+                value={descricaoFinal}
+                onChange={(event) => setDescricaoFinal(event.target.value)}
+                className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Descricao opcional. Se ficar vazio, o sistema lista os componentes do kit."
+              />
+            </label>
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-700">
+              Buscar produto
+              <input
+                value={buscaProduto}
+                onChange={(event) => setBuscaProduto(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="SKU, titulo vinculado ou produto fornecido"
+              />
+            </label>
+            <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-slate-200">
+              {produtosFiltrados.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-slate-600">Nenhum produto disponivel.</p>
+              ) : (
+                produtosFiltrados.map((produto) => (
+                  <button
+                    key={produto.id}
+                    type="button"
+                    onClick={() => adicionarProduto(produto.id)}
+                    className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  >
+                    <span className="font-medium text-slate-800">{produto.sku}</span>
+                    <span className="ml-2 text-xs text-slate-500">
+                      {produto.produtoOlist ? "com produto_olist" : "sem produto_olist"}
+                    </span>
+                    {produto.produtoFornecido && (
+                      <span className="block text-xs text-slate-500">
+                        {produto.produtoFornecido.produtoFornecedor.nome} - qtd {formatDecimal(produto.produtoFornecido.quantidadeUsada, 4)}
+                      </span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Produtos do kit</h4>
+            {componentes.length === 0 ? (
+              <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                Selecione produtos para compor o kit.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-600">
+                      <th className="p-3">SKU</th>
+                      <th className="p-3">Qtd.</th>
+                      <th className="p-3">Custo un.</th>
+                      <th className="p-3">Custo total</th>
+                      <th className="p-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {componentes.map((item) => {
+                      const detalhe = componentesDetalhados.find((detalhado) => detalhado.produtoId === item.produtoId);
+                      const produto = produtosPorId.get(item.produtoId);
+
+                      return (
+                        <tr key={item.produtoId} className="border-b border-slate-100">
+                          <td className="p-3 font-medium text-slate-700">{produto?.sku ?? "-"}</td>
+                          <td className="p-3">
+                            <input
+                              inputMode="decimal"
+                              value={item.quantidade}
+                              onChange={(event) =>
+                                setComponentes((prev) =>
+                                  prev.map((componente) =>
+                                    componente.produtoId === item.produtoId
+                                      ? { ...componente, quantidade: event.target.value }
+                                      : componente,
+                                  ),
+                                )
+                              }
+                              onBlur={() =>
+                                setComponentes((prev) =>
+                                  prev.map((componente) =>
+                                    componente.produtoId === item.produtoId
+                                      ? { ...componente, quantidade: normalizeFlexibleDecimalText(componente.quantidade, 4) }
+                                      : componente,
+                                  ),
+                                )
+                              }
+                              className="w-24 rounded-md border border-slate-300 px-2 py-1"
+                            />
+                          </td>
+                          <td className="p-3 text-slate-700">{formatMoney(detalhe?.custoUnitario ?? null)}</td>
+                          <td className="p-3 text-slate-700">{formatMoney(detalhe?.custoTotal ?? null)}</td>
+                          <td className="p-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removerProduto(item.produtoId)}
+                              className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                            >
+                              Remover
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-5 rounded-lg border border-slate-200 bg-white p-6">
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Valores do produto final</h4>
+            <div className="grid grid-cols-1 gap-3 rounded-md border border-slate-200 bg-white p-4 text-sm">
+              <div>
+                <span className="block text-slate-500">Produto fornecido</span>
+                <strong className="text-slate-900">
+                  {tipoSelecionado?.produtosFornecidos[0]?.produtoFornecedor
+                    ? `${tipoSelecionado.produtosFornecidos[0].produtoFornecedor.nome} - ${tipoSelecionado.produtosFornecidos[0].produtoFornecedor.fornecedorNome}`
+                    : "Selecione um tipo com produto fornecido"}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-slate-500">Produtos selecionados</span>
+                <strong className="text-slate-900">{componentesDetalhados.length}</strong>
+              </div>
+              <div>
+                <span className="block text-slate-500">Preco de custo calculado</span>
+                <strong className="text-slate-900">{formatMoney(custoCalculado)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[
+                { key: "taxaMktFixa", label: "Taxa MKT R$", digits: 2, placeholder: "6,75" },
+                { key: "impostoPercent", label: "Imposto %", digits: 2, placeholder: "4,00", valorConvertido: precificacao.impostoValor },
+                { key: "taxaMktPercent", label: "Taxa MKT %", digits: 2, placeholder: "15,00", valorConvertido: precificacao.taxaMktValor },
+                { key: "campanhasPercent", label: "Campanhas %", digits: 2, placeholder: "15,00", valorConvertido: precificacao.campanhasValor },
+                { key: "margemDesejadaPercent", label: "Margem desejada %", digits: 2, placeholder: "10,00" },
+              ].map((field) => (
+                <label key={field.key} className="text-sm text-slate-700">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span>{field.label}</span>
+                    {"valorConvertido" in field && (
+                      <span className="text-[10px] text-slate-500">{formatMoney(field.valorConvertido ?? null)}</span>
+                    )}
+                  </span>
+                  <input
+                    inputMode="decimal"
+                    value={precificacaoForm[field.key as keyof typeof precificacaoForm]}
+                    onChange={(event) =>
+                      setPrecificacaoForm((prev) => ({ ...prev, [field.key]: event.target.value }))
+                    }
+                    onBlur={() =>
+                      setPrecificacaoForm((prev) => ({
+                        ...prev,
+                        [field.key]: normalizeDecimalText(prev[field.key as keyof typeof precificacaoForm], field.digits),
+                      }))
+                    }
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                    placeholder={field.placeholder}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 text-sm">
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-slate-500">Preco min.</span>
+                <strong className="text-slate-900">{formatMoney(precificacao.precoMinimo)}</strong>
+                <span className="mt-1 block text-xs text-slate-500">=(custo + taxa fixa) / (1 - imposto - taxa mkt)</span>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-slate-500">Preco sug.</span>
+                <strong className="text-slate-900">{formatMoney(precificacao.precoSugerido)}</strong>
+                <span className="mt-1 block text-xs text-slate-500">
+                  =(custo + taxa fixa) / (1 - imposto - taxa mkt - campanhas - margem)
+                </span>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-slate-500">Lucro previsto</span>
+                <strong className="text-slate-900">{formatMoney(precificacao.lucroPrevisto)}</strong>
+                <span className="mt-1 block text-xs text-slate-500">
+                  Margem prevista: {formatDecimal(
+                    precificacao.margemPrevista === null ? null : precificacao.margemPrevista * 100,
+                    2,
+                  )}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+            {[
+              { key: "pesoLiquido", label: "Peso liquido", digits: 3, placeholder: "0,000" },
+              { key: "pesoBruto", label: "Peso bruto", digits: 3, placeholder: "0,000" },
+              { key: "larguraEmbalagem", label: "Largura da embalagem", digits: 2, placeholder: "0,00" },
+              { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "0,00" },
+              { key: "comprimentoEmbalagem", label: "Comprimento da embalagem", digits: 2, placeholder: "0,00" },
+            ].map((field) => (
+              <label key={field.key} className="text-sm text-slate-700">
+                {field.label}
+                <input
+                  inputMode="decimal"
+                  value={geracaoForm[field.key as keyof typeof geracaoForm]}
+                  onChange={(event) => setGeracaoForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                  onBlur={() =>
+                    setGeracaoForm((prev) => ({
+                      ...prev,
+                      [field.key]: normalizeDecimalText(prev[field.key as keyof typeof geracaoForm], field.digits),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                  placeholder={field.placeholder}
+                />
+              </label>
+            ))}
+            <label className="text-sm text-slate-700">
+              Preco aplicado
+              <input
+                inputMode="decimal"
+                value={geracaoForm.preco}
+                readOnly
+                className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-700"
+                placeholder="0,00"
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500">Todos os valores desta secao serao aplicados no produto kit gerado.</p>
+          {skuDuplicado && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Ja existe um produto criado com este SKU; ao confirmar, ele sera sobrescrito.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={confirmarGeracao}
+            disabled={
+              saving ||
+              !tipoProdutoId ||
+              !estampaId ||
+              !skuKitCalculado ||
+              !tituloFinal.trim() ||
+              componentesDetalhados.length === 0 ||
+              custoCalculado === null ||
+              !geracaoForm.preco
+            }
+            className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {saving ? "Gerando..." : "Criar em Produtos Criados"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

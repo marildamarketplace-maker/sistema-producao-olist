@@ -177,6 +177,32 @@ export type ProdutoFinalOlist = {
   > | null;
 };
 
+export type ProdutoKitBaseOlist = {
+  id: string;
+  sku: string;
+  idCadastroOlist: string | null;
+  imagemUrl: string | null;
+  produtoOlist: {
+    id: string;
+    skuFinal: string;
+    tituloFinal: string;
+    precoCusto: number | null;
+    preco: number | null;
+    pesoLiquido: number | null;
+    pesoBruto: number | null;
+    larguraEmbalagem: number | null;
+    alturaEmbalagem: number | null;
+    comprimentoEmbalagem: number | null;
+    tipoProdutoId: string;
+    estampaId: string;
+  } | null;
+  produtoFornecido: {
+    produtoFornecedorId: string;
+    quantidadeUsada: number;
+    produtoFornecedor: ProdutoFornecedorOlist;
+  } | null;
+};
+
 export type GeradorCsvOlistData = {
   tiposProduto: TipoProdutoOlist[];
   produtosFornecedor: ProdutoFornecedorOlist[];
@@ -184,6 +210,7 @@ export type GeradorCsvOlistData = {
   variantes: VarianteOlist[];
   tamanhos: TamanhoOlist[];
   produtosFinais: ProdutoFinalOlist[];
+  produtos: ProdutoKitBaseOlist[];
 };
 
 type ApiResponse<T> = T | { error: string };
@@ -403,6 +430,30 @@ export function salvarProdutoFinalOlist(payload: {
   return requestGeradorCsv<{ produtoFinal: ProdutoFinalOlist }>({
     method: "POST",
     body: JSON.stringify({ action: "salvar-produto-final", payload }),
+  });
+}
+
+export function salvarProdutoKitFinalOlist(payload: {
+  tipoProdutoId: string;
+  estampaId: string;
+  skuFinal: string;
+  tituloFinal: string;
+  descricaoFinal?: string | null;
+  precoCusto?: number | null;
+  preco?: number | null;
+  pesoLiquido?: number | null;
+  pesoBruto?: number | null;
+  larguraEmbalagem?: number | null;
+  alturaEmbalagem?: number | null;
+  comprimentoEmbalagem?: number | null;
+  componentes: Array<{
+    produtoId: string;
+    quantidade: number;
+  }>;
+}) {
+  return requestGeradorCsv<{ produtoFinal: ProdutoFinalOlist }>({
+    method: "POST",
+    body: JSON.stringify({ action: "salvar-produto-kit-final", payload }),
   });
 }
 

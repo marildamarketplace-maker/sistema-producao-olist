@@ -41,6 +41,13 @@ function optionalNumber(value: unknown, field: string) {
   return numberValue;
 }
 
+function formatDecimalPtBr(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
 function requiredPositiveNumber(value: unknown, field: string) {
   const numberValue = optionalNumber(value, field);
 
@@ -67,6 +74,10 @@ function cleanCodePart(value: string) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .toUpperCase();
+}
+
+function buildKitSku(produtos: Array<{ sku: string }>) {
+  return ["KIT", ...produtos.map((produto) => produto.sku.trim().toUpperCase()).filter(Boolean)].join("__");
 }
 
 function buildEstampaImagemStoragePath(codigo: string, index: number) {
@@ -614,8 +625,82 @@ function normalizeProdutoOlist(produto: {
   };
 }
 
+function normalizeProdutoKitBase(produto: {
+  id: string;
+  sku: string;
+  idCadastroOlist: string | null;
+  imagemUrl: string | null;
+  produtosOlist?: Array<{
+    id: string;
+    skuFinal: string;
+    tituloFinal: string;
+    precoCusto: unknown;
+    preco: unknown;
+    pesoLiquido: unknown;
+    pesoBruto: unknown;
+    larguraEmbalagem: unknown;
+    alturaEmbalagem: unknown;
+    comprimentoEmbalagem: unknown;
+    tipoProdutoId: string;
+    estampaId: string;
+  }>;
+  produtoFornecedorOlist?: {
+    produtoFornecedorId: string;
+    quantidadeUsada: unknown;
+    produtoFornecedor: {
+      id: string;
+      fornecedorId: string;
+      nome: string;
+      descricao: string | null;
+      referencia: string | null;
+      precoUnitarioMetro: unknown;
+      pesoLiquidoMetro?: unknown;
+      pesoBrutoMetro?: unknown;
+      larguraEmbalagemMetro?: unknown;
+      alturaEmbalagemMetro?: unknown;
+      comprimentoEmbalagemMetro?: unknown;
+      fornecedor: {
+        nome: string;
+      };
+    };
+  } | null;
+}) {
+  const produtoOlist = produto.produtosOlist?.[0] ?? null;
+  const produtoFornecido = produto.produtoFornecedorOlist ?? null;
+
+  return {
+    id: produto.id,
+    sku: produto.sku,
+    idCadastroOlist: produto.idCadastroOlist,
+    imagemUrl: produto.imagemUrl,
+    produtoOlist: produtoOlist
+      ? {
+          id: produtoOlist.id,
+          skuFinal: produtoOlist.skuFinal,
+          tituloFinal: produtoOlist.tituloFinal,
+          precoCusto: decimalToNumber(produtoOlist.precoCusto),
+          preco: decimalToNumber(produtoOlist.preco),
+          pesoLiquido: decimalToNumber(produtoOlist.pesoLiquido),
+          pesoBruto: decimalToNumber(produtoOlist.pesoBruto),
+          larguraEmbalagem: decimalToNumber(produtoOlist.larguraEmbalagem),
+          alturaEmbalagem: decimalToNumber(produtoOlist.alturaEmbalagem),
+          comprimentoEmbalagem: decimalToNumber(produtoOlist.comprimentoEmbalagem),
+          tipoProdutoId: produtoOlist.tipoProdutoId,
+          estampaId: produtoOlist.estampaId,
+        }
+      : null,
+    produtoFornecido: produtoFornecido
+      ? {
+          produtoFornecedorId: produtoFornecido.produtoFornecedorId,
+          quantidadeUsada: decimalToNumber(produtoFornecido.quantidadeUsada) ?? 0,
+          produtoFornecedor: normalizeProdutoFornecedor(produtoFornecido.produtoFornecedor),
+        }
+      : null,
+  };
+}
+
 async function carregarDados() {
-  const [tiposProduto, produtosFornecedor, estampas, variantes, tamanhos, produtosFinais] = await Promise.all([
+  const [tiposProduto, produtosFornecedor, estampas, variantes, tamanhos, produtosFinais, produtos] = await Promise.all([
     prisma.tipoProduto.findMany({
       include: {
         produtosFornecedor: {
@@ -717,6 +802,45 @@ async function carregarDados() {
       },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.produto.findMany({
+      where: { ativo: true },
+      select: {
+        id: true,
+        sku: true,
+        idCadastroOlist: true,
+        imagemUrl: true,
+        produtosOlist: {
+          select: {
+            id: true,
+            skuFinal: true,
+            tituloFinal: true,
+            precoCusto: true,
+            preco: true,
+            pesoLiquido: true,
+            pesoBruto: true,
+            larguraEmbalagem: true,
+            alturaEmbalagem: true,
+            comprimentoEmbalagem: true,
+            tipoProdutoId: true,
+            estampaId: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        produtoFornecedorOlist: {
+          select: {
+            produtoFornecedorId: true,
+            quantidadeUsada: true,
+            produtoFornecedor: {
+              include: {
+                fornecedor: { select: { nome: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { sku: "asc" },
+    }),
   ]);
 
   return {
@@ -726,6 +850,7 @@ async function carregarDados() {
     variantes: variantes.map(normalizeVariante),
     tamanhos: tamanhos.map(normalizeTamanho),
     produtosFinais: produtosFinais.map(normalizeProdutoOlist),
+    produtos: produtos.map(normalizeProdutoKitBase),
   };
 }
 
@@ -1400,6 +1525,241 @@ export async function POST(request: Request) {
           },
         },
       });
+
+      return NextResponse.json({ produtoFinal: normalizeProdutoOlist(produtoFinal) });
+    }
+
+    if (body.action === "salvar-produto-kit-final") {
+      const tipoProdutoId = requiredString(payload.tipoProdutoId, "tipoProdutoId");
+      const estampaId = requiredString(payload.estampaId, "estampaId");
+      const tituloFinal = requiredString(payload.tituloFinal, "tituloFinal");
+      const componentesPayload = Array.isArray(payload.componentes) ? payload.componentes : [];
+      const componentes = componentesPayload.map((item, index) => {
+        const itemRecord = item as Record<string, unknown>;
+        const produtoId = requiredString(itemRecord.produtoId, `componentes[${index}].produtoId`);
+        const quantidade = requiredPositiveNumber(itemRecord.quantidade, `componentes[${index}].quantidade`);
+
+        return { produtoId, quantidade };
+      });
+
+      if (componentes.length === 0) {
+        throw new Error("Selecione ao menos um produto para compor o kit.");
+      }
+
+      const [tipoProduto, estampa, produtosComponentes] = await Promise.all([
+        prisma.tipoProduto.findUniqueOrThrow({ where: { id: tipoProdutoId } }),
+        prisma.estampa.findUniqueOrThrow({ where: { id: estampaId } }),
+        prisma.produto.findMany({
+          where: { id: { in: componentes.map((item) => item.produtoId) }, ativo: true },
+          select: {
+            id: true,
+            sku: true,
+            produtosOlist: {
+              select: {
+                precoCusto: true,
+                preco: true,
+                pesoLiquido: true,
+                pesoBruto: true,
+                larguraEmbalagem: true,
+                alturaEmbalagem: true,
+                comprimentoEmbalagem: true,
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+            produtoFornecedorOlist: {
+              select: {
+                quantidadeUsada: true,
+                produtoFornecedor: {
+                  select: {
+                    precoUnitarioMetro: true,
+                    pesoLiquidoMetro: true,
+                    pesoBrutoMetro: true,
+                    larguraEmbalagemMetro: true,
+                    alturaEmbalagemMetro: true,
+                    comprimentoEmbalagemMetro: true,
+                  },
+                },
+              },
+            },
+          },
+        }),
+      ]);
+      const produtosPorId = new Map(produtosComponentes.map((produto) => [produto.id, produto]));
+      const componenteAusente = componentes.find((item) => !produtosPorId.has(item.produtoId));
+
+      if (componenteAusente) {
+        throw new Error("Um dos produtos selecionados nao foi encontrado ou esta inativo.");
+      }
+
+      const skuFinal = buildKitSku(componentes.map((item) => produtosPorId.get(item.produtoId)!));
+      if (!skuFinal) {
+        throw new Error("Nao foi possivel gerar o SKU final do kit.");
+      }
+
+      const componentesDescricao = componentes.map((item) => {
+        const produto = produtosPorId.get(item.produtoId)!;
+        return `${formatDecimalPtBr(item.quantidade)} x ${produto.sku}`;
+      });
+      const calcularValorProduto = (
+        produto: (typeof produtosComponentes)[number],
+        key: "precoCusto" | "preco" | "pesoLiquido" | "pesoBruto" | "larguraEmbalagem" | "alturaEmbalagem" | "comprimentoEmbalagem",
+      ) => decimalToNumber(produto.produtosOlist[0]?.[key] ?? null);
+      const calcularFornecedor = (
+        produto: (typeof produtosComponentes)[number],
+        key:
+          | "precoUnitarioMetro"
+          | "pesoLiquidoMetro"
+          | "pesoBrutoMetro"
+          | "larguraEmbalagemMetro"
+          | "alturaEmbalagemMetro"
+          | "comprimentoEmbalagemMetro",
+      ) => {
+        const relacionamento = produto.produtoFornecedorOlist;
+        const quantidadeUsada = decimalToNumber(relacionamento?.quantidadeUsada ?? null);
+        const valor = decimalToNumber(relacionamento?.produtoFornecedor[key] ?? null);
+
+        return quantidadeUsada !== null && valor !== null ? quantidadeUsada * valor : null;
+      };
+      const somarComponentes = (
+        calcular: (produto: (typeof produtosComponentes)[number]) => number | null,
+      ) => {
+        let total = 0;
+        let encontrouValor = false;
+
+        for (const item of componentes) {
+          const produto = produtosPorId.get(item.produtoId)!;
+          const valor = calcular(produto);
+
+          if (valor === null) continue;
+          total += valor * item.quantidade;
+          encontrouValor = true;
+        }
+
+        return encontrouValor ? total : null;
+      };
+      const somarComponentesSemQuantidade = (
+        calcular: (produto: (typeof produtosComponentes)[number]) => number | null,
+      ) => {
+        let total = 0;
+        let encontrouValor = false;
+
+        for (const item of componentes) {
+          const produto = produtosPorId.get(item.produtoId)!;
+          const valor = calcular(produto);
+
+          if (valor === null) continue;
+          total += valor;
+          encontrouValor = true;
+        }
+
+        return encontrouValor ? total : null;
+      };
+      const precoCustoCalculado = somarComponentes(
+        (produto) => calcularValorProduto(produto, "precoCusto") ?? calcularFornecedor(produto, "precoUnitarioMetro"),
+      );
+      const pesoLiquidoCalculado = somarComponentes(
+        (produto) => calcularValorProduto(produto, "pesoLiquido") ?? calcularFornecedor(produto, "pesoLiquidoMetro"),
+      );
+      const pesoBrutoCalculado = somarComponentes(
+        (produto) => calcularValorProduto(produto, "pesoBruto") ?? calcularFornecedor(produto, "pesoBrutoMetro"),
+      );
+      const larguraCalculada = somarComponentesSemQuantidade(
+        (produto) => calcularValorProduto(produto, "larguraEmbalagem") ?? calcularFornecedor(produto, "larguraEmbalagemMetro"),
+      );
+      const alturaCalculada = somarComponentes(
+        (produto) => calcularValorProduto(produto, "alturaEmbalagem") ?? calcularFornecedor(produto, "alturaEmbalagemMetro"),
+      );
+      const comprimentoCalculado = somarComponentesSemQuantidade(
+        (produto) =>
+          calcularValorProduto(produto, "comprimentoEmbalagem") ?? calcularFornecedor(produto, "comprimentoEmbalagemMetro"),
+      );
+      const produtoExistente = await prisma.produtoOlist.findUnique({
+        where: { skuFinal },
+        select: { id: true },
+      });
+      const produtoFinalData = {
+        tipoProdutoId,
+        estampaId,
+        varianteId: null,
+        tamanhoId: null,
+        skuFinal,
+        tituloFinal: cleanText(tituloFinal),
+        descricaoFinal:
+          optionalString(payload.descricaoFinal) ??
+          `Kit composto por: ${componentesDescricao.join("; ")}.`,
+        descricaoSeoFinal: optionalString(payload.descricaoFinal),
+        palavrasChaveFinal: componentes.map((item) => produtosPorId.get(item.produtoId)!.sku).join(", "),
+        slugFinal: buildSlugFinal([tipoProduto.slug, estampa.codigo, skuFinal]) || null,
+        categoria: tipoProduto.categoria,
+        precoCusto: optionalNumber(payload.precoCusto, "precoCusto") ?? precoCustoCalculado,
+        preco: optionalNumber(payload.preco, "preco"),
+        pesoLiquido: optionalNumber(payload.pesoLiquido, "pesoLiquido") ?? pesoLiquidoCalculado,
+        pesoBruto: optionalNumber(payload.pesoBruto, "pesoBruto") ?? pesoBrutoCalculado,
+        larguraEmbalagem: optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem") ?? larguraCalculada,
+        alturaEmbalagem: optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem") ?? alturaCalculada,
+        comprimentoEmbalagem: optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem") ?? comprimentoCalculado,
+      };
+      const include = {
+        produto: { select: { id: true, sku: true, idCadastroOlist: true } },
+        tipoProduto: {
+          select: {
+            id: true,
+            titulo: true,
+            sku: true,
+            descricao: true,
+            descricaoSeo: true,
+            palavrasChave: true,
+            detalhesPromptIa: true,
+            slug: true,
+            categoria: true,
+            precoCusto: true,
+            preco: true,
+            pesoLiquido: true,
+            pesoBruto: true,
+            larguraEmbalagem: true,
+            alturaEmbalagem: true,
+            comprimentoEmbalagem: true,
+          },
+        },
+        estampa: {
+          select: {
+            id: true,
+            codigo: true,
+            descricao: true,
+            palavrasChave: true,
+            extra: true,
+            imagemUrl: true,
+            imagemUrl2: true,
+          },
+        },
+        variante: { select: { id: true, codigo: true, descricao: true, palavrasChave: true } },
+        tamanho: {
+          select: {
+            id: true,
+            titulo: true,
+            sku: true,
+            slug: true,
+            precoCusto: true,
+            preco: true,
+            pesoLiquido: true,
+            pesoBruto: true,
+            larguraEmbalagem: true,
+            alturaEmbalagem: true,
+            comprimentoEmbalagem: true,
+          },
+        },
+      };
+      const produtoFinal = produtoExistente
+        ? await prisma.produtoOlist.update({
+            where: { id: produtoExistente.id },
+            data: produtoFinalData,
+            include,
+          })
+        : await prisma.produtoOlist.create({
+            data: produtoFinalData,
+            include,
+          });
 
       return NextResponse.json({ produtoFinal: normalizeProdutoOlist(produtoFinal) });
     }
