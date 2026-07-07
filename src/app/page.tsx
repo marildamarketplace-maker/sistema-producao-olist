@@ -426,7 +426,7 @@ export default function DashboardPage() {
       produtosVendidos,
       produtosParados,
       produtosParadosMaisDe7Dias: produtosParados.filter(
-        (produto) => produto.dias_sem_venda === null || produto.dias_sem_venda > 7,
+        (produto) => produto.dias_sem_venda !== null && produto.dias_sem_venda > 7,
       ),
       gruposMaisVendidos: gruposMaisVendidos
         .sort((a, b) => b.total_vendido - a.total_vendido)
@@ -694,7 +694,7 @@ export default function DashboardPage() {
           {podeVerEstoque && (
             <>
               <ProdutosParadosCard
-                rows={indicadores.produtosParados}
+                rows={indicadores.produtosParadosMaisDe7Dias}
                 totalExportacao={indicadores.produtosParadosMaisDe7Dias.length}
                 onExportar={exportarProdutosParadosCsv}
               />
@@ -912,7 +912,7 @@ function ProdutosParadosCard({
         <div>
           <h3 className="text-base font-semibold text-slate-950">Produtos parados em estoque</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Produtos com saldo positivo ordenados por dias desde a ultima venda.
+            Produtos com saldo positivo e mais de 7 dias desde a ultima venda.
           </p>
         </div>
         <button
@@ -926,7 +926,7 @@ function ProdutosParadosCard({
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-500">Nenhum produto com estoque positivo encontrado.</p>
+        <p className="text-sm text-slate-500">Nenhum produto com mais de 7 dias sem vender encontrado.</p>
       ) : (
         <div className="space-y-4">
           {rowsPagina.map((produto) => {
