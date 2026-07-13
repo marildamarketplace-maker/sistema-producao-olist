@@ -278,7 +278,12 @@ export default function SolicitacoesProducaoPage() {
   async function carregarDados() {
     setLoading(true);
     setErrorMessage(null);
-    const produtosPromise = supabase.from("produtos").select("id, sku, imagem_url").eq("ativo", true).order("sku");
+    const produtosPromise = supabase
+      .from("produtos")
+      .select("id, sku, imagem_url")
+      .eq("ativo", true)
+      .order("sku")
+      .limit(99999999);
 
     try {
       const [solicitacoesProducaoResp, demaisSolicitacoesResp] = await Promise.all([

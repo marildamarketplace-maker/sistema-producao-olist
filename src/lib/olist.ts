@@ -435,7 +435,6 @@ async function listarProdutosOlist(token: string, offset: number, limite: number
 
   url.searchParams.set("limit", String(limite));
   url.searchParams.set("offset", String(offset));
-  url.searchParams.set("situacao", SITUACAO_PRODUTO_ATIVO);
 
   const response = await axios.get(url.toString(), {
     headers: {
@@ -471,7 +470,7 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
   const idCadastroOlist = produto.id === null || produto.id === undefined ? null : String(produto.id).trim() || null;
   const situacao = String(produto.situacao ?? "A").toUpperCase();
 
-  if (!sku || situacao !== SITUACAO_PRODUTO_ATIVO) {
+  if (!sku) {
     return null;
   }
 
@@ -479,7 +478,7 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
     sku,
     idCadastroOlist,
     imagemUrl: null,
-    ativo: true,
+    ativo: situacao === SITUACAO_PRODUTO_ATIVO,
   };
 }
 
@@ -544,9 +543,9 @@ export async function importarProdutosOlist() {
       }
     }
 
-    offset += limite;
+    offset += pagina.produtos.length;
 
-    if (pagina.produtos.length < limite || (total !== null && offset >= total)) {
+    if (total !== null && offset >= total) {
       break;
     }
 
