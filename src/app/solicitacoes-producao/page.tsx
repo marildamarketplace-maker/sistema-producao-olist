@@ -855,7 +855,7 @@ export default function SolicitacoesProducaoPage() {
       pedidos_ignorados: Number(json.pedidos_ignorados ?? 0),
       total_itens: Number(json.total_itens ?? itensPreparados.length),
       produtos_cadastrados: Number(json.produtos_cadastrados ?? 0),
-      motivo_pedidos_ignorados: String(json.motivo_pedidos_ignorados ?? "Pedido já processado anteriormente."),
+      motivo_pedidos_ignorados: String(json.motivo_pedidos_ignorados ?? "Nenhum pedido é ignorado durante a busca."),
     });
     setIntegrandoOlist(false);
   }
@@ -1258,9 +1258,10 @@ export default function SolicitacoesProducaoPage() {
               <p><strong>Pedidos adicionados:</strong> {resumoImportacaoOlist.pedidos_adicionados}</p>
               <p><strong>Itens preenchidos:</strong> {resumoImportacaoOlist.total_itens}</p>
               <p><strong>Produtos cadastrados:</strong> {resumoImportacaoOlist.produtos_cadastrados}</p>
-              <p><strong>Pedidos ignorados:</strong> {resumoImportacaoOlist.pedidos_ignorados}</p>
-              {resumoImportacaoOlist.pedidos_ignorados > 0 && (
+              {resumoImportacaoOlist.pedidos_ignorados > 0 ? (
                 <p className="mt-1 text-slate-600">Motivo: {resumoImportacaoOlist.motivo_pedidos_ignorados}</p>
+              ) : (
+                <p><strong>Todos os pedidos encontrados foram considerados.</strong></p>
               )}
             </div>
           )}

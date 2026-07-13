@@ -567,7 +567,6 @@ export async function buscarPedidosOlistPorDataLimite(
 ): Promise<{
   pedidos: OlistOrder[];
   pedidosEncontrados: number;
-  pedidosJaProcessadosIgnorados: number;
 }> {
   const token = await getValidOlistAccessToken();
 
@@ -589,14 +588,10 @@ export async function buscarPedidosOlistPorDataLimite(
   const pedidosUnicos = Array.from(
     new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
   );
-  const pedidosJaProcessadosSet = await buscarPedidosJaProcessados(pedidosUnicos);
-  const pedidosNaoProcessados = pedidosUnicos.filter(
-    (pedido) => !pedidosJaProcessadosSet.has(String(pedido.id)),
-  );
 
   const resultados = [];
 
-  for (const pedido of pedidosNaoProcessados) {
+  for (const pedido of pedidosUnicos) {
     const detalhe = await buscarDetalhePedidoOlist(token, pedido.id);
 
     resultados.push(detalhe);
@@ -607,7 +602,6 @@ export async function buscarPedidosOlistPorDataLimite(
   return {
     pedidos: resultados,
     pedidosEncontrados: pedidosUnicos.length,
-    pedidosJaProcessadosIgnorados: pedidosJaProcessadosSet.size,
   };
 }
 
@@ -622,25 +616,6 @@ function extrairParesPedidoItem(pedidos: OlistOrder[]) {
       item_olist_id: item.produto.sku,
     })),
   );
-}
-
-async function buscarPedidosJaProcessados(pedidos: OlistOrder[]) {
-  const pedidosIds = [...new Set(pedidos.map((pedido) => String(pedido.id)))];
-
-  if (pedidosIds.length === 0) {
-    return new Set<string>();
-  }
-
-  const processadosRows = await prisma.pedidoOlistProcessado.findMany({
-    where: {
-      pedidoOlistId: { in: pedidosIds },
-    },
-    select: {
-      pedidoOlistId: true,
-    },
-  });
-
-  return new Set(processadosRows.map((row) => row.pedidoOlistId));
 }
 
 async function buscarPedidosComBaixaJaRegistrada(pedidos: OlistOrder[]) {
@@ -666,37 +641,7 @@ async function buscarPedidosComBaixaJaRegistrada(pedidos: OlistOrder[]) {
   );
 }
 
-async function buscarItensJaProcessados(
-  paresPedidoItem: ReturnType<typeof extrairParesPedidoItem>,
-) {
-  const pedidosIds = [
-    ...new Set(paresPedidoItem.map((par) => par.pedido_olist_id)),
-  ];
-
-  const itensIds = [
-    ...new Set(paresPedidoItem.map((par) => par.item_olist_id)),
-  ];
-
-  const processadosRows =
-    pedidosIds.length > 0 && itensIds.length > 0
-      ? await prisma.pedidoOlistProcessado.findMany({
-          where: {
-            pedidoOlistId: { in: pedidosIds },
-            itemOlistId: { in: itensIds },
-          },
-          select: {
-            pedidoOlistId: true,
-            itemOlistId: true,
-          },
-        })
-      : [];
-
-  return new Set(
-    processadosRows.map((row) => `${row.pedidoOlistId}::${row.itemOlistId}`),
-  );
-}
-
-function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
+function agregarItensNovos(pedidos: OlistOrder[]) {
   const agregados = new Map<
     string,
     {
@@ -714,29 +659,28 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
 
   const novosProcessadosSet = new Set<string>();
 
-  let itensJaProcessados = 0;
-  let pedidosIgnorados = 0;
   let pedidosAdicionados = 0;
 
   for (const pedido of pedidos) {
-    let teveItemNovo = false;
+    if (!pedido.itens?.length) {
+      throw new Error(`Pedido Olist ${pedido.id} retornado sem itens.`);
+    }
 
     for (const item of pedido.itens ?? []) {
       const sku = String(item.produto.sku).trim();
 
-      if (!sku) continue;
+      if (!sku) {
+        throw new Error(`Pedido Olist ${pedido.id} contém item sem SKU.`);
+      }
+
+      const quantidade = Number(item.quantidade);
+
+      if (!Number.isFinite(quantidade) || quantidade <= 0) {
+        throw new Error(`Pedido Olist ${pedido.id}, SKU ${sku}, contém quantidade inválida.`);
+      }
 
       const itemOlistId = item.produto.sku;
       const chaveProcessamento = `${pedido.id}::${itemOlistId}`;
-
-      if (processadosSet.has(chaveProcessamento)) {
-        itensJaProcessados += 1;
-        continue;
-      }
-
-      if (novosProcessadosSet.has(chaveProcessamento)) {
-        continue;
-      }
 
       const atual = agregados.get(sku) ?? {
         sku,
@@ -744,33 +688,27 @@ function agregarItensNovos(pedidos: OlistOrder[], processadosSet: Set<string>) {
         quantidade_pedidos: 0,
       };
 
-      atual.quantidade_pedidos += item.quantidade;
+      atual.quantidade_pedidos += quantidade;
 
       agregados.set(sku, atual);
 
-      itensNovosProcessados.push({
-        pedido_olist_id: String(pedido.id),
-        item_olist_id: itemOlistId,
-        sku,
-      });
+      if (!novosProcessadosSet.has(chaveProcessamento)) {
+        itensNovosProcessados.push({
+          pedido_olist_id: String(pedido.id),
+          item_olist_id: itemOlistId,
+          sku,
+        });
 
-      novosProcessadosSet.add(chaveProcessamento);
-
-      teveItemNovo = true;
+        novosProcessadosSet.add(chaveProcessamento);
+      }
     }
 
-    if (teveItemNovo) {
-      pedidosAdicionados += 1;
-    } else {
-      pedidosIgnorados += 1;
-    }
+    pedidosAdicionados += 1;
   }
 
   return {
     agregados,
     itensNovosProcessados,
-    itensJaProcessados,
-    pedidosIgnorados,
     pedidosAdicionados,
     skus: [...agregados.keys()],
   };
@@ -1479,7 +1417,6 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   const {
     pedidos,
     pedidosEncontrados,
-    pedidosJaProcessadosIgnorados,
   } = await buscarPedidosOlistPorDataLimite(
     null,
     null,
@@ -1492,9 +1429,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     throw new Error("Nenhum item elegível encontrado nos pedidos da Olist.");
   }
 
-  const processadosSet = await buscarItensJaProcessados(paresPedidoItem);
-
-  const resultadoAgregacao = agregarItensNovos(pedidos, processadosSet);
+  const resultadoAgregacao = agregarItensNovos(pedidos);
 
   const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(
     resultadoAgregacao.agregados,
@@ -1525,13 +1460,12 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     prioridade_producao: prioridadeProducao,
     itens: itensComStatusProducao,
     total_itens: itensComStatusProducao.length,
-    itens_ja_processados: resultadoAgregacao.itensJaProcessados,
+    itens_ja_processados: 0,
     pedidos_encontrados: pedidosEncontrados,
     pedidos_adicionados: resultadoAgregacao.pedidosAdicionados,
-    pedidos_ignorados:
-      resultadoAgregacao.pedidosIgnorados + pedidosJaProcessadosIgnorados,
+    pedidos_ignorados: 0,
     produtos_cadastrados: produtosCadastrados,
     rastreio_olist: resultadoAgregacao.itensNovosProcessados,
-    motivo_pedidos_ignorados: "Pedido já processado anteriormente.",
+    motivo_pedidos_ignorados: "Nenhum pedido é ignorado durante a busca.",
   };
 }
