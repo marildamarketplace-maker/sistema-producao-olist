@@ -19,7 +19,7 @@ import {
   excluirTamanhoOlist,
   excluirTipoProdutoOlist,
   excluirVarianteOlist,
-  gerarProdutoFinalOlist,
+  gerarProdutosFinaisEmLoteOlist,
   gerarMockupProdutoOlist,
   montarCamposCsvProdutoOlist,
   montarCsvProdutosFabricadosOlist,
@@ -37,7 +37,15 @@ import {
   vincularProdutosFinaisOlist,
 } from "@/lib/gerador-csv-olist";
 
-type Aba = "tipos" | "tamanhos" | "estampas" | "variantes" | "gerar" | "gerar-kit" | "produtos";
+type Aba =
+  | "tipos"
+  | "tamanhos"
+  | "estampas"
+  | "variantes"
+  | "gerar"
+  | "gerar-kit"
+  | "produtos"
+  | "produtos-vk";
 type MockupQuality = "low" | "medium" | "high";
 
 const ABAS: { id: Aba; label: string }[] = [
@@ -47,7 +55,7 @@ const ABAS: { id: Aba; label: string }[] = [
   { id: "variantes", label: "Variantes" },
   { id: "gerar", label: "Gerar Produto Final" },
   { id: "gerar-kit", label: "Gerar Produto Kit Final" },
-  { id: "produtos", label: "Produtos Criados" },
+  { id: "produtos-vk", label: "Produtos Criados (V/K)" },
 ];
 
 const MOCKUP_QUALITY_LABELS: Record<MockupQuality, string> = {
@@ -70,6 +78,8 @@ const tipoInicial = {
   descricaoSeo: "",
   palavrasChave: "",
   detalhesPromptIa: "",
+  corteLaser: false,
+  tecidoCorrido: false,
   slug: "",
   categoria: "",
   produtosFornecidos: [] as Array<{
@@ -212,18 +222,61 @@ function buildSlugFromTitle(titulo: string) {
   return buildSlugPart(titulo);
 }
 
+function buildTipoProdutoMarkers(
+  tipoProduto: Pick<TipoProdutoOlist, "corteLaser" | "tecidoCorrido">,
+) {
+  return [
+    tipoProduto.corteLaser ? "C/LASER" : null,
+    tipoProduto.tecidoCorrido ? "C/CORRIDO" : null,
+  ].filter((marker): marker is string => Boolean(marker));
+}
+
+function buildProdutoSku(
+  tipoProduto: Pick<TipoProdutoOlist, "sku" | "corteLaser" | "tecidoCorrido">,
+  estampaCodigo: string,
+  varianteCodigo: string | null | undefined,
+  tamanhoSku: string | null | undefined,
+) {
+  const skuTipoProduto = tipoProduto.sku.trim();
+  const usaPadraoMeury2 = skuTipoProduto.toUpperCase().startsWith("MEURY2-");
+
+  if (usaPadraoMeury2) {
+    return [
+      `TP/${cleanSkuPart(skuTipoProduto.replace(/^MEURY2-+/i, ""))}`,
+      ...buildTipoProdutoMarkers(tipoProduto),
+      tamanhoSku ? `TA/${cleanSkuPart(tamanhoSku)}` : "",
+      `EST/${cleanSkuPart(estampaCodigo)}`,
+      cleanSkuPart(varianteCodigo ?? ""),
+    ]
+      .filter(Boolean)
+      .join("-")
+      .replace(/-+/g, "-");
+  }
+
+  return [
+    cleanSkuPart(tipoProduto.sku),
+    ...buildTipoProdutoMarkers(tipoProduto),
+    cleanSkuPart(tamanhoSku ?? ""),
+    cleanSkuPart(estampaCodigo),
+    cleanSkuPart(varianteCodigo ?? ""),
+  ]
+    .filter(Boolean)
+    .join("-")
+    .replace(/-+/g, "-");
+}
+
 function buildSkuFinal(
   tipoProduto: TipoProdutoOlist,
   estampa: EstampaOlist,
   variante: VarianteOlist | null,
   tamanho: TamanhoOlist | null = null,
 ) {
-  return [tipoProduto.sku, tamanho?.sku, estampa.codigo, variante?.codigo]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .map(cleanSkuPart)
-    .filter(Boolean)
-    .join("-")
-    .replace(/-+/g, "-");
+  return buildProdutoSku(
+    tipoProduto,
+    estampa.codigo,
+    variante?.codigo,
+    tamanho?.sku,
+  );
 }
 
 function hasTemplateVariable(value: string | null | undefined) {
@@ -541,6 +594,8 @@ export function GeradorCsvOlistClient() {
         descricaoSeo: tipoForm.descricaoSeo || null,
         palavrasChave: tipoForm.palavrasChave || null,
         detalhesPromptIa: tipoForm.detalhesPromptIa || null,
+        corteLaser: tipoForm.corteLaser,
+        tecidoCorrido: tipoForm.tecidoCorrido,
         slug: slug || null,
         categoria: tipoForm.categoria || null,
         produtosFornecidos: tipoForm.produtosFornecidos.slice(0, 1).map((item) => ({
@@ -870,66 +925,27 @@ export function GeradorCsvOlistClient() {
       if (!payload.tamanhoId) {
         throw new Error("Selecione um tamanho.");
       }
-
-      const tamanhoId = payload.tamanhoId;
-      const skusNovos = new Set<string>();
-      const combinacoes = [];
-
-      for (const estampaId of payload.estampaIds) {
-        const estampa = dados.estampas.find((item) => item.id === estampaId);
-        if (!estampa) continue;
-
-        const variantesParaGerar = dados.variantes.filter(
-          (item) => item.estampaId === estampa.id && item.tamanhoId === tamanhoId,
-        );
-
-        for (const variante of variantesParaGerar) {
-          const tamanho = dados.tamanhos.find((item) => item.id === variante.tamanhoId) ?? null;
-          if (!tamanho) continue;
-          const skuFinal = buildSkuFinal(tipoProduto, estampa, variante, tamanho);
-
-          if (skusNovos.has(skuFinal)) {
-            throw new Error(`A selecao atual gera SKU duplicado: ${skuFinal}.`);
-          }
-
-          skusNovos.add(skuFinal);
-          combinacoes.push({ estampa, variante, tamanho });
-        }
+      const alturaEmbalagem = toNumberOrNull(payload.alturaEmbalagem ?? "");
+      if (alturaEmbalagem === null || alturaEmbalagem < 1) {
+        throw new Error("A altura da embalagem deve ser no minimo 1.");
       }
 
-      if (combinacoes.length === 0) {
-        throw new Error("Nenhuma variante encontrada para as estampas e tamanhos selecionados.");
-      }
+      const resposta = await gerarProdutosFinaisEmLoteOlist({
+        tipoProdutoId: tipoProduto.id,
+        estampaIds: payload.estampaIds,
+        tamanhoId: payload.tamanhoId,
+        precoCusto: toNumberOrNull(payload.precoCusto ?? ""),
+        preco: toNumberOrNull(payload.preco ?? ""),
+        pesoLiquido: toNumberOrNull(payload.pesoLiquido ?? ""),
+        pesoBruto: toNumberOrNull(payload.pesoBruto ?? ""),
+        larguraEmbalagem: toNumberOrNull(payload.larguraEmbalagem ?? ""),
+        alturaEmbalagem,
+        comprimentoEmbalagem: toNumberOrNull(payload.comprimentoEmbalagem ?? ""),
+      });
 
-      let totalGerado = 0;
-      let totalSobrescrito = 0;
-
-      for (const combinacao of combinacoes) {
-        const skuFinal = buildSkuFinal(tipoProduto, combinacao.estampa, combinacao.variante, combinacao.tamanho);
-        const jaExiste = dados.produtosFinais.some((produto) => produto.sku === skuFinal);
-
-        await gerarProdutoFinalOlist({
-          tipoProdutoId: tipoProduto.id,
-          estampaId: combinacao.estampa.id,
-          varianteId: combinacao.variante?.id ?? null,
-          tamanhoId: combinacao.tamanho?.id ?? null,
-          precoCusto: toNumberOrNull(payload.precoCusto ?? ""),
-          preco: toNumberOrNull(payload.preco ?? ""),
-          pesoLiquido: toNumberOrNull(payload.pesoLiquido ?? ""),
-          pesoBruto: toNumberOrNull(payload.pesoBruto ?? ""),
-          larguraEmbalagem: toNumberOrNull(payload.larguraEmbalagem ?? ""),
-          alturaEmbalagem: toNumberOrNull(payload.alturaEmbalagem ?? ""),
-          comprimentoEmbalagem: toNumberOrNull(payload.comprimentoEmbalagem ?? ""),
-        });
-
-        if (jaExiste) {
-          totalSobrescrito += 1;
-        } else {
-          totalGerado += 1;
-        }
-      }
-
-      setMessage(`${totalGerado} produto(s) criado(s) e ${totalSobrescrito} sobrescrito(s) com sucesso.`);
+      setMessage(
+        `${resposta.criados} produto(s) criado(s) e ${resposta.sobrescritos} sobrescrito(s) com sucesso.`,
+      );
       await carregar();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao gerar produtos.");
@@ -999,6 +1015,8 @@ export function GeradorCsvOlistClient() {
       descricaoSeo: tipo.descricaoSeo ?? "",
       palavrasChave: tipo.palavrasChave ?? "",
       detalhesPromptIa: tipo.detalhesPromptIa ?? "",
+      corteLaser: tipo.corteLaser,
+      tecidoCorrido: tipo.tecidoCorrido,
       slug: tipo.slug ?? "",
       categoria: tipo.categoria ?? "",
       produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
@@ -1017,6 +1035,8 @@ export function GeradorCsvOlistClient() {
       descricaoSeo: tipo.descricaoSeo ?? "",
       palavrasChave: tipo.palavrasChave ?? "",
       detalhesPromptIa: tipo.detalhesPromptIa ?? "",
+      corteLaser: tipo.corteLaser,
+      tecidoCorrido: tipo.tecidoCorrido,
       slug: withSlugCopySuffix(tipo.slug),
       categoria: tipo.categoria ?? "",
       produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
@@ -1186,6 +1206,35 @@ export function GeradorCsvOlistClient() {
     }
   }
 
+  async function excluirVariantesEmLote(ids: string[]) {
+    if (ids.length === 0) return false;
+
+    const confirmar = window.confirm(`Excluir ${ids.length} variante(s) selecionada(s)?`);
+    if (!confirmar) return false;
+
+    setSaving(true);
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      for (const id of ids) {
+        await excluirVarianteOlist(id);
+      }
+      if (varianteEditId && ids.includes(varianteEditId)) {
+        setVarianteForm(varianteInicial);
+        setVarianteEditId(null);
+      }
+      setMessage(`${ids.length} variante(s) excluida(s) com sucesso.`);
+      await carregar();
+      return true;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir variantes.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function salvarProdutoFinal(payload: {
     id: string;
     skuFinal: string;
@@ -1224,17 +1273,20 @@ export function GeradorCsvOlistClient() {
     await excluirProdutoFinalSemConfirmar(id);
   }
 
-  async function excluirProdutoFinalSemConfirmar(id: string) {
+  async function excluirProdutoFinalSemConfirmar(idOuIds: string | string[]) {
+    const ids = Array.isArray(idOuIds) ? idOuIds : [idOuIds];
     setSaving(true);
     setMessage(null);
     setErrorMessage(null);
 
     try {
-      await excluirProdutoFinalOlist(id);
-      setMessage("Produto final excluido com sucesso.");
+      const resposta = await excluirProdutoFinalOlist(ids);
+      setMessage(`${resposta.excluidos} produto(s) final(is) excluido(s) com sucesso.`);
       await carregar();
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir produto final.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1378,6 +1430,7 @@ export function GeradorCsvOlistClient() {
               onEdit={editarVariante}
               onDuplicate={duplicarVariante}
               onDelete={excluirVariante}
+              onDeleteMany={excluirVariantesEmLote}
             />
           )}
 
@@ -1419,6 +1472,14 @@ export function GeradorCsvOlistClient() {
               onLinkProdutos={vincularProdutosFinais}
             />
           )}
+
+          {abaAtiva === "produtos-vk" && (
+            <ProdutosCriadosVkTab
+              produtos={dados.produtosFinais}
+              saving={saving}
+              onDeleteMany={excluirProdutoFinalSemConfirmar}
+            />
+          )}
         </>
       )}
     </div>
@@ -1450,7 +1511,10 @@ function TiposProdutoTab({
   onDuplicate: (tipo: TipoProdutoOlist) => void;
   onDelete: (id: string) => void | Promise<void>;
 }) {
-  type TipoProdutoTextField = Exclude<keyof typeof tipoInicial, "produtosFornecidos">;
+  type TipoProdutoTextField = Exclude<
+    keyof typeof tipoInicial,
+    "produtosFornecidos" | "corteLaser" | "tecidoCorrido"
+  >;
   const textFields: {
     key: TipoProdutoTextField;
     label: string;
@@ -1497,6 +1561,24 @@ function TiposProdutoTab({
               />
             </label>
           ))}
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.corteLaser}
+              onChange={(event) => setForm((prev) => ({ ...prev, corteLaser: event.target.checked }))}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Tem corte laser ({form.corteLaser ? "C/LASER" : "S/LASER"})
+          </label>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.tecidoCorrido}
+              onChange={(event) => setForm((prev) => ({ ...prev, tecidoCorrido: event.target.checked }))}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Tecido corrido ({form.tecidoCorrido ? "C/CORRIDO" : "S/CORRIDO"})
+          </label>
           <label className="text-sm text-slate-700 md:col-span-4">
             Descricao
             <textarea
@@ -1579,6 +1661,8 @@ function TiposProdutoTab({
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Titulo</th>
                   <th className="p-3">SKU</th>
+                  <th className="p-3">Corte laser</th>
+                  <th className="p-3">Tecido corrido</th>
                   <th className="p-3">Categoria</th>
                   <th className="p-3">Produto fornecido</th>
                   <th className="p-3">Acoes</th>
@@ -1592,6 +1676,8 @@ function TiposProdutoTab({
                       <div className="mt-1 text-xs text-slate-500">{tipo.slug ?? "-"}</div>
                     </td>
                     <td className="p-3 text-slate-700">{tipo.sku}</td>
+                    <td className="p-3 text-slate-700">{tipo.corteLaser ? "C/LASER" : "S/LASER"}</td>
+                    <td className="p-3 text-slate-700">{tipo.tecidoCorrido ? "C/CORRIDO" : "S/CORRIDO"}</td>
                     <td className="p-3 text-slate-700">{tipo.categoria ?? "-"}</td>
                     <td className="p-3 text-slate-700">
                       {tipo.produtosFornecidos[0]?.produtoFornecedor.nome ?? "-"}
@@ -2011,7 +2097,7 @@ function EstampasTab({
               <p className="mt-1 text-sm text-slate-500">{selectedIds.length} selecionada(s)</p>
             )}
           </div>
-          <div className="flex w-full flex-col gap-2 md:max-w-md md:flex-row md:items-end">
+          <div className="grid w-full grid-cols-1 gap-2 md:max-w-3xl md:grid-cols-2">
             <label className="w-full text-sm text-slate-700">
               Buscar por codigo
               <input
@@ -2223,6 +2309,7 @@ function VariantesTab({
   onEdit,
   onDuplicate,
   onDelete,
+  onDeleteMany,
 }: {
   variantes: VarianteOlist[];
   estampas: EstampaOlist[];
@@ -2239,10 +2326,43 @@ function VariantesTab({
   onEdit: (variante: VarianteOlist) => void;
   onDuplicate: (variante: VarianteOlist) => void;
   onDelete: (id: string) => void;
+  onDeleteMany: (ids: string[]) => Promise<boolean>;
 }) {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  const [tamanhoFiltroId, setTamanhoFiltroId] = useState("");
+  const [selecionadas, setSelecionadas] = useState<string[]>([]);
+  const variantesExibidas = useMemo(
+    () =>
+      tamanhoFiltroId
+        ? variantes.filter((variante) => variante.tamanho?.id === tamanhoFiltroId)
+        : variantes,
+    [tamanhoFiltroId, variantes],
+  );
+  const todasExibidasSelecionadas =
+    variantesExibidas.length > 0 &&
+    variantesExibidas.every((variante) => selecionadas.includes(variante.id));
+
+  function toggleVariante(id: string) {
+    setSelecionadas((ids) =>
+      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
+    );
+  }
+
+  function toggleTodasExibidas() {
+    const idsExibidos = variantesExibidas.map((variante) => variante.id);
+    setSelecionadas((ids) =>
+      todasExibidasSelecionadas
+        ? ids.filter((id) => !idsExibidos.includes(id))
+        : Array.from(new Set([...ids, ...idsExibidos])),
+    );
+  }
+
+  async function excluirSelecionadas() {
+    const excluiu = await onDeleteMany(selecionadas);
+    if (excluiu) setSelecionadas([]);
+  }
 
   async function submitImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2369,7 +2489,7 @@ function VariantesTab({
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Variantes cadastradas</h3>
-          <div className="flex w-full flex-col gap-2 md:max-w-md md:flex-row md:items-end">
+          <div className="grid w-full grid-cols-1 gap-2 md:max-w-3xl md:grid-cols-2">
             <label className="w-full text-sm text-slate-700">
               Buscar por codigo
               <input
@@ -2379,23 +2499,58 @@ function VariantesTab({
                 placeholder="Codigo, estampa ou tamanho"
               />
             </label>
-            <button
-              type="button"
-              onClick={() => downloadCsv("variantes-importacao.csv", buildVariantesImportCsv(variantes))}
-              disabled={variantes.length === 0}
-              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
-            >
-              Exportar CSV
-            </button>
+            <label className="w-full text-sm text-slate-700">
+              Filtrar por tamanho
+              <select
+                value={tamanhoFiltroId}
+                onChange={(event) => setTamanhoFiltroId(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                <option value="">Todos os tamanhos</option>
+                {tamanhos.map((tamanho) => (
+                  <option key={tamanho.id} value={tamanho.id}>
+                    {tamanho.titulo} ({tamanho.sku})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 md:col-span-2 md:justify-end">
+              <span className="text-xs text-slate-500">{selecionadas.length} selecionada(s)</span>
+              <button
+                type="button"
+                onClick={toggleTodasExibidas}
+                disabled={variantesExibidas.length === 0}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {todasExibidasSelecionadas ? "Desmarcar todas" : "Selecionar todas"}
+              </button>
+              <button
+                type="button"
+                onClick={excluirSelecionadas}
+                disabled={saving || selecionadas.length === 0}
+                className="rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Excluir selecionadas
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadCsv("variantes-importacao.csv", buildVariantesImportCsv(variantesExibidas))}
+                disabled={variantesExibidas.length === 0}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
+              >
+                Exportar CSV
+              </button>
+            </div>
           </div>
         </div>
 
-        <TableEmpty visible={variantes.length === 0} text="Nenhuma variante encontrada." />
-        {variantes.length > 0 && (
+        <TableEmpty visible={variantesExibidas.length === 0} text="Nenhuma variante encontrada." />
+        {variantesExibidas.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
+                  <th className="p-3">Selecionar</th>
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Estampa</th>
                   <th className="p-3">Tamanho</th>
@@ -2405,8 +2560,17 @@ function VariantesTab({
                 </tr>
               </thead>
               <tbody>
-                {variantes.map((variante) => (
+                {variantesExibidas.map((variante) => (
                   <tr key={variante.id} className="border-b border-slate-100">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Selecionar variante ${variante.codigo}`}
+                        checked={selecionadas.includes(variante.id)}
+                        onChange={() => toggleVariante(variante.id)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </td>
                     <td className="p-3 font-medium text-slate-700">{variante.codigo}</td>
                     <td className="p-3 text-slate-700">{variante.estampa?.codigo ?? "-"}</td>
                     <td className="p-3 text-slate-700">{variante.tamanho?.titulo ?? "-"}</td>
@@ -2502,6 +2666,833 @@ function VariantesTab({
   );
 }
 
+type GrupoProdutoCriadoVk = {
+  id: string;
+  sku: string;
+  titulo: string;
+  categoria: string | null;
+  tipoProduto: string;
+  estampa: string | null;
+  tamanho: string | null;
+  createdAt: string;
+  produtoBase: ProdutoFinalOlist;
+  filhos: ProdutoFinalOlist[];
+};
+
+function agruparProdutosCriadosVk(produtos: ProdutoFinalOlist[]) {
+  const grupos = new Map<string, GrupoProdutoCriadoVk>();
+
+  for (const produto of produtos) {
+    const possuiVariacao = Boolean(produto.variante || produto.tamanho);
+
+    if (!possuiVariacao) {
+      grupos.set(`produto:${produto.id}`, {
+        id: `produto:${produto.id}`,
+        sku: produto.skuFinal,
+        titulo: produto.tituloFinal,
+        categoria: produto.categoria,
+        tipoProduto: produto.tipoProduto.titulo,
+        estampa: produto.estampa?.codigo ?? null,
+        tamanho: produto.tamanho?.titulo ?? null,
+        createdAt: produto.createdAt,
+        produtoBase: produto,
+        filhos: [],
+      });
+      continue;
+    }
+
+    const skuPai = buildProdutoSku(
+      produto.tipoProduto,
+      produto.estampa?.codigo ?? "",
+      null,
+      produto.tamanho?.sku,
+    ).toUpperCase();
+
+    const grupoExistente = grupos.get(skuPai);
+    if (grupoExistente) {
+      grupoExistente.filhos.push(produto);
+      continue;
+    }
+
+    const tituloPai = montarCamposCsvProdutoOlist(produto, true).find(
+      (campo) => campo.campo === "Descrição",
+    )?.valor;
+
+    grupos.set(skuPai, {
+      id: skuPai,
+      sku: skuPai,
+      titulo: String(tituloPai || produto.tituloFinal),
+      categoria: produto.categoria,
+      tipoProduto: produto.tipoProduto.titulo,
+      estampa: produto.estampa?.codigo ?? null,
+      tamanho: produto.tamanho?.titulo ?? null,
+      createdAt: produto.createdAt,
+      produtoBase: produto,
+      filhos: [produto],
+    });
+  }
+
+  return Array.from(grupos.values());
+}
+
+function ProdutosCriadosVkTab({
+  produtos,
+  saving,
+  onDeleteMany,
+}: {
+  produtos: ProdutoFinalOlist[];
+  saving: boolean;
+  onDeleteMany: (ids: string[]) => Promise<boolean>;
+}) {
+  const [buscaSku, setBuscaSku] = useState("");
+  const [buscaTitulo, setBuscaTitulo] = useState("");
+  const [tipoProdutoId, setTipoProdutoId] = useState("");
+  const [estampaId, setEstampaId] = useState("");
+  const [varianteId, setVarianteId] = useState("");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [gruposSelecionadosIds, setGruposSelecionadosIds] = useState<string[]>([]);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const grupos = useMemo(() => agruparProdutosCriadosVk(produtos), [produtos]);
+  const gruposSelecionados = useMemo(
+    () => grupos.filter((grupo) => gruposSelecionadosIds.includes(grupo.id)),
+    [grupos, gruposSelecionadosIds],
+  );
+  const tipos = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          produtos.map((produto) => [produto.tipoProduto.id, produto.tipoProduto]),
+        ).values(),
+      ).sort((a, b) => a.titulo.localeCompare(b.titulo, "pt-BR")),
+    [produtos],
+  );
+  const estampas = useMemo(
+    () => Array.from(
+      new Map(
+        produtos
+          .filter((produto) => produto.estampa)
+          .map((produto) => [produto.estampa!.id, produto.estampa!]),
+      ).values(),
+    ).sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR")),
+    [produtos],
+  );
+  const variantes = useMemo(
+    () => Array.from(
+      new Map(
+        produtos
+          .filter((produto) => produto.variante)
+          .map((produto) => [produto.variante!.id, produto.variante!]),
+      ).values(),
+    ).sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR")),
+    [produtos],
+  );
+  const gruposFiltrados = useMemo(() => {
+    const sku = buscaSku.trim().toLocaleLowerCase("pt-BR");
+    const titulo = buscaTitulo.trim().toLocaleLowerCase("pt-BR");
+
+    return grupos
+      .filter((grupo) => {
+        const produtosDoGrupo = grupo.filhos.length > 0 ? grupo.filhos : [grupo.produtoBase];
+        const matchSku =
+          !sku ||
+          grupo.sku.toLocaleLowerCase("pt-BR").includes(sku) ||
+          produtosDoGrupo.some((produto) => produto.skuFinal.toLocaleLowerCase("pt-BR").includes(sku));
+        const matchTitulo =
+          !titulo ||
+          grupo.titulo.toLocaleLowerCase("pt-BR").includes(titulo) ||
+          produtosDoGrupo.some((produto) =>
+            produto.tituloFinal.toLocaleLowerCase("pt-BR").includes(titulo),
+          );
+        const matchTipo =
+          !tipoProdutoId || grupo.produtoBase.tipoProduto.id === tipoProdutoId;
+        const matchEstampa =
+          !estampaId || grupo.produtoBase.estampa?.id === estampaId;
+        const matchVariante =
+          !varianteId ||
+          produtosDoGrupo.some((produto) =>
+            varianteId === "__sem_variante__"
+              ? !produto.variante
+              : produto.variante?.id === varianteId,
+          );
+
+        return matchSku && matchTitulo && matchTipo && matchEstampa && matchVariante;
+      })
+      .sort((a, b) => {
+        const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return sortDirection === "asc" ? diff : -diff;
+      });
+  }, [
+    buscaSku,
+    buscaTitulo,
+    estampaId,
+    grupos,
+    sortDirection,
+    tipoProdutoId,
+    varianteId,
+  ]);
+  const todosFiltradosSelecionados =
+    gruposFiltrados.length > 0 &&
+    gruposFiltrados.every((grupo) => gruposSelecionadosIds.includes(grupo.id));
+
+  function toggleSelecionarTodos() {
+    const idsFiltrados = gruposFiltrados.map((grupo) => grupo.id);
+
+    setGruposSelecionadosIds((idsSelecionados) =>
+      todosFiltradosSelecionados
+        ? idsSelecionados.filter((id) => !idsFiltrados.includes(id))
+        : Array.from(new Set([...idsSelecionados, ...idsFiltrados])),
+    );
+  }
+
+  async function excluirSelecionados() {
+    if (gruposSelecionados.length === 0) return;
+
+    const produtosIds = gruposSelecionados.flatMap((grupo) =>
+      grupo.filhos.length > 0
+        ? grupo.filhos.map((filho) => filho.id)
+        : [grupo.produtoBase.id],
+    );
+    const confirmar = window.confirm(
+      `Excluir ${gruposSelecionados.length} produto(s) pai V e ${produtosIds.length} registro(s) vinculado(s)?`,
+    );
+    if (!confirmar) return;
+
+    const excluiu = await onDeleteMany(produtosIds);
+    if (excluiu) setGruposSelecionadosIds([]);
+  }
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <div className="mb-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Produtos Criados (V/K)</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Consulte os produtos pais (V) e expanda cada item para visualizar seus filhos (K).
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setExportModalOpen(true)}
+              disabled={gruposSelecionados.length === 0}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Exportar selecionados
+            </button>
+            <button
+              type="button"
+              onClick={excluirSelecionados}
+              disabled={saving || gruposSelecionados.length === 0}
+              className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Excluir selecionados
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <label className="text-sm text-slate-700">
+            Buscar por SKU
+            <input
+              value={buscaSku}
+              onChange={(event) => setBuscaSku(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="SKU final"
+            />
+          </label>
+          <label className="text-sm text-slate-700">
+            Buscar por titulo
+            <input
+              value={buscaTitulo}
+              onChange={(event) => setBuscaTitulo(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="Titulo final"
+            />
+          </label>
+          <label className="text-sm text-slate-700">
+            Tipo de produto
+            <select
+              value={tipoProdutoId}
+              onChange={(event) => setTipoProdutoId(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Todos</option>
+              {tipos.map((tipo) => (
+                <option key={tipo.id} value={tipo.id}>
+                  {tipo.titulo}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Estampa
+            <select
+              value={estampaId}
+              onChange={(event) => setEstampaId(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Todas</option>
+              {estampas.map((estampa) => (
+                <option key={estampa.id} value={estampa.id}>
+                  {estampa.codigo}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Variante
+            <select
+              value={varianteId}
+              onChange={(event) => setVarianteId(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Todas</option>
+              <option value="__sem_variante__">Sem variante</option>
+              {variantes.map((variante) => (
+                <option key={variante.id} value={variante.id}>
+                  {variante.codigo}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Ordenacao
+            <select
+              value={sortDirection}
+              onChange={(event) => setSortDirection(event.target.value as "asc" | "desc")}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="desc">Mais recentes primeiro</option>
+              <option value="asc">Mais antigos primeiro</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2 text-xs font-medium">
+        <span className="rounded-full bg-slate-900 px-3 py-1 text-white">
+          {gruposFiltrados.length} produto(s) V
+        </span>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+          {gruposFiltrados.reduce((total, grupo) => total + grupo.filhos.length, 0)} produto(s) K
+        </span>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+          {gruposSelecionados.length} V selecionado(s)
+        </span>
+        <button
+          type="button"
+          onClick={toggleSelecionarTodos}
+          disabled={gruposFiltrados.length === 0}
+          className="rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {todosFiltradosSelecionados ? "Desmarcar todos" : "Selecionar todos"}
+        </button>
+      </div>
+
+      <TableEmpty
+        visible={gruposFiltrados.length === 0}
+        text="Nenhum produto criado encontrado."
+      />
+
+      {gruposFiltrados.length > 0 && (
+        <div className="space-y-3">
+          {gruposFiltrados.map((grupo) => (
+            <details key={grupo.id} className="group rounded-lg border border-slate-200 bg-white">
+              <summary className="flex cursor-pointer list-none items-center gap-3 p-4 marker:content-none">
+                <span
+                  className="flex items-center"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`Selecionar produto pai ${grupo.sku}`}
+                    checked={gruposSelecionadosIds.includes(grupo.id)}
+                    onChange={() =>
+                      setGruposSelecionadosIds((ids) =>
+                        ids.includes(grupo.id)
+                          ? ids.filter((id) => id !== grupo.id)
+                          : [...ids, grupo.id],
+                      )
+                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                </span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                  V
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-slate-900">{grupo.titulo}</span>
+                  <span className="mt-1 block break-all text-xs text-slate-500">{grupo.sku}</span>
+                </span>
+                <span className="hidden text-right text-xs text-slate-500 sm:block">
+                  {grupo.tipoProduto}
+                  <span className="mt-1 block">
+                    {grupo.filhos.length} filho(s)
+                  </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="text-lg text-slate-500 transition-transform group-open:rotate-180"
+                >
+                  ⌄
+                </span>
+              </summary>
+
+              <div className="border-t border-slate-200 bg-slate-50 p-4">
+                {grupo.filhos.length === 0 ? (
+                  <p className="text-sm text-slate-500">Este produto V nao possui produtos K.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                    <table className="min-w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-left text-slate-600">
+                          <th className="p-3">Tipo</th>
+                          <th className="p-3">SKU</th>
+                          <th className="p-3">ID produto Olist</th>
+                          <th className="p-3">Titulo</th>
+                          <th className="p-3">Categoria</th>
+                          <th className="p-3">Preco de custo</th>
+                          <th className="p-3">Preco final</th>
+                          <th className="p-3">Estampa</th>
+                          <th className="p-3">Variante</th>
+                          <th className="p-3">Tamanho</th>
+                          <th className="p-3">Criado em</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grupo.filhos.map((filho) => (
+                          <tr key={filho.id} className="border-b border-slate-100 last:border-0">
+                            <td className="p-3">
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
+                                K
+                              </span>
+                            </td>
+                            <td className="p-3 font-medium text-slate-700">{filho.skuFinal}</td>
+                            <td className="p-3 text-slate-700">
+                              {filho.produto?.idCadastroOlist ?? "-"}
+                            </td>
+                            <td className="p-3 text-slate-700">{filho.tituloFinal}</td>
+                            <td className="p-3 text-slate-700">{filho.categoria ?? "-"}</td>
+                            <td className="p-3 whitespace-nowrap text-slate-700">
+                              {formatMoney(filho.precoCusto)}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-slate-700">
+                              {formatMoney(filho.preco)}
+                            </td>
+                            <td className="p-3 text-slate-700">{filho.estampa?.codigo ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{filho.variante?.codigo ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{filho.tamanho?.titulo ?? "-"}</td>
+                            <td className="p-3 whitespace-nowrap text-slate-700">
+                              {new Date(filho.createdAt).toLocaleString("pt-BR")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+
+      {exportModalOpen && (
+        <ExportarProdutosVkModal
+          grupos={gruposSelecionados}
+          onClose={() => setExportModalOpen(false)}
+        />
+      )}
+    </section>
+  );
+}
+
+function validarUrlHttp(value: string, campo: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+  } catch {
+    throw new Error(`${campo}: informe uma URL http ou https valida.`);
+  }
+}
+
+function validarQuantidadeImagens(value: number, tipo: "V" | "K") {
+  if (!Number.isInteger(value) || value < 1 || value > 6) {
+    throw new Error(`A quantidade de imagens de produtos ${tipo} deve ser um inteiro entre 1 e 6.`);
+  }
+}
+
+function validarVariaveisPadrao(
+  padrao: string,
+  permitidas: Array<"ESTAMPA" | "VARIANTE" | "INDEX">,
+  tipo: "V" | "K",
+) {
+  const variaveis = Array.from(padrao.matchAll(/\$\{([^}]+)\}/g), (match) => match[1]);
+  const desconhecida = variaveis.find(
+    (variavel) => !permitidas.some((permitida) => permitida === variavel),
+  );
+
+  if (desconhecida) {
+    throw new Error(`Variavel \${${desconhecida}} nao permitida no padrao de produtos ${tipo}.`);
+  }
+  if (padrao.replace(/\$\{[^}]+\}/g, "").includes("${")) {
+    throw new Error(`Existe uma variavel incompleta no padrao de produtos ${tipo}.`);
+  }
+}
+
+function gerarUrlsExternasProduto(
+  padrao: string,
+  quantidade: number,
+  produto: ProdutoFinalOlist,
+  tipo: "V" | "K",
+) {
+  const estampa = produto.estampa?.codigo?.trim() ?? "";
+  const variante = produto.variante?.codigo?.trim() ?? "";
+
+  validarVariaveisPadrao(
+    padrao,
+    tipo === "V" ? ["ESTAMPA", "INDEX"] : ["ESTAMPA", "VARIANTE", "INDEX"],
+    tipo,
+  );
+
+  return Array.from({ length: quantidade }, (_, imageIndex) => {
+    const index = String(imageIndex + 1);
+    const variaveis: Record<string, string> = { ESTAMPA: estampa, VARIANTE: variante, INDEX: index };
+    const ausentes: string[] = [];
+    const url = padrao.replace(/\$\{([^}]+)\}/g, (_, variavel: string) => {
+      const valor = variaveis[variavel] ?? "";
+      if (!valor) ausentes.push(variavel);
+      return valor;
+    });
+
+    if (ausentes.length > 0) {
+      throw new Error(
+        `Produto ${produto.skuFinal}: nao foi possivel resolver ${ausentes
+          .map((variavel) => `\${${variavel}}`)
+          .join(", ")}.`,
+      );
+    }
+
+    validarUrlHttp(url, `Produto ${produto.skuFinal}`);
+    return url;
+  });
+}
+
+function formatExportTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    "_",
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
+}
+
+function ExportarProdutosVkModal({
+  grupos,
+  onClose,
+}: {
+  grupos: GrupoProdutoCriadoVk[];
+  onClose: () => void;
+}) {
+  const [etapa, setEtapa] = useState<1 | 2 | 3>(1);
+  const [padraoV, setPadraoV] = useState(
+    "https://storage.googleapis.com/forro-de-mesa-retangular/LENCO-RELIGIOSO-FOURWAY/${ESTAMPA}/${ESTAMPA}-${INDEX}.jpg",
+  );
+  const [quantidadeV, setQuantidadeV] = useState(1);
+  const [informativoUrl, setInformativoUrl] = useState(
+    "https://storage.googleapis.com/forro-de-mesa-retangular/LENCO-RELIGIOSO-FOURWAY/INFORMATIVO.jpg",
+  );
+  const [padraoK, setPadraoK] = useState(
+    "https://storage.googleapis.com/forro-de-mesa-retangular/LENCO-RELIGIOSO-FOURWAY/${ESTAMPA}/${ESTAMPA}-${VARIANTE}-${INDEX}.jpg",
+  );
+  const [quantidadeK, setQuantidadeK] = useState(1);
+  const [componenteId, setComponenteId] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+
+  const filhos = useMemo(() => grupos.flatMap((grupo) => grupo.filhos), [grupos]);
+  const produtosParaExportar = useMemo(
+    () => grupos.flatMap((grupo) => grupo.filhos.length > 0 ? grupo.filhos : [grupo.produtoBase]),
+    [grupos],
+  );
+  const produtosParaKit = useMemo(
+    () =>
+      grupos.flatMap((grupo) =>
+        [...grupo.filhos].sort((a, b) =>
+          a.skuFinal.localeCompare(b.skuFinal, "pt-BR", {
+            sensitivity: "base",
+            numeric: true,
+          }),
+        ),
+      ),
+    [grupos],
+  );
+
+  function validarEtapa(numero: 1 | 2 | 3) {
+    if (grupos.length === 0) throw new Error("Selecione ao menos um produto pai V.");
+
+    if (numero === 1) {
+      if (!padraoV.trim()) throw new Error("Informe o padrao da URL das imagens dos produtos V.");
+      validarQuantidadeImagens(quantidadeV, "V");
+      if (!informativoUrl.trim()) throw new Error("Informe o link da imagem de informativo.");
+      if (quantidadeV >= 6) {
+        throw new Error(
+          "Produtos V aceitam no maximo 5 imagens do padrao, pois o informativo ocupa a proxima posicao.",
+        );
+      }
+      validarUrlHttp(informativoUrl.trim(), "Link da imagem de informativo");
+      for (const grupo of grupos) {
+        gerarUrlsExternasProduto(padraoV.trim(), quantidadeV, grupo.produtoBase, "V");
+      }
+    }
+
+    if (numero === 2) {
+      if (!padraoK.trim()) throw new Error("Informe o padrao da URL das imagens dos produtos K.");
+      validarQuantidadeImagens(quantidadeK, "K");
+      validarVariaveisPadrao(padraoK.trim(), ["ESTAMPA", "VARIANTE", "INDEX"], "K");
+      for (const filho of filhos) {
+        gerarUrlsExternasProduto(padraoK.trim(), quantidadeK, filho, "K");
+      }
+    }
+
+    if (numero === 3 && !componenteId.trim()) {
+      throw new Error("Informe o ID do componente utilizado na fabricacao.");
+    }
+  }
+
+  function avancar() {
+    setErro(null);
+    try {
+      validarEtapa(etapa);
+      if (etapa < 3) setEtapa((etapa + 1) as 2 | 3);
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Nao foi possivel avancar.");
+    }
+  }
+
+  function gerarArquivos() {
+    setErro(null);
+    try {
+      validarEtapa(1);
+      validarEtapa(2);
+      validarEtapa(3);
+
+      const csvProdutos = montarCsvProdutosOlist(produtosParaExportar, {
+        imageUrls: (produto, isParent) =>
+          gerarUrlsExternasProduto(
+            isParent ? padraoV.trim() : padraoK.trim(),
+            isParent ? quantidadeV : quantidadeK,
+            produto,
+            isParent ? "V" : "K",
+          ),
+        informativoImageUrl: informativoUrl.trim(),
+      });
+      const csvKits = montarCsvProdutosFabricadosOlist(produtosParaKit, {
+        componenteId: componenteId.trim(),
+        quantidade: 1,
+      });
+      const timestamp = formatExportTimestamp(new Date());
+
+      downloadCsv(`importar_produto_olist_${timestamp}.csv`, csvProdutos);
+      downloadCsv(`importar_kit_olist_${timestamp}.csv`, csvKits);
+      onClose();
+    } catch (error) {
+      setErro(error instanceof Error ? error.message : "Erro ao gerar os arquivos.");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Exportar produtos selecionados</h3>
+            <p className="mt-1 text-sm text-slate-600">Configure imagens e componente em 3 etapas.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Fechar
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 border-b border-slate-200 text-center text-xs font-medium">
+          {["Imagens V", "Imagens K", "Componente e resumo"].map((titulo, index) => {
+            const numero = index + 1;
+            return (
+              <div
+                key={titulo}
+                className={`px-2 py-3 ${etapa === numero ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500"}`}
+              >
+                {numero}. {titulo}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="overflow-y-auto p-5">
+          {etapa === 1 && (
+            <div className="space-y-5">
+              <div>
+                <h4 className="font-semibold text-slate-900">Imagens do produto pai (V)</h4>
+                <p className="mt-1 text-sm text-slate-600">
+                  Variaveis disponiveis: <code>{"${ESTAMPA}"}</code> e <code>{"${INDEX}"}</code> (inicia em 1).
+                </p>
+              </div>
+              <label className="block text-sm text-slate-700">
+                Padrao da URL da imagem
+                <textarea
+                  required
+                  value={padraoV}
+                  onChange={(event) => setPadraoV(event.target.value)}
+                  className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                  placeholder="https://storage.googleapis.com/bucket/produto/${ESTAMPA}/${ESTAMPA}-${INDEX}.jpg"
+                />
+              </label>
+              <label className="block text-sm text-slate-700">
+                Quantidade de imagens
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={6}
+                  step={1}
+                  value={quantidadeV}
+                  onChange={(event) => setQuantidadeV(Number(event.target.value))}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm text-slate-700">
+                Link da imagem de informativo
+                <input
+                  required
+                  type="url"
+                  value={informativoUrl}
+                  onChange={(event) => setInformativoUrl(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                  placeholder="https://storage.googleapis.com/bucket/informativo.jpg"
+                />
+                <span className="mt-1 block text-xs text-slate-500">
+                  Sera preenchido na primeira coluna URL imagem livre apos as imagens V.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {etapa === 2 && (
+            <div className="space-y-5">
+              <div>
+                <h4 className="font-semibold text-slate-900">Imagens dos produtos filhos (K)</h4>
+                <p className="mt-1 text-sm text-slate-600">
+                  Variaveis disponiveis: <code>{"${ESTAMPA}"}</code>, <code>{"${VARIANTE}"}</code> e <code>{"${INDEX}"}</code> (inicia em 1).
+                </p>
+              </div>
+              <label className="block text-sm text-slate-700">
+                Padrao da URL da imagem
+                <textarea
+                  required
+                  value={padraoK}
+                  onChange={(event) => setPadraoK(event.target.value)}
+                  className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                  placeholder="https://storage.googleapis.com/bucket/produto/${ESTAMPA}/${ESTAMPA}-${VARIANTE}-${INDEX}.jpg"
+                />
+              </label>
+              <label className="block text-sm text-slate-700">
+                Quantidade de imagens
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={6}
+                  step={1}
+                  value={quantidadeK}
+                  onChange={(event) => setQuantidadeK(Number(event.target.value))}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+            </div>
+          )}
+
+          {etapa === 3 && (
+            <div className="space-y-5">
+              <div>
+                <h4 className="font-semibold text-slate-900">Componente utilizado na fabricacao</h4>
+                <p className="mt-1 text-sm text-slate-600">
+                  O componente sera relacionado a todos os produtos exportados no arquivo de kits.
+                </p>
+              </div>
+              <label className="block text-sm text-slate-700">
+                ID do componente
+                <input
+                  required
+                  value={componenteId}
+                  onChange={(event) => setComponenteId(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                  placeholder="Ex.: 345775052"
+                />
+              </label>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h5 className="font-semibold text-slate-900">Resumo da exportacao</h5>
+                <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  <div><dt className="text-slate-500">Produtos pai V</dt><dd className="font-medium text-slate-900">{grupos.length}</dd></div>
+                  <div><dt className="text-slate-500">Produtos filhos K</dt><dd className="font-medium text-slate-900">{filhos.length}</dd></div>
+                  <div><dt className="text-slate-500">Imagens por produto V</dt><dd className="font-medium text-slate-900">{quantidadeV}</dd></div>
+                  <div><dt className="text-slate-500">Imagens por produto K</dt><dd className="font-medium text-slate-900">{quantidadeK}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-slate-500">ID do componente</dt><dd className="break-all font-medium text-slate-900">{componenteId.trim() || "-"}</dd></div>
+                </dl>
+              </div>
+            </div>
+          )}
+
+          {erro && (
+            <p className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {erro}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 p-5">
+          <button
+            type="button"
+            onClick={() => {
+              setErro(null);
+              setEtapa((etapa - 1) as 1 | 2);
+            }}
+            disabled={etapa === 1}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+          >
+            Voltar
+          </button>
+          {etapa < 3 ? (
+            <button
+              type="button"
+              onClick={avancar}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            >
+              Avancar
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={gerarArquivos}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            >
+              Gerar e baixar arquivos
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProdutosCriadosTab({
   produtos,
   tipos,
@@ -2528,7 +3519,7 @@ function ProdutosCriadosTab({
     preco: string;
   }) => Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
-  onDeleteMany: (id: string) => void | Promise<void>;
+  onDeleteMany: (ids: string[]) => Promise<boolean>;
   onExportCsv: (produtos: ProdutoFinalOlist[]) => void;
   onLinkProdutos: (ids: string[]) => Promise<ProdutoFinalOlist[]>;
 }) {
@@ -2792,11 +3783,8 @@ function ProdutosCriadosTab({
     const confirmar = window.confirm(`Excluir ${produtosSelecionados.length} produto(s) selecionado(s)?`);
     if (!confirmar) return;
 
-    for (const produto of produtosSelecionados) {
-      await onDeleteMany(produto.id);
-    }
-
-    setSelecionados([]);
+    const excluiu = await onDeleteMany(produtosSelecionados.map((produto) => produto.id));
+    if (excluiu) setSelecionados([]);
   }
 
   async function vincularSelecionados() {
@@ -4204,7 +5192,7 @@ function GerarProdutoTab({
   }) => Promise<void>;
   onDownloadCsv: () => void;
 }) {
-  const [modalAberto, setModalAberto] = useState(false);
+  const [modalAberto, setModalAberto] = useState(true);
   const [tipoProdutoId, setTipoProdutoId] = useState("");
   const [produtoSkuBusca, setProdutoSkuBusca] = useState("");
   const [produtoPageSize, setProdutoPageSize] = useState(10);
@@ -4392,7 +5380,12 @@ function GerarProdutoTab({
       pesoLiquido: formatNumberForInput(valoresProdutoFornecidoCalculados.pesoLiquido, 3),
       pesoBruto: formatNumberForInput(valoresProdutoFornecidoCalculados.pesoBruto, 3),
       larguraEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.larguraEmbalagem, 2),
-      alturaEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.alturaEmbalagem, 2),
+      alturaEmbalagem: formatNumberForInput(
+        valoresProdutoFornecidoCalculados.alturaEmbalagem === null
+          ? null
+          : Math.max(1, valoresProdutoFornecidoCalculados.alturaEmbalagem),
+        2,
+      ),
       comprimentoEmbalagem: formatNumberForInput(valoresProdutoFornecidoCalculados.comprimentoEmbalagem, 2),
     };
 
@@ -4429,7 +5422,6 @@ function GerarProdutoTab({
       ...geracaoForm,
       precoCusto: formatNumberForInput(custoProdutoFornecido, 2),
     });
-    setModalAberto(false);
     setTipoProdutoId("");
     setEstampaBusca("");
     setEstampaIds([]);
@@ -4453,7 +5445,7 @@ function GerarProdutoTab({
 
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <section className="hidden rounded-lg border border-slate-200 bg-white p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Produtos finais</h3>
@@ -4482,7 +5474,7 @@ function GerarProdutoTab({
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <section className="hidden rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Produtos finais</h3>
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-end">
@@ -4583,8 +5575,8 @@ function GerarProdutoTab({
       </section>
 
       {modalAberto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl">
+        <section className="rounded-lg border border-slate-200 bg-white">
+          <div className="flex w-full flex-col">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Gerar Produto Final</h3>
@@ -4592,16 +5584,9 @@ function GerarProdutoTab({
                   Serão geradas apenas as variantes vinculadas as estampas e tamanhos selecionados.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setModalAberto(false)}
-                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Fechar
-              </button>
             </div>
 
-            <div className="space-y-5 overflow-y-auto p-5">
+            <div className="space-y-5 p-5">
               <label className="block text-sm text-slate-700">
                 Tipo de Produto
                 <select
@@ -4769,7 +5754,7 @@ function GerarProdutoTab({
                       { key: "pesoLiquido", label: "Peso liquido", digits: 3, placeholder: "0,000" },
                       { key: "pesoBruto", label: "Peso bruto", digits: 3, placeholder: "0,000" },
                       { key: "larguraEmbalagem", label: "Largura da embalagem", digits: 2, placeholder: "0,00" },
-                      { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "0,00" },
+                      { key: "alturaEmbalagem", label: "Altura da embalagem", digits: 2, placeholder: "1,00" },
                       { key: "comprimentoEmbalagem", label: "Comprimento da embalagem", digits: 2, placeholder: "0,00" },
                     ].map((field) => (
                       <label key={field.key} className="text-sm text-slate-700">
@@ -4786,10 +5771,18 @@ function GerarProdutoTab({
                           onBlur={() =>
                             setGeracaoForm((prev) => ({
                               ...prev,
-                              [field.key]: normalizeDecimalText(
-                                prev[field.key as keyof typeof geracaoForm],
-                                field.digits,
-                              ),
+                              [field.key]: field.key === "alturaEmbalagem"
+                                ? formatNumberForInput(
+                                    Math.max(
+                                      1,
+                                      parseDecimalText(prev.alturaEmbalagem) ?? 1,
+                                    ),
+                                    field.digits,
+                                  )
+                                : normalizeDecimalText(
+                                    prev[field.key as keyof typeof geracaoForm],
+                                    field.digits,
+                                  ),
                             }))
                           }
                           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
@@ -4915,13 +5908,6 @@ function GerarProdutoTab({
             <div className="flex justify-end gap-2 border-t border-slate-200 p-5">
               <button
                 type="button"
-                onClick={() => setModalAberto(false)}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
                 onClick={confirmarGeracao}
                 disabled={
                   saving ||
@@ -4939,7 +5925,7 @@ function GerarProdutoTab({
               </button>
             </div>
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

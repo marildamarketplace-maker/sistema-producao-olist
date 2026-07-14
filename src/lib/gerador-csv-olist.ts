@@ -5,6 +5,8 @@ export type TipoProdutoOlist = {
   descricaoSeo: string | null;
   palavrasChave: string | null;
   detalhesPromptIa: string | null;
+  corteLaser: boolean;
+  tecidoCorrido: boolean;
   slug: string | null;
   categoria: string | null;
   precoCusto: number | null;
@@ -143,6 +145,8 @@ export type ProdutoFinalOlist = {
     | "descricaoSeo"
     | "palavrasChave"
     | "detalhesPromptIa"
+    | "corteLaser"
+    | "tecidoCorrido"
     | "slug"
     | "categoria"
     | "precoCusto"
@@ -244,6 +248,8 @@ export function salvarTipoProdutoOlist(payload: {
   descricaoSeo?: string | null;
   palavrasChave?: string | null;
   detalhesPromptIa?: string | null;
+  corteLaser: boolean;
+  tecidoCorrido: boolean;
   slug?: string | null;
   categoria?: string | null;
   produtosFornecidos?: Array<{
@@ -419,6 +425,24 @@ export function gerarProdutoFinalOlist(payload: {
   });
 }
 
+export function gerarProdutosFinaisEmLoteOlist(payload: {
+  tipoProdutoId: string;
+  estampaIds: string[];
+  tamanhoId: string;
+  precoCusto?: number | null;
+  preco?: number | null;
+  pesoLiquido?: number | null;
+  pesoBruto?: number | null;
+  larguraEmbalagem?: number | null;
+  alturaEmbalagem?: number | null;
+  comprimentoEmbalagem?: number | null;
+}) {
+  return requestGeradorCsv<{ criados: number; sobrescritos: number; total: number }>({
+    method: "POST",
+    body: JSON.stringify({ action: "gerar-produtos-finais-lote", payload }),
+  });
+}
+
 export function salvarProdutoFinalOlist(payload: {
   id: string;
   skuFinal: string;
@@ -457,10 +481,12 @@ export function salvarProdutoKitFinalOlist(payload: {
   });
 }
 
-export function excluirProdutoFinalOlist(id: string) {
-  return requestGeradorCsv<{ ok: true }>({
+export function excluirProdutoFinalOlist(idOuIds: string | string[]) {
+  const ids = Array.isArray(idOuIds) ? idOuIds : [idOuIds];
+
+  return requestGeradorCsv<{ ok: true; excluidos: number }>({
     method: "POST",
-    body: JSON.stringify({ action: "excluir-produto-final", payload: { id } }),
+    body: JSON.stringify({ action: "excluir-produto-final", payload: { ids } }),
   });
 }
 
@@ -594,6 +620,41 @@ function cleanCodePart(value: string | null | undefined) {
     .toUpperCase();
 }
 
+function tipoProdutoMarkers(
+  tipoProduto: Pick<TipoProdutoOlist, "corteLaser" | "tecidoCorrido">,
+) {
+  return [
+    tipoProduto.corteLaser ? "C/LASER" : null,
+    tipoProduto.tecidoCorrido ? "C/CORRIDO" : null,
+  ].filter((marker): marker is string => Boolean(marker));
+}
+
+function produtoPaiSku(produto: ProdutoFinalOlist) {
+  const skuTipoProduto = produto.tipoProduto.sku.trim();
+
+  if (skuTipoProduto.toUpperCase().startsWith("MEURY2-")) {
+    return joinClean(
+      [
+        `TP/${cleanCodePart(skuTipoProduto.replace(/^MEURY2-+/i, ""))}`,
+        ...tipoProdutoMarkers(produto.tipoProduto),
+        produto.tamanho?.sku ? `TA/${cleanCodePart(produto.tamanho.sku)}` : "",
+        `EST/${cleanCodePart(produto.estampa?.codigo)}`,
+      ],
+      "-",
+    ).toUpperCase();
+  }
+
+  return joinClean(
+    [
+      produto.tipoProduto.sku,
+      ...tipoProdutoMarkers(produto.tipoProduto),
+      produto.tamanho?.sku,
+      produto.estampa?.codigo,
+    ],
+    "-",
+  ).toUpperCase();
+}
+
 function truncate(value: string | null | undefined, length: number) {
   return value ? value.slice(0, length) : "";
 }
@@ -643,6 +704,8 @@ function produtoCsvVariables(produto: ProdutoFinalOlist) {
 
 type ProdutoOlistCsvOptions = {
   cacheKey?: number;
+  imageUrls?: (produto: ProdutoFinalOlist, isParent: boolean) => string[];
+  informativoImageUrl?: string;
 };
 
 function withCacheBust(url: string, cacheKey?: number) {
@@ -757,11 +820,28 @@ export function montarLinhaCsvProdutoOlist(
   options?: ProdutoOlistCsvOptions,
 ) {
     const variables = produtoCsvVariables(produto);
-    const parentSku = joinClean(
-      [produto.tipoProduto.sku, produto.tamanho?.sku, produto.estampa?.codigo],
-      "-",
-    ).toUpperCase();
+    const parentSku = produtoPaiSku(produto);
     const temVariacao = Boolean(produto.variante || produto.tamanho);
+    const isTipoProdutoV = isParent || !temVariacao;
+    const configuredImageUrls = options?.imageUrls?.(produto, isTipoProdutoV);
+    const imageUrls = configuredImageUrls
+      ? [
+          ...configuredImageUrls,
+          ...(isTipoProdutoV && options?.informativoImageUrl
+            ? [options.informativoImageUrl]
+            : []),
+        ].slice(0, 6)
+      : null;
+    const imageColumns = imageUrls
+      ? Array.from({ length: 6 }, (_, index) => imageUrls[index] ?? "")
+      : [
+          produtoCsvImageUrl(produto, 0, isTipoProdutoV, options),
+          produtoCsvImageUrl(produto, 1, isTipoProdutoV, options),
+          storageAiImageUrl(produto, 2, options),
+          storageAiImageUrl(produto, 3, options),
+          storageAiImageUrl(produto, 4, options),
+          "",
+        ];
     const codigoPai = !isParent && temVariacao ? parentSku : "";
     const variacoes = !isParent && produto.variante ? `Cor:${produto.variante.codigo}` : "";
     const descricaoBase = isParent
@@ -813,11 +893,13 @@ export function montarLinhaCsvProdutoOlist(
     const slugBase = isParent
       ? slugCsv([
           produto.tipoProduto.titulo,
+          ...tipoProdutoMarkers(produto.tipoProduto),
           produto.tamanho?.slug ?? produto.tamanho?.titulo,
           produto.estampa?.codigo,
         ])
       : produto.slugFinal || slugCsv([
           produto.tipoProduto.titulo,
+          ...tipoProdutoMarkers(produto.tipoProduto),
           produto.tamanho?.slug ?? produto.tamanho?.titulo,
           produto.estampa?.codigo,
           produto.variante?.codigo,
@@ -859,12 +941,7 @@ export function montarLinhaCsvProdutoOlist(
       produto.comprimentoEmbalagem ?? produto.tipoProduto.comprimentoEmbalagem ?? "",
       0,
       tipoProdutoCsv,
-      produtoCsvImageUrl(produto, 0, tipoProdutoCsv === "V", options),
-      produtoCsvImageUrl(produto, 1, tipoProdutoCsv === "V", options),
-      storageAiImageUrl(produto, 2, options),
-      storageAiImageUrl(produto, 3, options),
-      storageAiImageUrl(produto, 4, options),
-      "",
+      ...imageColumns,
       produto.tipoProduto.categoria ?? produto.categoria ?? "",
       codigoPai,
       variacoes,
@@ -913,13 +990,32 @@ export function montarCsvProdutosOlist(produtos: ProdutoFinalOlist[], options?: 
 
   const rows: Array<Array<string | number | null | undefined>> = [];
   const parentRows = new Set<string>();
+  const produtosOrdenados = produtos
+    .map((produto, index) => ({
+      produto,
+      index,
+      grupoSku: produto.variante || produto.tamanho
+        ? produtoPaiSku(produto)
+        : produto.skuFinal,
+    }))
+    .sort((a, b) => {
+      const grupoDiff = a.grupoSku.localeCompare(b.grupoSku, "pt-BR", {
+        sensitivity: "base",
+        numeric: true,
+      });
+      if (grupoDiff !== 0) return grupoDiff;
 
-  for (const produto of produtos) {
+      const skuDiff = a.produto.skuFinal.localeCompare(b.produto.skuFinal, "pt-BR", {
+        sensitivity: "base",
+        numeric: true,
+      });
+      return skuDiff !== 0 ? skuDiff : a.index - b.index;
+    })
+    .map(({ produto }) => produto);
+
+  for (const produto of produtosOrdenados) {
     if (produto.variante || produto.tamanho) {
-      const parentSku = joinClean(
-        [produto.tipoProduto.sku, produto.tamanho?.sku, produto.estampa?.codigo],
-        "-",
-      ).toUpperCase();
+      const parentSku = produtoPaiSku(produto);
 
       if (!parentRows.has(parentSku)) {
         rows.push(montarLinhaCsvProdutoOlist(produto, true, options));

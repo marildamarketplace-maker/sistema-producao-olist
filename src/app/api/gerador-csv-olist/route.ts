@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildProdutoMockupPrompt } from "@/lib/mockup-prompt";
 import {
@@ -27,6 +28,10 @@ function requiredString(value: unknown, field: string) {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function booleanValue(value: unknown) {
+  return value === true || value === "true";
 }
 
 function optionalNumber(value: unknown, field: string) {
@@ -129,6 +134,50 @@ function buildSlugFinal(parts: Array<string | null | undefined>) {
     .join("-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function buildTipoProdutoMarkers(tipoProduto: {
+  corteLaser: boolean;
+  tecidoCorrido: boolean;
+}) {
+  return [
+    tipoProduto.corteLaser ? "C/LASER" : null,
+    tipoProduto.tecidoCorrido ? "C/CORRIDO" : null,
+  ].filter((marker): marker is string => Boolean(marker));
+}
+
+function buildProdutoFinalSku(
+  tipoProduto: { sku: string; corteLaser: boolean; tecidoCorrido: boolean },
+  tamanhoSku: string | null | undefined,
+  estampaCodigo: string,
+  varianteCodigo: string | null | undefined,
+) {
+  const skuTipoProduto = tipoProduto.sku.trim();
+  const usaPadraoMeury2 = skuTipoProduto.toUpperCase().startsWith("MEURY2-");
+
+  if (usaPadraoMeury2) {
+    return [
+      `TP/${cleanCodePart(skuTipoProduto.replace(/^MEURY2-+/i, ""))}`,
+      ...buildTipoProdutoMarkers(tipoProduto),
+      tamanhoSku ? `TA/${cleanCodePart(tamanhoSku)}` : "",
+      `EST/${cleanCodePart(estampaCodigo)}`,
+      cleanCodePart(varianteCodigo ?? ""),
+    ]
+      .filter(Boolean)
+      .join("-")
+      .replace(/-+/g, "-");
+  }
+
+  return [
+    cleanCodePart(tipoProduto.sku),
+    ...buildTipoProdutoMarkers(tipoProduto),
+    cleanCodePart(tamanhoSku ?? ""),
+    cleanCodePart(estampaCodigo),
+    cleanCodePart(varianteCodigo ?? ""),
+  ]
+    .filter(Boolean)
+    .join("-")
+    .replace(/-+/g, "-");
 }
 
 function hasTemplateVariable(value: string | null | undefined) {
@@ -244,6 +293,8 @@ function normalizeTipoProduto(tipoProduto: {
   descricaoSeo: string | null;
   palavrasChave: string | null;
   detalhesPromptIa: string | null;
+  corteLaser: boolean;
+  tecidoCorrido: boolean;
   slug: string | null;
   categoria: string | null;
   precoCusto: unknown;
@@ -286,6 +337,8 @@ function normalizeTipoProduto(tipoProduto: {
     descricaoSeo: tipoProduto.descricaoSeo,
     palavrasChave: tipoProduto.palavrasChave,
     detalhesPromptIa: tipoProduto.detalhesPromptIa,
+    corteLaser: tipoProduto.corteLaser,
+    tecidoCorrido: tipoProduto.tecidoCorrido,
     slug: tipoProduto.slug,
     categoria: tipoProduto.categoria,
     precoCusto: decimalToNumber(tipoProduto.precoCusto),
@@ -502,6 +555,8 @@ function normalizeProdutoOlist(produto: {
     descricaoSeo: string | null;
     palavrasChave: string | null;
     detalhesPromptIa: string | null;
+    corteLaser: boolean;
+    tecidoCorrido: boolean;
     slug: string | null;
     categoria: string | null;
     precoCusto: unknown;
@@ -576,6 +631,8 @@ function normalizeProdutoOlist(produto: {
       descricaoSeo: produto.tipoProduto.descricaoSeo,
       palavrasChave: produto.tipoProduto.palavrasChave,
       detalhesPromptIa: produto.tipoProduto.detalhesPromptIa,
+      corteLaser: produto.tipoProduto.corteLaser,
+      tecidoCorrido: produto.tipoProduto.tecidoCorrido,
       slug: produto.tipoProduto.slug,
       categoria: produto.tipoProduto.categoria,
       precoCusto: decimalToNumber(produto.tipoProduto.precoCusto),
@@ -759,6 +816,8 @@ async function carregarDados() {
             descricaoSeo: true,
             palavrasChave: true,
             detalhesPromptIa: true,
+            corteLaser: true,
+            tecidoCorrido: true,
             slug: true,
             categoria: true,
             precoCusto: true,
@@ -1002,6 +1061,8 @@ export async function POST(request: Request) {
         descricaoSeo: optionalString(payload.descricaoSeo),
         palavrasChave: optionalString(payload.palavrasChave),
         detalhesPromptIa: optionalString(payload.detalhesPromptIa),
+        corteLaser: booleanValue(payload.corteLaser),
+        tecidoCorrido: booleanValue(payload.tecidoCorrido),
         slug: buildSlugFinal([optionalString(payload.slug) ?? titulo]),
         categoria: optionalString(payload.categoria),
       };
@@ -1227,6 +1288,219 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (body.action === "gerar-produtos-finais-lote") {
+      const tipoProdutoId = requiredString(payload.tipoProdutoId, "tipoProdutoId");
+      const tamanhoId = requiredString(payload.tamanhoId, "tamanhoId");
+      const estampaIds = Array.from(
+        new Set(
+          (Array.isArray(payload.estampaIds) ? payload.estampaIds : []).filter(
+            (id): id is string => typeof id === "string" && Boolean(id.trim()),
+          ),
+        ),
+      );
+      const precoCusto = optionalNumber(payload.precoCusto, "precoCusto");
+      const preco = optionalNumber(payload.preco, "preco");
+      const pesoLiquido = optionalNumber(payload.pesoLiquido, "pesoLiquido");
+      const pesoBruto = optionalNumber(payload.pesoBruto, "pesoBruto");
+      const larguraEmbalagem = optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem");
+      const alturaEmbalagem = optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem");
+      const comprimentoEmbalagem = optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem");
+
+      if (estampaIds.length === 0) {
+        throw new Error("Selecione ao menos uma estampa.");
+      }
+      if (alturaEmbalagem === null || alturaEmbalagem < 1) {
+        throw new Error("A altura da embalagem deve ser no minimo 1.");
+      }
+
+      const [tipoProduto, tamanho, estampas, variantes] = await Promise.all([
+        prisma.tipoProduto.findUniqueOrThrow({
+          where: { id: tipoProdutoId },
+          include: {
+            produtosFornecedor: {
+              include: { produtoFornecedor: true },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+          },
+        }),
+        prisma.tamanho.findUniqueOrThrow({ where: { id: tamanhoId } }),
+        prisma.estampa.findMany({ where: { id: { in: estampaIds } } }),
+        prisma.variante.findMany({
+          where: {
+            estampaId: { in: estampaIds },
+            tamanhoId,
+          },
+        }),
+      ]);
+      const produtoFornecedorTipo = tipoProduto.produtosFornecedor[0]?.produtoFornecedor ?? null;
+      const quantidadeProdutoFornecedor = decimalToNumber(tamanho.quantidadeProdutoFornecedor);
+
+      if (!produtoFornecedorTipo) {
+        throw new Error("O tipo de produto selecionado nao possui produto fornecido associado.");
+      }
+      if (quantidadeProdutoFornecedor === null || quantidadeProdutoFornecedor <= 0) {
+        throw new Error("O tamanho selecionado nao possui quantidade usada do produto fornecido.");
+      }
+      if (estampas.length !== estampaIds.length) {
+        throw new Error("Uma ou mais estampas selecionadas nao foram encontradas.");
+      }
+      if (variantes.length === 0) {
+        throw new Error("Nenhuma variante encontrada para as estampas e tamanho selecionados.");
+      }
+
+      const precoCustoCalculado =
+        Number(produtoFornecedorTipo.precoUnitarioMetro) * quantidadeProdutoFornecedor;
+      const estampasPorId = new Map(estampas.map((estampa) => [estampa.id, estampa]));
+      const skusGerados = new Set<string>();
+      const produtosData = variantes.map((variante) => {
+        const estampa = variante.estampaId ? estampasPorId.get(variante.estampaId) : null;
+        if (!estampa) {
+          throw new Error(`Estampa da variante ${variante.codigo} nao encontrada.`);
+        }
+
+        const skuFinal = buildProdutoFinalSku(
+          tipoProduto,
+          tamanho.sku,
+          estampa.codigo,
+          variante.codigo,
+        );
+        if (skusGerados.has(skuFinal)) {
+          throw new Error(`A selecao atual gera SKU duplicado: ${skuFinal}.`);
+        }
+        skusGerados.add(skuFinal);
+
+        const templateVariables = {
+          ...buildProdutoVariables(tipoProduto, estampa, variante),
+          TAMANHO: tamanho.titulo,
+        };
+        const tituloFinal = hasTemplateVariable(tipoProduto.titulo)
+          ? renderTemplate(tipoProduto.titulo, templateVariables)
+          : joinTextParts([tipoProduto.titulo, tamanho.titulo, estampa.codigo, variante.codigo]);
+        const descricaoFinal = hasTemplateVariable(tipoProduto.descricao)
+          ? renderTemplate(tipoProduto.descricao, templateVariables)
+          : joinTextParts([
+              tipoProduto.descricao,
+              tamanho.titulo,
+              estampa.descricao,
+              variante.descricao,
+            ]);
+        const descricaoSeoFinal = hasTemplateVariable(tipoProduto.descricaoSeo)
+          ? renderTemplate(tipoProduto.descricaoSeo, templateVariables)
+          : joinTextParts([
+              tipoProduto.descricaoSeo,
+              estampa.descricao,
+              variante.descricao,
+            ]);
+
+        return {
+          tipoProdutoId,
+          estampaId: estampa.id,
+          varianteId: variante.id,
+          tamanhoId,
+          skuFinal,
+          tituloFinal,
+          descricaoFinal: descricaoFinal || null,
+          descricaoSeoFinal: descricaoSeoFinal || null,
+          palavrasChaveFinal: joinKeywordParts([
+            tipoProduto.palavrasChave,
+            estampa.palavrasChave,
+            variante.palavrasChave,
+          ]) || null,
+          slugFinal: buildSlugFinal([
+            tipoProduto.slug,
+            ...buildTipoProdutoMarkers(tipoProduto),
+            tamanho.slug ?? tamanho.titulo,
+            estampa.codigo,
+            variante.codigo,
+          ]) || null,
+          categoria: tipoProduto.categoria,
+          precoCusto: precoCustoCalculado ?? precoCusto,
+          preco,
+          pesoLiquido,
+          pesoBruto,
+          larguraEmbalagem,
+          alturaEmbalagem,
+          comprimentoEmbalagem,
+        };
+      });
+      const existentes = await prisma.produtoOlist.findMany({
+        where: { skuFinal: { in: produtosData.map((produto) => produto.skuFinal) } },
+        select: { skuFinal: true },
+      });
+      const skusExistentes = new Set(existentes.map((produto) => produto.skuFinal));
+
+      const valoresSql = produtosData.map((data) => Prisma.sql`(
+        ${data.tipoProdutoId}::uuid,
+        ${data.estampaId}::uuid,
+        ${data.varianteId}::uuid,
+        ${data.tamanhoId}::uuid,
+        ${data.skuFinal},
+        ${data.tituloFinal},
+        ${data.descricaoFinal},
+        ${data.descricaoSeoFinal},
+        ${data.palavrasChaveFinal},
+        ${data.slugFinal},
+        ${data.categoria},
+        ${data.precoCusto},
+        ${data.preco},
+        ${data.pesoLiquido},
+        ${data.pesoBruto},
+        ${data.larguraEmbalagem},
+        ${data.alturaEmbalagem},
+        ${data.comprimentoEmbalagem}
+      )`);
+
+      await prisma.$executeRaw(Prisma.sql`
+        INSERT INTO produto_olist (
+          tipo_produto_id,
+          estampa_id,
+          variante_id,
+          tamanho_id,
+          sku_final,
+          titulo_final,
+          descricao_final,
+          descricao_seo_final,
+          palavras_chave_final,
+          slug_final,
+          categoria,
+          preco_custo,
+          preco,
+          peso_liquido,
+          peso_bruto,
+          largura_embalagem,
+          altura_embalagem,
+          comprimento_embalagem
+        )
+        VALUES ${Prisma.join(valoresSql)}
+        ON CONFLICT (sku_final) DO UPDATE SET
+          tipo_produto_id = EXCLUDED.tipo_produto_id,
+          estampa_id = EXCLUDED.estampa_id,
+          variante_id = EXCLUDED.variante_id,
+          tamanho_id = EXCLUDED.tamanho_id,
+          titulo_final = EXCLUDED.titulo_final,
+          descricao_final = EXCLUDED.descricao_final,
+          descricao_seo_final = EXCLUDED.descricao_seo_final,
+          palavras_chave_final = EXCLUDED.palavras_chave_final,
+          slug_final = EXCLUDED.slug_final,
+          categoria = EXCLUDED.categoria,
+          preco_custo = EXCLUDED.preco_custo,
+          preco = EXCLUDED.preco,
+          peso_liquido = EXCLUDED.peso_liquido,
+          peso_bruto = EXCLUDED.peso_bruto,
+          largura_embalagem = EXCLUDED.largura_embalagem,
+          altura_embalagem = EXCLUDED.altura_embalagem,
+          comprimento_embalagem = EXCLUDED.comprimento_embalagem,
+          updated_at = NOW()
+      `);
+
+      return NextResponse.json({
+        criados: produtosData.length - skusExistentes.size,
+        sobrescritos: skusExistentes.size,
+        total: produtosData.length,
+      });
+    }
+
     if (body.action === "gerar-produto-final") {
       const tipoProdutoId = requiredString(payload.tipoProdutoId, "tipoProdutoId");
       const estampaId = requiredString(payload.estampaId, "estampaId");
@@ -1239,6 +1513,10 @@ export async function POST(request: Request) {
       const larguraEmbalagem = optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem");
       const alturaEmbalagem = optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem");
       const comprimentoEmbalagem = optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem");
+
+      if (alturaEmbalagem === null || alturaEmbalagem < 1) {
+        throw new Error("A altura da embalagem deve ser no minimo 1.");
+      }
 
       const [tipoProduto, estampa, variante, tamanhoSelecionado] = await Promise.all([
         prisma.tipoProduto.findUniqueOrThrow({
@@ -1282,12 +1560,12 @@ export async function POST(request: Request) {
         throw new Error("O tamanho selecionado nao possui quantidade usada do produto fornecido.");
       }
 
-      const skuFinal = [tipoProduto.sku, tamanho?.sku, estampa.codigo, variante?.codigo]
-        .filter((value): value is string => Boolean(value?.trim()))
-        .map(cleanCodePart)
-        .filter(Boolean)
-        .join("-")
-        .replace(/-+/g, "-");
+      const skuFinal = buildProdutoFinalSku(
+        tipoProduto,
+        tamanho?.sku,
+        estampa.codigo,
+        variante?.codigo,
+      );
       const produtoExistente = await prisma.produtoOlist.findUnique({
         where: { skuFinal },
         select: { id: true },
@@ -1330,7 +1608,13 @@ export async function POST(request: Request) {
         descricaoFinal: descricaoFinal || null,
         descricaoSeoFinal: descricaoSeoFinal || null,
         palavrasChaveFinal: palavrasChaveFinal || null,
-        slugFinal: buildSlugFinal([tipoProduto.slug, tamanho?.slug ?? tamanho?.titulo, estampa.codigo, variante?.codigo]) || null,
+        slugFinal: buildSlugFinal([
+          tipoProduto.slug,
+          ...buildTipoProdutoMarkers(tipoProduto),
+          tamanho?.slug ?? tamanho?.titulo,
+          estampa.codigo,
+          variante?.codigo,
+        ]) || null,
         categoria: tipoProduto.categoria,
         precoCusto: precoCustoCalculado ?? precoCusto,
         preco,
@@ -1355,6 +1639,8 @@ export async function POST(request: Request) {
                   descricaoSeo: true,
                   palavrasChave: true,
                   detalhesPromptIa: true,
+                  corteLaser: true,
+                  tecidoCorrido: true,
                   slug: true,
                   categoria: true,
                   precoCusto: true,
@@ -1408,6 +1694,8 @@ export async function POST(request: Request) {
               descricaoSeo: true,
               palavrasChave: true,
               detalhesPromptIa: true,
+              corteLaser: true,
+              tecidoCorrido: true,
               slug: true,
               categoria: true,
               precoCusto: true,
@@ -1485,6 +1773,8 @@ export async function POST(request: Request) {
               descricaoSeo: true,
               palavrasChave: true,
               detalhesPromptIa: true,
+              corteLaser: true,
+              tecidoCorrido: true,
               slug: true,
               categoria: true,
               precoCusto: true,
@@ -1711,6 +2001,8 @@ export async function POST(request: Request) {
             descricaoSeo: true,
             palavrasChave: true,
             detalhesPromptIa: true,
+            corteLaser: true,
+            tecidoCorrido: true,
             slug: true,
             categoria: true,
             precoCusto: true,
@@ -1807,10 +2099,28 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "excluir-produto-final") {
-      const id = requiredString(payload.id, "id");
-      await prisma.produtoOlist.delete({ where: { id } });
+      const idsRecebidos = Array.isArray(payload.ids)
+        ? payload.ids
+        : payload.id
+          ? [payload.id]
+          : [];
+      const ids = Array.from(
+        new Set(
+          idsRecebidos.filter(
+            (id): id is string => typeof id === "string" && Boolean(id.trim()),
+          ),
+        ),
+      );
 
-      return NextResponse.json({ ok: true });
+      if (ids.length === 0) {
+        throw new Error("Selecione ao menos um produto final para excluir.");
+      }
+
+      const resultado = await prisma.produtoOlist.deleteMany({
+        where: { id: { in: ids } },
+      });
+
+      return NextResponse.json({ ok: true, excluidos: resultado.count });
     }
 
     if (body.action === "gerar-mockup-produto") {

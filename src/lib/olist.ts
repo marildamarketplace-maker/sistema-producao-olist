@@ -314,6 +314,70 @@ export async function getValidOlistAccessToken() {
   throw new Error("Falha no OAuth Olist/Tiny.");
 }
 
+type CategoriaOlistImportada = {
+  olistId: string;
+  nome: string;
+  caminho: string;
+  parentOlistId: string | null;
+  nivel: number;
+};
+
+export async function listarArvoreCategoriasOlist(): Promise<CategoriaOlistImportada[]> {
+  const token = await getValidOlistAccessToken();
+  const olistConfig = await getAplicativoOlistConfig();
+  const url = new URL("categorias/todas", normalizarBaseUrl(olistConfig.apiBaseUrl));
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "categorias" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(response.status === 401 ? "Token inválido ou sem permissão." : `Erro Olist ${response.status}`);
+  }
+
+  const resultado: CategoriaOlistImportada[] = [];
+  const visitados = new Set<string>();
+  const raiz = response.data as unknown;
+
+  function visitar(valor: unknown, pai: string | null, nomesPais: string[], nivel: number) {
+    if (Array.isArray(valor)) {
+      valor.forEach((item) => visitar(item, pai, nomesPais, nivel));
+      return;
+    }
+    if (!valor || typeof valor !== "object") return;
+    const item = valor as Record<string, unknown>;
+    const idRaw = item.id ?? item.idCategoria ?? item.codigo ?? item.categoriaId;
+    const nomeRaw = item.nome ?? item.descricao ?? item.titulo;
+    const id = idRaw === undefined || idRaw === null ? null : String(idRaw);
+    const nome = typeof nomeRaw === "string" ? nomeRaw.trim() : "";
+    const filhos =
+      item.filhos ??
+      item.filhas ??
+      item.children ??
+      item.subcategorias ??
+      item.subCategorias ??
+      item.categorias;
+
+    if (id && nome) {
+      if (!visitados.has(id)) {
+        resultado.push({ olistId: id, nome, caminho: [...nomesPais, nome].join(" > "), parentOlistId: pai, nivel });
+        visitados.add(id);
+      }
+      visitar(filhos, id, [...nomesPais, nome], nivel + 1);
+      return;
+    }
+
+    for (const [chave, conteudo] of Object.entries(item)) {
+      if (["data", "itens", "results", "categorias", "arvore"].includes(chave)) visitar(conteudo, pai, nomesPais, nivel);
+    }
+  }
+
+  visitar(raiz, null, [], 0);
+  return resultado;
+}
+
 /* =========================================================
  * API OLIST
  * ======================================================= */

@@ -78,6 +78,10 @@ const menuItems: MenuItem[] = [
     ],
   },
   {
+    label: "Controle de mídia",
+    items: [{ label: "Categorias", href: "/controle-midia/categorias" }],
+  },
+  {
     label: "Configurações",
     href: "/configuracoes",
     permissions: ["podeVisualizarConfiguracao", "podeEditarConfiguracao"],
