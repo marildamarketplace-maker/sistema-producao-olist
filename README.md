@@ -134,3 +134,16 @@ O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/cal
 - `GET /api/olist/login`: inicia OAuth2 (authorization code).
 - `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
 - Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
+
+### Cobrança diária de confirmação de produção via WhatsApp
+
+O cron da Vercel chama `GET /api/cron/cobrar-confirmacao-producao` diariamente às 20:00 UTC, equivalente a 17:00 em `America/Sao_Paulo`. A mensagem é enviada somente quando existem solicitações com status `em_producao`.
+
+Variáveis obrigatórias:
+
+- `CRON_SECRET`: segredo usado pela Vercel no header `Authorization: Bearer ...`.
+- `ZAPI_INSTANCE_ID`: ID da instância Z-API.
+- `ZAPI_TOKEN`: token da instância Z-API.
+- `ZAPI_CLIENT_TOKEN`: token de segurança da conta Z-API.
+- `WHATSAPP_CONFIRMACAO_PRODUCAO_NUMEROS`: um ou mais números separados por vírgula, no formato DDI + DDD + número, somente dígitos.
+- `APP_URL`: URL pública do sistema, usada no link para a tela de confirmação (opcional na Vercel).
