@@ -105,6 +105,7 @@ const menuItems: MenuItem[] = [
     href: "/configuracoes",
     permissions: ["podeVisualizarConfiguracao", "podeEditarConfiguracao"],
   },
+  { label: "Usuários", href: "/usuarios", permissions: ["podeEditarConfiguracao"] },
 ];
 
 export function Sidebar() {
