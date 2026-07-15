@@ -163,7 +163,9 @@ export type FiltrosListagemPedidosOlist = {
   cpfCnpj?: string;
   dataInicial?: string;
   dataFinal?: string;
+  dataAtualizacao?: string;
   situacao?: string;
+  idVendedor?: string;
   numeroPedidoEcommerce?: string;
   origemPedido?: "0" | "1";
   orderBy?: "asc" | "desc";
@@ -327,7 +329,9 @@ export async function listarPedidosOlistApi(aplicativoId: string, filtros: Filtr
     cpfCnpj: filtros.cpfCnpj,
     dataInicial: filtros.dataInicial,
     dataFinal: filtros.dataFinal,
+    dataAtualizacao: filtros.dataAtualizacao,
     situacao: filtros.situacao,
+    idVendedor: filtros.idVendedor,
     numeroPedidoEcommerce: filtros.numeroPedidoEcommerce,
     origemPedido: filtros.origemPedido,
     orderBy: filtros.orderBy,
@@ -401,6 +405,25 @@ export async function criarPedidoOlistApi(aplicativoId: string, pedido: Record<s
     throw new Error(response.status === 401 ? "Token inválido ou sem permissão." : `Erro Olist ${response.status}: ${detalhe}`);
   }
   return response.data as { id?: number; numeroPedido?: string };
+}
+
+export async function obterPedidoOlistApi(aplicativoId: string, pedidoId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`pedidos/${encodeURIComponent(pedidoId)}`, normalizarBaseUrl(olistConfig.apiBaseUrl));
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedido-detalhe-exportacao" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  return response.data as Record<string, unknown>;
 }
 
 export async function listarProdutosOlistApi(

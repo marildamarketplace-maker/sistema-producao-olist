@@ -67,11 +67,11 @@ const menuItems: MenuItem[] = [
   {
     label: "Olist",
     items: [
-      { label: "Produtos", href: "/olist/produtos" },
-      { label: "Contatos", href: "/olist/contatos" },
-      { label: "Pedidos", href: "/olist/pedidos" },
-      { label: "Criar pedido", href: "/olist/pedidos/criar" },
-      { label: "Vendedores", href: "/olist/vendedores" },
+      { label: "Produtos", href: "/olist/produtos", permissions: ["podeVisualizarOlistProdutos"] },
+      { label: "Contatos", href: "/olist/contatos", permissions: ["podeVisualizarOlistContatos"] },
+      { label: "Pedidos", href: "/olist/pedidos", permissions: ["podeVisualizarOlistPedidos"] },
+      { label: "Criar pedido", href: "/olist/pedidos/criar", permissions: ["podeCriarOlistPedido"] },
+      { label: "Vendedores", href: "/olist/vendedores", permissions: ["podeVisualizarOlistVendedores"] },
     ],
   },
   {

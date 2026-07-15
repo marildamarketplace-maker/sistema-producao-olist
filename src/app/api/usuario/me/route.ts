@@ -10,6 +10,11 @@ type UsuarioRow = {
   pode_visualizar_fornecedores: boolean;
   pode_visualizar_produtos_fornecedor: boolean;
   pode_visualizar_categorias_midia: boolean;
+  pode_visualizar_olist_produtos: boolean;
+  pode_visualizar_olist_contatos: boolean;
+  pode_visualizar_olist_pedidos: boolean;
+  pode_criar_olist_pedido: boolean;
+  pode_visualizar_olist_vendedores: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
   pode_visualizar_baixa: boolean;
@@ -55,6 +60,11 @@ export async function GET(request: Request) {
         pode_visualizar_fornecedores,
         pode_visualizar_produtos_fornecedor,
         pode_visualizar_categorias_midia,
+        pode_visualizar_olist_produtos,
+        pode_visualizar_olist_contatos,
+        pode_visualizar_olist_pedidos,
+        pode_criar_olist_pedido,
+        pode_visualizar_olist_vendedores,
         pode_visualizar_estoque,
         pode_editar_estoque,
         pode_visualizar_baixa,
@@ -105,6 +115,11 @@ export async function GET(request: Request) {
     podeVisualizarFornecedores: Boolean(usuario.pode_visualizar_fornecedores),
     podeVisualizarProdutosFornecedor: Boolean(usuario.pode_visualizar_produtos_fornecedor),
     podeVisualizarCategoriasMidia: Boolean(usuario.pode_visualizar_categorias_midia),
+    podeVisualizarOlistProdutos: Boolean(usuario.pode_visualizar_olist_produtos),
+    podeVisualizarOlistContatos: Boolean(usuario.pode_visualizar_olist_contatos),
+    podeVisualizarOlistPedidos: Boolean(usuario.pode_visualizar_olist_pedidos),
+    podeCriarOlistPedido: Boolean(usuario.pode_criar_olist_pedido),
+    podeVisualizarOlistVendedores: Boolean(usuario.pode_visualizar_olist_vendedores),
     podeVisualizarEstoque: Boolean(usuario.pode_visualizar_estoque),
     podeEditarEstoque: Boolean(usuario.pode_editar_estoque),
     podeVisualizarBaixa: Boolean(usuario.pode_visualizar_baixa),

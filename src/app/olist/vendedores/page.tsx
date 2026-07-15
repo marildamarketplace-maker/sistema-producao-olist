@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { AccessGuard } from "@/components/access-guard";
 
 type Contato = {
   id?: number;
@@ -29,7 +30,7 @@ function enderecoTexto(endereco?: Record<string, unknown> | null) {
   return [...new Set(valores)].join(" · ") || "—";
 }
 
-export default function VendedoresOlistPage() {
+function VendedoresOlistPage() {
   const { session } = useAuth();
   const [filtros, setFiltros] = useState({ nome: "", codigo: "" });
   const [consulta, setConsulta] = useState(filtros);
@@ -74,4 +75,8 @@ export default function VendedoresOlistPage() {
       <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><span className="text-sm text-slate-500">Página {pagina} de {paginas}</span><div className="flex gap-2"><button type="button" disabled={carregando || offset === 0} onClick={() => setOffset((atual) => Math.max(0, atual - LIMITE))} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Anterior</button><button type="button" disabled={carregando || offset + LIMITE >= total} onClick={() => setOffset((atual) => atual + LIMITE)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Próxima</button></div></div>
     </section>
   </div>;
+}
+
+export default function VendedoresOlistAccessPage() {
+  return <AccessGuard permissions={["podeVisualizarOlistVendedores"]}><VendedoresOlistPage /></AccessGuard>;
 }

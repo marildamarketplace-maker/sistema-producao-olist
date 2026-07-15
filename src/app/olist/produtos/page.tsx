@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { useAuth } from "@/components/auth-provider";
+import { AccessGuard } from "@/components/access-guard";
 
 type ProdutoOlist = {
   id?: number | string;
@@ -47,7 +48,7 @@ function formatarObjeto(valor: unknown) {
   return entradas.length ? entradas.join(" · ") : "—";
 }
 
-export default function ProdutosOlistPage() {
+function ProdutosOlistPage() {
   const { session } = useAuth();
   const [itens, setItens] = useState<ProdutoOlist[]>([]);
   const [total, setTotal] = useState(0);
@@ -113,4 +114,8 @@ export default function ProdutosOlistPage() {
       </section>
     </div>
   );
+}
+
+export default function ProdutosOlistAccessPage() {
+  return <AccessGuard permissions={["podeVisualizarOlistProdutos"]}><ProdutosOlistPage /></AccessGuard>;
 }

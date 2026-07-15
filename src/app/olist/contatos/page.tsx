@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { useAuth } from "@/components/auth-provider";
+import { AccessGuard } from "@/components/access-guard";
 
 type ContatoOlist = {
   id?: number | string;
@@ -51,7 +52,7 @@ function textoObjeto(valor?: Record<string, unknown> | null, chavesPreferidas: s
   return [...new Set(partes)].join(" · ") || "—";
 }
 
-export default function ContatosOlistPage() {
+function ContatosOlistPage() {
   const { session } = useAuth();
   const filtrosIniciais = { nome: "", codigo: "", cpfCnpj: "", celular: "", situacao: "", orderBy: "desc" };
   const [filtros, setFiltros] = useState(filtrosIniciais);
@@ -112,4 +113,8 @@ export default function ContatosOlistPage() {
       <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><span className="text-sm text-slate-500">Página {pagina} de {totalPaginas}</span><div className="flex gap-2"><button type="button" disabled={carregando || offset === 0} onClick={() => setOffset((atual) => Math.max(0, atual - LIMITE))} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Anterior</button><button type="button" disabled={carregando || offset + LIMITE >= total} onClick={() => setOffset((atual) => atual + LIMITE)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Próxima</button></div></div>
     </section>
   </div>;
+}
+
+export default function ContatosOlistAccessPage() {
+  return <AccessGuard permissions={["podeVisualizarOlistContatos"]}><ContatosOlistPage /></AccessGuard>;
 }

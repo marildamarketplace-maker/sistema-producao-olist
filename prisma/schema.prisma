@@ -81,6 +81,7 @@ model Usuario {
   nome                             String
   email                            String
   ativo                            Boolean    @default(true)
+  vendedorOlistId                  Int?       @map("vendedor_olist_id")
   podeVisualizarEstoque            Boolean    @default(false) @map("pode_visualizar_estoque")
   podeEditarEstoque                Boolean    @default(false) @map("pode_editar_estoque")
   podeVisualizarBaixa              Boolean    @default(false) @map("pode_visualizar_baixa")
@@ -98,6 +99,11 @@ model Usuario {
   podeVisualizarDashboard          Boolean    @default(false) @map("pode_visualizar_dashboard")
   podeVisualizarFornecedores       Boolean    @default(false) @map("pode_visualizar_fornecedores")
   podeVisualizarProdutosFornecedor Boolean    @default(false) @map("pode_visualizar_produtos_fornecedor")
+  podeVisualizarOlistProdutos       Boolean    @default(false) @map("pode_visualizar_olist_produtos")
+  podeVisualizarOlistContatos       Boolean    @default(false) @map("pode_visualizar_olist_contatos")
+  podeVisualizarOlistPedidos        Boolean    @default(false) @map("pode_visualizar_olist_pedidos")
+  podeCriarOlistPedido              Boolean    @default(false) @map("pode_criar_olist_pedido")
+  podeVisualizarOlistVendedores     Boolean    @default(false) @map("pode_visualizar_olist_vendedores")
   aplicativo                       Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, email], map: "uq_usuario_aplicativo_email")

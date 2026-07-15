@@ -19,11 +19,11 @@ export async function getUsuarioAutenticado(request: Request) {
         { email: { equals: email.trim(), mode: "insensitive" } },
       ],
     },
-    select: { id: true, aplicativoId: true },
+    select: { id: true, aplicativoId: true, vendedorOlistId: true },
   });
 
   if (!usuario) {
     throw new Error(`Usuário ${email.trim()} sem cadastro ativo no banco da aplicação.`);
   }
-  return { id: usuario.id, aplicativoId: usuario.aplicativoId };
+  return { id: usuario.id, aplicativoId: usuario.aplicativoId, vendedorOlistId: usuario.vendedorOlistId };
 }

@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown };
-type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; quantidade?: unknown; valorUnitario?: unknown; divisoes?: unknown };
+type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; divisoes?: unknown };
 
 function escaparXml(valor: string) {
   return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -32,6 +32,8 @@ export async function GET(request: Request) {
     const nome = params.get("nome")?.trim() || undefined;
     const codigo = params.get("codigo")?.trim() || undefined;
     const cpfCnpj = params.get("cpfCnpj")?.trim() || undefined;
+    const idVendedorParam = params.get("idVendedor")?.trim();
+    const idVendedor = idVendedorParam && /^\d+$/.test(idVendedorParam) ? idVendedorParam : undefined;
 
     if (recurso === "vendedores") {
       if (cpfCnpj) {
@@ -51,7 +53,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ itens: resposta.itens.filter((item) => item.situacao === "B" || item.situacao === "A") });
     }
     if (recurso === "clientes") {
-      const resposta = await listarContatosOlistApi(usuario.aplicativoId, { nome, codigo, cpfCnpj, limit: 50, offset: 0 });
+      const resposta = await listarContatosOlistApi(usuario.aplicativoId, { nome, codigo, cpfCnpj, idVendedor, limit: 50, offset: 0 });
       return NextResponse.json({ itens: resposta.itens.filter((item) =>
         (item.situacao === "B" || item.situacao === "A") && item.statusCrm === "C"
       ) });
@@ -64,7 +66,16 @@ export async function GET(request: Request) {
       prisma.estampa.findMany({ orderBy: { codigo: "asc" }, select: { id: true, codigo: true, descricao: true } }),
       prisma.variante.findMany({ orderBy: { codigo: "asc" }, select: { id: true, estampaId: true, codigo: true, descricao: true } }),
     ]);
-    return NextResponse.json({ estampas, variantes });
+    let vendedores: Record<string, unknown>[] = [];
+    if (usuario.vendedorOlistId) {
+      try {
+        const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { limit: 100, offset: 0 });
+        vendedores = resposta.itens.filter((vendedor) => Number(vendedor.id) === usuario.vendedorOlistId);
+      } catch (error) {
+        console.warn("Não foi possível carregar os dados do vendedor padrão:", error);
+      }
+    }
+    return NextResponse.json({ estampas, variantes, vendedores, vendedorOlistId: usuario.vendedorOlistId });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar dados." }, { status: 500 });
   }
@@ -84,11 +95,13 @@ export async function POST(request: Request) {
     const itens = (body.itens as ItemInput[]).map((item, indice) => {
       const produtoId = Number(item.produtoId);
       const produtoCodigo = String(item.produtoCodigo ?? produtoId).trim();
+      const produtoDescricao = String(item.produtoDescricao ?? produtoCodigo).trim();
+      const produtoUnidade = String(item.produtoUnidade ?? "UN").trim() || "UN";
       const quantidade = Number(item.quantidade);
       const valorUnitario = item.valorUnitario === null || item.valorUnitario === undefined ? undefined : Number(item.valorUnitario);
       const divisoes = Array.isArray(item.divisoes) ? item.divisoes as DivisaoInput[] : [];
       if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`Produto ${indice + 1} inválido.`);
-      if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Quantidade do produto ${indice + 1} inválida.`);
+      if (!Number.isFinite(quantidade) || quantidade < 1) throw new Error(`A quantidade mínima do produto ${indice + 1} é 1.`);
       if (valorUnitario !== undefined && (!Number.isFinite(valorUnitario) || valorUnitario < 0)) throw new Error(`Valor do produto ${indice + 1} inválido.`);
       if (divisoes.length === 0) divisoes.push({ quantidade });
       const soma = divisoes.reduce((total, divisao) => total + Number(divisao.quantidade), 0);
@@ -97,7 +110,7 @@ export async function POST(request: Request) {
       for (const divisao of divisoes) {
         const estampa = String(divisao.estampa ?? "").trim() || "Sem estampa";
         const variante = String(divisao.variante ?? "").trim() || "Sem variante";
-        observacoesLinhas.push(`Produto: ${produtoCodigo} Qtd: ${Number(divisao.quantidade)} Estampa: ${estampa} Variante: ${variante}`);
+        observacoesLinhas.push(`${produtoDescricao}     |     ${Number(divisao.quantidade)} ${produtoUnidade}     |     ${estampa}-${variante}`);
       }
       return {
         produto: { id: produtoId, tipo: "P" }, quantidade,
@@ -111,7 +124,7 @@ export async function POST(request: Request) {
       vendedor: { id: vendedorId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
-      observacoes: observacoesLinhas.join("\n"),
+      observacoes: observacoesLinhas.join("\n.\n"),
       itens,
     });
     return NextResponse.json(resultado);
