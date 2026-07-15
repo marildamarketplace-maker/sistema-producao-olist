@@ -36,12 +36,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const administrador = await getAdministrador(request);
-    const body = await request.json() as { nome?: unknown; email?: unknown; senha?: unknown; vendedorOlistId?: unknown };
+    const body = await request.json() as { nome?: unknown; email?: unknown; senha?: unknown; vendedorOlistId?: unknown; permissions?: unknown };
     const nome = String(body.nome ?? "").trim();
     const email = String(body.email ?? "").trim().toLowerCase();
     const senha = String(body.senha ?? "");
     const vendedorTexto = String(body.vendedorOlistId ?? "").trim();
     const vendedorOlistId = vendedorTexto ? Number(vendedorTexto) : null;
+    const permissoesRecebidas = body.permissions && typeof body.permissions === "object" ? body.permissions as Record<string, unknown> : {};
+    const permissoes = Object.fromEntries(permissionKeys.map((permission) => [permission, Boolean(permissoesRecebidas[permission])])) as Record<PermissionKey, boolean>;
     if (nome.length < 2) throw new Error("Informe o nome do usuário.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Informe um e-mail válido.");
     if (senha.length < 6) throw new Error("A senha deve possuir pelo menos 6 caracteres.");
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
     if (error || !data.user) throw new Error(`Não foi possível criar o usuário no Authentication: ${error?.message ?? "usuário não criado"}`);
     try {
       const usuario = await prisma.usuario.create({
-        data: { id: data.user.id, aplicativoId: administrador.aplicativoId, nome, email, vendedorOlistId, ativo: true },
+        data: { id: data.user.id, aplicativoId: administrador.aplicativoId, nome, email, vendedorOlistId, ativo: true, ...permissoes },
         select: selectUsuario,
       });
       return NextResponse.json({ usuario }, { status: 201 });

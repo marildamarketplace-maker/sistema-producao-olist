@@ -83,13 +83,21 @@ export async function GET(request: Request) {
       prisma.variante.findMany({ orderBy: { codigo: "asc" }, select: { id: true, estampaId: true, codigo: true, descricao: true } }),
     ]);
     let vendedores: Record<string, unknown>[] = [];
-    if (usuario.vendedorOlistId) {
-      try {
-        const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { limit: 100, offset: 0 });
-        vendedores = resposta.itens.filter((vendedor) => Number(vendedor.id) === usuario.vendedorOlistId);
-      } catch (error) {
-        console.warn("Não foi possível carregar os dados do vendedor padrão:", error);
-      }
+    try {
+      let offset = 0;
+      let total = 0;
+      do {
+        const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { limit: 100, offset });
+        vendedores.push(...resposta.itens);
+        total = resposta.paginacao.total;
+        offset += 100;
+      } while (offset < total && (!usuario.vendedorOlistId || !vendedores.some((vendedor) => Number(vendedor.id) === usuario.vendedorOlistId)));
+      vendedores = vendedores.filter((vendedor) =>
+        (vendedor.situacao === "B" || vendedor.situacao === "A") &&
+        (!usuario.vendedorOlistId || Number(vendedor.id) === usuario.vendedorOlistId)
+      );
+    } catch (error) {
+      console.warn("Não foi possível carregar os vendedores:", error);
     }
     return NextResponse.json({ estampas, variantes, vendedores, vendedorOlistId: usuario.vendedorOlistId });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listarVendedoresOlistApi } from "@/lib/olist";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { prisma } from "@/lib/prisma";
 
 function inteiroNaoNegativo(valor: string | null, padrao: number) {
   const numero = Number(valor);
@@ -19,7 +20,16 @@ export async function GET(request: Request) {
       limit,
       offset,
     });
-    return NextResponse.json(resultado);
+    const vendedoresIds = resultado.itens.map((vendedor) => Number(vendedor.id)).filter((id) => Number.isInteger(id) && id > 0);
+    const usuarios = await prisma.usuario.findMany({
+      where: { aplicativoId: usuario.aplicativoId, vendedorOlistId: { in: vendedoresIds } },
+      select: { id: true, nome: true, email: true, ativo: true, vendedorOlistId: true },
+    });
+    const usuarioPorVendedor = new Map(usuarios.map((item) => [item.vendedorOlistId, item]));
+    return NextResponse.json({
+      ...resultado,
+      itens: resultado.itens.map((vendedor) => ({ ...vendedor, usuarioVinculado: usuarioPorVendedor.get(Number(vendedor.id)) ?? null })),
+    });
   } catch (error) {
     console.error("Erro ao listar vendedores Olist:", error);
     return NextResponse.json(
