@@ -87,6 +87,16 @@ type RelacionamentoFormData = {
   editingProdutoFornecedorId: string | null;
 };
 
+type ProdutoCsvImportado = {
+  sku: string;
+  idOlist: string | null;
+  metaEstoque: number | null;
+  minimoEstoque: number | null;
+  referenciaProdutoFornecedor: string | null;
+  quantidadeProdutoFornecedor: number | null;
+  ativo: boolean;
+};
+
 const INITIAL_FORM: FormData = {
   sku: "",
   imagem_url: "",
@@ -96,6 +106,7 @@ const INITIAL_FORM: FormData = {
 };
 
 const PRODUTO_SKU_MAX_LENGTH = 50;
+const OPCOES_POR_PAGINA = [100, 1000, 9999999] as const;
 
 const INITIAL_FILTROS: FiltrosData = {
   sku: "",
@@ -151,6 +162,100 @@ function numeroDecimal(value: number | string | null | undefined) {
 
 function normalizarSkuBusca(value: string) {
   return value.trim().toUpperCase();
+}
+
+function formatarCampoCsv(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[;"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function lerLinhaCsv(linha: string) {
+  const campos: string[] = [];
+  let campo = "";
+  let entreAspas = false;
+
+  for (let index = 0; index < linha.length; index += 1) {
+    const caractere = linha[index];
+    if (caractere === '"' && entreAspas && linha[index + 1] === '"') {
+      campo += '"';
+      index += 1;
+    } else if (caractere === '"') {
+      entreAspas = !entreAspas;
+    } else if (caractere === ";" && !entreAspas) {
+      campos.push(campo.trim());
+      campo = "";
+    } else {
+      campo += caractere;
+    }
+  }
+
+  campos.push(campo.trim());
+  return campos;
+}
+
+function parseNumeroCsv(valor: string, campo: string, linha: number) {
+  if (!valor.trim()) return null;
+  const numero = parseFlexibleDecimalText(valor);
+  if (numero === null || numero < 0) throw new Error(`Linha ${linha}: ${campo} inválido.`);
+  return numero;
+}
+
+function parseProdutosCsv(conteudo: string): ProdutoCsvImportado[] {
+  const linhas = conteudo.replace(/^\uFEFF/, "").split(/\r?\n/).filter((linha) => linha.trim());
+  if (linhas.length < 2) throw new Error("O CSV deve conter o cabeçalho e ao menos um produto.");
+
+  const cabecalhoEsperado = [
+    "sku", "id olist", "meta de estoque", "minimo de estoque",
+    "referencia produto fornecido", "qtd produto fornecido", "situação",
+  ];
+  const cabecalho = lerLinhaCsv(linhas[0]).map((item) =>
+    item.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(),
+  );
+  const esperadoNormalizado = cabecalhoEsperado.map((item) =>
+    item.normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
+  );
+  if (cabecalho.join("|") !== esperadoNormalizado.join("|")) {
+    throw new Error("Cabeçalho inválido. Use o mesmo padrão do arquivo exportado.");
+  }
+
+  const produtos = linhas.slice(1).map((linha, index) => {
+    const numeroLinha = index + 2;
+    const campos = lerLinhaCsv(linha);
+    if (campos.length !== 7) throw new Error(`Linha ${numeroLinha}: são esperadas 7 colunas.`);
+    const [sku, idOlist, meta, minimo, referencia, quantidade, situacao] = campos;
+    if (!sku) throw new Error(`Linha ${numeroLinha}: SKU não informado.`);
+    const situacaoNormalizada = situacao.trim().toLowerCase();
+    if (!['ativo', 'inativo'].includes(situacaoNormalizada)) {
+      throw new Error(`Linha ${numeroLinha}: situação deve ser Ativo ou Inativo.`);
+    }
+    const metaNormalizada = parseNumeroCsv(meta, "meta de estoque", numeroLinha);
+    const minimoNormalizado = parseNumeroCsv(minimo, "mínimo de estoque", numeroLinha);
+    if ((metaNormalizada !== null && !Number.isInteger(metaNormalizada)) ||
+        (minimoNormalizado !== null && !Number.isInteger(minimoNormalizado))) {
+      throw new Error(`Linha ${numeroLinha}: meta e mínimo de estoque devem ser números inteiros.`);
+    }
+    const quantidadeNormalizada = parseNumeroCsv(quantidade, "quantidade do produto fornecido", numeroLinha);
+    if (referencia && (quantidadeNormalizada === null || quantidadeNormalizada <= 0)) {
+      throw new Error(`Linha ${numeroLinha}: informe uma quantidade maior que zero para o produto fornecido.`);
+    }
+    return {
+      sku: sku.trim(),
+      idOlist: idOlist.trim() || null,
+      metaEstoque: metaNormalizada,
+      minimoEstoque: minimoNormalizado,
+      referenciaProdutoFornecedor: referencia.trim() || null,
+      quantidadeProdutoFornecedor: quantidadeNormalizada,
+      ativo: situacaoNormalizada === "ativo",
+    };
+  });
+
+  const skus = new Set<string>();
+  for (const produto of produtos) {
+    const sku = normalizarSkuBusca(produto.sku);
+    if (skus.has(sku)) throw new Error(`SKU duplicado no CSV: ${produto.sku}.`);
+    skus.add(sku);
+  }
+  return produtos;
 }
 
 function chunkArray<T>(items: T[], size: number) {
@@ -248,6 +353,8 @@ export default function ProdutosPage() {
   const [formData, setFormData] = useState<FormData>(INITIAL_FORM);
   const [filtros, setFiltros] = useState<FiltrosData>(INITIAL_FILTROS);
   const [filtrosAplicados, setFiltrosAplicados] = useState<FiltrosData>(INITIAL_FILTROS);
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [itensPorPagina, setItensPorPagina] = useState<number>(100);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -256,6 +363,12 @@ export default function ProdutosPage() {
   const [fabricadoImportTexto, setFabricadoImportTexto] = useState("");
   const [fabricadoErro, setFabricadoErro] = useState<string | null>(null);
   const [fabricadoExportando, setFabricadoExportando] = useState(false);
+  const [produtosExportando, setProdutosExportando] = useState(false);
+  const [importacaoModalOpen, setImportacaoModalOpen] = useState(false);
+  const [importacaoEtapa, setImportacaoEtapa] = useState<"arquivo" | "confirmacao">("arquivo");
+  const [produtosImportados, setProdutosImportados] = useState<ProdutoCsvImportado[]>([]);
+  const [importacaoErro, setImportacaoErro] = useState<string | null>(null);
+  const [importacaoSalvando, setImportacaoSalvando] = useState(false);
   const [relacionamentoProduto, setRelacionamentoProduto] = useState<Produto | null>(null);
   const [relacionamentoProdutoOlistId, setRelacionamentoProdutoOlistId] = useState<string | null>(null);
   const [relacionamentosProduto, setRelacionamentosProduto] = useState<RelacionamentoProdutoFornecido[]>([]);
@@ -269,6 +382,11 @@ export default function ProdutosPage() {
   const podeEditarEstoque = Boolean(usuario?.podeEditarEstoque);
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
+  const totalPaginas = Math.max(1, Math.ceil(produtos.length / itensPorPagina));
+  const produtosPaginados = useMemo(() => {
+    const inicio = (paginaAtual - 1) * itensPorPagina;
+    return produtos.slice(inicio, inicio + itensPorPagina);
+  }, [itensPorPagina, paginaAtual, produtos]);
   const temFiltrosAplicados = useMemo(
     () =>
       filtrosAplicados.sku.trim() !== "" ||
@@ -352,6 +470,10 @@ export default function ProdutosPage() {
     loadProdutos(INITIAL_FILTROS);
   }, [loadProdutos]);
 
+  useEffect(() => {
+    if (paginaAtual > totalPaginas) setPaginaAtual(totalPaginas);
+  }, [paginaAtual, totalPaginas]);
+
   function resetForm() {
     setFormData(INITIAL_FORM);
     setEditingId(null);
@@ -360,14 +482,206 @@ export default function ProdutosPage() {
 
   async function handleFiltrar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setPaginaAtual(1);
     setFiltrosAplicados(filtros);
     await loadProdutos(filtros);
   }
 
   async function limparFiltros() {
+    setPaginaAtual(1);
     setFiltros(INITIAL_FILTROS);
     setFiltrosAplicados(INITIAL_FILTROS);
     await loadProdutos(INITIAL_FILTROS);
+  }
+
+  async function exportarProdutosCsv() {
+    if (produtos.length === 0) return;
+
+    setProdutosExportando(true);
+    setErrorMessage(null);
+
+    try {
+      const associacoes: ProdutoOlistFornecedorRow[] = [];
+
+      for (const ids of chunkArray(produtos.map((produto) => produto.id), 100)) {
+        const { data, error } = await supabase
+          .from("produto_olist_produto_fornecedor")
+          .select("produto_id, produto_fornecedor_id, quantidade_usada")
+          .in("produto_id", ids);
+
+        if (error) throw new Error(`Erro ao buscar produtos fornecidos: ${error.message}`);
+        associacoes.push(...((data as ProdutoOlistFornecedorRow[]) ?? []));
+      }
+
+      const produtosFornecedorIds = Array.from(
+        new Set(associacoes.map((item) => item.produto_fornecedor_id).filter(Boolean)),
+      );
+      const referencias = new Map<string, string | null>();
+
+      for (const ids of chunkArray(produtosFornecedorIds, 100)) {
+        const { data, error } = await supabase
+          .from("produtos_fornecedor")
+          .select("id, referencia")
+          .in("id", ids);
+
+        if (error) throw new Error(`Erro ao buscar referências: ${error.message}`);
+        for (const item of (data as Array<Pick<ProdutoFornecedorRow, "id" | "referencia">>) ?? []) {
+          referencias.set(item.id, item.referencia);
+        }
+      }
+
+      const associacaoPorProduto = new Map(
+        associacoes.map((associacao) => [associacao.produto_id, associacao]),
+      );
+      const cabecalho = [
+        "SKU",
+        "ID Olist",
+        "Meta de estoque",
+        "Minimo de estoque",
+        "Referencia produto fornecido",
+        "Qtd produto fornecido",
+        "Situação",
+      ];
+      const linhas = produtos.map((produto) => {
+        const associacao = associacaoPorProduto.get(produto.id);
+        return [
+          produto.sku,
+          produto.id_cadastro_olist,
+          produto.meta_estoque,
+          produto.minimo_estoque,
+          associacao ? referencias.get(associacao.produto_fornecedor_id) : null,
+          associacao?.quantidade_usada,
+          produto.ativo ? "Ativo" : "Inativo",
+        ];
+      });
+      const csv = [cabecalho, ...linhas]
+        .map((linha) => linha.map(formatarCampoCsv).join(";"))
+        .join("\r\n");
+      const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `produtos-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao exportar produtos.");
+    } finally {
+      setProdutosExportando(false);
+    }
+  }
+
+  function fecharImportacao(forcar = false) {
+    if (importacaoSalvando && !forcar) return;
+    setImportacaoModalOpen(false);
+    setImportacaoEtapa("arquivo");
+    setProdutosImportados([]);
+    setImportacaoErro(null);
+  }
+
+  async function lerArquivoImportacao(arquivo: File | null) {
+    setImportacaoErro(null);
+    setProdutosImportados([]);
+    if (!arquivo) return;
+
+    try {
+      const produtosLidos = parseProdutosCsv(await arquivo.text());
+      setProdutosImportados(produtosLidos);
+      setImportacaoEtapa("confirmacao");
+    } catch (error) {
+      setImportacaoErro(error instanceof Error ? error.message : "Erro ao ler o arquivo CSV.");
+    }
+  }
+
+  async function confirmarImportacaoCsv() {
+    setImportacaoSalvando(true);
+    setImportacaoErro(null);
+
+    try {
+      const produtosPorSku = new Map<string, ProdutoImportacaoRow>();
+      for (const skus of chunkArray(produtosImportados.map((produto) => produto.sku), 100)) {
+        const { data, error } = await supabase
+          .from("produtos")
+          .select("id, sku, id_cadastro_olist")
+          .in("sku", skus);
+        if (error) throw new Error(`Erro ao validar produtos: ${error.message}`);
+        for (const produto of (data as ProdutoImportacaoRow[]) ?? []) {
+          produtosPorSku.set(normalizarSkuBusca(produto.sku), produto);
+        }
+      }
+
+      const naoEncontrado = produtosImportados.find(
+        (produto) => !produtosPorSku.has(normalizarSkuBusca(produto.sku)),
+      );
+      if (naoEncontrado) throw new Error(`Produto com SKU ${naoEncontrado.sku} não encontrado.`);
+
+      const referenciasSolicitadas = Array.from(new Set(
+        produtosImportados
+          .map((produto) => produto.referenciaProdutoFornecedor)
+          .filter((referencia): referencia is string => Boolean(referencia)),
+      ));
+      const produtosFornecedorPorReferencia = new Map<string, ProdutoFornecedorRow>();
+      for (const referencias of chunkArray(referenciasSolicitadas, 100)) {
+        const { data, error } = await supabase
+          .from("produtos_fornecedor")
+          .select("id, nome, referencia")
+          .in("referencia", referencias);
+        if (error) throw new Error(`Erro ao validar referências: ${error.message}`);
+        for (const produto of (data as ProdutoFornecedorRow[]) ?? []) {
+          if (produto.referencia) produtosFornecedorPorReferencia.set(produto.referencia, produto);
+        }
+      }
+
+      const referenciaNaoEncontrada = referenciasSolicitadas.find(
+        (referencia) => !produtosFornecedorPorReferencia.has(referencia),
+      );
+      if (referenciaNaoEncontrada) {
+        throw new Error(`Produto fornecido com referência ${referenciaNaoEncontrada} não encontrado.`);
+      }
+
+      for (const item of produtosImportados) {
+        const produto = produtosPorSku.get(normalizarSkuBusca(item.sku));
+        if (!produto) continue;
+
+        const { error: produtoError } = await supabase
+          .from("produtos")
+          .update({
+            id_cadastro_olist: item.idOlist,
+            meta_estoque: item.metaEstoque,
+            minimo_estoque: item.minimoEstoque,
+            ativo: item.ativo,
+          })
+          .eq("id", produto.id);
+        if (produtoError) throw new Error(`Erro ao atualizar ${item.sku}: ${produtoError.message}`);
+
+        if (!item.referenciaProdutoFornecedor) {
+          const { error } = await supabase
+            .from("produto_olist_produto_fornecedor")
+            .delete()
+            .eq("produto_id", produto.id);
+          if (error) throw new Error(`Erro ao remover vínculo de ${item.sku}: ${error.message}`);
+          continue;
+        }
+
+        const produtoFornecedor = produtosFornecedorPorReferencia.get(item.referenciaProdutoFornecedor);
+        if (!produtoFornecedor || item.quantidadeProdutoFornecedor === null) continue;
+        const { error } = await supabase
+          .from("produto_olist_produto_fornecedor")
+          .upsert({
+            produto_id: produto.id,
+            produto_fornecedor_id: produtoFornecedor.id,
+            quantidade_usada: item.quantidadeProdutoFornecedor,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "produto_id" });
+        if (error) throw new Error(`Erro ao atualizar produto fornecido de ${item.sku}: ${error.message}`);
+      }
+
+      await loadProdutos(filtrosAplicados);
+      fecharImportacao(true);
+    } catch (error) {
+      setImportacaoErro(error instanceof Error ? error.message : "Erro ao importar o CSV.");
+    } finally {
+      setImportacaoSalvando(false);
+    }
   }
 
   async function exportarFabricadoImportado(event: FormEvent<HTMLFormElement>) {
@@ -856,7 +1170,7 @@ export default function ProdutosPage() {
       )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+        <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">Listagem de produtos</h3>
             {!isLoading && (
@@ -865,7 +1179,45 @@ export default function ProdutosPage() {
               </p>
             )}
           </div>
-          {podeEditarEstoque && (
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-sm text-slate-700">
+              Itens por página
+              <select
+                value={itensPorPagina}
+                onChange={(event) => {
+                  setItensPorPagina(Number(event.target.value));
+                  setPaginaAtual(1);
+                }}
+                className="mt-1 block rounded-md border border-slate-300 px-3 py-2"
+              >
+                {OPCOES_POR_PAGINA.map((opcao) => (
+                  <option key={opcao} value={opcao}>{opcao}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void exportarProdutosCsv()}
+              disabled={isLoading || produtosExportando || produtos.length === 0}
+              className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {produtosExportando ? "Exportando..." : "Exportar CSV"}
+            </button>
+            {podeEditarEstoque && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImportacaoErro(null);
+                  setImportacaoEtapa("arquivo");
+                  setProdutosImportados([]);
+                  setImportacaoModalOpen(true);
+                }}
+                className="rounded-md border border-emerald-700 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+              >
+                Importar CSV
+              </button>
+            )}
+            {podeEditarEstoque && (
             <button
               type="button"
               onClick={() => {
@@ -876,8 +1228,11 @@ export default function ProdutosPage() {
             >
               Importar qtd fabricado
             </button>
-          )}
+            )}
+          </div>
         </div>
+
+        {!formOpen && errorMessage && <p className="mb-4 text-sm text-red-600">{errorMessage}</p>}
 
         <form className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-6" onSubmit={handleFiltrar}>
           <label className="text-sm text-slate-700 md:col-span-2">
@@ -993,13 +1348,12 @@ export default function ProdutosPage() {
                   <th className="p-3">ID Olist</th>
                   <th className="p-3">Meta de estoque</th>
                   <th className="p-3">Minimo de estoque</th>
-                  <th className="p-3">Produto fornecido</th>
                   <th className="p-3">Ativo</th>
                   <th className="p-3">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {produtos.map((produto) => (
+                {produtosPaginados.map((produto) => (
                   <tr key={produto.id} className="border-b border-slate-100">
                     <td className="p-3">
                       {produto.imagem_url ? (
@@ -1019,7 +1373,6 @@ export default function ProdutosPage() {
                     <td className="p-3 text-slate-700">{produto.id_cadastro_olist || "-"}</td>
                     <td className="p-3 text-slate-700">{produto.meta_estoque ?? "(meta geral)"}</td>
                     <td className="p-3 text-slate-700">{produto.minimo_estoque ?? "(minimo geral)"}</td>
-                    <td className="p-3 text-slate-700">{produto.tem_produto_fornecido ? "Sim" : "Não"}</td>
                     <td className="p-3 text-slate-700">{produto.ativo ? "Sim" : "Não"}</td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-2">
@@ -1047,9 +1400,144 @@ export default function ProdutosPage() {
                 ))}
               </tbody>
             </table>
+            <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-600">
+                Página {paginaAtual} de {totalPaginas}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual((pagina) => Math.max(1, pagina - 1))}
+                  disabled={paginaAtual === 1}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual((pagina) => Math.min(totalPaginas, pagina + 1))}
+                  disabled={paginaAtual === totalPaginas}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                >
+                  Próxima
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </section>
+
+      {importacaoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Importar produtos por CSV</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Etapa {importacaoEtapa === "arquivo" ? "1 de 2 — Selecionar arquivo" : "2 de 2 — Confirmar dados"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => fecharImportacao()}
+                disabled={importacaoSalvando}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-5">
+              {importacaoEtapa === "arquivo" ? (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Arquivo CSV
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(event) => void lerArquivoImportacao(event.target.files?.[0] ?? null)}
+                      className="mt-2 block w-full rounded-md border border-slate-300 p-3 text-sm"
+                    />
+                  </label>
+                  <p className="text-sm text-slate-600">
+                    Use o arquivo gerado em “Exportar CSV”, com as mesmas sete colunas e separador ponto e vírgula.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-slate-600">
+                      Confira os {produtosImportados.length} produtos antes de confirmar a atualização.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportacaoEtapa("arquivo");
+                        setProdutosImportados([]);
+                        setImportacaoErro(null);
+                      }}
+                      disabled={importacaoSalvando}
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                    >
+                      Escolher outro arquivo
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border border-slate-200">
+                    <table className="min-w-full border-collapse text-sm">
+                      <thead className="bg-slate-50 text-left text-slate-600">
+                        <tr>
+                          <th className="p-3">SKU</th><th className="p-3">ID Olist</th>
+                          <th className="p-3">Meta</th><th className="p-3">Mínimo</th>
+                          <th className="p-3">Referência fornecido</th><th className="p-3">Qtd fornecido</th>
+                          <th className="p-3">Situação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {produtosImportados.map((produto) => (
+                          <tr key={produto.sku} className="border-t border-slate-200">
+                            <td className="p-3 font-medium text-slate-800">{produto.sku}</td>
+                            <td className="p-3 text-slate-700">{produto.idOlist ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{produto.metaEstoque ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{produto.minimoEstoque ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{produto.referenciaProdutoFornecedor ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{produto.quantidadeProdutoFornecedor ?? "-"}</td>
+                            <td className="p-3 text-slate-700">{produto.ativo ? "Ativo" : "Inativo"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {importacaoErro && (
+                <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{importacaoErro}</p>
+              )}
+            </div>
+
+            {importacaoEtapa === "confirmacao" && (
+              <div className="flex justify-end gap-2 border-t border-slate-200 p-5">
+                <button
+                  type="button"
+                  onClick={() => fecharImportacao()}
+                  disabled={importacaoSalvando}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmarImportacaoCsv()}
+                  disabled={importacaoSalvando || produtosImportados.length === 0}
+                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {importacaoSalvando ? "Importando..." : "Confirmar importação"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {fabricadoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
@@ -1165,7 +1653,6 @@ export default function ProdutosPage() {
                     <table className="min-w-full border-collapse text-sm">
                       <thead>
                         <tr className="border-b border-slate-200 text-left text-slate-600">
-                          <th className="p-3">ID</th>
                           <th className="p-3">Produto fornecido</th>
                           <th className="p-3">Referência</th>
                           <th className="p-3">Qtd usada</th>
@@ -1175,9 +1662,6 @@ export default function ProdutosPage() {
                       <tbody>
                         {relacionamentosProduto.map((relacionamento) => (
                           <tr key={relacionamento.produtoFornecedorId} className="border-b border-slate-100">
-                            <td className="p-3 font-mono text-xs text-slate-700">
-                              {relacionamento.produtoFornecedorId}
-                            </td>
                             <td className="p-3 text-slate-700">{relacionamento.nome}</td>
                             <td className="p-3 text-slate-700">{relacionamento.referencia ?? "-"}</td>
                             <td className="p-3 text-slate-700">
