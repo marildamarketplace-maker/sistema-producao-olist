@@ -2,13 +2,14 @@
 
 import { FormEvent, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { LockKeyhole, LogIn, Mail } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, LogIn, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => searchParams.get("email")?.trim() ?? "");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -74,13 +75,16 @@ export default function LoginPage() {
             <span className="mt-2 flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 focus-within:border-slate-500 focus-within:ring-2 focus-within:ring-slate-200">
               <LockKeyhole className="h-4 w-4 text-slate-400" aria-hidden="true" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
                 className="min-w-0 flex-1 border-0 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
                 placeholder="Sua senha"
               />
+              <button type="button" onClick={() => setShowPassword((visivel) => !visivel)} aria-label={showPassword ? "Ocultar senha" : "Visualizar senha"} title={showPassword ? "Ocultar senha" : "Visualizar senha"} className="shrink-0 text-slate-400 transition hover:text-slate-700">
+                {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+              </button>
             </span>
           </label>
 
