@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { importarProdutosOlist } from "@/lib/olist";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const result = await importarProdutosOlist();
+    const usuario = await getUsuarioAutenticado(request);
+    const result = await importarProdutosOlist(usuario.aplicativoId);
 
     return NextResponse.json(result);
   } catch (error) {

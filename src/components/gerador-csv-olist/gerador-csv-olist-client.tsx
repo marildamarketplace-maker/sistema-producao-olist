@@ -42,6 +42,7 @@ type Aba =
   | "tamanhos"
   | "estampas"
   | "variantes"
+  | "estamparia"
   | "gerar"
   | "gerar-kit"
   | "produtos"
@@ -53,6 +54,7 @@ const ABAS: { id: Aba; label: string }[] = [
   { id: "tamanhos", label: "Tamanho" },
   { id: "estampas", label: "Estampas" },
   { id: "variantes", label: "Variantes" },
+  { id: "estamparia", label: "Estamparia" },
   { id: "gerar", label: "Gerar Produto Final" },
   { id: "gerar-kit", label: "Gerar Produto Kit Final" },
   { id: "produtos-vk", label: "Produtos Criados (V/K)" },
@@ -1434,6 +1436,10 @@ export function GeradorCsvOlistClient() {
             />
           )}
 
+          {abaAtiva === "estamparia" && (
+            <EstampariaTab estampas={dados.estampas} variantes={dados.variantes} />
+          )}
+
           {abaAtiva === "gerar" && (
             <GerarProdutoTab
               tipos={tiposAtivos}
@@ -1483,6 +1489,117 @@ export function GeradorCsvOlistClient() {
         </>
       )}
     </div>
+  );
+}
+
+function EstampariaTab({
+  estampas,
+  variantes,
+}: {
+  estampas: EstampaOlist[];
+  variantes: VarianteOlist[];
+}) {
+  const [abertas, setAbertas] = useState<Set<string>>(new Set());
+
+  const variantesPorEstampa = useMemo(() => {
+    const mapa = new Map<string, VarianteOlist[]>();
+    for (const variante of variantes) {
+      if (!variante.estampaId) continue;
+      const atuais = mapa.get(variante.estampaId) ?? [];
+      atuais.push(variante);
+      mapa.set(variante.estampaId, atuais);
+    }
+    for (const lista of mapa.values()) {
+      lista.sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR"));
+    }
+    return mapa;
+  }, [variantes]);
+
+  function alternar(estampaId: string) {
+    setAbertas((atuais) => {
+      const proximas = new Set(atuais);
+      if (proximas.has(estampaId)) proximas.delete(estampaId);
+      else proximas.add(estampaId);
+      return proximas;
+    });
+  }
+
+  const estampasOrdenadas = useMemo(
+    () => [...estampas].sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR")),
+    [estampas],
+  );
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <h3 className="text-lg font-semibold text-slate-900">Estamparia</h3>
+        <p className="mt-1 text-sm text-slate-600">
+          Clique em uma estampa para visualizar suas variantes.
+        </p>
+      </div>
+
+      {estampasOrdenadas.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+          Nenhuma estampa cadastrada.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {estampasOrdenadas.map((estampa) => {
+            const aberta = abertas.has(estampa.id);
+            const variantesDaEstampa = variantesPorEstampa.get(estampa.id) ?? [];
+            return (
+              <article key={estampa.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <button
+                  type="button"
+                  aria-expanded={aberta}
+                  onClick={() => alternar(estampa.id)}
+                  className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900">{estampa.codigo}</p>
+                    <p className="mt-1 truncate text-sm text-slate-600">
+                      {estampa.descricao || estampa.nome || "Sem descrição"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                      {variantesDaEstampa.length} {variantesDaEstampa.length === 1 ? "variante" : "variantes"}
+                    </span>
+                    <span className={`text-lg text-slate-500 transition-transform ${aberta ? "rotate-180" : ""}`}>⌄</span>
+                  </div>
+                </button>
+
+                {aberta && (
+                  <div className="border-t border-slate-200 bg-slate-50 px-5 py-4">
+                    {variantesDaEstampa.length === 0 ? (
+                      <p className="text-sm text-slate-500">Esta estampa não possui variantes cadastradas.</p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                            <tr><th className="px-4 py-3">Código</th><th className="px-4 py-3">Descrição</th><th className="px-4 py-3">Tamanho</th><th className="px-4 py-3">Status</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {variantesDaEstampa.map((variante) => (
+                              <tr key={variante.id}>
+                                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{variante.codigo}</td>
+                                <td className="min-w-56 px-4 py-3 text-slate-600">{variante.descricao || variante.nome || "—"}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{variante.tamanho?.titulo || variante.tamanho?.sku || "—"}</td>
+                                <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs font-medium ${variante.ativo ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{variante.ativo ? "Ativa" : "Inativa"}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

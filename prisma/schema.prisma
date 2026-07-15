@@ -14,6 +14,7 @@ model Aplicativo {
   createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
   baixasEstoqueOlist        BaixaEstoqueOlist[]
+  categoriasOlist           CategoriaOlist[]
   configuracoesSistema      ConfiguracaoSistema[]
   controlesBuscaOlist       ControleBuscaOlist[]
   fornecedores              Fornecedor[]
@@ -21,6 +22,7 @@ model Aplicativo {
   itensBaixaEstoqueOlist    ItemBaixaEstoqueOlist[]
   itensSolicitacaoDevolucao ItemSolicitacaoDevolucao[]
   itensSolicitacaoProducao  ItemSolicitacaoProducao[]
+  midias                    Midia[]
   movimentacoesEstoque      MovimentacaoEstoque[]
   pedidosOlistProcessados   PedidoOlistProcessado[]
   produtos                  Produto[]
@@ -28,8 +30,6 @@ model Aplicativo {
   solicitacoesDevolucao     SolicitacaoDevolucao[]
   solicitacoesProducao      SolicitacaoProducao[]
   usuarios                  Usuario[]
-  categoriasOlist           CategoriaOlist[]
-  midias                    Midia[]
 
   @@map("aplicativo")
 }
@@ -68,7 +68,7 @@ model Midia {
   createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   aplicativo   Aplicativo      @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
-  categoria    CategoriaOlist? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  categoria    CategoriaOlist? @relation(fields: [categoriaId], references: [id])
 
   @@index([aplicativoId, tipo], map: "idx_midia_aplicativo_tipo")
   @@index([categoriaId], map: "idx_midia_categoria")
@@ -76,25 +76,29 @@ model Midia {
 }
 
 model Usuario {
-  id                         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId               String     @map("aplicativo_id") @db.Uuid
-  nome                       String
-  email                      String
-  ativo                      Boolean    @default(true)
-  podeVisualizarEstoque      Boolean    @default(false) @map("pode_visualizar_estoque")
-  podeEditarEstoque          Boolean    @default(false) @map("pode_editar_estoque")
-  podeVisualizarBaixa        Boolean    @default(false) @map("pode_visualizar_baixa")
-  podeSolicitarBaixa         Boolean    @default(false) @map("pode_solicitar_baixa")
-  podeVisualizarDevolucao    Boolean    @default(false) @map("pode_visualizar_devolucao")
-  podeSolicitarDevolucao     Boolean    @default(false) @map("pode_solicitar_devolucao")
-  podeSolicitarProducao      Boolean    @default(false) @map("pode_solicitar_producao")
-  podeVisualizarProducao     Boolean    @default(false) @map("pode_visualizar_producao")
-  podeConfirmarProducao      Boolean    @default(false) @map("pode_confirmar_producao")
-  podeVisualizarConfiguracao Boolean    @default(false) @map("pode_visualizar_configuracao")
-  podeEditarConfiguracao     Boolean    @default(false) @map("pode_editar_configuracao")
-  createdAt                  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                  DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
-  aplicativo                 Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId                     String     @map("aplicativo_id") @db.Uuid
+  nome                             String
+  email                            String
+  ativo                            Boolean    @default(true)
+  podeVisualizarEstoque            Boolean    @default(false) @map("pode_visualizar_estoque")
+  podeEditarEstoque                Boolean    @default(false) @map("pode_editar_estoque")
+  podeVisualizarBaixa              Boolean    @default(false) @map("pode_visualizar_baixa")
+  podeSolicitarBaixa               Boolean    @default(false) @map("pode_solicitar_baixa")
+  podeVisualizarDevolucao          Boolean    @default(false) @map("pode_visualizar_devolucao")
+  podeSolicitarDevolucao           Boolean    @default(false) @map("pode_solicitar_devolucao")
+  podeSolicitarProducao            Boolean    @default(false) @map("pode_solicitar_producao")
+  podeVisualizarProducao           Boolean    @default(false) @map("pode_visualizar_producao")
+  podeConfirmarProducao            Boolean    @default(false) @map("pode_confirmar_producao")
+  podeVisualizarConfiguracao       Boolean    @default(false) @map("pode_visualizar_configuracao")
+  podeEditarConfiguracao           Boolean    @default(false) @map("pode_editar_configuracao")
+  createdAt                        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                        DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  podeVisualizarCategoriasMidia    Boolean    @default(false) @map("pode_visualizar_categorias_midia")
+  podeVisualizarDashboard          Boolean    @default(false) @map("pode_visualizar_dashboard")
+  podeVisualizarFornecedores       Boolean    @default(false) @map("pode_visualizar_fornecedores")
+  podeVisualizarProdutosFornecedor Boolean    @default(false) @map("pode_visualizar_produtos_fornecedor")
+  aplicativo                       Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, email], map: "uq_usuario_aplicativo_email")
   @@index([aplicativoId], map: "idx_usuario_aplicativo_id")
@@ -123,19 +127,19 @@ model ProdutoFornecedor {
   descricao                 String?
   referencia                String?
   precoUnitarioMetro        Decimal                         @map("preco_unitario_metro") @db.Decimal(10, 2)
-  pesoLiquidoMetro          Decimal?                        @map("peso_liquido_metro") @db.Decimal(10, 3)
-  pesoBrutoMetro            Decimal?                        @map("peso_bruto_metro") @db.Decimal(10, 3)
-  larguraEmbalagemMetro     Decimal?                        @map("largura_embalagem_metro") @db.Decimal(10, 2)
-  alturaEmbalagemMetro      Decimal?                        @map("altura_embalagem_metro") @db.Decimal(10, 2)
-  comprimentoEmbalagemMetro Decimal?                        @map("comprimento_embalagem_metro") @db.Decimal(10, 2)
   createdAt                 DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                        @default(now()) @map("updated_at") @db.Timestamptz(6)
   aplicativoId              String?                         @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  alturaEmbalagemMetro      Decimal?                        @map("altura_embalagem_metro") @db.Decimal(10, 2)
+  comprimentoEmbalagemMetro Decimal?                        @map("comprimento_embalagem_metro") @db.Decimal(10, 2)
+  larguraEmbalagemMetro     Decimal?                        @map("largura_embalagem_metro") @db.Decimal(10, 2)
+  pesoBrutoMetro            Decimal?                        @map("peso_bruto_metro") @db.Decimal(10, 3)
+  pesoLiquidoMetro          Decimal?                        @map("peso_liquido_metro") @db.Decimal(10, 3)
+  produtosOlist             ProdutoOlistProdutoFornecedor[]
   aplicativo                Aplicativo?                     @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  fornecedor                Fornecedor                      @relation(fields: [fornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fornecedor                Fornecedor                      @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
   tamanhos                  TamanhoProdutoFornecedor[]
   tiposProduto              TipoProdutoProdutoFornecedor[]
-  produtosOlist             ProdutoOlistProdutoFornecedor[]
 
   @@index([aplicativoId], map: "idx_produtos_fornecedor_aplicativo_id")
   @@index([fornecedorId], map: "idx_produtos_fornecedor_fornecedor_id")
@@ -146,16 +150,16 @@ model ProdutoFornecedor {
 model Produto {
   id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku                    String                         @unique
-  idCadastroOlist        String?                        @map("id_cadastro_olist")
   imagemUrl              String?                        @map("imagem_url")
   metaEstoque            Int?                           @map("meta_estoque")
   ativo                  Boolean                        @default(true)
   createdAt              DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
   minimoEstoque          Int?                           @map("minimo_estoque")
   aplicativoId           String?                        @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo             Aplicativo?                    @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  idCadastroOlist        String?                        @map("id_cadastro_olist")
   produtosOlist          ProdutoOlist[]
   produtoFornecedorOlist ProdutoOlistProdutoFornecedor?
+  aplicativo             Aplicativo?                    @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([aplicativoId], map: "idx_produtos_aplicativo_id")
   @@map("produtos")
@@ -323,7 +327,7 @@ model ControleBuscaOlist {
 
 model IntegracaoOlistToken {
   id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider     String      @unique @default("olist")
+  provider     String      @default("olist")
   accessToken  String?     @map("access_token")
   refreshToken String?     @map("refresh_token")
   expiresAt    DateTime?   @map("expires_at") @db.Timestamptz(6)
@@ -331,9 +335,10 @@ model IntegracaoOlistToken {
   lastLoginAt  DateTime?   @map("last_login_at") @db.Timestamptz(6)
   createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
-  aplicativoId String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo   Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  aplicativoId String      @map("aplicativo_id") @db.Uuid
+  aplicativo   Aplicativo  @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@unique([aplicativoId, provider], map: "uq_integracao_olist_tokens_aplicativo_provider")
   @@index([aplicativoId], map: "idx_integracao_olist_tokens_aplicativo_id")
   @@map("integracao_olist_tokens")
 }
@@ -345,9 +350,6 @@ model TipoProduto {
   descricao            String?
   descricaoSeo         String?                        @map("descricao_seo")
   palavrasChave        String?                        @map("palavras_chave")
-  detalhesPromptIa     String?                        @map("detalhes_prompt_ia")
-  corteLaser           Boolean                        @default(false) @map("corte_laser")
-  tecidoCorrido        Boolean                        @default(false) @map("tecido_corrido")
   slug                 String?
   categoria            String?
   precoCusto           Decimal?                       @map("preco_custo") @db.Decimal(10, 2)
@@ -359,6 +361,9 @@ model TipoProduto {
   comprimentoEmbalagem Decimal?                       @map("comprimento_embalagem") @db.Decimal(10, 2)
   createdAt            DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  detalhesPromptIa     String?                        @map("detalhes_prompt_ia")
+  corteLaser           Boolean                        @default(false) @map("corte_laser")
+  tecidoCorrido        Boolean                        @default(false) @map("tecido_corrido")
   produtosOlist        ProdutoOlist[]
   produtosFornecedor   TipoProdutoProdutoFornecedor[]
 
@@ -372,8 +377,8 @@ model TipoProdutoProdutoFornecedor {
   quantidadeUsada     Decimal           @map("quantidade_usada") @db.Decimal(10, 4)
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onUpdate: NoAction)
   tipoProduto         TipoProduto       @relation(fields: [tipoProdutoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([tipoProdutoId, produtoFornecedorId], map: "uq_tipo_produto_produto_fornecedor")
   @@index([produtoFornecedorId], map: "idx_tipo_produto_produto_fornecedor_produto_id")
@@ -385,29 +390,29 @@ model Estampa {
   codigo        String         @unique
   descricao     String?
   palavrasChave String?        @map("palavras_chave")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   extra         String?
   imagemUrl     String?        @map("imagem_url")
   imagemUrl2    String?        @map("imagem_url_2")
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  variantes     Variante[]
   produtosOlist ProdutoOlist[]
+  variantes     Variante[]
 
   @@map("estampa")
 }
 
 model Variante {
   id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  estampaId     String?        @map("estampa_id") @db.Uuid
-  tamanhoId     String?        @map("tamanho_id") @db.Uuid
   codigo        String
   descricao     String?
   palavrasChave String?        @map("palavras_chave")
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  estampa       Estampa?       @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  tamanho       Tamanho?       @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  estampaId     String?        @map("estampa_id") @db.Uuid
+  tamanhoId     String?        @map("tamanho_id") @db.Uuid
   produtosOlist ProdutoOlist[]
+  estampa       Estampa?       @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tamanho       Tamanho?       @relation(fields: [tamanhoId], references: [id], onUpdate: NoAction)
 
   @@unique([estampaId, codigo], map: "uq_variante_estampa_codigo")
   @@index([estampaId], map: "idx_variante_estampa_id")
@@ -427,12 +432,12 @@ model Tamanho {
   larguraEmbalagem            Decimal?                   @map("largura_embalagem") @db.Decimal(10, 2)
   alturaEmbalagem             Decimal?                   @map("altura_embalagem") @db.Decimal(10, 2)
   comprimentoEmbalagem        Decimal?                   @map("comprimento_embalagem") @db.Decimal(10, 2)
-  quantidadeProdutoFornecedor Decimal?                   @map("quantidade_produto_fornecedor") @db.Decimal(10, 4)
   createdAt                   DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                   DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  quantidadeProdutoFornecedor Decimal?                   @map("quantidade_produto_fornecedor") @db.Decimal(10, 4)
+  produtosOlist               ProdutoOlist[]
   produtosFornecedor          TamanhoProdutoFornecedor[]
   variantes                   Variante[]
-  produtosOlist               ProdutoOlist[]
 
   @@map("tamanho")
 }
@@ -444,8 +449,8 @@ model TamanhoProdutoFornecedor {
   quantidadeUsada     Decimal           @map("quantidade_usada") @db.Decimal(10, 4)
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onUpdate: NoAction)
   tamanho             Tamanho           @relation(fields: [tamanhoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([tamanhoId, produtoFornecedorId], map: "uq_tamanho_produto_fornecedor")
   @@index([produtoFornecedorId], map: "idx_tamanho_produto_fornecedor_produto_id")
@@ -454,11 +459,9 @@ model TamanhoProdutoFornecedor {
 
 model ProdutoOlist {
   id                   String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  produtoId            String?                         @map("produto_id") @db.Uuid
   tipoProdutoId        String                          @map("tipo_produto_id") @db.Uuid
   estampaId            String                          @map("estampa_id") @db.Uuid
   varianteId           String?                         @map("variante_id") @db.Uuid
-  tamanhoId            String?                         @map("tamanho_id") @db.Uuid
   skuFinal             String                          @unique @map("sku_final")
   tituloFinal          String                          @map("titulo_final")
   descricaoFinal       String?                         @map("descricao_final")
@@ -475,11 +478,13 @@ model ProdutoOlist {
   comprimentoEmbalagem Decimal?                        @map("comprimento_embalagem") @db.Decimal(10, 2)
   createdAt            DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  produto              Produto?                        @relation(fields: [produtoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  tipoProduto          TipoProduto                     @relation(fields: [tipoProdutoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  estampa              Estampa                         @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  variante             Variante?                       @relation(fields: [varianteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  tamanho              Tamanho?                        @relation(fields: [tamanhoId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tamanhoId            String?                         @map("tamanho_id") @db.Uuid
+  produtoId            String?                         @map("produto_id") @db.Uuid
+  estampa              Estampa                         @relation(fields: [estampaId], references: [id], onUpdate: NoAction)
+  produto              Produto?                        @relation(fields: [produtoId], references: [id], onUpdate: NoAction)
+  tamanho              Tamanho?                        @relation(fields: [tamanhoId], references: [id], onUpdate: NoAction)
+  tipoProduto          TipoProduto                     @relation(fields: [tipoProdutoId], references: [id], onUpdate: NoAction)
+  variante             Variante?                       @relation(fields: [varianteId], references: [id], onUpdate: NoAction)
   produtosFornecedor   ProdutoOlistProdutoFornecedor[]
 
   @@index([produtoId], map: "idx_produto_olist_produto_id")
@@ -492,15 +497,15 @@ model ProdutoOlist {
 
 model ProdutoOlistProdutoFornecedor {
   id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  produtoId           String            @unique(map: "uq_produto_olist_produto_fornecedor_produto_id") @map("produto_id") @db.Uuid
   produtoOlistId      String?           @map("produto_olist_id") @db.Uuid
   produtoFornecedorId String            @map("produto_fornecedor_id") @db.Uuid
   quantidadeUsada     Decimal           @map("quantidade_usada") @db.Decimal(10, 4)
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  produtoId           String            @unique(map: "uq_produto_olist_produto_fornecedor_produto_id") @map("produto_id") @db.Uuid
+  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onUpdate: NoAction)
   produto             Produto           @relation(fields: [produtoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  produtoOlist        ProdutoOlist?     @relation(fields: [produtoOlistId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  produtoFornecedor   ProdutoFornecedor @relation(fields: [produtoFornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  produtoOlist        ProdutoOlist?     @relation(fields: [produtoOlistId], references: [id], onUpdate: NoAction)
 
   @@index([produtoOlistId], map: "idx_produto_olist_produto_fornecedor_produto_olist_id")
   @@index([produtoFornecedorId], map: "idx_produto_olist_produto_fornecedor_produto_id")

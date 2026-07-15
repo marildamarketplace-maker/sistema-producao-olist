@@ -72,7 +72,7 @@ function formatarCampoCsv(valor: string | number | null | undefined) {
 }
 
 export default function EstoquePage() {
-  const { usuario } = useAuth();
+  const { session, usuario } = useAuth();
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
@@ -397,7 +397,7 @@ export default function EstoquePage() {
     const resp = await axios.post(
       "/api/olist/produtos/importar",
       {},
-      { validateStatus: () => true },
+      { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
     );
 
     if (resp.status < 200 || resp.status >= 300) {

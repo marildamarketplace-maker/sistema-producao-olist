@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
-export async function GET() {
-  const data = await prisma.integracaoOlistToken.findUnique({
-    where: { provider: "olist" },
+export async function GET(request: Request) {
+  const usuario = await getUsuarioAutenticado(request);
+  const data = await prisma.integracaoOlistToken.findFirst({
+    where: { aplicativoId: usuario.aplicativoId, provider: "olist" },
     select: {
       status: true,
       lastLoginAt: true,

@@ -31,6 +31,10 @@ type UsuarioAplicativoFallbackResponse = {
   email: string;
   aplicativo_id: string;
   aplicativo?: { nome: string } | { nome: string }[] | null;
+  pode_visualizar_dashboard: boolean;
+  pode_visualizar_fornecedores: boolean;
+  pode_visualizar_produtos_fornecedor: boolean;
+  pode_visualizar_categorias_midia: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
   pode_visualizar_baixa: boolean;
@@ -46,7 +50,7 @@ type UsuarioAplicativoFallbackResponse = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const publicPaths = new Set(["/login"]);
+const publicPaths = new Set(["/", "/login"]);
 
 function isPublicPath(pathname: string) {
   return publicPaths.has(pathname);
@@ -69,6 +73,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         nome,
         email,
         aplicativo_id,
+        pode_visualizar_dashboard,
+        pode_visualizar_fornecedores,
+        pode_visualizar_produtos_fornecedor,
+        pode_visualizar_categorias_midia,
         pode_visualizar_estoque,
         pode_editar_estoque,
         pode_visualizar_baixa,
@@ -100,6 +108,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: usuarioData.email,
       aplicativo_id: usuarioData.aplicativo_id,
       aplicativo,
+      podeVisualizarDashboard: Boolean(usuarioData.pode_visualizar_dashboard),
+      podeVisualizarFornecedores: Boolean(usuarioData.pode_visualizar_fornecedores),
+      podeVisualizarProdutosFornecedor: Boolean(usuarioData.pode_visualizar_produtos_fornecedor),
+      podeVisualizarCategoriasMidia: Boolean(usuarioData.pode_visualizar_categorias_midia),
       podeVisualizarEstoque: Boolean(usuarioData.pode_visualizar_estoque),
       podeEditarEstoque: Boolean(usuarioData.pode_editar_estoque),
       podeVisualizarBaixa: Boolean(usuarioData.pode_visualizar_baixa),
@@ -208,7 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (session && isPublicPath(pathname)) {
+    if (session && pathname === "/login") {
       const next = searchParams.get("next") || "/";
       router.replace(next);
     }

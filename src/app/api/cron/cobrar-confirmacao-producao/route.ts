@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { APLICATIVO_PADRAO_ID } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 import { enviarMensagemZApi } from "@/services/zapiService";
 
@@ -28,8 +27,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const aplicativoId = request.nextUrl.searchParams.get("aplicativoId")?.trim();
+    if (!aplicativoId) {
+      return NextResponse.json({ error: "aplicativoId é obrigatório para executar o job." }, { status: 400 });
+    }
     const solicitacoes = await prisma.solicitacaoProducao.findMany({
-      where: { aplicativoId: APLICATIVO_PADRAO_ID, status: "em_producao" },
+      where: { aplicativoId, status: "em_producao" },
       select: { id: true, dataEntrega: true, prioridadeProducao: true },
       orderBy: [{ prioridadeProducao: "desc" }, { dataEntrega: "asc" }],
     });

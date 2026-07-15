@@ -1,8 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
 
-export async function GET(req: Request) {
-  const olistConfig = await getAplicativoOlistConfig();
+export async function GET(req: NextRequest) {
+  const aplicativoId = req.cookies.get("olist_aplicativo_id")?.value;
+  if (!aplicativoId) return NextResponse.json({ error: "Aplicativo não identificado." }, { status: 401 });
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const clientId = olistConfig.clientId;
   const redirectUri = getOlistRedirectUri(req);
 

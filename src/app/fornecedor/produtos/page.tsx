@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
+import { AccessGuard } from "@/components/access-guard";
 import { supabase } from "@/lib/supabase";
 
 type FornecedorOption = {
@@ -298,6 +299,7 @@ export default function ProdutosFornecedorPage() {
   }
 
   return (
+    <AccessGuard permissions={["podeVisualizarProdutosFornecedor"]}>
     <div className="space-y-8">
       <PageHeader
         title="Produtos do fornecedor"
@@ -558,5 +560,6 @@ export default function ProdutosFornecedorPage() {
         )}
       </section>
     </div>
+    </AccessGuard>
   );
 }

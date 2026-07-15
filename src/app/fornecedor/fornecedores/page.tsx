@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
+import { AccessGuard } from "@/components/access-guard";
 import { supabase } from "@/lib/supabase";
 
 type Fornecedor = {
@@ -145,6 +146,7 @@ export default function FornecedoresPage() {
   }
 
   return (
+    <AccessGuard permissions={["podeVisualizarFornecedores"]}>
     <div className="space-y-8">
       <PageHeader
         title="Fornecedores"
@@ -297,5 +299,6 @@ export default function FornecedoresPage() {
         )}
       </section>
     </div>
+    </AccessGuard>
   );
 }

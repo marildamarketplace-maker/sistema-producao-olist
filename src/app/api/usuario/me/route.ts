@@ -6,6 +6,10 @@ type UsuarioRow = {
   nome: string;
   email: string;
   aplicativo_id: string;
+  pode_visualizar_dashboard: boolean;
+  pode_visualizar_fornecedores: boolean;
+  pode_visualizar_produtos_fornecedor: boolean;
+  pode_visualizar_categorias_midia: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
   pode_visualizar_baixa: boolean;
@@ -47,6 +51,10 @@ export async function GET(request: Request) {
         nome,
         email,
         aplicativo_id,
+        pode_visualizar_dashboard,
+        pode_visualizar_fornecedores,
+        pode_visualizar_produtos_fornecedor,
+        pode_visualizar_categorias_midia,
         pode_visualizar_estoque,
         pode_editar_estoque,
         pode_visualizar_baixa,
@@ -93,6 +101,10 @@ export async function GET(request: Request) {
     email: usuario.email,
     aplicativo_id: usuario.aplicativo_id,
     aplicativo: aplicativo ? { nome: aplicativo.nome } : null,
+    podeVisualizarDashboard: Boolean(usuario.pode_visualizar_dashboard),
+    podeVisualizarFornecedores: Boolean(usuario.pode_visualizar_fornecedores),
+    podeVisualizarProdutosFornecedor: Boolean(usuario.pode_visualizar_produtos_fornecedor),
+    podeVisualizarCategoriasMidia: Boolean(usuario.pode_visualizar_categorias_midia),
     podeVisualizarEstoque: Boolean(usuario.pode_visualizar_estoque),
     podeEditarEstoque: Boolean(usuario.pode_editar_estoque),
     podeVisualizarBaixa: Boolean(usuario.pode_visualizar_baixa),

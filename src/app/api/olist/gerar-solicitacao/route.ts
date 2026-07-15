@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { NecessidadeProducaoError, gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 export async function POST(req: NextRequest) {
   try {
+    const usuario = await getUsuarioAutenticado(req);
     const body = await req.json();
     const dataLimite = body?.data_limite;
     const filtroDataBase = body?.filtro_data_base ?? "APROVACAO_PEDIDO";
@@ -20,6 +22,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await gerarSolicitacaoPorPedidosOlist({
+      aplicativoId: usuario.aplicativoId,
       dataLimite,
       filtroDataBase,
       situacoes,

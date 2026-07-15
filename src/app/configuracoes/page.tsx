@@ -12,7 +12,7 @@ const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
 const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
 
 export default function ConfiguracoesPage() {
-  const { usuario } = useAuth();
+  const { session, usuario } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const [metaGeral, setMetaGeral] = useState("0");
   const [minimoGeral, setMinimoGeral] = useState("0");
@@ -27,6 +27,7 @@ export default function ConfiguracoesPage() {
 
   useEffect(() => {
     async function carregar() {
+      if (!session?.access_token) return;
       setLoading(true);
       setMessage(null);
       const { data, error } = await supabase
@@ -43,6 +44,7 @@ export default function ConfiguracoesPage() {
       }
 
       const statusResp = await axios.get("/api/olist/status", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
         validateStatus: () => true,
       });
       const statusJson = statusResp.data;
@@ -55,7 +57,7 @@ export default function ConfiguracoesPage() {
     }
 
     carregar();
-  }, []);
+  }, [session?.access_token]);
 
   async function salvar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -105,7 +107,15 @@ export default function ConfiguracoesPage() {
 
     setReconnecting(true);
     setMessage(null);
+    const { data: sessaoAtual } = await supabase.auth.getSession();
+    const accessToken = sessaoAtual.session?.access_token;
+    if (!accessToken) {
+      setMessage("Sua sessão expirou. Entre novamente para conectar a Olist.");
+      setReconnecting(false);
+      return;
+    }
     const resp = await axios.post("/api/olist/reconnect", null, {
+      headers: { Authorization: `Bearer ${accessToken}` },
       validateStatus: () => true,
     });
     const json = resp.data;

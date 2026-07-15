@@ -1,5 +1,5 @@
 ﻿import axios, { AxiosResponse } from "axios";
-import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig } from "@/lib/aplicativo";
+import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 
 /* =========================================================
@@ -94,6 +94,7 @@ function isPrismaUniqueConstraintError(error: unknown) {
 type ProdutoOlistListagem = {
   id?: string | number;
   sku?: string | number | null;
+  descricao?: string | null;
   tipo?: string | null;
   situacao?: string | null;
   dataCriacao?: string | null;
@@ -103,6 +104,78 @@ type ProdutoOlistListagem = {
   precos?: unknown;
   estoque?: unknown;
   tipoVariacao?: string | null;
+};
+
+export type FiltrosListagemProdutosOlist = {
+  nome?: string;
+  codigo?: string;
+  gtin?: string;
+  situacao?: "A" | "I" | "E";
+  limit: number;
+  offset: number;
+};
+
+export type ListagemProdutosOlist = {
+  itens: ProdutoOlistListagem[];
+  paginacao: {
+    limit: number;
+    offset: number;
+    total: number;
+  };
+};
+
+type ContatoOlistListagem = {
+  id?: string | number;
+  nome?: string | null;
+  codigo?: string | null;
+  fantasia?: string | null;
+  tipoPessoa?: "J" | "F" | "E" | "X" | null;
+  cpfCnpj?: string | null;
+  inscricaoEstadual?: string | null;
+  rg?: string | null;
+  telefone?: string | null;
+  celular?: string | null;
+  email?: string | null;
+  endereco?: Record<string, unknown> | null;
+  vendedor?: Record<string, unknown> | null;
+  situacao?: "B" | "A" | "I" | "E" | null;
+  statusCrm?: "L" | "P" | "C" | "I" | null;
+  dataCriacao?: string | null;
+  dataAtualizacao?: string | null;
+};
+
+export type FiltrosListagemContatosOlist = {
+  nome?: string;
+  codigo?: string;
+  situacao?: "B" | "A" | "I" | "E";
+  idVendedor?: string;
+  cpfCnpj?: string;
+  celular?: string;
+  orderBy?: "asc" | "desc";
+  limit: number;
+  offset: number;
+};
+
+export type FiltrosListagemPedidosOlist = {
+  numero?: string;
+  nomeCliente?: string;
+  codigoCliente?: string;
+  cpfCnpj?: string;
+  dataInicial?: string;
+  dataFinal?: string;
+  situacao?: string;
+  numeroPedidoEcommerce?: string;
+  origemPedido?: "0" | "1";
+  orderBy?: "asc" | "desc";
+  limit: number;
+  offset: number;
+};
+
+export type FiltrosListagemVendedoresOlist = {
+  nome?: string;
+  codigo?: string;
+  limit: number;
+  offset: number;
 };
 
 /* =========================================================
@@ -129,6 +202,10 @@ function logIntegracaoOlist(input: {
   endpoint: string;
   status: number;
   modulo: string;
+  quantidade?: number;
+  total?: number | null;
+  limit?: number;
+  offset?: number;
 }) {
   console.info("[olist-api]", input);
 }
@@ -194,12 +271,199 @@ function extrairTotalPaginacao(payload: unknown) {
   return Number.isFinite(totalNumber) ? totalNumber : null;
 }
 
+export async function listarContatosOlistApi(aplicativoId: string, filtros: FiltrosListagemContatosOlist) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("contatos", normalizarBaseUrl(olistConfig.apiBaseUrl));
+
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  if (filtros.codigo) url.searchParams.set("codigo", filtros.codigo);
+  if (filtros.situacao) url.searchParams.set("situacao", filtros.situacao);
+  if (filtros.idVendedor) url.searchParams.set("idVendedor", filtros.idVendedor);
+  if (filtros.cpfCnpj) url.searchParams.set("cpfCnpj", filtros.cpfCnpj);
+  if (filtros.celular) url.searchParams.set("celular", filtros.celular);
+  if (filtros.orderBy) url.searchParams.set("orderBy", filtros.orderBy);
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "contatos-listagem" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const payload = response.data && typeof response.data === "object"
+    ? response.data as Record<string, unknown>
+    : {};
+  const dados = payload.itens ?? payload.data ?? payload.contatos ?? payload.results;
+  const itens = Array.isArray(dados) ? dados as ContatoOlistListagem[] : [];
+  return {
+    itens,
+    paginacao: {
+      limit: filtros.limit,
+      offset: filtros.offset,
+      total: extrairTotalPaginacao(response.data) ?? itens.length,
+    },
+  };
+}
+
+export async function listarPedidosOlistApi(aplicativoId: string, filtros: FiltrosListagemPedidosOlist) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
+
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  const opcionais = {
+    numero: filtros.numero,
+    nomeCliente: filtros.nomeCliente,
+    codigoCliente: filtros.codigoCliente,
+    cpfCnpj: filtros.cpfCnpj,
+    dataInicial: filtros.dataInicial,
+    dataFinal: filtros.dataFinal,
+    situacao: filtros.situacao,
+    numeroPedidoEcommerce: filtros.numeroPedidoEcommerce,
+    origemPedido: filtros.origemPedido,
+    orderBy: filtros.orderBy,
+  };
+  Object.entries(opcionais).forEach(([chave, valor]) => { if (valor) url.searchParams.set(chave, valor); });
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos-listagem" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const payload = response.data && typeof response.data === "object" ? response.data as Record<string, unknown> : {};
+  const dados = payload.itens ?? payload.data ?? payload.pedidos ?? payload.results;
+  const itens = Array.isArray(dados) ? dados as Record<string, unknown>[] : [];
+  const total = extrairTotalPaginacao(response.data) ?? itens.length;
+  logIntegracaoOlist({
+    endpoint: url.toString(), status: response.status, modulo: "pedidos-listagem-retorno",
+    quantidade: itens.length, total, limit: filtros.limit, offset: filtros.offset,
+  });
+  return { itens, paginacao: { limit: filtros.limit, offset: filtros.offset, total } };
+}
+
+export async function listarVendedoresOlistApi(aplicativoId: string, filtros: FiltrosListagemVendedoresOlist) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("vendedores", normalizarBaseUrl(olistConfig.apiBaseUrl));
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  if (filtros.codigo) url.searchParams.set("codigo", filtros.codigo);
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` }, validateStatus: () => true,
+  });
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "vendedores-listagem" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const payload = response.data && typeof response.data === "object" ? response.data as Record<string, unknown> : {};
+  const dados = payload.itens ?? payload.data ?? payload.vendedores ?? payload.results;
+  const itens = Array.isArray(dados) ? dados as Record<string, unknown>[] : [];
+  const total = extrairTotalPaginacao(response.data) ?? itens.length;
+  logIntegracaoOlist({
+    endpoint: url.toString(), status: response.status, modulo: "vendedores-listagem-retorno",
+    quantidade: itens.length, total, limit: filtros.limit, offset: filtros.offset,
+  });
+  return { itens, paginacao: { limit: filtros.limit, offset: filtros.offset, total } };
+}
+
+export async function criarPedidoOlistApi(aplicativoId: string, pedido: Record<string, unknown>) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
+  const response = await axios.post(url.toString(), pedido, {
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    validateStatus: () => true,
+  });
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos-criacao" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    const detalhe = typeof response.data === "string" ? response.data : JSON.stringify(response.data ?? {});
+    throw new Error(response.status === 401 ? "Token inválido ou sem permissão." : `Erro Olist ${response.status}: ${detalhe}`);
+  }
+  return response.data as { id?: number; numeroPedido?: string };
+}
+
+export async function listarProdutosOlistApi(
+  aplicativoId: string,
+  filtros: FiltrosListagemProdutosOlist,
+): Promise<ListagemProdutosOlist> {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("produtos", normalizarBaseUrl(olistConfig.apiBaseUrl));
+
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  if (filtros.codigo) url.searchParams.set("codigo", filtros.codigo);
+  if (filtros.gtin) url.searchParams.set("gtin", filtros.gtin);
+  if (filtros.situacao) url.searchParams.set("situacao", filtros.situacao);
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({
+    endpoint: url.toString(),
+    status: response.status,
+    modulo: "produtos-listagem",
+  });
+  validarRespostaAxiosJsonOrThrow(response);
+
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) {
+      throw new Error("Token inválido ou sem permissão.");
+    }
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const itens = normalizarPayloadProdutos(response.data);
+  const total = extrairTotalPaginacao(response.data);
+  logIntegracaoOlist({
+    endpoint: url.toString(),
+    status: response.status,
+    modulo: "produtos-listagem-retorno",
+    quantidade: itens.length,
+    total,
+    limit: filtros.limit,
+    offset: filtros.offset,
+  });
+  return {
+    itens,
+    paginacao: {
+      limit: filtros.limit,
+      offset: filtros.offset,
+      total: total ?? itens.length,
+    },
+  };
+}
+
 /* =========================================================
  * OAUTH
  * ======================================================= */
 
-async function renovarTokenComRefresh(refreshToken: string) {
-  const olistConfig = await getAplicativoOlistConfig();
+async function renovarTokenComRefresh(aplicativoId: string, refreshToken: string) {
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const clientId = olistConfig.clientId;
   const clientSecret = olistConfig.clientSecret;
 
@@ -258,12 +522,13 @@ function normalizarSituacoes(situacoes?: string[]) {
   return unicas;
 }
 
-export async function getValidOlistAccessToken() {
+export async function getValidOlistAccessToken(aplicativoId: string) {
   const now = new Date();
 
-  const tokenRow = await prisma.integracaoOlistToken.findUnique({
-    where: { provider: "olist" },
+  const tokenRow = await prisma.integracaoOlistToken.findFirst({
+    where: { aplicativoId, provider: "olist" },
     select: {
+      id: true,
       accessToken: true,
       refreshToken: true,
       expiresAt: true,
@@ -279,32 +544,28 @@ export async function getValidOlistAccessToken() {
   }
 
   if (tokenRow?.refreshToken) {
-    const refreshed = await renovarTokenComRefresh(tokenRow.refreshToken);
+    const refreshed = await renovarTokenComRefresh(aplicativoId, tokenRow.refreshToken);
 
     const expiresAt = refreshed.expires_in
       ? new Date(Date.now() + refreshed.expires_in * 1000)
       : null;
 
-    await prisma.integracaoOlistToken.upsert({
-      where: { provider: "olist" },
-      create: {
-        aplicativoId: APLICATIVO_PADRAO_ID,
+    const tokenData = {
+      aplicativoId,
+      accessToken: refreshed.access_token ?? null,
+      refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
+      expiresAt,
+      status: refreshed.access_token ? "conectado" : "erro_autenticacao",
+      updatedAt: new Date(),
+    };
+    if (tokenRow.id) {
+      await prisma.integracaoOlistToken.update({ where: { id: tokenRow.id }, data: tokenData });
+    } else {
+      await prisma.integracaoOlistToken.create({ data: {
         provider: "olist",
-        accessToken: refreshed.access_token ?? null,
-        refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
-        expiresAt,
-        status: refreshed.access_token ? "conectado" : "erro_autenticacao",
-        updatedAt: new Date(),
-      },
-      update: {
-        aplicativoId: APLICATIVO_PADRAO_ID,
-        accessToken: refreshed.access_token ?? null,
-        refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
-        expiresAt,
-        status: refreshed.access_token ? "conectado" : "erro_autenticacao",
-        updatedAt: new Date(),
-      },
-    });
+        ...tokenData,
+      } });
+    }
 
     if (refreshed.access_token) {
       return refreshed.access_token;
@@ -322,9 +583,9 @@ type CategoriaOlistImportada = {
   nivel: number;
 };
 
-export async function listarArvoreCategoriasOlist(): Promise<CategoriaOlistImportada[]> {
-  const token = await getValidOlistAccessToken();
-  const olistConfig = await getAplicativoOlistConfig();
+export async function listarArvoreCategoriasOlist(aplicativoId: string): Promise<CategoriaOlistImportada[]> {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL("categorias/todas", normalizarBaseUrl(olistConfig.apiBaseUrl));
   const response = await axios.get(url.toString(), {
     headers: { Authorization: `Bearer ${token}` },
@@ -384,6 +645,7 @@ export async function listarArvoreCategoriasOlist(): Promise<CategoriaOlistImpor
 
 async function listarPedidosOlist(
   token: string,
+  aplicativoId: string,
   periodoInicio: Date | null,
   periodoFim: Date | null,
   situacao: string,
@@ -392,7 +654,7 @@ async function listarPedidosOlist(
   const pedidos: OlistOrder[] = [];
   let offset = 0;
   let total: number | null = null;
-  const olistConfig = await getAplicativoOlistConfig();
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
 
   while (true) {
     const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
@@ -454,9 +716,10 @@ async function listarPedidosOlist(
 
 async function buscarDetalhePedidoOlist(
   token: string,
+  aplicativoId: string,
   pedidoId: string | number,
 ) {
-  const olistConfig = await getAplicativoOlistConfig();
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL(
     `pedidos/${pedidoId}`,
     normalizarBaseUrl(olistConfig.apiBaseUrl),
@@ -493,8 +756,8 @@ async function buscarDetalhePedidoOlist(
   };
 }
 
-async function listarProdutosOlist(token: string, offset: number, limite: number) {
-  const olistConfig = await getAplicativoOlistConfig();
+async function listarProdutosOlist(token: string, aplicativoId: string, offset: number, limite: number) {
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL("produtos", normalizarBaseUrl(olistConfig.apiBaseUrl));
 
   url.searchParams.set("limit", String(limite));
@@ -546,8 +809,8 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
   };
 }
 
-export async function importarProdutosOlist() {
-  const token = await getValidOlistAccessToken();
+export async function importarProdutosOlist(aplicativoId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
   const limite = 100;
   let offset = 0;
   let total: number | null = null;
@@ -558,7 +821,7 @@ export async function importarProdutosOlist() {
   const vistos = new Set<string>();
 
   while (true) {
-    const pagina = await listarProdutosOlist(token, offset, limite);
+    const pagina = await listarProdutosOlist(token, aplicativoId, offset, limite);
 
     if (total === null) {
       total = pagina.total;
@@ -625,6 +888,7 @@ export async function importarProdutosOlist() {
 }
 
 export async function buscarPedidosOlistPorDataLimite(
+  aplicativoId: string,
   periodoInicio: Date | null,
   periodoFim: Date | null,
   situacoes: string[],
@@ -632,13 +896,14 @@ export async function buscarPedidosOlistPorDataLimite(
   pedidos: OlistOrder[];
   pedidosEncontrados: number;
 }> {
-  const token = await getValidOlistAccessToken();
+  const token = await getValidOlistAccessToken(aplicativoId);
 
   const pedidos: OlistOrder[] = [];
 
   for (const situacao of situacoes) {
     const pedidosPorSituacao = await listarPedidosOlist(
       token,
+      aplicativoId,
       periodoInicio,
       periodoFim,
       situacao,
@@ -656,7 +921,7 @@ export async function buscarPedidosOlistPorDataLimite(
   const resultados = [];
 
   for (const pedido of pedidosUnicos) {
-    const detalhe = await buscarDetalhePedidoOlist(token, pedido.id);
+    const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedido.id);
 
     resultados.push(detalhe);
 
@@ -1153,7 +1418,7 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
   };
 }
 
-export async function buscarPedidosParaBaixaEstoqueOlist(input?: {
+export async function buscarPedidosParaBaixaEstoqueOlist(aplicativoId: string, input?: {
   periodoInicio?: string | null;
 }) {
   const periodoPadrao = await obterPeriodoBuscaBaixaEstoque();
@@ -1163,12 +1428,13 @@ export async function buscarPedidosParaBaixaEstoqueOlist(input?: {
       ? periodoInicioInformado
       : periodoPadrao.periodoInicio;
   const periodoFim = periodoPadrao.periodoFim;
-  const token = await getValidOlistAccessToken();
+  const token = await getValidOlistAccessToken(aplicativoId);
   const pedidos: OlistOrder[] = [];
 
   for (const situacao of SITUACOES_BAIXA_ESTOQUE) {
     const pedidosPorSituacao = await listarPedidosOlist(
       token,
+      aplicativoId,
       periodoInicio,
       periodoFim,
       situacao,
@@ -1193,7 +1459,7 @@ export async function buscarPedidosParaBaixaEstoqueOlist(input?: {
     const pedido = pedidosNaoBaixados[index];
 
     try {
-      detalhes.push(await buscarDetalhePedidoOlist(token, pedido.id));
+      detalhes.push(await buscarDetalhePedidoOlist(token, aplicativoId, pedido.id));
       await aguardar(500);
     } catch (error) {
       if (!isErroTiny429(error)) {
@@ -1240,9 +1506,9 @@ export async function buscarPedidosParaBaixaEstoqueOlist(input?: {
   };
 }
 
-export async function sincronizarPedidoBaixaEstoqueOlist(pedidoId: string) {
-  const token = await getValidOlistAccessToken();
-  const detalhe = await buscarDetalhePedidoOlist(token, pedidoId);
+export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, pedidoId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedidoId);
   const { pedidos, produtosAusentes } = await prepararPedidosBaixaEstoque([detalhe]);
 
   return {
@@ -1471,6 +1737,7 @@ async function cadastrarProdutosOlistNaoCadastrados(
  * ======================================================= */
 
 export async function gerarSolicitacaoPorPedidosOlist(input: {
+  aplicativoId: string;
   dataLimite: string;
   filtroDataBase: FiltroDataBase;
   situacoes?: string[];
@@ -1482,6 +1749,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     pedidos,
     pedidosEncontrados,
   } = await buscarPedidosOlistPorDataLimite(
+    input.aplicativoId,
     null,
     null,
     situacoes,

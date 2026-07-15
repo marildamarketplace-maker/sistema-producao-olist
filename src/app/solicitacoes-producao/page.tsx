@@ -253,7 +253,7 @@ function ordenarSolicitacoes(a: Solicitacao, b: Solicitacao) {
 }
 
 export default function SolicitacoesProducaoPage() {
-  const { usuario } = useAuth();
+  const { session, usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
@@ -790,6 +790,7 @@ export default function SolicitacoesProducaoPage() {
         situacoes: situacoesOlistSelecionadas,
       },
       {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
         validateStatus: () => true,
       },
     );

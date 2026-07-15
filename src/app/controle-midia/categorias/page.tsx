@@ -3,6 +3,8 @@
 import { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Clipboard, Download, ImagePlus, Loader2, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 
 type Categoria = {
   id: string;
@@ -32,6 +34,7 @@ const PROPORCOES: Record<TipoMidia, { largura: number; altura: number; descricao
 };
 
 export default function ControleMidiaCategoriasPage() {
+  const { session } = useAuth();
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [midias, setMidias] = useState<Midia[]>([]);
   const [tipo, setTipo] = useState<TipoMidia>("HOME_PC");
@@ -52,14 +55,14 @@ export default function ControleMidiaCategoriasPage() {
     setCarregando(true);
     try {
       const [categoriasResponse, midiasResponse] = await Promise.all([
-        fetch("/api/controle-midia/categorias"), fetch("/api/controle-midia/midias"),
+        fetch("/api/controle-midia/categorias", { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` } }), fetch("/api/controle-midia/midias", { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` } }),
       ]);
       if (!categoriasResponse.ok || !midiasResponse.ok) throw new Error("Não foi possível carregar os dados.");
       setCategorias((await categoriasResponse.json()).categorias);
       setMidias((await midiasResponse.json()).midias);
     } catch (error) { setMensagem({ tipo: "erro", texto: error instanceof Error ? error.message : "Erro ao carregar." }); }
     finally { setCarregando(false); }
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -75,7 +78,7 @@ export default function ControleMidiaCategoriasPage() {
   async function importar() {
     setImportando(true); setMensagem(null);
     try {
-      const response = await fetch("/api/controle-midia/categorias", { method: "POST" });
+      const response = await fetch("/api/controle-midia/categorias", { method: "POST", headers: { Authorization: `Bearer ${session?.access_token ?? ""}` } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha na importação.");
       setMensagem({ tipo: "ok", texto: `${data.categorias} categorias e ${data.subcategorias} subcategorias importadas da Olist.` }); await carregar();
@@ -90,7 +93,7 @@ export default function ControleMidiaCategoriasPage() {
     try {
       const form = new FormData(); form.set("arquivo", arquivo); form.set("tipo", tipo); form.set("titulo", titulo);
       if (categoriaId) form.set("categoriaId", categoriaId);
-      const response = await fetch("/api/controle-midia/midias", { method: "POST", body: form });
+      const response = await fetch("/api/controle-midia/midias", { method: "POST", headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Falha no upload.");
       setArquivo(null); setTitulo(""); setMensagem({ tipo: "ok", texto: "Mídia enviada e link disponibilizado." }); await carregar();
@@ -100,7 +103,7 @@ export default function ControleMidiaCategoriasPage() {
 
   async function excluir(id: string) {
     if (!window.confirm("Excluir esta mídia do cadastro e do storage?")) return;
-    const response = await fetch(`/api/controle-midia/midias?id=${id}`, { method: "DELETE" });
+    const response = await fetch(`/api/controle-midia/midias?id=${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token ?? ""}` } });
     if (response.ok) { setMidias((atuais) => atuais.filter((item) => item.id !== id)); setMensagem({ tipo: "ok", texto: "Mídia excluída." }); }
     else setMensagem({ tipo: "erro", texto: (await response.json()).error ?? "Erro ao excluir." });
   }
@@ -146,7 +149,7 @@ A arte deve ter aparência moderna, comercial e premium, com boa hierarquia visu
     return mapa;
   }, [midias]);
 
-  return <div className="space-y-8">
+  return <AccessGuard permissions={["podeVisualizarCategoriasMidia"]}><div className="space-y-8">
     <PageHeader title="Categorias e mídias" description="Importe a árvore da Olist e gerencie banners e conteúdos publicados no storage." />
     {mensagem && <div className={`rounded-lg border px-4 py-3 text-sm ${mensagem.tipo === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>{mensagem.texto}</div>}
 
@@ -184,5 +187,5 @@ A arte deve ter aparência moderna, comercial e premium, com boa hierarquia visu
     </section>
 
     <section><h2 className="font-semibold text-slate-900">Mídias cadastradas</h2><div className="mt-4 grid gap-4 lg:grid-cols-2">{midias.map((item) => <article key={item.id} className="flex min-w-0 gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">{item.contentType.startsWith("video/") ? <video src={item.arquivoUrl} className="h-24 w-28 shrink-0 rounded-lg bg-slate-100 object-cover" controls /> : <img src={item.arquivoUrl} alt={item.titulo ?? "Mídia"} className="h-24 w-28 shrink-0 rounded-lg bg-slate-100 object-cover" />}<div className="min-w-0 flex-1"><p className="text-xs font-semibold uppercase text-slate-500">{TIPOS.find((tipo) => tipo.value === item.tipo)?.label}</p><p className="mt-1 truncate text-sm font-medium text-slate-900">{item.titulo ?? item.categoria?.caminho ?? "Sem título"}</p><a href={item.arquivoUrl} target="_blank" rel="noreferrer" className="mt-2 block truncate text-xs text-blue-600 hover:underline">{item.arquivoUrl}</a><div className="mt-3 flex gap-2"><button onClick={() => copiar(item.arquivoUrl, item.id)} className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700">{copiado === item.id ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />} {copiado === item.id ? "Copiado" : "Copiar link"}</button><button onClick={() => excluir(item.id)} className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-1 text-xs text-red-700"><Trash2 className="h-3.5 w-3.5" /> Excluir</button></div></div></article>)}{!carregando && !midias.length && <div className="col-span-full rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Nenhuma mídia cadastrada.</div>}</div></section>
-  </div>;
+  </div></AccessGuard>;
 }

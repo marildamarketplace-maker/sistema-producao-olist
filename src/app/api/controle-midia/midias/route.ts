@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { APLICATIVO_PADRAO_ID } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { deleteGoogleStorageObject, uploadToGoogleStorage } from "@/services/googleStorageService";
 
 const TIPOS = new Set(["HOME_PC", "HOME_MOBILE", "CATEGORIA", "STORY", "FEED"]);
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const usuario = await getUsuarioAutenticado(request);
   const midias = await prisma.midia.findMany({
-    where: { aplicativoId: APLICATIVO_PADRAO_ID },
+    where: { aplicativoId: usuario.aplicativoId },
     include: { categoria: { select: { id: true, nome: true, caminho: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -18,6 +19,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const usuario = await getUsuarioAutenticado(request);
     const form = await request.formData();
     const arquivo = form.get("arquivo");
     const tipo = String(form.get("tipo") ?? "");
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
     const path = `controle-midia/${tipo.toLowerCase()}/${randomUUID()}.${extensao}`;
     const uploaded = await uploadToGoogleStorage({ path, buffer: Buffer.from(await arquivo.arrayBuffer()), contentType: arquivo.type });
     const midia = await prisma.midia.create({ data: {
-      aplicativoId: APLICATIVO_PADRAO_ID, categoriaId, tipo, titulo,
+      aplicativoId: usuario.aplicativoId, categoriaId, tipo, titulo,
       arquivoUrl: uploaded.publicUrl, storagePath: uploaded.path, contentType: arquivo.type,
     }});
     return NextResponse.json({ midia }, { status: 201 });
@@ -45,9 +47,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const usuario = await getUsuarioAutenticado(request);
     const id = request.nextUrl.searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Mídia não informada." }, { status: 400 });
-    const midia = await prisma.midia.findFirst({ where: { id, aplicativoId: APLICATIVO_PADRAO_ID } });
+    const midia = await prisma.midia.findFirst({ where: { id, aplicativoId: usuario.aplicativoId } });
     if (!midia) return NextResponse.json({ error: "Mídia não encontrada." }, { status: 404 });
     await deleteGoogleStorageObject(midia.storagePath);
     await prisma.midia.delete({ where: { id } });

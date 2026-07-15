@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
-import { APLICATIVO_PADRAO_ID, getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
+import { getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
 import { prisma } from "@/lib/prisma";
 
 const usedAuthorizationCodes = new Set<string>();
@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const refreshToken = req.nextUrl.searchParams.get("refresh_token");
-  const olistConfig = await getAplicativoOlistConfig();
+  const aplicativoId = req.cookies.get("olist_aplicativo_id")?.value;
+  if (!aplicativoId) return NextResponse.json({ error: "Aplicativo não identificado." }, { status: 401 });
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const clientId = olistConfig.clientId;
   const clientSecret = olistConfig.clientSecret;
   const redirectUri = getOlistRedirectUri(req);
@@ -94,30 +96,26 @@ export async function GET(req: NextRequest) {
   if (grantType === "authorization_code" && code) usedAuthorizationCodes.add(code);
 
   const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
-  await prisma.integracaoOlistToken.upsert({
-    where: { provider: "olist" },
-    create: {
-      aplicativoId: APLICATIVO_PADRAO_ID,
-      provider: "olist",
-      accessToken: tokenData.access_token ?? null,
-      refreshToken: tokenData.refresh_token ?? null,
-      expiresAt,
-      status: "conectado",
-      lastLoginAt: new Date(),
-      updatedAt: new Date(),
-    },
-    update: {
-      aplicativoId: APLICATIVO_PADRAO_ID,
-      accessToken: tokenData.access_token ?? null,
-      refreshToken: tokenData.refresh_token ?? null,
-      expiresAt,
-      status: "conectado",
-      lastLoginAt: new Date(),
-      updatedAt: new Date(),
-    },
+  const existente = await prisma.integracaoOlistToken.findFirst({
+    where: { aplicativoId, provider: "olist" }, select: { id: true },
   });
+  const dadosToken = {
+    aplicativoId,
+    accessToken: tokenData.access_token ?? null,
+    refreshToken: tokenData.refresh_token ?? null,
+    expiresAt,
+    status: "conectado",
+    lastLoginAt: new Date(),
+    updatedAt: new Date(),
+  };
+  if (existente) {
+    await prisma.integracaoOlistToken.update({ where: { id: existente.id }, data: dadosToken });
+  } else {
+    await prisma.integracaoOlistToken.create({ data: { provider: "olist", ...dadosToken } });
+  }
 
   const redirect = NextResponse.redirect(new URL("/configuracoes/integracoes", req.nextUrl.origin));
   redirect.cookies.set("olist_oauth_state", "", { path: "/", maxAge: 0 });
+  redirect.cookies.set("olist_aplicativo_id", "", { path: "/api/olist", maxAge: 0 });
   return redirect;
 }

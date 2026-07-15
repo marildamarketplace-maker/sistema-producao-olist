@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buscarPedidosParaBaixaEstoqueOlist, obterPeriodoBuscaBaixaEstoque } from "@/lib/olist";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 export async function GET() {
   try {
@@ -20,8 +21,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const usuario = await getUsuarioAutenticado(req);
     const body = await req.json().catch(() => ({}));
-    const result = await buscarPedidosParaBaixaEstoqueOlist({
+    const result = await buscarPedidosParaBaixaEstoqueOlist(usuario.aplicativoId, {
       periodoInicio: typeof body?.periodo_inicio === "string" ? body.periodo_inicio : null,
     });
 

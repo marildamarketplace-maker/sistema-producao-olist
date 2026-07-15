@@ -1,4 +1,8 @@
 export const permissionKeys = [
+  "podeVisualizarDashboard",
+  "podeVisualizarFornecedores",
+  "podeVisualizarProdutosFornecedor",
+  "podeVisualizarCategoriasMidia",
   "podeVisualizarEstoque",
   "podeEditarEstoque",
   "podeVisualizarBaixa",
@@ -17,6 +21,10 @@ export type PermissionKey = (typeof permissionKeys)[number];
 export type PermissionSet = Record<PermissionKey, boolean>;
 
 export const permissionLabels: Record<PermissionKey, string> = {
+  podeVisualizarDashboard: "Visualizar dashboard",
+  podeVisualizarFornecedores: "Visualizar fornecedores",
+  podeVisualizarProdutosFornecedor: "Visualizar produtos do fornecedor",
+  podeVisualizarCategoriasMidia: "Visualizar categorias e mídias",
   podeVisualizarEstoque: "Visualizar estoque",
   podeEditarEstoque: "Editar estoque",
   podeVisualizarBaixa: "Visualizar baixas",

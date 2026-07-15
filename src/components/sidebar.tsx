@@ -22,7 +22,7 @@ type MenuGroup = {
 type MenuItem = MenuLink | MenuGroup;
 
 const menuItems: MenuItem[] = [
-  { label: "Dashboard", href: "/" },
+  { label: "Dashboard", href: "/dashboard", permissions: ["podeVisualizarDashboard"] },
   {
     label: "Produtos",
     items: [
@@ -65,21 +65,39 @@ const menuItems: MenuItem[] = [
     ],
   },
   {
+    label: "Olist",
+    items: [
+      { label: "Produtos", href: "/olist/produtos" },
+      { label: "Contatos", href: "/olist/contatos" },
+      { label: "Pedidos", href: "/olist/pedidos" },
+      { label: "Criar pedido", href: "/olist/pedidos/criar" },
+      { label: "Vendedores", href: "/olist/vendedores" },
+    ],
+  },
+  {
     label: "Fornecedor",
     items: [
       {
         label: "Fornecedores",
         href: "/fornecedor/fornecedores",
+        permissions: ["podeVisualizarFornecedores"],
       },
       {
         label: "Produtos",
         href: "/fornecedor/produtos",
+        permissions: ["podeVisualizarProdutosFornecedor"],
       },
     ],
   },
   {
     label: "Controle de mídia",
-    items: [{ label: "Categorias", href: "/controle-midia/categorias" }],
+    items: [
+      {
+        label: "Categorias",
+        href: "/controle-midia/categorias",
+        permissions: ["podeVisualizarCategoriasMidia"],
+      },
+    ],
   },
   {
     label: "Configurações",

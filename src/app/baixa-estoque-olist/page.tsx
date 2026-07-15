@@ -98,7 +98,7 @@ function dateTimeLocalParaIso(value: string) {
 }
 
 export default function BaixaEstoqueOlistPage() {
-  const { usuario } = useAuth();
+  const { session, usuario } = useAuth();
   const [resultadoBusca, setResultadoBusca] = useState<ResultadoBusca | null>(null);
   const [pedidosSelecionados, setPedidosSelecionados] = useState<string[]>([]);
   const [itensForm, setItensForm] = useState<ItemBaixaForm[]>([{ ...ITEM_INICIAL }]);
@@ -193,7 +193,7 @@ export default function BaixaEstoqueOlistPage() {
     const resp = await axios.post(
       "/api/olist/baixa-estoque/buscar",
       { periodo_inicio: periodoInicio },
-      { validateStatus: () => true },
+      { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
     );
 
     if (resp.status < 200 || resp.status >= 300) {
@@ -286,7 +286,7 @@ export default function BaixaEstoqueOlistPage() {
     const resp = await axios.post(
       "/api/olist/baixa-estoque/sincronizar",
       { pedido_olist_id: pedidoId },
-      { validateStatus: () => true },
+      { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
     );
 
     if (resp.status < 200 || resp.status >= 300) {
