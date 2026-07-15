@@ -6,6 +6,7 @@ type UsuarioRow = {
   nome: string;
   email: string;
   aplicativo_id: string;
+  vendedor_olist_id: number | null;
   pode_visualizar_dashboard: boolean;
   pode_visualizar_fornecedores: boolean;
   pode_visualizar_produtos_fornecedor: boolean;
@@ -56,6 +57,7 @@ export async function GET(request: Request) {
         nome,
         email,
         aplicativo_id,
+        vendedor_olist_id,
         pode_visualizar_dashboard,
         pode_visualizar_fornecedores,
         pode_visualizar_produtos_fornecedor,
@@ -110,6 +112,7 @@ export async function GET(request: Request) {
     nome: usuario.nome,
     email: usuario.email,
     aplicativo_id: usuario.aplicativo_id,
+    vendedorOlistId: usuario.vendedor_olist_id,
     aplicativo: aplicativo ? { nome: aplicativo.nome } : null,
     podeVisualizarDashboard: Boolean(usuario.pode_visualizar_dashboard),
     podeVisualizarFornecedores: Boolean(usuario.pode_visualizar_fornecedores),

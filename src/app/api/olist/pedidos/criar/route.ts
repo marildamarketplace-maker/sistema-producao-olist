@@ -108,6 +108,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(body.itens) || body.itens.length === 0) throw new Error("Adicione ao menos um produto.");
 
     const observacoesLinhas: string[] = [];
+    const produtosAdicionados = new Set<number>();
     const itens = (body.itens as ItemInput[]).map((item, indice) => {
       const produtoId = Number(item.produtoId);
       const produtoCodigo = String(item.produtoCodigo ?? produtoId).trim();
@@ -117,6 +118,8 @@ export async function POST(request: Request) {
       const valorUnitario = item.valorUnitario === null || item.valorUnitario === undefined ? undefined : Number(item.valorUnitario);
       const divisoes = Array.isArray(item.divisoes) ? item.divisoes as DivisaoInput[] : [];
       if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`Produto ${indice + 1} inválido.`);
+      if (produtosAdicionados.has(produtoId)) throw new Error(`O produto ${produtoCodigo} foi adicionado mais de uma vez.`);
+      produtosAdicionados.add(produtoId);
       if (!Number.isFinite(quantidade) || quantidade < 1) throw new Error(`A quantidade mínima do produto ${indice + 1} é 1.`);
       if (valorUnitario !== undefined && (!Number.isFinite(valorUnitario) || valorUnitario < 0)) throw new Error(`Valor do produto ${indice + 1} inválido.`);
       if (divisoes.length === 0) divisoes.push({ quantidade });

@@ -11,6 +11,7 @@ type UsuarioAplicativo = {
   nome: string;
   email: string;
   aplicativo_id: string;
+  vendedorOlistId: number | null;
   aplicativo?: {
     nome: string;
   } | null;
@@ -30,6 +31,7 @@ type UsuarioAplicativoFallbackResponse = {
   nome: string;
   email: string;
   aplicativo_id: string;
+  vendedor_olist_id: number | null;
   aplicativo?: { nome: string } | { nome: string }[] | null;
   pode_visualizar_dashboard: boolean;
   pode_visualizar_fornecedores: boolean;
@@ -78,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         nome,
         email,
         aplicativo_id,
+        vendedor_olist_id,
         pode_visualizar_dashboard,
         pode_visualizar_fornecedores,
         pode_visualizar_produtos_fornecedor,
@@ -117,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       nome: usuarioData.nome,
       email: usuarioData.email,
       aplicativo_id: usuarioData.aplicativo_id,
+      vendedorOlistId: usuarioData.vendedor_olist_id,
       aplicativo,
       podeVisualizarDashboard: Boolean(usuarioData.pode_visualizar_dashboard),
       podeVisualizarFornecedores: Boolean(usuarioData.pode_visualizar_fornecedores),
