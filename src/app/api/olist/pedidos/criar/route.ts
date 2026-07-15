@@ -53,14 +53,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ itens: resposta.itens.filter((item) => item.situacao === "B" || item.situacao === "A") });
     }
     if (recurso === "clientes") {
-      const resposta = await listarContatosOlistApi(usuario.aplicativoId, { nome, codigo, cpfCnpj, idVendedor, limit: 50, offset: 0 });
-      return NextResponse.json({ itens: resposta.itens.filter((item) =>
+      const itens = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const resposta = await listarContatosOlistApi(usuario.aplicativoId, { nome, codigo, cpfCnpj, idVendedor, limit: 100, offset });
+        itens.push(...resposta.itens);
+        total = resposta.paginacao.total;
+        offset += 100;
+      } while (!nome && !codigo && !cpfCnpj && offset < total);
+      return NextResponse.json({ itens: itens.filter((item) =>
         (item.situacao === "B" || item.situacao === "A") && item.statusCrm === "C"
       ) });
     }
     if (recurso === "produtos") {
-      const resposta = await listarProdutosOlistApi(usuario.aplicativoId, { nome, codigo, limit: 50, offset: 0 });
-      return NextResponse.json({ itens: resposta.itens.filter((item) => item.tipo === "F" && item.situacao === "A") });
+      const itens = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const resposta = await listarProdutosOlistApi(usuario.aplicativoId, { nome, codigo, limit: 100, offset });
+        itens.push(...resposta.itens);
+        total = resposta.paginacao.total;
+        offset += 100;
+      } while (!nome && !codigo && offset < total);
+      return NextResponse.json({ itens: itens.filter((item) => item.tipo === "F" && item.situacao === "A") });
     }
     const [estampas, variantes] = await Promise.all([
       prisma.estampa.findMany({ orderBy: { codigo: "asc" }, select: { id: true, codigo: true, descricao: true } }),
