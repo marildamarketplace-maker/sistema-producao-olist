@@ -15,12 +15,12 @@ function escaparXml(valor: string) {
   return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-function infoAdicional(divisoes: DivisaoInput[]) {
+function infoAdicional(divisoes: DivisaoInput[], unidade: string) {
   return divisoes.map((divisao) => {
     const quantidade = Number(divisao.quantidade);
     const estampa = String(divisao.estampa ?? "").trim();
     const variante = String(divisao.variante ?? "").trim();
-    return `<ESTAMPA>${estampa ? `<COD>${escaparXml(estampa)}</COD>` : ""}${variante ? `<VAR>${escaparXml(variante)}</VAR>` : ""}<QTD>${quantidade}</QTD></ESTAMPA>`;
+    return `<ESTAMPA>${estampa ? `<COD>${escaparXml(estampa)}</COD>` : ""}${variante ? `<VAR>${escaparXml(variante)}</VAR>` : ""}<QTD>${quantidade}</QTD><UN>${escaparXml(unidade)}</UN></ESTAMPA>`;
   }).join("");
 }
 
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
       return {
         produto: { id: produtoId, tipo: "P" }, quantidade,
         ...(valorUnitario !== undefined ? { valorUnitario } : {}),
-        infoAdicional: infoAdicional(divisoes),
+        infoAdicional: infoAdicional(divisoes, produtoUnidade),
       };
     });
 
