@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import type { PermissionKey } from "@/lib/permissions";
 import { hasAnyPermission } from "@/lib/permissions";
+import { useTheme } from "@/components/theme-provider";
 
 type MenuLink = {
   label: string;
@@ -108,6 +109,7 @@ const menuItems: MenuItem[] = [
 
 export function Sidebar() {
   const { usuario, user, signOut } = useAuth();
+  const { isDarkMode, toggleDarkMode } = useTheme();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const nomeAplicativo = usuario?.aplicativo?.nome ?? "Aplicativo";
@@ -181,6 +183,10 @@ export function Sidebar() {
         </ul>
       </nav>
       <div className="mt-auto border-t border-slate-200 pt-5">
+        <div className="mb-3 flex items-center justify-between rounded-md px-3 py-2">
+          <span className="text-sm font-medium text-slate-700">{isDarkMode ? "Dark mode ativo" : "Dark mode inativo"}</span>
+          <button type="button" role="switch" aria-checked={isDarkMode} aria-label="Alternar dark mode" onClick={toggleDarkMode} className={`theme-switch relative h-7 w-12 rounded-full transition ${isDarkMode ? "is-active" : ""}`}><span className={`theme-switch-thumb absolute top-1 h-5 w-5 rounded-full shadow transition ${isDarkMode ? "left-6" : "left-1"}`} /></button>
+        </div>
         <Link
           href="/usuario"
           className={`block min-w-0 rounded-md px-3 py-2 transition hover:bg-slate-100 ${
