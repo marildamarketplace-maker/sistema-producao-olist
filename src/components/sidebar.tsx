@@ -120,7 +120,7 @@ export function Sidebar() {
   }, [pathname]);
 
   function isActive(href: string) {
-    return href === "/" ? pathname === href : pathname.startsWith(href);
+    return pathname === href;
   }
 
   function linkClassName(href: string, nested = false) {
