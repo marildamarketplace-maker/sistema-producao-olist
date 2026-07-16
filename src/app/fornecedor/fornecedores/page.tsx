@@ -6,11 +6,6 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { supabase } from "@/lib/supabase";
 
-type AplicativoOption = {
-  id: string;
-  nome: string;
-};
-
 type Fornecedor = {
   id: string;
   aplicativo_id: string | null;
@@ -37,7 +32,6 @@ const INITIAL_FORM: FornecedorFormData = {
 
 export default function FornecedoresPage() {
   const { usuario } = useAuth();
-  const [aplicativos, setAplicativos] = useState<AplicativoOption[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -54,27 +48,18 @@ export default function FornecedoresPage() {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const [fornecedoresResult, aplicativosResult] = await Promise.all([
-      supabase
-        .from("fornecedores")
-        .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
-        .order("nome", { ascending: true }),
-      supabase
-        .from("aplicativo")
-        .select("id, nome")
-        .order("nome", { ascending: true }),
-    ]);
+    const fornecedoresResult = await supabase
+      .from("fornecedores")
+      .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
+      .order("nome", { ascending: true });
 
-    if (fornecedoresResult.error || aplicativosResult.error) {
-      setErrorMessage(
-        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? aplicativosResult.error?.message}`,
-      );
+    if (fornecedoresResult.error) {
+      setErrorMessage(`Erro ao carregar fornecedores: ${fornecedoresResult.error.message}`);
       setIsLoading(false);
       return;
     }
 
     setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
-    setAplicativos((aplicativosResult.data as AplicativoOption[]) ?? []);
     setIsLoading(false);
   }
 
@@ -214,22 +199,16 @@ export default function FornecedoresPage() {
         {formOpen && (
         <form className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <label className="text-sm text-slate-700">
-            Aplicativo
-            <select
+            ID do aplicativo
+            <input
               required
-              value={formData.aplicativo_id || usuario?.aplicativo_id || ""}
+              value={formData.aplicativo_id}
               onChange={(event) =>
                 setFormData((prev) => ({ ...prev, aplicativo_id: event.target.value }))
               }
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            >
-              <option value="">Selecione um aplicativo</option>
-              {aplicativos.map((aplicativo) => (
-                <option key={aplicativo.id} value={aplicativo.id}>
-                  {aplicativo.nome} — {aplicativo.id}
-                </option>
-              ))}
-            </select>
+              placeholder="UUID do aplicativo"
+            />
           </label>
 
           <label className="text-sm text-slate-700">
@@ -339,9 +318,7 @@ export default function FornecedoresPage() {
                       {fornecedor.nome}
                     </td>
                     <td className="p-3 text-slate-700">
-                      {aplicativos.find((aplicativo) => aplicativo.id === fornecedor.aplicativo_id)?.nome
-                        ?? fornecedor.aplicativo_id
-                        ?? "-"}
+                      {fornecedor.aplicativo_id ?? "-"}
                     </td>
                     <td className="p-3 text-slate-700">{fornecedor.vendedor_olist_id ?? "-"}</td>
                     <td className="max-w-md p-3 text-slate-700">
