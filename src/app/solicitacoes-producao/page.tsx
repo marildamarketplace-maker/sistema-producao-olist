@@ -1917,20 +1917,20 @@ export default function SolicitacoesProducaoPage() {
                         <h5 className="font-semibold text-slate-900">Dados do pedido</h5>
                         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                           <label className="text-sm text-slate-700">ID do cliente
-                            <input type="number" min={1} value={pedidoFornecedorEdicao.idContato} onChange={(event) => alterarPedidoFornecedor({ idContato: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            <input disabled type="number" min={1} value={pedidoFornecedorEdicao.idContato} onChange={(event) => alterarPedidoFornecedor({ idContato: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                           </label>
                           <label className="text-sm text-slate-700">ID do vendedor
-                            <input type="number" min={1} value={pedidoFornecedorEdicao.vendedor.id} onChange={(event) => alterarPedidoFornecedor({ vendedor: { id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            <input disabled type="number" min={1} value={pedidoFornecedorEdicao.vendedor.id} onChange={(event) => alterarPedidoFornecedor({ vendedor: { id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                           </label>
                           <label className="text-sm text-slate-700">Situação
-                            <input type="number" value={pedidoFornecedorEdicao.situacao} onChange={(event) => alterarPedidoFornecedor({ situacao: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            <input disabled type="number" value={pedidoFornecedorEdicao.situacao} onChange={(event) => alterarPedidoFornecedor({ situacao: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                           </label>
                           <label className="text-sm text-slate-700">Data
-                            <input type="date" value={pedidoFornecedorEdicao.data} onChange={(event) => alterarPedidoFornecedor({ data: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            <input disabled type="date" value={pedidoFornecedorEdicao.data} onChange={(event) => alterarPedidoFornecedor({ data: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                           </label>
                         </div>
                         <label className="mt-4 block text-sm text-slate-700">Observações
-                          <textarea value={pedidoFornecedorEdicao.observacoes} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2" />
+                          <textarea disabled value={pedidoFornecedorEdicao.observacoes} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                         </label>
                       </section>
 
@@ -1941,16 +1941,16 @@ export default function SolicitacoesProducaoPage() {
                           </h5>
                           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             <label className="text-sm text-slate-700">ID do produto
-                              <input type="number" min={1} value={item.produto.id} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                              <input disabled type="number" min={1} value={item.produto.id} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                             </label>
                             <label className="text-sm text-slate-700">Tipo
-                              <input value={item.produto.tipo} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, tipo: event.target.value } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                              <input disabled value={item.produto.tipo} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, tipo: event.target.value } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                             </label>
                             <label className="text-sm text-slate-700">Quantidade
-                              <input type="number" min={0.0001} step="0.0001" value={item.quantidade} onChange={(event) => alterarItemPedidoFornecedor(index, { quantidade: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                              <input disabled type="number" min={0.0001} step="0.0001" value={item.quantidade} onChange={(event) => alterarItemPedidoFornecedor(index, { quantidade: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                             </label>
                             <label className="text-sm text-slate-700">Preço unitário
-                              <input type="number" min={0} step="0.01" value={item.valorUnitario} onChange={(event) => alterarItemPedidoFornecedor(index, { valorUnitario: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                              <input disabled type="number" min={0} step="0.01" value={item.valorUnitario} onChange={(event) => alterarItemPedidoFornecedor(index, { valorUnitario: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                             </label>
                           </div>
                           {extrairDivisoesInfoAdicional(item.infoAdicional).map((divisao, divisaoIndex) => (
@@ -1964,10 +1964,10 @@ export default function SolicitacoesProducaoPage() {
                                   <input value={divisao.variante} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "variante", event.target.value)} placeholder="Variante" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
                                 </label>
                                 <label className="text-sm text-slate-700">Quantidade da divisão
-                                  <input type="number" min={0.0001} step="0.0001" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                  <input disabled inputMode="decimal" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                                 </label>
                                 <label className="text-sm text-slate-700">Unidade
-                                  <input value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                  <input disabled value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                                 </label>
                                 <label className="text-sm text-slate-700">Tamanho
                                   <input value={divisao.tamanho} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", event.target.value)} placeholder="Ex.: 70x70" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
@@ -1976,7 +1976,7 @@ export default function SolicitacoesProducaoPage() {
                                   <input value={divisao.tipo} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tipo", event.target.value)} placeholder="Ex.: LENCO-RELIG-FOURWAY" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
                                 </label>
                                 <label className="text-sm text-slate-700">Corte a laser
-                                  <select value={divisao.laser} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "laser", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+                                  <select disabled value={divisao.laser} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "laser", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500">
                                     <option value="false">Não</option>
                                     <option value="true">Sim</option>
                                   </select>
@@ -1986,7 +1986,7 @@ export default function SolicitacoesProducaoPage() {
                           ))}
                           {item.produto.tipo !== "S" && (
                             <label className="mt-4 block text-sm text-slate-700">Informação adicional
-                              <textarea value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />
+                              <textarea disabled value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs disabled:bg-slate-100 disabled:text-slate-500" />
                             </label>
                           )}
                         </section>

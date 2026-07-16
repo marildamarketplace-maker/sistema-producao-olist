@@ -522,7 +522,6 @@ export default function ProdutosFornecedorPage() {
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">ID</th>
                   <th className="p-3">Fornecedor</th>
                   <th className="p-3">Nome</th>
                   <th className="p-3">Tipo</th>
@@ -537,9 +536,6 @@ export default function ProdutosFornecedorPage() {
               <tbody>
                 {produtos.map((produto) => (
                   <tr key={produto.id} className="border-b border-slate-100">
-                    <td className="max-w-48 break-all p-3 font-mono text-xs text-slate-600">
-                      {produto.id}
-                    </td>
                     <td className="p-3 text-slate-700">
                       {produto.fornecedores?.nome ?? "-"}
                     </td>

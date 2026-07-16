@@ -17,6 +17,10 @@ function extrairEstampaVariante(sku: string) {
   return match ? { estampa: match[1], variante: match[2] } : { estampa: "", variante: "" };
 }
 
+function formatarQuantidadeDivisao(quantidade: number) {
+  return quantidade.toFixed(2).replace(".", ",");
+}
+
 export async function POST(request: Request) {
   try {
     const autenticado = await getUsuarioAutenticado(request);
@@ -64,10 +68,7 @@ export async function POST(request: Request) {
       include: { produtoFornecedor: true },
     });
     const associacaoPorProduto = new Map(associacoes.map((item) => [item.produtoId, item]));
-    const quantidadeCorteLaser = itensSolicitacao.reduce(
-      (total, item) => item.tipoCorte === "LASER" ? total + item.quantidadeSolicitada : total,
-      0,
-    );
+    let quantidadeCorteLaser = 0;
     const grupos = new Map<string, {
       referencia: string;
       nome: string;
@@ -89,9 +90,11 @@ export async function POST(request: Request) {
       if (!Number.isFinite(preco) || preco < 0) throw new Error(`Preço inválido no produto fornecido ${referencia}.`);
       const { estampa, variante } = extrairEstampaVariante(item.sku);
       const laser = item.tipoCorte === "LASER";
+      if (laser) quantidadeCorteLaser += quantidade;
       const tamanho = extrairTamanhoSku(item.sku);
       const tipo = extrairTipoProdutoSku(item.sku);
-      const grupo = grupos.get(referencia) ?? {
+      const chaveGrupo = `${referencia}\u0000${laser}`;
+      const grupo = grupos.get(chaveGrupo) ?? {
         referencia,
         nome: associacao.produtoFornecedor.nome,
         preco,
@@ -103,7 +106,7 @@ export async function POST(request: Request) {
       const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, laser, tamanho, tipo };
       divisao.quantidade += quantidade;
       grupo.divisoes.set(chave, divisao);
-      grupos.set(referencia, grupo);
+      grupos.set(chaveGrupo, grupo);
     }
 
     const itens = [];
@@ -114,14 +117,17 @@ export async function POST(request: Request) {
       const unidade = "MT";
       const divisoes = Array.from(grupo.divisoes.values());
       const infoAdicional = criarInfoAdicionalOlist(
-        divisoes,
+        divisoes.map((divisao) => ({
+          ...divisao,
+          quantidade: formatarQuantidadeDivisao(divisao.quantidade),
+        })),
         unidade,
         { incluirTagsVazias: true },
       );
       for (const divisao of divisoes) {
         observacoes.push({
           descricao: grupo.nome,
-          quantidade: divisao.quantidade,
+          quantidade: formatarQuantidadeDivisao(divisao.quantidade),
           unidade,
           estampa: divisao.estampa,
           variante: divisao.variante,
@@ -132,7 +138,7 @@ export async function POST(request: Request) {
       }
       itens.push({
         produto: { id: produtoId, tipo: "P" },
-        quantidade: grupo.quantidade,
+        quantidade: Number(grupo.quantidade.toFixed(2)),
         valorUnitario: grupo.preco,
         infoAdicional,
       });
@@ -166,7 +172,7 @@ export async function POST(request: Request) {
 
       itens.push({
         produto: { id: servicoId, tipo: "S" },
-        quantidade: quantidadeCorteLaser,
+        quantidade: Number(quantidadeCorteLaser.toFixed(2)),
         valorUnitario: precoServico,
         infoAdicional: "",
       });
