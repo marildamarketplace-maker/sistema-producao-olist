@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
@@ -160,51 +160,28 @@ export default function EstoquePage() {
     return movimentacoes.filter((mov) => mov.produto_id === produtoMovimentacoesAberto.id);
   }, [movimentacoes, produtoMovimentacoesAberto]);
 
-  async function carregarDados() {
+  const carregarDados = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
 
-    const [
-      { data: produtosData, error: produtosError },
-      { data: movData, error: movError },
-      { data: cfgData, error: cfgError },
-    ] = await Promise.all([
-      supabase
-        .from("produtos")
-        .select("id, sku, imagem_url, meta_estoque")
-        .eq("ativo", true)
-        .order("sku"),
-      supabase
-        .from("movimentacoes_estoque")
-        .select("id, produto_id, sku, tipo_movimento, quantidade, origem, observacao, created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("configuracoes_sistema")
-        .select("valor")
-        .eq("chave", "META_GERAL_ESTOQUE")
-        .maybeSingle(),
-    ]);
+    try {
+      if (!session?.access_token) throw new Error("Sessão expirada.");
+      const response = await fetch("/api/estoque/dados", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const json = await response.json() as {
+        produtos?: Produto[]; movimentacoes?: Movimentacao[]; metaGeral?: number; error?: string;
+      };
+      if (!response.ok) throw new Error(json.error ?? "Erro ao carregar estoque.");
+      const listaProdutos = json.produtos ?? [];
+      const listaMovimentacoes = json.movimentacoes ?? [];
+      const metaGlobal = Number(json.metaGeral ?? 0);
+      setMetaGeral(Number.isNaN(metaGlobal) ? 0 : metaGlobal);
+      const mapa = new Map<string, { entradas: number; saidas: number; movimentacoes: number }>();
 
-    if (produtosError || movError || cfgError) {
-      setErrorMessage(
-        produtosError?.message ??
-          movError?.message ??
-          cfgError?.message ??
-          "Erro ao carregar estoque.",
-      );
-      setLoading(false);
-      return;
-    }
-
-    const metaGlobal = Number(cfgData?.valor ?? 0);
-    setMetaGeral(Number.isNaN(metaGlobal) ? 0 : metaGlobal);
-
-    const listaProdutos = (produtosData as Produto[]) ?? [];
-    const listaMovimentacoes = (movData as Movimentacao[]) ?? [];
-    const mapa = new Map<string, { entradas: number; saidas: number }>();
-
-    listaMovimentacoes.forEach((mov) => {
-      const atual = mapa.get(mov.produto_id) ?? { entradas: 0, saidas: 0 };
+      listaMovimentacoes.forEach((mov) => {
+      const atual = mapa.get(mov.produto_id) ?? { entradas: 0, saidas: 0, movimentacoes: 0 };
+      atual.movimentacoes += 1;
 
       if (mov.tipo_movimento === "entrada") {
         atual.entradas += mov.quantidade;
@@ -213,11 +190,10 @@ export default function EstoquePage() {
       }
 
       mapa.set(mov.produto_id, atual);
-    });
+      });
 
-    const linhasCalculadas: LinhaEstoque[] = listaProdutos.map((produto) => {
-      const totais = mapa.get(produto.id) ?? { entradas: 0, saidas: 0 };
-      const qtdMovimentacoes = listaMovimentacoes.filter((mov) => mov.produto_id === produto.id).length;
+      const linhasCalculadas: LinhaEstoque[] = listaProdutos.map((produto) => {
+      const totais = mapa.get(produto.id) ?? { entradas: 0, saidas: 0, movimentacoes: 0 };
       const metaAplicada =
         produto.meta_estoque ?? (Number.isNaN(metaGlobal) ? 0 : metaGlobal);
 
@@ -227,19 +203,23 @@ export default function EstoquePage() {
         total_saidas: totais.saidas,
         saldo_atual: totais.entradas - totais.saidas,
         meta_aplicada: metaAplicada,
-        qtd_movimentacoes: qtdMovimentacoes,
+        qtd_movimentacoes: totais.movimentacoes,
       };
-    });
+      });
 
-    setProdutos(listaProdutos);
-    setMovimentacoes(listaMovimentacoes);
-    setLinhas(linhasCalculadas);
-    setLoading(false);
-  }
+      setProdutos(listaProdutos);
+      setMovimentacoes(listaMovimentacoes);
+      setLinhas(linhasCalculadas);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao carregar estoque.");
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.access_token]);
 
   useEffect(() => {
     carregarDados();
-  }, []);
+  }, [carregarDados]);
 
   function alterarOrdenacao(key: SortKey) {
     setSortConfig((prev) => ({

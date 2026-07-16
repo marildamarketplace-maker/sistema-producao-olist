@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Fragment, FormEvent, useEffect, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { ChevronDown, Download, Pencil, Printer, Send, XCircle } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
@@ -298,18 +298,13 @@ export default function SolicitacoesProducaoPage() {
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
   const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
 
-  async function carregarDados() {
+  const carregarDados = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
-    const produtosPromise = supabase
-      .from("produtos")
-      .select("id, sku, imagem_url")
-      .eq("ativo", true)
-      .order("sku")
-      .limit(99999999);
 
     try {
-      const [solicitacoesProducaoResp, demaisSolicitacoesResp] = await Promise.all([
+      if (!session?.access_token) throw new Error("Sessão expirada.");
+      const [solicitacoesProducaoResp, demaisSolicitacoesResp, produtosResponse] = await Promise.all([
         supabase
           .from("solicitacoes_producao")
           .select("id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim")
@@ -323,6 +318,9 @@ export default function SolicitacoesProducaoPage() {
           .neq("status", "em_producao")
           .order("created_at", { ascending: false })
           .limit(LIMITE_SOLICITACOES_RESUMO),
+        fetch("/api/produtos/opcoes", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
       ]);
 
       if (solicitacoesProducaoResp.error || demaisSolicitacoesResp.error) {
@@ -342,16 +340,13 @@ export default function SolicitacoesProducaoPage() {
       setSolicitacoes(solicitacoesCarregadas.sort(ordenarSolicitacoes));
       setItensPorSolicitacao({});
       setItensCarregando({});
-      setLoading(false);
-
-      const produtosResp = await produtosPromise;
-
-      if (produtosResp.error) {
-        setErrorMessage(`Solicitações carregadas, mas erro ao carregar produtos: ${produtosResp.error.message}`);
+      const produtosJson = await produtosResponse.json() as { produtos?: Produto[]; error?: string };
+      if (!produtosResponse.ok) {
+        setErrorMessage(`Solicitações carregadas, mas erro ao carregar produtos: ${produtosJson.error ?? "erro desconhecido"}`);
         return [];
       }
 
-      const produtosCarregados = (produtosResp.data as Produto[]) ?? [];
+      const produtosCarregados = produtosJson.produtos ?? [];
       setProdutos(produtosCarregados);
       return produtosCarregados;
     } catch (error) {
@@ -360,7 +355,7 @@ export default function SolicitacoesProducaoPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [session?.access_token]);
 
   async function carregarItensSolicitacao(solicitacaoId: string, force = false) {
     if (!force && itensPorSolicitacao[solicitacaoId]) {
@@ -546,7 +541,7 @@ export default function SolicitacoesProducaoPage() {
 
   useEffect(() => {
     carregarDados();
-  }, []);
+  }, [carregarDados]);
 
   useEffect(() => {
     if (produtos.length === 0) return;
