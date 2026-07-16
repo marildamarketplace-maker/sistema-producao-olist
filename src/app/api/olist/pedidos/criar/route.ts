@@ -16,7 +16,7 @@ import {
   type LinhaObservacaoPedidoOlist,
 } from "@/lib/olist-pedido";
 
-type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown };
+type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown };
 type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown; divisoes?: unknown };
 
 const listarProdutosCriacaoComCache = unstable_cache(
@@ -157,15 +157,20 @@ export async function POST(request: Request) {
       for (const divisao of divisoes) {
         const estampa = String(divisao.estampa ?? "").trim() || "Sem estampa";
         const variante = String(divisao.variante ?? "").trim() || "Sem variante";
+        const tipoDivisao = String(divisao.tipo ?? produtoTipo).trim();
+        const tamanhoDivisao = String(divisao.tamanho ?? produtoTamanho).trim();
+        const laserDivisao = divisao.laser === undefined
+          ? produtoLaser
+          : divisao.laser === true || String(divisao.laser).trim().toLowerCase() === "true";
         observacoesLinhas.push({
           descricao: produtoDescricao,
           quantidade: Number(divisao.quantidade),
           unidade: produtoUnidade,
           estampa,
           variante,
-          laser: produtoLaser,
-          tamanho: produtoTamanho,
-          tipo: produtoTipo,
+          laser: laserDivisao,
+          tamanho: tamanhoDivisao,
+          tipo: tipoDivisao,
         });
       }
       return {
@@ -173,7 +178,12 @@ export async function POST(request: Request) {
         ...(valorUnitario !== undefined ? { valorUnitario } : {}),
         infoAdicional: criarInfoAdicionalOlist(
           divisoes.map((divisao) => ({
-            ...divisao, tamanho: produtoTamanho, tipo: produtoTipo, laser: produtoLaser,
+            ...divisao,
+            tamanho: String(divisao.tamanho ?? produtoTamanho).trim(),
+            tipo: String(divisao.tipo ?? produtoTipo).trim(),
+            laser: divisao.laser === undefined
+              ? produtoLaser
+              : divisao.laser === true || String(divisao.laser).trim().toLowerCase() === "true",
           })),
           produtoUnidade,
         ),

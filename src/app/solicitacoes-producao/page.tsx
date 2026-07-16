@@ -1967,7 +1967,7 @@ export default function SolicitacoesProducaoPage() {
                                   <input disabled inputMode="decimal" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                                 </label>
                                 <label className="text-sm text-slate-700">Unidade
-                                  <input disabled value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
+                                  <input value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
                                 </label>
                                 <label className="text-sm text-slate-700">Tamanho
                                   <input value={divisao.tamanho} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", event.target.value)} placeholder="Ex.: 70x70" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
