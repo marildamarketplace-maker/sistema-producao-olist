@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { supabase } from "@/lib/supabase";
 
 type UsuarioVendedorOption = {
@@ -35,6 +36,7 @@ const INITIAL_FORM: FornecedorFormData = {
 };
 
 export default function FornecedoresPage() {
+  const { session } = useAuth();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [usuariosVendedores, setUsuariosVendedores] = useState<UsuarioVendedorOption[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
@@ -48,37 +50,43 @@ export default function FornecedoresPage() {
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
-  async function carregarDados() {
+  const carregarDados = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const [fornecedoresResult, usuariosResult] = await Promise.all([
+    const [fornecedoresResult, usuariosResponse] = await Promise.all([
       supabase
         .from("fornecedores")
         .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
         .order("nome", { ascending: true }),
-      supabase
-        .from("usuario")
-        .select("id, nome, email, aplicativo_id")
-        .order("nome", { ascending: true }),
+      fetch("/api/fornecedores/vendedores", {
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {},
+      }),
     ]);
 
-    if (fornecedoresResult.error || usuariosResult.error) {
+    const usuariosJson = await usuariosResponse.json() as {
+      usuarios?: UsuarioVendedorOption[];
+      error?: string;
+    };
+
+    if (fornecedoresResult.error || !usuariosResponse.ok) {
       setErrorMessage(
-        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? usuariosResult.error?.message}`,
+        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? usuariosJson.error ?? "erro desconhecido"}`,
       );
       setIsLoading(false);
       return;
     }
 
     setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
-    setUsuariosVendedores((usuariosResult.data as UsuarioVendedorOption[]) ?? []);
+    setUsuariosVendedores(usuariosJson.usuarios ?? []);
     setIsLoading(false);
-  }
+  }, [session?.access_token]);
 
   useEffect(() => {
     carregarDados();
-  }, []);
+  }, [carregarDados]);
 
   function resetForm() {
     setFormData(INITIAL_FORM);
