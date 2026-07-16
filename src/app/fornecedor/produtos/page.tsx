@@ -10,6 +10,14 @@ type FornecedorOption = {
   nome: string;
 };
 
+const TIPOS_SERVICO = ["CORTE_LASER"] as const;
+
+type TipoServico = (typeof TIPOS_SERVICO)[number];
+
+const TIPO_SERVICO_LABEL: Record<TipoServico, string> = {
+  CORTE_LASER: "Corte a laser",
+};
+
 type ProdutoFornecedor = {
   id: string;
   fornecedor_id: string;
@@ -22,6 +30,7 @@ type ProdutoFornecedor = {
   largura_embalagem_metro: number | string | null;
   altura_embalagem_metro: number | string | null;
   comprimento_embalagem_metro: number | string | null;
+  tipo_servico: TipoServico | null;
   created_at: string;
   fornecedores: {
     nome: string;
@@ -50,6 +59,7 @@ type ProdutoFornecedorFormData = {
   largura_embalagem_metro: string;
   altura_embalagem_metro: string;
   comprimento_embalagem_metro: string;
+  tipo_servico: TipoServico | "";
 };
 
 const INITIAL_FORM: ProdutoFornecedorFormData = {
@@ -63,6 +73,7 @@ const INITIAL_FORM: ProdutoFornecedorFormData = {
   largura_embalagem_metro: "",
   altura_embalagem_metro: "",
   comprimento_embalagem_metro: "",
+  tipo_servico: "",
 };
 
 function normalizarNumero(valor: string) {
@@ -151,7 +162,7 @@ export default function ProdutosFornecedorPage() {
       supabase
         .from("produtos_fornecedor")
         .select(
-          "id, fornecedor_id, nome, descricao, referencia, preco_unitario_metro, peso_liquido_metro, peso_bruto_metro, largura_embalagem_metro, altura_embalagem_metro, comprimento_embalagem_metro, created_at, fornecedores(nome)",
+          "id, fornecedor_id, nome, descricao, referencia, preco_unitario_metro, peso_liquido_metro, peso_bruto_metro, largura_embalagem_metro, altura_embalagem_metro, comprimento_embalagem_metro, tipo_servico, created_at, fornecedores(nome)",
         )
         .order("created_at", { ascending: false }),
     ]);
@@ -195,6 +206,7 @@ export default function ProdutosFornecedorPage() {
       largura_embalagem_metro: formatarNumeroParaInput(produto.largura_embalagem_metro, 2),
       altura_embalagem_metro: formatarNumeroParaInput(produto.altura_embalagem_metro, 2),
       comprimento_embalagem_metro: formatarNumeroParaInput(produto.comprimento_embalagem_metro, 2),
+      tipo_servico: produto.tipo_servico ?? "",
     });
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -223,6 +235,7 @@ export default function ProdutosFornecedorPage() {
       largura_embalagem_metro: larguraEmbalagem,
       altura_embalagem_metro: alturaEmbalagem,
       comprimento_embalagem_metro: comprimentoEmbalagem,
+      tipo_servico: formData.tipo_servico || null,
       updated_at: new Date().toISOString(),
     };
 
@@ -396,6 +409,27 @@ export default function ProdutosFornecedorPage() {
           </label>
 
           <label className="text-sm text-slate-700">
+            Tipo de servico
+            <select
+              value={formData.tipo_servico}
+              onChange={(event) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  tipo_servico: event.target.value as TipoServico | "",
+                }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Produto (nao e servico)</option>
+              {TIPOS_SERVICO.map((tipo) => (
+                <option key={tipo} value={tipo}>
+                  {TIPO_SERVICO_LABEL[tipo]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-700">
             Preco unitario / metro
             <input
               required
@@ -491,6 +525,7 @@ export default function ProdutosFornecedorPage() {
                   <th className="p-3">ID</th>
                   <th className="p-3">Fornecedor</th>
                   <th className="p-3">Nome</th>
+                  <th className="p-3">Tipo</th>
                   <th className="p-3">Referencia</th>
                   <th className="p-3">Preco unitario / metro</th>
                   <th className="p-3">Pesos / metro</th>
@@ -510,6 +545,11 @@ export default function ProdutosFornecedorPage() {
                     </td>
                     <td className="p-3 font-medium text-slate-700">
                       {produto.nome}
+                    </td>
+                    <td className="p-3 text-slate-700">
+                      {produto.tipo_servico
+                        ? TIPO_SERVICO_LABEL[produto.tipo_servico]
+                        : "Produto"}
                     </td>
                     <td className="p-3 text-slate-700">
                       {produto.referencia || "-"}

@@ -6,6 +6,12 @@ datasource db {
   provider = "postgresql"
 }
 
+enum TipoServicoProdutoFornecedor {
+  CORTE_LASER
+
+  @@map("tipo_servico_produto_fornecedor")
+}
+
 model Aplicativo {
   id                        String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
@@ -155,6 +161,7 @@ model ProdutoFornecedor {
   larguraEmbalagemMetro     Decimal?                        @map("largura_embalagem_metro") @db.Decimal(10, 2)
   pesoBrutoMetro            Decimal?                        @map("peso_bruto_metro") @db.Decimal(10, 3)
   pesoLiquidoMetro          Decimal?                        @map("peso_liquido_metro") @db.Decimal(10, 3)
+  tipoServico               TipoServicoProdutoFornecedor?   @map("tipo_servico")
   produtosOlist             ProdutoOlistProdutoFornecedor[]
   aplicativo                Aplicativo?                     @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   fornecedor                Fornecedor                      @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
