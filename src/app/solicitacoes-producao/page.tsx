@@ -1168,13 +1168,16 @@ export default function SolicitacoesProducaoPage() {
       return;
     }
 
+    const prioridadeSolicitacao =
+      prioridadeProducao || itensNormalizados.some((item) => Boolean(item.prioridade_producao));
+
     if (solicitacaoEditandoId) {
       const { error: solicitacaoErro } = await supabase
         .from("solicitacoes_producao")
         .update({
           data_entrega: dataEntrega,
           observacao_geral: observacaoGeral.trim() || null,
-          prioridade_producao: prioridadeProducao,
+          prioridade_producao: prioridadeSolicitacao,
         })
         .eq("id", solicitacaoEditandoId);
 
@@ -1238,14 +1241,7 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const processamentoOlist = processamentoOlistPendente;
-    const prioridadesEncontradas = new Set(itensNormalizados.map((item) => Boolean(item.prioridade_producao)));
-    const deveSepararPrioridade = Boolean(processamentoOlist) && prioridadesEncontradas.size > 1;
-    const gruposSolicitacao = deveSepararPrioridade
-      ? [
-          { prioridade: true, itens: itensNormalizados.filter((item) => Boolean(item.prioridade_producao)) },
-          { prioridade: false, itens: itensNormalizados.filter((item) => !Boolean(item.prioridade_producao)) },
-        ].filter((grupo) => grupo.itens.length > 0)
-      : [{ prioridade: prioridadeProducao, itens: itensNormalizados }];
+    const gruposSolicitacao = [{ prioridade: prioridadeSolicitacao, itens: itensNormalizados }];
 
     for (const grupo of gruposSolicitacao) {
       const { data: solicitacaoCriada, error: solicitacaoErro } = await supabase
