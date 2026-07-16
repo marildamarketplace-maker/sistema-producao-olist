@@ -685,7 +685,7 @@ export default function SolicitacoesProducaoPage() {
         .reduce((total, item) => total + extrairDivisoesInfoAdicional(item.infoAdicional).length, 0) + divisaoIndex;
       const linhasObservacao = pedido.observacoesInternas.split("\n.\n");
       const partes = linhasObservacao[indiceObservacao]?.split("     |     ") ?? [];
-      if (partes.length >= 3) {
+      if (partes[0]) {
         linhasObservacao[indiceObservacao] = criarLinhaObservacaoPedidoOlist({
           descricao: partes[0],
           quantidade: divisoes[divisaoIndex].quantidade,
