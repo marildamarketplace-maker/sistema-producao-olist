@@ -3,10 +3,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { supabase } from "@/lib/supabase";
+
+type AplicativoOption = {
+  id: string;
+  nome: string;
+};
 
 type Fornecedor = {
   id: string;
+  aplicativo_id: string | null;
+  vendedor_olist_id: number | null;
   nome: string;
   endereco: string | null;
   created_at: string;
@@ -14,16 +22,22 @@ type Fornecedor = {
 };
 
 type FornecedorFormData = {
+  aplicativo_id: string;
+  vendedor_olist_id: string;
   nome: string;
   endereco: string;
 };
 
 const INITIAL_FORM: FornecedorFormData = {
+  aplicativo_id: "",
+  vendedor_olist_id: "",
   nome: "",
   endereco: "",
 };
 
 export default function FornecedoresPage() {
+  const { usuario } = useAuth();
+  const [aplicativos, setAplicativos] = useState<AplicativoOption[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,31 +50,40 @@ export default function FornecedoresPage() {
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
-  async function carregarFornecedores() {
+  async function carregarDados() {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const { data, error } = await supabase
-      .from("fornecedores")
-      .select("id, nome, endereco, created_at, updated_at")
-      .order("nome", { ascending: true });
+    const [fornecedoresResult, aplicativosResult] = await Promise.all([
+      supabase
+        .from("fornecedores")
+        .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
+        .order("nome", { ascending: true }),
+      supabase
+        .from("aplicativo")
+        .select("id, nome")
+        .order("nome", { ascending: true }),
+    ]);
 
-    if (error) {
-      setErrorMessage(`Erro ao carregar fornecedores: ${error.message}`);
+    if (fornecedoresResult.error || aplicativosResult.error) {
+      setErrorMessage(
+        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? aplicativosResult.error?.message}`,
+      );
       setIsLoading(false);
       return;
     }
 
-    setFornecedores((data as Fornecedor[]) ?? []);
+    setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
+    setAplicativos((aplicativosResult.data as AplicativoOption[]) ?? []);
     setIsLoading(false);
   }
 
   useEffect(() => {
-    carregarFornecedores();
+    carregarDados();
   }, []);
 
   function resetForm() {
-    setFormData(INITIAL_FORM);
+    setFormData({ ...INITIAL_FORM, aplicativo_id: usuario?.aplicativo_id ?? "" });
     setEditingId(null);
     setFormOpen(false);
   }
@@ -69,6 +92,8 @@ export default function FornecedoresPage() {
     setEditingId(fornecedor.id);
     setFormOpen(true);
     setFormData({
+      aplicativo_id: fornecedor.aplicativo_id ?? "",
+      vendedor_olist_id: fornecedor.vendedor_olist_id?.toString() ?? "",
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
     });
@@ -83,13 +108,24 @@ export default function FornecedoresPage() {
     setSuccessMessage(null);
 
     const payload = {
+      aplicativo_id: formData.aplicativo_id || usuario?.aplicativo_id || "",
+      vendedor_olist_id: formData.vendedor_olist_id.trim()
+        ? Number(formData.vendedor_olist_id)
+        : null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
-    if (!payload.nome) {
-      setErrorMessage("Nome do fornecedor e obrigatorio.");
+    if (!payload.aplicativo_id || !payload.nome) {
+      setErrorMessage("Aplicativo e nome do fornecedor são obrigatórios.");
+      setIsSaving(false);
+      return;
+    }
+
+    if (payload.vendedor_olist_id !== null &&
+        (!Number.isInteger(payload.vendedor_olist_id) || payload.vendedor_olist_id <= 0)) {
+      setErrorMessage("Informe um ID de vendedor válido.");
       setIsSaving(false);
       return;
     }
@@ -106,7 +142,7 @@ export default function FornecedoresPage() {
       return;
     }
 
-    await carregarFornecedores();
+    await carregarDados();
     resetForm();
     setSuccessMessage(
       isEditing
@@ -140,7 +176,7 @@ export default function FornecedoresPage() {
       resetForm();
     }
 
-    await carregarFornecedores();
+    await carregarDados();
     setSuccessMessage("Fornecedor excluido com sucesso.");
     setDeletingId(null);
   }
@@ -178,6 +214,25 @@ export default function FornecedoresPage() {
         {formOpen && (
         <form className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <label className="text-sm text-slate-700">
+            Aplicativo
+            <select
+              required
+              value={formData.aplicativo_id || usuario?.aplicativo_id || ""}
+              onChange={(event) =>
+                setFormData((prev) => ({ ...prev, aplicativo_id: event.target.value }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">Selecione um aplicativo</option>
+              {aplicativos.map((aplicativo) => (
+                <option key={aplicativo.id} value={aplicativo.id}>
+                  {aplicativo.nome} — {aplicativo.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-700">
             Nome
             <input
               required
@@ -187,6 +242,21 @@ export default function FornecedoresPage() {
               }
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               placeholder="Nome do fornecedor"
+            />
+          </label>
+
+          <label className="text-sm text-slate-700">
+            ID vendedor Olist
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={formData.vendedor_olist_id}
+              onChange={(event) =>
+                setFormData((prev) => ({ ...prev, vendedor_olist_id: event.target.value }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="ID do vendedor"
             />
           </label>
 
@@ -255,6 +325,8 @@ export default function FornecedoresPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Nome</th>
+                  <th className="p-3">Aplicativo</th>
+                  <th className="p-3">ID vendedor</th>
                   <th className="p-3">Endereco</th>
                   <th className="p-3">Cadastro</th>
                   <th className="p-3 text-right">Acoes</th>
@@ -266,6 +338,12 @@ export default function FornecedoresPage() {
                     <td className="p-3 font-medium text-slate-700">
                       {fornecedor.nome}
                     </td>
+                    <td className="p-3 text-slate-700">
+                      {aplicativos.find((aplicativo) => aplicativo.id === fornecedor.aplicativo_id)?.nome
+                        ?? fornecedor.aplicativo_id
+                        ?? "-"}
+                    </td>
+                    <td className="p-3 text-slate-700">{fornecedor.vendedor_olist_id ?? "-"}</td>
                     <td className="max-w-md p-3 text-slate-700">
                       {fornecedor.endereco || "-"}
                     </td>

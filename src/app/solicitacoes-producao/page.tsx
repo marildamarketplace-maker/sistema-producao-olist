@@ -2,7 +2,7 @@
 
 import { Fragment, FormEvent, useEffect, useState } from "react";
 import axios from "axios";
-import { ChevronDown, Download, Pencil, Printer, XCircle } from "lucide-react";
+import { ChevronDown, Download, Pencil, Printer, Send, XCircle } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -18,7 +18,20 @@ type Produto = {
 type ProdutoFornecidoInfo = {
   id: string;
   nome: string;
+  referencia?: string | null;
   quantidade_por_produto: number;
+};
+
+type FornecedorEnvio = {
+  id: string;
+  nome: string;
+  vendedor_olist_id: number;
+  aplicativo_id: string;
+};
+
+type ItemConferenciaFornecedor = ItemSolicitacao & {
+  nomeProduto: string;
+  produtoFornecido: ProdutoFornecidoInfo | null;
 };
 
 type ProdutoOlistProdutoFornecedorRow = {
@@ -267,6 +280,14 @@ export default function SolicitacoesProducaoPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
+  const [envioModalOpen, setEnvioModalOpen] = useState(false);
+  const [envioEtapa, setEnvioEtapa] = useState<1 | 2>(1);
+  const [envioSolicitacao, setEnvioSolicitacao] = useState<Solicitacao | null>(null);
+  const [fornecedoresEnvio, setFornecedoresEnvio] = useState<FornecedorEnvio[]>([]);
+  const [fornecedorEnvioId, setFornecedorEnvioId] = useState("");
+  const [itensConferencia, setItensConferencia] = useState<ItemConferenciaFornecedor[]>([]);
+  const [envioCarregando, setEnvioCarregando] = useState(false);
+  const [envioErro, setEnvioErro] = useState<string | null>(null);
 
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
@@ -420,8 +441,77 @@ export default function SolicitacoesProducaoPage() {
     return salvarCache({
       id: fornecedor.id,
       nome: fornecedor.nome,
+      referencia: fornecedor.referencia,
       quantidade_por_produto: quantidadePorProduto,
     });
+  }
+
+  function fecharEnvioFornecedor() {
+    setEnvioModalOpen(false);
+    setEnvioEtapa(1);
+    setEnvioSolicitacao(null);
+    setFornecedoresEnvio([]);
+    setFornecedorEnvioId("");
+    setItensConferencia([]);
+    setEnvioErro(null);
+  }
+
+  async function abrirEnvioFornecedor(solicitacao: Solicitacao) {
+    if (!session) return;
+    setEnvioModalOpen(true);
+    setEnvioEtapa(1);
+    setEnvioSolicitacao(solicitacao);
+    setFornecedorEnvioId("");
+    setItensConferencia([]);
+    setEnvioErro(null);
+    setEnvioCarregando(true);
+
+    const { data, error } = await supabase
+      .from("fornecedores")
+      .select("id, nome, vendedor_olist_id, aplicativo_id")
+      .not("vendedor_olist_id", "is", null)
+      .not("aplicativo_id", "is", null)
+      .order("nome");
+
+    if (error) setEnvioErro(`Erro ao carregar fornecedores: ${error.message}`);
+    else setFornecedoresEnvio((data as FornecedorEnvio[]) ?? []);
+    setEnvioCarregando(false);
+  }
+
+  async function revisarProdutosFornecedor() {
+    if (!envioSolicitacao || !fornecedorEnvioId) return;
+    setEnvioCarregando(true);
+    setEnvioErro(null);
+
+    try {
+      const itens = await carregarItensSolicitacao(envioSolicitacao.id);
+      if (!itens?.length) throw new Error("A solicitação não possui produtos para conferência.");
+
+      const detalhes = await Promise.all(itens.map(async (item) => {
+        const [{ data: produtoOlistData }, produtoFornecido] = await Promise.all([
+          supabase
+            .from("produto_olist")
+            .select("titulo_final")
+            .eq("produto_id", item.produto_id)
+            .limit(1)
+            .maybeSingle(),
+          carregarProdutoFornecido(item.produto_id),
+        ]);
+
+        return {
+          ...item,
+          nomeProduto: (produtoOlistData as { titulo_final?: string } | null)?.titulo_final ?? item.sku,
+          produtoFornecido,
+        };
+      }));
+
+      setItensConferencia(detalhes);
+      setEnvioEtapa(2);
+    } catch (error) {
+      setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar conferência dos produtos.");
+    } finally {
+      setEnvioCarregando(false);
+    }
   }
 
   useEffect(() => {
@@ -1150,6 +1240,18 @@ export default function SolicitacoesProducaoPage() {
                             </button>
                           </>
                         )}
+                        {destacarDivisao && (
+                          <button
+                            type="button"
+                            onClick={() => void abrirEnvioFornecedor(solicitacao)}
+                            disabled={!session || carregandoItens || envioCarregando}
+                            className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={session ? "Enviar para o fornecedor" : "Entre no sistema para enviar"}
+                          >
+                            <Send className="h-4 w-4" aria-hidden="true" />
+                            Enviar para o Fornecedor
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
@@ -1485,6 +1587,172 @@ export default function SolicitacoesProducaoPage() {
           renderTabelaSolicitacoes(demaisSolicitacoes)
         )}
       </section>
+
+      {envioModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Enviar para o Fornecedor</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Etapa {envioEtapa} de 2 — {envioEtapa === 1 ? "Seleção do fornecedor" : "Conferência dos produtos"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fecharEnvioFornecedor}
+                disabled={envioCarregando}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-5">
+              {envioEtapa === 1 ? (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">Selecione o fornecedor</h4>
+                    <p className="mt-1 text-sm text-slate-600">
+                      São exibidos apenas fornecedores com ID do vendedor e ID do aplicativo.
+                    </p>
+                  </div>
+
+                  {envioCarregando ? (
+                    <p className="text-sm text-slate-600">Carregando fornecedores...</p>
+                  ) : fornecedoresEnvio.length === 0 ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                      Nenhum fornecedor possui os dados necessários para continuar.
+                    </p>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {fornecedoresEnvio.map((fornecedor) => {
+                        const selecionado = fornecedorEnvioId === fornecedor.id;
+                        return (
+                          <label
+                            key={fornecedor.id}
+                            className={`cursor-pointer rounded-lg border p-4 transition ${
+                              selecionado ? "border-emerald-600 bg-emerald-50" : "border-slate-200 hover:border-slate-400"
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="radio"
+                                name="fornecedor-envio"
+                                value={fornecedor.id}
+                                checked={selecionado}
+                                onChange={() => setFornecedorEnvioId(fornecedor.id)}
+                                className="mt-1"
+                              />
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-900">{fornecedor.nome}</p>
+                                <p className="mt-2 text-sm text-slate-600">ID vendedor: {fornecedor.vendedor_olist_id}</p>
+                                <p className="mt-1 break-all text-sm text-slate-600">ID aplicativo: {fornecedor.aplicativo_id}</p>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fornecedor selecionado</p>
+                    <p className="mt-1 font-semibold text-slate-900">
+                      {fornecedoresEnvio.find((fornecedor) => fornecedor.id === fornecedorEnvioId)?.nome}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold text-slate-900">Confira os produtos da solicitação</h4>
+                    <p className="mt-1 text-sm text-slate-600">Revise todas as informações antes de continuar.</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {itensConferencia.map((item) => {
+                      const quantidadeNecessaria = item.produtoFornecido
+                        ? item.quantidade_solicitada * item.produtoFornecido.quantidade_por_produto
+                        : null;
+                      return (
+                        <article key={item.id} className="rounded-lg border border-slate-200 p-4 sm:p-5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                {item.quantidade_solicitada} unidades — {item.sku}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-600">{item.nomeProduto}</p>
+                            </div>
+                            <span className={`self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                              item.tipo_corte === "LASER"
+                                ? "bg-indigo-100 text-indigo-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}>
+                              {item.tipo_corte === "LASER" ? "Corte a laser" : "Sem corte a laser"}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 border-t border-slate-200 pt-4">
+                            <p className="text-sm font-semibold text-slate-800">Produto fornecido</p>
+                            {item.produtoFornecido ? (
+                              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                                <div><dt className="text-slate-500">Referência</dt><dd className="mt-1 font-medium text-slate-800">{item.produtoFornecido.referencia ?? "-"}</dd></div>
+                                <div><dt className="text-slate-500">Quantidade necessária</dt><dd className="mt-1 font-medium text-slate-800">{formatarDecimal(quantidadeNecessaria ?? 0)} m</dd></div>
+                                <div><dt className="text-slate-500">Nome</dt><dd className="mt-1 font-medium text-slate-800">{item.produtoFornecido.nome}</dd></div>
+                              </dl>
+                            ) : (
+                              <p className="mt-2 text-sm text-slate-500">Nenhum produto fornecido relacionado.</p>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                  <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+                    Esta etapa é apenas para conferência. O envio ao fornecedor ainda não será realizado.
+                  </p>
+                </div>
+              )}
+
+              {envioErro && (
+                <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{envioErro}</p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 p-5">
+              {envioEtapa === 2 && (
+                <button
+                  type="button"
+                  onClick={() => setEnvioEtapa(1)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Voltar
+                </button>
+              )}
+              {envioEtapa === 1 ? (
+                <button
+                  type="button"
+                  onClick={() => void revisarProdutosFornecedor()}
+                  disabled={!fornecedorEnvioId || envioCarregando}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {envioCarregando ? "Carregando..." : "Revisar produtos"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={fecharEnvioFornecedor}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Fechar conferência
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </AccessGuard>
   );
