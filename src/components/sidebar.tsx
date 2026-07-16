@@ -92,6 +92,8 @@ const menuItems: MenuItem[] = [
       { label: "Contatos", href: "/olist/contatos", permissions: ["podeVisualizarOlistContatos"] },
       { label: "Pedidos", href: "/olist/pedidos", permissions: ["podeVisualizarOlistPedidos"] },
       { label: "Criar pedido", href: "/olist/pedidos/criar", permissions: ["podeCriarOlistPedido"] },
+      { label: "Formas de pagamento", href: "/olist/formas-pagamento", permissions: ["podeVisualizarOlistFormasPagamento"] },
+      { label: "Formas de recebimento", href: "/olist/formas-recebimento", permissions: ["podeVisualizarOlistFormasRecebimento"] },
       { label: "Vendedores", href: "/olist/vendedores", permissions: ["podeVisualizarOlistVendedores"] },
     ],
   },

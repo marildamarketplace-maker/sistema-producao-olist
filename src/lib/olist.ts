@@ -124,6 +124,44 @@ export type ListagemProdutosOlist = {
   };
 };
 
+export type FormaPagamentoOlist = {
+  id?: number | string;
+  nome?: string | null;
+};
+
+export type FiltrosFormasPagamentoOlist = {
+  nome?: string;
+  situacao?: 1 | 2;
+  limit: number;
+  offset: number;
+};
+
+export type ListagemFormasPagamentoOlist = {
+  itens: FormaPagamentoOlist[];
+  paginacao: {
+    limit: number;
+    offset: number;
+    total: number;
+  };
+};
+
+export type FormaRecebimentoOlist = {
+  id?: number | string;
+  nome?: string | null;
+};
+
+export type FiltrosFormasRecebimentoOlist = {
+  nome?: string;
+  situacao?: 1 | 2;
+  limit: number;
+  offset: number;
+};
+
+export type ListagemFormasRecebimentoOlist = {
+  itens: FormaRecebimentoOlist[];
+  paginacao: { limit: number; offset: number; total: number };
+};
+
 type ContatoOlistListagem = {
   id?: string | number;
   nome?: string | null;
@@ -477,6 +515,87 @@ export async function listarProdutosOlistApi(
       limit: filtros.limit,
       offset: filtros.offset,
       total: total ?? itens.length,
+    },
+  };
+}
+
+export async function listarFormasPagamentoOlistApi(
+  aplicativoId: string,
+  filtros: FiltrosFormasPagamentoOlist,
+): Promise<ListagemFormasPagamentoOlist> {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("formas-pagamento", normalizarBaseUrl(olistConfig.apiBaseUrl));
+
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  if (filtros.situacao) url.searchParams.set("situacao", String(filtros.situacao));
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+  logIntegracaoOlist({
+    endpoint: url.toString(),
+    status: response.status,
+    modulo: "formas-pagamento-listagem",
+  });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const payload = response.data as {
+    itens?: FormaPagamentoOlist[];
+    paginacao?: { limit?: number; offset?: number; total?: number };
+  };
+  return {
+    itens: Array.isArray(payload.itens) ? payload.itens : [],
+    paginacao: {
+      limit: Number(payload.paginacao?.limit ?? filtros.limit),
+      offset: Number(payload.paginacao?.offset ?? filtros.offset),
+      total: Number(payload.paginacao?.total ?? 0),
+    },
+  };
+}
+
+export async function listarFormasRecebimentoOlistApi(
+  aplicativoId: string,
+  filtros: FiltrosFormasRecebimentoOlist,
+): Promise<ListagemFormasRecebimentoOlist> {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("formas-recebimento", normalizarBaseUrl(olistConfig.apiBaseUrl));
+
+  url.searchParams.set("limit", String(filtros.limit));
+  url.searchParams.set("offset", String(filtros.offset));
+  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  if (filtros.situacao) url.searchParams.set("situacao", String(filtros.situacao));
+
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "formas-recebimento-listagem" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
+    throw new Error(`Erro Olist ${response.status}`);
+  }
+
+  const payload = response.data as {
+    itens?: FormaRecebimentoOlist[];
+    paginacao?: { limit?: number; offset?: number; total?: number };
+  };
+  return {
+    itens: Array.isArray(payload.itens) ? payload.itens : [],
+    paginacao: {
+      limit: Number(payload.paginacao?.limit ?? filtros.limit),
+      offset: Number(payload.paginacao?.offset ?? filtros.offset),
+      total: Number(payload.paginacao?.total ?? 0),
     },
   };
 }

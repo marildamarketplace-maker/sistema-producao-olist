@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 import {
   criarPedidoOlistApi,
+  listarFormasPagamentoOlistApi,
   listarContatosOlistApi,
   listarProdutosOlistApi,
   listarVendedoresOlistApi,
@@ -18,6 +19,27 @@ import {
 
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown };
 type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown; divisoes?: unknown };
+
+function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
+  const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
+    ? [0]
+    : nomePlano.split("/").map(Number);
+  if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
+    throw new Error("O plano de pagamento possui parcelas inválidas.");
+  }
+
+  const totalCentavos = Math.round(valorTotal * 100);
+  const baseCentavos = Math.floor(totalCentavos / dias.length);
+  const resto = totalCentavos - baseCentavos * dias.length;
+  return {
+    formaRecebimento: { id: formaPagamentoId },
+    parcelas: dias.map((dia, indice) => ({
+      dias: dia,
+      valor: (baseCentavos + (indice < resto ? 1 : 0)) / 100,
+      formaRecebimento: { id: formaPagamentoId },
+    })),
+  };
+}
 
 const listarProdutosCriacaoComCache = unstable_cache(
   async (aplicativoId: string, nome: string, codigo: string) => {
@@ -95,6 +117,42 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, max-age=0" } },
       );
     }
+    if (recurso === "formas-pagamento") {
+      const formas = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const resposta = await listarFormasPagamentoOlistApi(usuario.aplicativoId, {
+          limit: 100,
+          offset,
+        });
+        formas.push(...resposta.itens);
+        total = resposta.paginacao.total;
+        offset += 100;
+      } while (offset < total);
+
+      const associacoes = await prisma.formaPagamentoOlistPlano.findMany({
+        where: { aplicativoId: usuario.aplicativoId },
+        select: {
+          formaOlistId: true,
+          planoPagamento: { select: { id: true, nome: true, ativo: true } },
+        },
+      });
+      const planosPorForma = new Map<string, Array<{ id: string; nome: string }>>();
+      for (const associacao of associacoes) {
+        if (!associacao.planoPagamento.ativo) continue;
+        const planos = planosPorForma.get(associacao.formaOlistId) ?? [];
+        planos.push({ id: associacao.planoPagamento.id, nome: associacao.planoPagamento.nome });
+        planosPorForma.set(associacao.formaOlistId, planos);
+      }
+
+      return NextResponse.json({
+        itens: formas.map((forma) => ({
+          ...forma,
+          planos: planosPorForma.get(String(forma.id)) ?? [],
+        })),
+      });
+    }
     const [estampas, variantes, tiposProduto, tamanhos] = await Promise.all([
       prisma.estampa.findMany({ orderBy: { codigo: "asc" }, select: { id: true, codigo: true, descricao: true } }),
       prisma.variante.findMany({ orderBy: { codigo: "asc" }, select: { id: true, estampaId: true, codigo: true, descricao: true } }),
@@ -134,12 +192,44 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
-    const body = await request.json() as { vendedorId?: unknown; clienteId?: unknown; itens?: unknown; acao?: unknown };
+    const body = await request.json() as {
+      vendedorId?: unknown;
+      clienteId?: unknown;
+      formaPagamentoId?: unknown;
+      planoPagamentoId?: unknown;
+      tipoVenda?: unknown;
+      observacaoPedido?: unknown;
+      observacaoEntrega?: unknown;
+      itens?: unknown;
+      acao?: unknown;
+    };
     const vendedorId = Number(body.vendedorId);
     const clienteId = Number(body.clienteId);
     if (!Number.isInteger(vendedorId) || vendedorId <= 0) throw new Error("Selecione um vendedor válido.");
     if (!Number.isInteger(clienteId) || clienteId <= 0) throw new Error("Selecione um cliente válido.");
+    const formaPagamentoId = String(body.formaPagamentoId ?? "").trim();
+    const planoPagamentoId = String(body.planoPagamentoId ?? "").trim();
+    const tipoVenda = String(body.tipoVenda ?? "").trim().toLowerCase();
+    const observacaoPedido = String(body.observacaoPedido ?? "").trim();
+    const observacaoEntrega = String(body.observacaoEntrega ?? "").trim();
+    if (!/^\d+$/.test(formaPagamentoId)) throw new Error("Selecione uma forma de pagamento válida.");
+    if (!planoPagamentoId) throw new Error("Selecione um plano de pagamento.");
+    if (!["venda", "venda g", "venda pc"].includes(tipoVenda)) throw new Error("Selecione um tipo de venda válido.");
     if (!Array.isArray(body.itens) || body.itens.length === 0) throw new Error("Adicione ao menos um produto.");
+
+    const associacaoPlano = await prisma.formaPagamentoOlistPlano.findUnique({
+      where: {
+        aplicativoId_formaOlistId_planoPagamentoId: {
+          aplicativoId: usuario.aplicativoId,
+          formaOlistId: formaPagamentoId,
+          planoPagamentoId,
+        },
+      },
+      select: { planoPagamento: { select: { nome: true, ativo: true } } },
+    });
+    if (!associacaoPlano?.planoPagamento.ativo) {
+      throw new Error("O plano selecionado não está associado à forma de pagamento.");
+    }
 
     const observacoesLinhas: LinhaObservacaoPedidoOlist[] = [];
     const produtosAdicionados = new Set<number>();
@@ -164,8 +254,8 @@ export async function POST(request: Request) {
       if (divisoes.some((divisao) => !Number.isFinite(Number(divisao.quantidade)) || Number(divisao.quantidade) <= 0)) throw new Error(`Divisão do produto ${indice + 1} inválida.`);
       if (Math.abs(soma - quantidade) > 0.0001) throw new Error(`As divisões do produto ${indice + 1} somam ${soma}, mas a quantidade é ${quantidade}.`);
       for (const divisao of divisoes) {
-        const estampa = String(divisao.estampa ?? "").trim() || "Sem estampa";
-        const variante = String(divisao.variante ?? "").trim() || "Sem variante";
+        const estampa = String(divisao.estampa ?? "").trim();
+        const variante = String(divisao.variante ?? "").trim();
         const tipoDivisao = String(divisao.tipo ?? produtoTipo).trim();
         const tamanhoDivisao = String(divisao.tamanho ?? produtoTamanho).trim();
         const laserDivisao = divisao.laser === undefined
@@ -203,12 +293,27 @@ export async function POST(request: Request) {
       };
     });
 
+    const observacoesProdutos = criarObservacoesPedidoOlist(observacoesLinhas);
+    const identificacaoTipoVenda = `Tipo de venda: ${tipoVenda}`;
+    const observacoes = [
+      identificacaoTipoVenda,
+      observacaoPedido ? `Observação do pedido: ${observacaoPedido}` : "",
+      observacaoEntrega ? `Observação de entrega: ${observacaoEntrega}` : "",
+    ].filter(Boolean).join("\n\n");
+    const observacoesInternas = observacoesProdutos;
+
     const pedido = {
       idContato: clienteId,
       vendedor: { id: vendedorId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
-      observacoes: criarObservacoesPedidoOlist(observacoesLinhas),
+      observacoes,
+      observacoesInternas,
+      pagamento: criarPagamentoPedido(
+        Number(formaPagamentoId),
+        associacaoPlano.planoPagamento.nome,
+        itens.reduce((total, item) => total + item.quantidade * (item.valorUnitario ?? 0), 0),
+      ),
       itens,
     };
 

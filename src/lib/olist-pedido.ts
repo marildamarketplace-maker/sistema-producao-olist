@@ -68,12 +68,23 @@ export function criarInfoAdicionalOlist(
 }
 
 export function criarLinhaObservacaoPedidoOlist(linha: LinhaObservacaoPedidoOlist) {
-  const base = `${String(linha.descricao ?? "").trim()}     |     ` +
-    `${String(linha.tipo ?? "").trim()}     |     ` +
-    `${String(linha.quantidade ?? "").trim()} ${String(linha.unidade ?? "").trim()}     |     ` +
-    `${String(linha.tamanho ?? "").trim()}     |     ` +
-    `${String(linha.estampa ?? "").trim()}-${String(linha.variante ?? "").trim()}`;
-  return valorBooleano(linha.laser) ? `${base}     |     CORTE LASER` : base;
+  const estampa = String(linha.estampa ?? "").trim();
+  const variante = String(linha.variante ?? "").trim();
+  const estampaVariante = [estampa, variante].filter(Boolean).join("-");
+  const quantidadeUnidade = [
+    String(linha.quantidade ?? "").trim(),
+    String(linha.unidade ?? "").trim(),
+  ].filter(Boolean).join(" ");
+  const partes = [
+    String(linha.descricao ?? "").trim(),
+    String(linha.tipo ?? "").trim(),
+    quantidadeUnidade,
+    String(linha.tamanho ?? "").trim(),
+    estampaVariante,
+    valorBooleano(linha.laser) ? "CORTE LASER" : "",
+  ].filter(Boolean);
+
+  return partes.join("     |     ");
 }
 
 export function criarObservacoesPedidoOlist(linhas: LinhaObservacaoPedidoOlist[]) {

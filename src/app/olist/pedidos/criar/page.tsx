@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
-import { CampoTipoProduto, type TipoProdutoOpcao } from "@/components/campo-tipo-produto";
-import { CampoTamanho, type TamanhoOpcao } from "@/components/campo-tamanho";
+import type { TipoProdutoOpcao } from "@/components/campo-tipo-produto";
+import type { TamanhoOpcao } from "@/components/campo-tamanho";
 import { Switch } from "@/components/switch";
 import { extrairTamanhoSku, extrairTipoProdutoSku } from "@/lib/olist-pedido";
 
@@ -15,6 +15,9 @@ type Cliente = { id?: number; nome?: string | null; fantasia?: string | null; co
 type Produto = { id?: number; sku?: string; descricao?: string; unidade?: string; precos?: { preco?: number | string | null; precoPromocional?: number | string | null } | null };
 type Estampa = { id: string; codigo: string; descricao: string | null };
 type Variante = { id: string; estampaId: string | null; codigo: string; descricao: string | null };
+type PlanoPagamento = { id: string; nome: string };
+type FormaPagamento = { id?: number | string; nome?: string | null; planos: PlanoPagamento[] };
+type TipoVenda = "venda" | "venda g" | "venda pc";
 type Divisao = {
   id: string;
   quantidade: string;
@@ -44,6 +47,11 @@ type PedidoPreview = {
   situacao: number;
   data: string;
   observacoes: string;
+  observacoesInternas: string;
+  pagamento: {
+    formaRecebimento: { id: number };
+    parcelas: Array<{ dias: number; valor: number; formaRecebimento: { id: number } }>;
+  };
   itens: Array<{
     produto: { id: number; tipo: string };
     quantidade: number;
@@ -112,12 +120,22 @@ function ListaClientes({ clientes, clienteId, carregando, onSelect }: { clientes
   return <div className="mt-4"><div className="space-y-2 sm:hidden">{clientes.map((cliente) => { const id = String(cliente.id ?? ""); const selecionado = clienteId === id; return <button key={id} type="button" onClick={() => onSelect(id)} className={`w-full rounded-lg border p-4 text-left ${selecionado ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white"}`}><div className="flex items-start gap-3"><input type="radio" name="cliente-mobile" checked={selecionado} onChange={() => onSelect(id)} className="mt-1" /><div className="min-w-0"><p className="font-medium text-slate-900">{cliente.nome ?? cliente.fantasia ?? "Cliente"}</p><p className="mt-1 text-sm text-slate-600">Código: {cliente.codigo ?? "—"}</p><p className="mt-1 text-sm text-slate-600">CNPJ: {cliente.cpfCnpj ?? "—"}</p></div></div></button>; })}</div><div className="hidden max-h-[28rem] overflow-auto rounded-md border border-slate-200 sm:block"><table className="min-w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="w-12 px-4 py-3">Sel.</th><th className="px-4 py-3">Cliente</th><th className="px-4 py-3">Código</th><th className="px-4 py-3">CNPJ</th></tr></thead><tbody className="divide-y divide-slate-100">{clientes.map((cliente) => { const id = String(cliente.id ?? ""); const selecionado = clienteId === id; return <tr key={id} onClick={() => onSelect(id)} className={`cursor-pointer ${selecionado ? "bg-emerald-50" : "hover:bg-slate-50"}`}><td className="px-4 py-3"><input type="radio" name="cliente" checked={selecionado} onChange={() => onSelect(id)} /></td><td className="min-w-52 px-4 py-3 font-medium text-slate-900">{cliente.nome ?? cliente.fantasia ?? "Cliente"}</td><td className="px-4 py-3 text-slate-600">{cliente.codigo ?? "—"}</td><td className="whitespace-nowrap px-4 py-3 text-slate-600">{cliente.cpfCnpj ?? "—"}</td></tr>; })}</tbody></table></div></div>;
 }
 
+function ResumoCampo({ titulo, valor }: { titulo: string; valor: string }) {
+  return <div className="rounded-md bg-slate-50 px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{titulo}</p><p className="mt-1 whitespace-pre-wrap text-sm font-medium text-slate-900">{valor}</p></div>;
+}
+
 function CriarPedidoOlistPage() {
   const { session } = useAuth();
   const [etapa, setEtapa] = useState(1);
   const [dados, setDados] = useState<Dados>({ vendedores: [], clientes: [], produtos: [], estampas: [], variantes: [], tiposProduto: [], tamanhos: [] });
   const [vendedorId, setVendedorId] = useState("");
   const [clienteId, setClienteId] = useState("");
+  const [formasPagamento, setFormasPagamento] = useState<FormaPagamento[]>([]);
+  const [formaPagamentoId, setFormaPagamentoId] = useState("");
+  const [planoPagamentoId, setPlanoPagamentoId] = useState("");
+  const [tipoVenda, setTipoVenda] = useState<TipoVenda | "">("");
+  const [observacaoPedido, setObservacaoPedido] = useState("");
+  const [observacaoEntrega, setObservacaoEntrega] = useState("");
   const [produtoId, setProdutoId] = useState("");
   const [produtoBuscaAberta, setProdutoBuscaAberta] = useState(false);
   const [quantidadeNova, setQuantidadeNova] = useState("1");
@@ -134,6 +152,13 @@ function CriarPedidoOlistPage() {
   const [sucesso, setSucesso] = useState<{ id?: number; numeroPedido?: string } | null>(null);
   const clientesCarregados = useRef("");
   const produtosCarregados = useRef(false);
+  const formasPagamentoCarregadas = useRef(false);
+  const etapasRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    const etapaAtiva = etapasRef.current?.querySelector<HTMLElement>(`[data-etapa="${etapa}"]`);
+    etapaAtiva?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [etapa]);
 
   const carregar = useCallback(async () => {
     if (!session?.access_token) return;
@@ -173,7 +198,25 @@ function CriarPedidoOlistPage() {
   }, [etapa, session?.access_token, vendedorId]);
 
   useEffect(() => {
-    if (etapa !== 3 || !session?.access_token || produtosCarregados.current) return;
+    if (etapa !== 3 || !session?.access_token || formasPagamentoCarregadas.current) return;
+    formasPagamentoCarregadas.current = true;
+    setBuscando(true); setErro(null);
+    const params = new URLSearchParams({ recurso: "formas-pagamento" });
+    void fetch(`/api/olist/pedidos/criar?${params}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
+      .then(async (response) => {
+        const json = await response.json() as { itens?: FormaPagamento[]; error?: string };
+        if (!response.ok) throw new Error(json.error ?? "Não foi possível carregar as formas de pagamento.");
+        setFormasPagamento(json.itens ?? []);
+      })
+      .catch((error) => {
+        formasPagamentoCarregadas.current = false;
+        setErro(error instanceof Error ? error.message : "Erro ao carregar formas de pagamento.");
+      })
+      .finally(() => setBuscando(false));
+  }, [etapa, session?.access_token]);
+
+  useEffect(() => {
+    if (etapa !== 4 || !session?.access_token || produtosCarregados.current) return;
     produtosCarregados.current = true;
     setBuscando(true); setErro(null);
     const params = new URLSearchParams({ recurso: "produtos" });
@@ -289,6 +332,11 @@ function CriarPedidoOlistPage() {
     return {
       acao,
       vendedorId: Number(vendedorId), clienteId: Number(clienteId),
+      formaPagamentoId,
+      planoPagamentoId,
+      tipoVenda,
+      observacaoPedido,
+      observacaoEntrega,
       itens: itens.map((item) => ({
         produtoId: item.produto.id, produtoCodigo: item.produto.sku, produtoDescricao: item.produto.descricao,
         produtoUnidade: item.produto.unidade, quantidade: numero(item.quantidade),
@@ -308,6 +356,10 @@ function CriarPedidoOlistPage() {
 
   async function abrirConfirmacao(event: FormEvent) {
     event.preventDefault();
+    await prepararResumo();
+  }
+
+  async function prepararResumo() {
     const validacao = validarItens();
     if (validacao) { setErro(validacao); return; }
     if (!session?.access_token) { setErro("Sessão expirada."); return; }
@@ -320,9 +372,36 @@ function CriarPedidoOlistPage() {
       const json = await response.json() as { pedido?: PedidoPreview; error?: string };
       if (!response.ok || !json.pedido) throw new Error(json.error ?? "Não foi possível preparar a confirmação.");
       setPedidoPreview(json.pedido);
-      setConfirmacaoAberta(true);
+      setConfirmacaoAberta(false);
+      setEtapa(6);
     } catch (error) { setErro(error instanceof Error ? error.message : "Erro inesperado."); }
     finally { setPreparandoConfirmacao(false); }
+  }
+
+  function avancarParaObservacoes() {
+    const validacao = validarItens();
+    if (validacao) { setErro(validacao); return; }
+    setErro(null);
+    setEtapa(5);
+  }
+
+  function navegarParaEtapa(destino: number) {
+    if (destino >= 2 && !vendedorId) { setErro("Selecione o vendedor antes de avançar."); return; }
+    if (destino >= 3 && !clienteId) { setErro("Selecione o cliente antes de avançar."); return; }
+    if (destino >= 4 && (!formaPagamentoId || !planoPagamentoId || !tipoVenda)) {
+      setErro("Selecione a forma, o plano de pagamento e o tipo de venda antes de avançar.");
+      return;
+    }
+    if (destino >= 5) {
+      const validacao = validarItens();
+      if (validacao) { setErro(validacao); return; }
+    }
+    if (destino === 6) {
+      void prepararResumo();
+      return;
+    }
+    setErro(null);
+    setEtapa(destino);
   }
 
   async function criarPedido() {
@@ -360,12 +439,21 @@ function CriarPedidoOlistPage() {
       .some((valor) => String(valor ?? "").toLocaleLowerCase("pt-BR").includes(termoProduto));
   });
   const produtosSugeridos = produtosFiltrados.slice(0, 100);
+  const formaPagamentoSelecionada = formasPagamento.find((forma) => String(forma.id) === formaPagamentoId);
+  const planosPagamento = formaPagamentoSelecionada?.planos ?? [];
+  const vendedorSelecionado = dados.vendedores.find((vendedor) => String(vendedor.id) === vendedorId);
+  const clienteSelecionado = dados.clientes.find((cliente) => String(cliente.id) === clienteId);
 
   if (carregando) return <div className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6 text-sm text-slate-600">Carregando vendedores, clientes e produtos...</div>;
 
   return <div className="space-y-6">
     <PageHeader title="Criar pedido Olist" description="Selecione vendedor, cliente e distribua os produtos entre estampas e variantes." />
-    <ol className="grid grid-cols-3 gap-1.5 sm:gap-2">{["Vendedor", "Cliente", "Produtos"].map((nome, indice) => <li key={nome} className={`flex min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-1 py-2.5 font-medium sm:justify-start sm:gap-1.5 sm:px-4 sm:py-3 sm:text-sm ${etapa === indice + 1 ? "border-slate-900 bg-slate-900 text-white" : etapa > indice + 1 ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}`}><span className="text-xs font-bold sm:text-sm">{indice + 1}.</span><span className="truncate text-[10px] sm:text-sm">{nome}</span></li>)}</ol>
+    <ol ref={etapasRef} className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-2 sm:grid sm:grid-cols-6 sm:overflow-visible sm:pb-0">
+      {["Vendedor", "Cliente", "Formas de pagamento", "Produtos", "Observações", "Resumo"].map((nome, indice) => {
+        const numeroEtapa = indice + 1;
+        return <li key={nome} className="min-w-[9rem] snap-start sm:min-w-0"><button type="button" data-etapa={numeroEtapa} onClick={() => navegarParaEtapa(numeroEtapa)} aria-current={etapa === numeroEtapa ? "step" : undefined} className={`flex w-full min-w-0 items-center justify-start gap-1.5 whitespace-nowrap rounded-lg border px-3 py-2.5 font-medium transition hover:border-slate-400 sm:px-3 sm:py-3 sm:text-sm ${etapa === numeroEtapa ? "border-slate-900 bg-slate-900 text-white" : etapa > numeroEtapa ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}`}><span className="text-xs font-bold sm:text-sm">{numeroEtapa}.</span><span className="truncate text-xs sm:text-sm">{nome}</span></button></li>;
+      })}
+    </ol>
     {erro && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{erro}</div>}
     {sucesso && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5 text-emerald-800"><p className="font-semibold">Pedido criado com sucesso.</p><p className="mt-1 text-sm">Pedido {sucesso.numeroPedido ?? sucesso.id ?? "criado"}.</p><Link href="/olist/pedidos" className="mt-3 inline-block text-sm font-medium underline">Voltar para pedidos</Link></div>}
 
@@ -373,11 +461,17 @@ function CriarPedidoOlistPage() {
 
     {!sucesso && etapa === 2 && <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Selecione o cliente</h3><input placeholder="Filtrar por nome, código ou CPF/CNPJ" value={buscas.cliente} onChange={(e) => setBuscas({ ...buscas, cliente: e.target.value })} className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2" /><p className="mt-2 text-xs text-slate-500">{buscando ? "Carregando todos os clientes do vendedor..." : `${clientesFiltrados.length} de ${dados.clientes.length} clientes`}</p><ListaClientes clientes={clientesFiltrados} clienteId={clienteId} carregando={buscando} onSelect={setClienteId} /><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button onClick={() => setEtapa(1)} className="w-full rounded-md border border-slate-300 px-5 py-2 text-sm sm:w-auto">Voltar</button><button disabled={!clienteId} onClick={() => setEtapa(3)} className="w-full rounded-md bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">Continuar</button></div></section>}
 
-    {!sucesso && etapa === 3 && <form onSubmit={abrirConfirmacao} className="space-y-4 pb-24 sm:space-y-5 sm:pb-0"><section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-900">Adicionar produto</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{itens.length} no pedido</span></div><div className="mt-4 grid grid-cols-[minmax(0,3fr)_minmax(72px,1fr)] gap-3 md:grid-cols-[1fr_180px_auto] md:items-end"><label className="relative min-w-0 text-sm text-slate-700">Produto<input placeholder="Busque por nome ou SKU" value={buscas.produto} onChange={(e) => { setBuscas({ ...buscas, produto: e.target.value }); setProdutoId(""); setProdutoBuscaAberta(true); }} onFocus={() => setProdutoBuscaAberta(true)} onBlur={() => window.setTimeout(() => setProdutoBuscaAberta(false), 150)} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" />{produtoBuscaAberta && <div className="absolute z-30 mt-1 max-h-[50vh] w-full overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white shadow-xl">{buscando ? <div className="px-3 py-4 text-sm text-slate-500">Carregando produtos...</div> : produtosSugeridos.length > 0 ? produtosSugeridos.map((produto) => <button key={produto.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setProdutoId(String(produto.id ?? "")); setBuscas({ ...buscas, produto: `${produto.sku ?? ""} — ${produto.descricao ?? ""}` }); setProdutoBuscaAberta(false); }} className="block min-h-14 w-full border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50"><span className="block text-sm font-semibold text-slate-900">{produto.sku ?? produto.id}</span><span className="mt-0.5 block line-clamp-2 text-xs text-slate-500">{produto.descricao ?? "Sem descrição"} · {produto.unidade ?? "Sem unidade"}</span></button>) : <div className="px-3 py-4 text-sm text-slate-500">Nenhum produto encontrado.</div>}</div>}</label><label className="text-sm text-slate-700">Qtd.<input aria-label="Quantidade do novo produto" type="number" min="1" step="0.01" inputMode="decimal" value={quantidadeNova} onChange={(e) => setQuantidadeNova(e.target.value)} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><button type="button" disabled={!produtoId} onClick={adicionarProduto} className="col-span-2 min-h-11 w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 md:col-span-1 md:w-auto">Adicionar</button></div><p className="mt-2 text-xs text-slate-500">{produtosFiltrados.length} de {dados.produtos.length} produtos disponíveis{produtosFiltrados.length > 100 ? " · refine a busca para ver resultados mais específicos" : ""}</p></section>
-      {itens.map((item) => <section key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h4 className="truncate font-semibold text-slate-900">{item.produto.sku}</h4><p className="mt-1 line-clamp-2 text-sm text-slate-500">{item.produto.descricao}</p></div><button type="button" onClick={() => setItens((atuais) => atuais.filter((atual) => atual.id !== item.id))} className="shrink-0 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-600">Remover</button></div><div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4"><label className="text-sm text-slate-700">Quantidade<input type="number" min="1" step="0.01" inputMode="decimal" value={item.quantidade} onChange={(e) => atualizarItem(item.id, { quantidade: e.target.value })} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><label className="text-sm text-slate-700">Valor unitário<input type="text" inputMode="numeric" value={item.valorUnitario} onChange={(e) => atualizarItem(item.id, { valorUnitario: formatarValorCentavos(e.target.value) })} onFocus={(e) => e.currentTarget.select()} aria-label="Valor unitário em reais" className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-right tabular-nums" /></label></div>{produtoSublime(item.produto) && <div className="mt-5 border-t border-slate-100 pt-4"><div><h5 className="text-sm font-semibold text-slate-800">Divisão por estampa</h5></div><div className="mt-3 space-y-3">{item.divisoes.map((divisao) => { const variantes = dados.variantes.filter((variante) => variante.estampaId === divisao.estampaId); return <div key={divisao.id} className="rounded-md bg-slate-50 p-3"><div className="grid gap-3 md:grid-cols-4"><label className="text-sm text-slate-700">Quantidade da divisão<input type="number" min="0.01" step="0.01" inputMode="decimal" value={divisao.quantidade} onChange={(e) => atualizarDivisao(item.id, divisao.id, { quantidade: e.target.value })} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><div><label className="mb-1 block text-sm text-slate-700">Estampa</label><CampoCodigo rotulo="Estampa" placeholder="Código da estampa" opcoes={dados.estampas} codigo={divisao.estampaCodigo} onChange={(estampaId, estampaCodigo) => atualizarDivisao(item.id, divisao.id, { estampaId, estampaCodigo, varianteId: "", varianteCodigo: "" })} /></div><div><label className="mb-1 block text-sm text-slate-700">Variante</label><CampoCodigo rotulo="Variante" placeholder="Código da variante" opcoes={variantes} codigo={divisao.varianteCodigo} onChange={(varianteId, varianteCodigo) => atualizarDivisao(item.id, divisao.id, { varianteId, varianteCodigo })} /></div><label className="text-sm text-slate-700">Tipo do produto (TIPO)<div className="mt-1"><CampoTipoProduto opcoes={dados.tiposProduto} valor={divisao.tipo} onChange={(tipo) => atualizarDivisao(item.id, divisao.id, { tipo })} /></div></label><label className="text-sm text-slate-700">Tamanho (TAM)<div className="mt-1"><CampoTamanho opcoes={dados.tamanhos} valor={divisao.tamanho} onChange={(tamanho) => atualizarDivisao(item.id, divisao.id, { tamanho })} /></div></label><div className="flex items-end"><div className="flex min-h-11 items-center gap-3"><Switch checked={divisao.laser} onCheckedChange={(laser) => atualizarDivisao(item.id, divisao.id, { laser })} label="Corte a laser" /><span className="text-sm text-slate-700">Corte a laser</span></div></div><div className="flex items-end md:col-span-2"><button type="button" disabled={item.divisoes.length === 1} onClick={() => atualizarItem(item.id, { divisoes: item.divisoes.filter((atual) => atual.id !== divisao.id) })} className="min-h-11 rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 disabled:opacity-30">Excluir divisão</button></div></div></div>; })}<div className="flex justify-end"><button type="button" onClick={() => atualizarItem(item.id, { divisoes: [...item.divisoes, { id: novoId(), quantidade: "1", estampaId: "", estampaCodigo: "", varianteId: "", varianteCodigo: "", tipo: item.tipo, tamanho: item.tamanho, laser: item.laser }] })} className="min-h-11 rounded-md border border-dashed border-blue-300 px-4 py-2 text-sm font-medium text-blue-700">+ Adicionar divisão</button></div></div><p className={`mt-2 rounded-md px-3 py-2 text-xs font-medium ${divisaoValida(item) ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>Total dividido: {item.divisoes.reduce((total, divisao) => total + (numero(divisao.quantidade) || 0), 0)} de {item.quantidade}</p></div>}</section>)}
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button type="button" onClick={() => setEtapa(2)} className="w-full rounded-md border border-slate-300 px-5 py-2.5 text-sm sm:w-auto">Voltar</button><button disabled={preparandoConfirmacao || !itensValidos} className="hidden rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:block">{preparandoConfirmacao ? "Preparando confirmação..." : "Criar pedido na Olist"}</button></div>
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:hidden"><div className="mx-auto flex max-w-lg items-center gap-3"><div className="min-w-0 flex-1"><p className="text-xs text-slate-500">{itens.length} {itens.length === 1 ? "produto" : "produtos"}</p><p className="truncate text-sm font-semibold text-slate-900">{totalPedidoFormatado}</p></div><button disabled={preparandoConfirmacao || !itensValidos} className="min-h-11 rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50">{preparandoConfirmacao ? "Preparando..." : "Criar pedido"}</button></div></div>
+    {!sucesso && etapa === 3 && <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Formas de pagamento</h3><p className="mt-1 text-sm text-slate-500">Defina a forma, o plano de pagamento e o tipo da venda.</p><div className="mt-5 grid gap-4 md:grid-cols-3"><label className="text-sm font-medium text-slate-700">Forma de pagamento<select value={formaPagamentoId} onChange={(event) => { setFormaPagamentoId(event.target.value); setPlanoPagamentoId(""); }} disabled={buscando} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"><option value="">Selecione</option>{formasPagamento.map((forma) => <option key={String(forma.id)} value={String(forma.id)}>{forma.nome ?? forma.id}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Plano de pagamento<select value={planoPagamentoId} onChange={(event) => setPlanoPagamentoId(event.target.value)} disabled={!formaPagamentoId} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"><option value="">Selecione</option>{planosPagamento.map((plano) => <option key={plano.id} value={plano.id}>{plano.nome}</option>)}</select>{formaPagamentoId && planosPagamento.length === 0 && <span className="mt-1 block text-xs text-amber-700">Esta forma não possui planos associados.</span>}</label><label className="text-sm font-medium text-slate-700">Tipo de venda<select value={tipoVenda} onChange={(event) => setTipoVenda(event.target.value as TipoVenda | "")} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2"><option value="">Selecione</option><option value="venda">Venda</option><option value="venda g">Venda G</option><option value="venda pc">Venda PC</option></select></label></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button type="button" onClick={() => setEtapa(2)} className="w-full rounded-md border border-slate-300 px-5 py-2 text-sm sm:w-auto">Voltar</button><button type="button" disabled={!formaPagamentoId || !planoPagamentoId || !tipoVenda} onClick={() => setEtapa(4)} className="w-full rounded-md bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">Continuar</button></div></section>}
+
+    {!sucesso && etapa === 4 && <form onSubmit={(event) => { event.preventDefault(); avancarParaObservacoes(); }} className="space-y-4 pb-24 sm:space-y-5 sm:pb-0"><section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-900">Adicionar produto</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{itens.length} no pedido</span></div><div className="mt-4 grid grid-cols-[minmax(0,3fr)_minmax(72px,1fr)] gap-3 md:grid-cols-[1fr_180px_auto] md:items-end"><label className="relative min-w-0 text-sm text-slate-700">Produto<input placeholder="Busque por nome ou SKU" value={buscas.produto} onChange={(e) => { setBuscas({ ...buscas, produto: e.target.value }); setProdutoId(""); setProdutoBuscaAberta(true); }} onFocus={() => setProdutoBuscaAberta(true)} onBlur={() => window.setTimeout(() => setProdutoBuscaAberta(false), 150)} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" />{produtoBuscaAberta && <div className="absolute z-30 mt-1 max-h-[50vh] w-full overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white shadow-xl">{buscando ? <div className="px-3 py-4 text-sm text-slate-500">Carregando produtos...</div> : produtosSugeridos.length > 0 ? produtosSugeridos.map((produto) => <button key={produto.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setProdutoId(String(produto.id ?? "")); setBuscas({ ...buscas, produto: `${produto.sku ?? ""} — ${produto.descricao ?? ""}` }); setProdutoBuscaAberta(false); }} className="block min-h-14 w-full border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50"><span className="block text-sm font-semibold text-slate-900">{produto.sku ?? produto.id}</span><span className="mt-0.5 block line-clamp-2 text-xs text-slate-500">{produto.descricao ?? "Sem descrição"} · {produto.unidade ?? "Sem unidade"}</span></button>) : <div className="px-3 py-4 text-sm text-slate-500">Nenhum produto encontrado.</div>}</div>}</label><label className="text-sm text-slate-700">Qtd.<input aria-label="Quantidade do novo produto" type="number" min="1" step="0.01" inputMode="decimal" value={quantidadeNova} onChange={(e) => setQuantidadeNova(e.target.value)} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><button type="button" disabled={!produtoId} onClick={adicionarProduto} className="col-span-2 min-h-11 w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 md:col-span-1 md:w-auto">Adicionar</button></div><p className="mt-2 text-xs text-slate-500">{produtosFiltrados.length} de {dados.produtos.length} produtos disponíveis{produtosFiltrados.length > 100 ? " · refine a busca para ver resultados mais específicos" : ""}</p></section>
+      {itens.map((item) => <section key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h4 className="truncate font-semibold text-slate-900">{item.produto.sku}</h4><p className="mt-1 line-clamp-2 text-sm text-slate-500">{item.produto.descricao}</p></div><button type="button" onClick={() => setItens((atuais) => atuais.filter((atual) => atual.id !== item.id))} className="shrink-0 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-600">Remover</button></div><div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4"><label className="text-sm text-slate-700">Quantidade<input type="number" min="1" step="0.01" inputMode="decimal" value={item.quantidade} onChange={(e) => atualizarItem(item.id, { quantidade: e.target.value })} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><label className="text-sm text-slate-700">Valor unitário<input type="text" inputMode="numeric" value={item.valorUnitario} onChange={(e) => atualizarItem(item.id, { valorUnitario: formatarValorCentavos(e.target.value) })} onFocus={(e) => e.currentTarget.select()} aria-label="Valor unitário em reais" className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-right tabular-nums" /></label></div>{produtoSublime(item.produto) && <div className="mt-5 border-t border-slate-100 pt-4"><div><h5 className="text-sm font-semibold text-slate-800">Divisão por estampa</h5></div><div className="mt-3 space-y-3">{item.divisoes.map((divisao) => { const variantes = dados.variantes.filter((variante) => variante.estampaId === divisao.estampaId); return <div key={divisao.id} className="rounded-md bg-slate-50 p-3"><div className="grid gap-3 md:grid-cols-4"><label className="text-sm text-slate-700">Quantidade da divisão<input type="number" min="0.01" step="0.01" inputMode="decimal" value={divisao.quantidade} onChange={(e) => atualizarDivisao(item.id, divisao.id, { quantidade: e.target.value })} className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2" /></label><div><label className="mb-1 block text-sm text-slate-700">Estampa</label><CampoCodigo rotulo="Estampa" placeholder="Código da estampa" opcoes={dados.estampas} codigo={divisao.estampaCodigo} onChange={(estampaId, estampaCodigo) => atualizarDivisao(item.id, divisao.id, { estampaId, estampaCodigo, varianteId: "", varianteCodigo: "" })} /></div><div><label className="mb-1 block text-sm text-slate-700">Variante</label><CampoCodigo rotulo="Variante" placeholder="Código da variante" opcoes={variantes} codigo={divisao.varianteCodigo} onChange={(varianteId, varianteCodigo) => atualizarDivisao(item.id, divisao.id, { varianteId, varianteCodigo })} /></div><div className="flex items-end md:col-span-2"><button type="button" disabled={item.divisoes.length === 1} onClick={() => atualizarItem(item.id, { divisoes: item.divisoes.filter((atual) => atual.id !== divisao.id) })} className="min-h-11 rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 disabled:opacity-30">Excluir divisão</button></div></div></div>; })}<div className="flex justify-end"><button type="button" onClick={() => atualizarItem(item.id, { divisoes: [...item.divisoes, { id: novoId(), quantidade: "1", estampaId: "", estampaCodigo: "", varianteId: "", varianteCodigo: "", tipo: item.tipo, tamanho: item.tamanho, laser: item.laser }] })} className="min-h-11 rounded-md border border-dashed border-blue-300 px-4 py-2 text-sm font-medium text-blue-700">+ Adicionar divisão</button></div></div><p className={`mt-2 rounded-md px-3 py-2 text-xs font-medium ${divisaoValida(item) ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>Total dividido: {item.divisoes.reduce((total, divisao) => total + (numero(divisao.quantidade) || 0), 0)} de {item.quantidade}</p></div>}</section>)}
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button type="button" onClick={() => setEtapa(3)} className="w-full rounded-md border border-slate-300 px-5 py-2.5 text-sm sm:w-auto">Voltar</button><button disabled={!itensValidos} className="hidden rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:block">Continuar</button></div>
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:hidden"><div className="mx-auto flex max-w-lg items-center gap-3"><div className="min-w-0 flex-1"><p className="text-xs text-slate-500">{itens.length} {itens.length === 1 ? "produto" : "produtos"}</p><p className="truncate text-sm font-semibold text-slate-900">{totalPedidoFormatado}</p></div><button disabled={!itensValidos} className="min-h-11 rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50">Continuar</button></div></div>
     </form>}
+
+    {!sucesso && etapa === 5 && <form onSubmit={abrirConfirmacao} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Observações</h3><p className="mt-1 text-sm text-slate-500">Informe observações adicionais para o pedido e para a entrega.</p><div className="mt-5 grid gap-5 md:grid-cols-2"><label className="text-sm font-medium text-slate-700">Observação do pedido<textarea value={observacaoPedido} onChange={(event) => setObservacaoPedido(event.target.value)} placeholder="Digite uma observação para o pedido" className="mt-1 min-h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-normal" /></label><label className="text-sm font-medium text-slate-700">Observação de entrega<textarea value={observacaoEntrega} onChange={(event) => setObservacaoEntrega(event.target.value)} placeholder="Digite uma observação para a entrega" className="mt-1 min-h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-normal" /></label></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button type="button" onClick={() => setEtapa(4)} className="w-full rounded-md border border-slate-300 px-5 py-2.5 text-sm sm:w-auto">Voltar</button><button disabled={preparandoConfirmacao} className="w-full rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">{preparandoConfirmacao ? "Preparando confirmação..." : "Revisar pedido"}</button></div></form>}
+
+    {!sucesso && etapa === 6 && pedidoPreview && <div className="space-y-5"><section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-lg font-semibold text-slate-900">Resumo do pedido</h3><p className="mt-1 text-sm text-slate-500">Confira todas as informações antes de criar o pedido na Olist.</p></div><p className="text-xl font-bold text-emerald-700">{totalPedidoFormatado}</p></div><div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><ResumoCampo titulo="Vendedor" valor={vendedorSelecionado?.contato?.nome ?? `ID ${vendedorId}`} /><ResumoCampo titulo="Cliente" valor={clienteSelecionado?.nome ?? clienteSelecionado?.fantasia ?? `ID ${clienteId}`} /><ResumoCampo titulo="Forma de pagamento" valor={formaPagamentoSelecionada?.nome ?? formaPagamentoId} /><ResumoCampo titulo="Plano de pagamento" valor={planosPagamento.find((plano) => plano.id === planoPagamentoId)?.nome ?? planoPagamentoId} /><ResumoCampo titulo="Tipo de venda" valor={tipoVenda} /><ResumoCampo titulo="Quantidade de produtos" valor={String(itens.length)} /></div></section><section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h4 className="font-semibold text-slate-900">Produtos</h4><div className="mt-4 space-y-3">{itens.map((item) => <div key={item.id} className="rounded-md border border-slate-200 p-4"><div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium text-slate-900">{item.produto.sku} — {item.produto.descricao}</p><p className="mt-1 text-sm text-slate-600">Quantidade: {item.quantidade} · Valor unitário: R$ {item.valorUnitario}</p></div><p className="font-semibold text-slate-800">{((numero(item.quantidade) || 0) * (numero(item.valorUnitario) || 0)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>{item.divisoes.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{item.divisoes.map((divisao) => <span key={divisao.id} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">{divisao.quantidade} {divisao.laser ? "UN" : "MT"}{divisao.estampaCodigo ? ` · ${divisao.estampaCodigo}${divisao.varianteCodigo ? `-${divisao.varianteCodigo}` : ""}` : ""}</span>)}</div>}</div>)}</div></section><section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h4 className="font-semibold text-slate-900">Observações</h4><div className="mt-4 grid gap-4 md:grid-cols-2"><ResumoCampo titulo="Observação do pedido" valor={observacaoPedido || "Nenhuma"} /><ResumoCampo titulo="Observação de entrega" valor={observacaoEntrega || "Nenhuma"} /></div></section><div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button type="button" disabled={enviando} onClick={() => setEtapa(5)} className="rounded-md border border-slate-300 px-5 py-2.5 text-sm">Voltar</button><button type="button" disabled={enviando} onClick={() => void criarPedido()} className="rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50">{enviando ? "Criando pedido..." : "Confirmar e criar pedido na Olist"}</button></div></div>}
 
     {confirmacaoAberta && pedidoPreview && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
@@ -394,8 +488,13 @@ function CriarPedidoOlistPage() {
                 <label className="text-sm text-slate-700">ID do vendedor<input disabled value={pedidoPreview.vendedor.id} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
                 <label className="text-sm text-slate-700">Situação<input disabled value={pedidoPreview.situacao} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
                 <label className="text-sm text-slate-700">Data<input disabled value={pedidoPreview.data} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
+                <label className="text-sm text-slate-700">Forma de pagamento<input disabled value={formaPagamentoSelecionada?.nome ?? formaPagamentoId} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
+                <label className="text-sm text-slate-700">Plano de pagamento<input disabled value={planosPagamento.find((plano) => plano.id === planoPagamentoId)?.nome ?? planoPagamentoId} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
+                <label className="text-sm text-slate-700">Tipo de venda<input disabled value={tipoVenda} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
               </div>
-              <label className="mt-4 block text-sm text-slate-700">Observações<textarea disabled value={pedidoPreview.observacoes} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="text-sm text-slate-700">Observação do pedido<textarea disabled value={observacaoPedido} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label><label className="text-sm text-slate-700">Observação de entrega<textarea disabled value={observacaoEntrega} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label></div>
+              <label className="mt-4 block text-sm text-slate-700">Observações enviadas à Olist<textarea disabled value={pedidoPreview.observacoes} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
+              <label className="mt-4 block text-sm text-slate-700">Observações internas enviadas à Olist<textarea disabled value={pedidoPreview.observacoesInternas} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-slate-500" /></label>
             </section>
             {pedidoPreview.itens.map((item, index) => (
               <section key={`${item.produto.id}-${index}`} className="rounded-lg border border-slate-200 p-4">
