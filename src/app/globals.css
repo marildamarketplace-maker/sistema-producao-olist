@@ -14,6 +14,42 @@ body {
   @apply bg-slate-100 text-slate-900 antialiased;
 }
 
+/* O Safari no iPhone amplia a página ao focar campos com fonte menor que 16px. */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 767px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+.pedido-produto-dropdown > :first-child {
+  position: relative;
+  cursor: pointer;
+  padding-right: 3rem;
+}
+
+.pedido-produto-dropdown > :first-child::after {
+  content: "⌄";
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  color: rgb(100 116 139);
+  font-size: 1.25rem;
+  transform: translateY(-50%);
+  transition: transform 150ms ease;
+}
+
+.pedido-produto-dropdown[data-open="true"] > :first-child::after {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.pedido-produto-dropdown[data-open="false"] > :not(:first-child) {
+  display: none;
+}
+
 .theme-switch {
   background-color: rgb(203 213 225);
 }

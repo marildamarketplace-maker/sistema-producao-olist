@@ -135,6 +135,14 @@ export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const nomeAplicativo = usuario?.aplicativo?.nome ?? "Aplicativo";
 
+  async function hardRefresh() {
+    if ("caches" in window) {
+      const cacheNames = await window.caches.keys();
+      await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)));
+    }
+    window.location.reload();
+  }
+
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
@@ -169,12 +177,17 @@ export function Sidebar() {
 
   const renderSidebarContent = () => (
     <>
-      <div className="mb-5 shrink-0 pr-10 md:pr-0">
+      <button
+        type="button"
+        onClick={() => void hardRefresh()}
+        title="Recarregar página"
+        className="mb-5 shrink-0 rounded-md pr-10 text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 md:pr-0"
+      >
         <h1 className="text-lg font-semibold text-slate-900">ERP Shop</h1>
         <p className="mt-1 text-xs text-slate-500">
           {nomeAplicativo}
         </p>
-      </div>
+      </button>
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">
         <ul className="space-y-3 pb-3">
           {visibleMenuItems.map((item) => (
@@ -233,12 +246,12 @@ export function Sidebar() {
   return (
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
-        <div className="min-w-0">
+        <button type="button" onClick={() => void hardRefresh()} title="Recarregar página" className="min-w-0 rounded-md text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
           <h1 className="truncate text-base font-semibold text-slate-900">ERP Shop</h1>
           <p className="truncate text-xs text-slate-500">
             {nomeAplicativo}
           </p>
-        </div>
+        </button>
         <button
           type="button"
           onClick={() => setIsOpen(true)}
