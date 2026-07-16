@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import {
   criarPedidoOlistApi,
   listarContatosOlistApi,
@@ -17,6 +18,29 @@ import {
 
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown };
 type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown; divisoes?: unknown };
+
+const listarProdutosCriacaoComCache = unstable_cache(
+  async (aplicativoId: string, nome: string, codigo: string) => {
+    const itens = [];
+    let offset = 0;
+    let total = 0;
+    do {
+      const resposta = await listarProdutosOlistApi(aplicativoId, {
+        nome: nome || undefined,
+        codigo: codigo || undefined,
+        limit: 100,
+        offset,
+      });
+      itens.push(...resposta.itens);
+      total = resposta.paginacao.total;
+      offset += 100;
+    } while (!nome && !codigo && offset < total);
+
+    return itens.filter((item) => item.tipo === "F" && item.situacao === "A");
+  },
+  ["olist-pedidos-criar-produtos"],
+  { revalidate: 60 * 60 },
+);
 
 export async function GET(request: Request) {
   try {
@@ -61,16 +85,15 @@ export async function GET(request: Request) {
       ) });
     }
     if (recurso === "produtos") {
-      const itens = [];
-      let offset = 0;
-      let total = 0;
-      do {
-        const resposta = await listarProdutosOlistApi(usuario.aplicativoId, { nome, codigo, limit: 100, offset });
-        itens.push(...resposta.itens);
-        total = resposta.paginacao.total;
-        offset += 100;
-      } while (!nome && !codigo && offset < total);
-      return NextResponse.json({ itens: itens.filter((item) => item.tipo === "F" && item.situacao === "A") });
+      const itens = await listarProdutosCriacaoComCache(
+        usuario.aplicativoId,
+        nome ?? "",
+        codigo ?? "",
+      );
+      return NextResponse.json(
+        { itens },
+        { headers: { "Cache-Control": "private, max-age=0" } },
+      );
     }
     const [estampas, variantes] = await Promise.all([
       prisma.estampa.findMany({ orderBy: { codigo: "asc" }, select: { id: true, codigo: true, descricao: true } }),

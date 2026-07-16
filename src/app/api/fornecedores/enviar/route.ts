@@ -102,7 +102,7 @@ export async function POST(request: Request) {
         divisoes: new Map(),
       };
       grupo.quantidade += quantidade;
-      const chave = `${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
+      const chave = `${item.sku}\u0000${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
       const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, laser, tamanho, tipo };
       divisao.quantidade += item.quantidadeSolicitada;
       grupo.divisoes.set(chave, divisao);
