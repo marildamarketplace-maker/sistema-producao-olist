@@ -117,7 +117,19 @@ export async function POST(request: Request) {
       observacoes: observacoes.join("\n.\n"),
       itens,
     });
-    return NextResponse.json(resultado);
+    const pedidoOlistId = String(resultado.id ?? "").trim();
+    if (!pedidoOlistId) throw new Error("A Olist criou o pedido, mas não retornou o ID para registro.");
+
+    const registro = await prisma.pedidoFornecedorSolicitacao.create({
+      data: {
+        pedidoOlistId,
+        fornecedorId: fornecedor.id,
+        solicitacaoId: solicitacao.id,
+      },
+      select: { id: true },
+    });
+
+    return NextResponse.json({ ...resultado, registroId: registro.id });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao enviar pedido ao fornecedor." },

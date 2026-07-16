@@ -124,6 +124,7 @@ model Fornecedor {
   aplicativo        Aplicativo?         @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   vendedor          Usuario?            @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
   produtos          ProdutoFornecedor[]
+  pedidosSolicitacao PedidoFornecedorSolicitacao[]
 
   @@index([aplicativoId], map: "idx_fornecedores_aplicativo_id")
   @@index([vendedorOlistId], map: "idx_fornecedores_vendedor_olist_id")
@@ -201,9 +202,25 @@ model SolicitacaoProducao {
   prioridadeProducao Boolean     @default(false) @map("prioridade_producao")
   aplicativoId       String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   aplicativo         Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  pedidosFornecedor  PedidoFornecedorSolicitacao[]
 
   @@index([aplicativoId], map: "idx_solicitacoes_producao_aplicativo_id")
   @@map("solicitacoes_producao")
+}
+
+model PedidoFornecedorSolicitacao {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pedidoOlistId String              @map("pedido_olist_id")
+  fornecedorId  String              @map("fornecedor_id") @db.Uuid
+  solicitacaoId String              @map("solicitacao_id") @db.Uuid
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  fornecedor    Fornecedor          @relation(fields: [fornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([pedidoOlistId, fornecedorId], map: "uq_pedido_fornecedor_solicitacao_pedido_fornecedor")
+  @@index([fornecedorId], map: "idx_pedido_fornecedor_solicitacao_fornecedor_id")
+  @@index([solicitacaoId], map: "idx_pedido_fornecedor_solicitacao_solicitacao_id")
+  @@map("pedido_fornecedor_solicitacao")
 }
 
 model ItemSolicitacaoProducao {

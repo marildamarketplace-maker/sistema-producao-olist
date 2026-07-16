@@ -271,6 +271,7 @@ export default function SolicitacoesProducaoPage() {
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
+  const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
   const [dataEntrega, setDataEntrega] = useState("");
   const [observacaoGeral, setObservacaoGeral] = useState("");
   const [itensForm, setItensForm] = useState<ItemForm[]>([{ ...ITEM_INICIAL }]);
@@ -304,7 +305,7 @@ export default function SolicitacoesProducaoPage() {
 
     try {
       if (!session?.access_token) throw new Error("Sessão expirada.");
-      const [solicitacoesProducaoResp, demaisSolicitacoesResp, produtosResponse] = await Promise.all([
+      const [solicitacoesProducaoResp, demaisSolicitacoesResp, produtosResponse, pedidosResponse] = await Promise.all([
         supabase
           .from("solicitacoes_producao")
           .select("id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim")
@@ -319,6 +320,9 @@ export default function SolicitacoesProducaoPage() {
           .order("created_at", { ascending: false })
           .limit(LIMITE_SOLICITACOES_RESUMO),
         fetch("/api/produtos/opcoes", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+        fetch("/api/solicitacoes-producao/pedidos-fornecedor", {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
       ]);
@@ -341,13 +345,27 @@ export default function SolicitacoesProducaoPage() {
       setItensPorSolicitacao({});
       setItensCarregando({});
       const produtosJson = await produtosResponse.json() as { produtos?: Produto[]; error?: string };
+      const pedidosJson = await pedidosResponse.json() as {
+        pedidos?: Array<{ solicitacaoId: string; pedidoOlistId: string }>;
+        error?: string;
+      };
       if (!produtosResponse.ok) {
         setErrorMessage(`Solicitações carregadas, mas erro ao carregar produtos: ${produtosJson.error ?? "erro desconhecido"}`);
+        return [];
+      }
+      if (!pedidosResponse.ok) {
+        setErrorMessage(`Solicitações carregadas, mas erro ao carregar pedidos: ${pedidosJson.error ?? "erro desconhecido"}`);
         return [];
       }
 
       const produtosCarregados = produtosJson.produtos ?? [];
       setProdutos(produtosCarregados);
+      const pedidosAgrupados: Record<string, string[]> = {};
+      for (const pedido of pedidosJson.pedidos ?? []) {
+        pedidosAgrupados[pedido.solicitacaoId] ??= [];
+        pedidosAgrupados[pedido.solicitacaoId].push(pedido.pedidoOlistId);
+      }
+      setPedidosOlistPorSolicitacao(pedidosAgrupados);
       return produtosCarregados;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao carregar dados.");
@@ -1168,7 +1186,11 @@ export default function SolicitacoesProducaoPage() {
   const solicitacoesEmProducao = solicitacoes.filter((solicitacao) => solicitacao.status === "em_producao");
   const demaisSolicitacoes = solicitacoes.filter((solicitacao) => solicitacao.status !== "em_producao");
 
-  function renderTabelaSolicitacoes(solicitacoesTabela: Solicitacao[], destacarDivisao = false) {
+  function renderTabelaSolicitacoes(
+    solicitacoesTabela: Solicitacao[],
+    destacarDivisao = false,
+    exibirPedidoOlist = false,
+  ) {
     return (
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse text-sm">
@@ -1180,6 +1202,7 @@ export default function SolicitacoesProducaoPage() {
               <th className="p-3">Observação geral</th>
               <th className="p-3">Quantidade de itens</th>
               <th className="p-3">Data de criação</th>
+              {exibirPedidoOlist && <th className="p-3">ID pedido Olist</th>}
               <th className="p-3 text-right">Ações</th>
             </tr>
           </thead>
@@ -1210,6 +1233,11 @@ export default function SolicitacoesProducaoPage() {
                       {itensJaCarregados ? itensSolicitacao.length : "Ao abrir"}
                     </td>
                     <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
+                    {exibirPedidoOlist && (
+                      <td className="p-3 text-slate-700">
+                        {(pedidosOlistPorSolicitacao[solicitacao.id] ?? []).join(", ") || "-"}
+                      </td>
+                    )}
                     <td className="p-3">
                       <div className="flex justify-end gap-2">
                         <button
@@ -1293,7 +1321,7 @@ export default function SolicitacoesProducaoPage() {
                   </tr>
                   {aberta && (
                     <tr className={`border-b bg-slate-50 ${destacarDivisao ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
-                      <td className="p-3" colSpan={7}>
+                      <td className="p-3" colSpan={exibirPedidoOlist ? 8 : 7}>
                         {carregandoItens ? (
                           <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
                             Carregando itens da solicitacao...
@@ -1609,7 +1637,7 @@ export default function SolicitacoesProducaoPage() {
         ) : demaisSolicitacoes.length === 0 ? (
           <p className="text-sm text-slate-600">Nenhuma outra solicitação cadastrada.</p>
         ) : (
-          renderTabelaSolicitacoes(demaisSolicitacoes)
+          renderTabelaSolicitacoes(demaisSolicitacoes, false, true)
         )}
       </section>
 

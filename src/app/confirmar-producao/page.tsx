@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AccessGuard } from "@/components/access-guard";
+import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -37,7 +38,9 @@ function formatarDataEntrega(dataEntrega: string) {
 }
 
 export default function ConfirmarProducaoPage() {
+  const { session } = useAuth();
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
+  const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
@@ -47,21 +50,42 @@ export default function ConfirmarProducaoPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function carregarDados() {
+  const carregarDados = useCallback(async () => {
     setLoading(true);
     setMessage(null);
 
-    const solicitacoesResp = await supabase
-      .from("solicitacoes_producao")
-      .select(
-        "id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim",
-      )
-      .eq("status", "em_producao")
-      .order("prioridade_producao", { ascending: false })
-      .order("created_at", { ascending: false });
+    if (!session?.access_token) {
+      setMessage("Sessão expirada.");
+      setLoading(false);
+      return;
+    }
+
+    const [solicitacoesResp, pedidosResponse] = await Promise.all([
+      supabase
+        .from("solicitacoes_producao")
+        .select(
+          "id, data_entrega, status, created_at, observacao_geral, prioridade_producao, periodo_inicio, periodo_fim",
+        )
+        .eq("status", "em_producao")
+        .order("prioridade_producao", { ascending: false })
+        .order("created_at", { ascending: false }),
+      fetch("/api/solicitacoes-producao/pedidos-fornecedor", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }),
+    ]);
 
     if (solicitacoesResp.error) {
       setMessage(solicitacoesResp.error.message ?? "Erro ao carregar dados.");
+      setLoading(false);
+      return;
+    }
+
+    const pedidosJson = await pedidosResponse.json() as {
+      pedidos?: Array<{ solicitacaoId: string; pedidoOlistId: string }>;
+      error?: string;
+    };
+    if (!pedidosResponse.ok) {
+      setMessage(pedidosJson.error ?? "Erro ao carregar IDs dos pedidos Olist.");
       setLoading(false);
       return;
     }
@@ -76,12 +100,18 @@ export default function ConfirmarProducaoPage() {
     });
 
     setSolicitacoes(listaSolicitacoes);
+    const pedidosAgrupados: Record<string, string[]> = {};
+    for (const pedido of pedidosJson.pedidos ?? []) {
+      pedidosAgrupados[pedido.solicitacaoId] ??= [];
+      pedidosAgrupados[pedido.solicitacaoId].push(pedido.pedidoOlistId);
+    }
+    setPedidosOlistPorSolicitacao(pedidosAgrupados);
     setItensPorSolicitacao({});
     setItensCarregando({});
     setSolicitacoesAbertas({});
     setProduzidas({});
     setLoading(false);
-  }
+  }, [session?.access_token]);
 
   async function carregarItensSolicitacao(solicitacaoId: string, force = false) {
     if (!force && itensPorSolicitacao[solicitacaoId]) {
@@ -133,7 +163,7 @@ export default function ConfirmarProducaoPage() {
 
   useEffect(() => {
     carregarDados();
-  }, []);
+  }, [carregarDados]);
 
   function montarRelatorioWhatsapp(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
     const linhas = itensSolicitacao.map((item) => {
@@ -315,6 +345,10 @@ export default function ConfirmarProducaoPage() {
                     </p>
                     <p>
                       <strong>Itens:</strong> {itensJaCarregados ? itensSolicitacao.length : "Ao abrir"}
+                    </p>
+                    <p className="md:col-span-2">
+                      <strong>ID pedido Olist:</strong>{" "}
+                      {(pedidosOlistPorSolicitacao[solicitacao.id] ?? []).join(", ") || "-"}
                     </p>
                     <p className="md:col-span-2">
                       <strong>Observação geral:</strong> {solicitacao.observacao_geral || "-"}
