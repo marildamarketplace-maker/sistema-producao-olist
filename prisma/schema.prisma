@@ -171,6 +171,7 @@ model ProdutoFornecedor {
   @@index([aplicativoId], map: "idx_produtos_fornecedor_aplicativo_id")
   @@index([fornecedorId], map: "idx_produtos_fornecedor_fornecedor_id")
   @@index([nome], map: "idx_produtos_fornecedor_nome")
+  @@unique([fornecedorId, tipoServico], map: "uq_produtos_fornecedor_fornecedor_tipo_servico")
   @@map("produtos_fornecedor")
 }
 

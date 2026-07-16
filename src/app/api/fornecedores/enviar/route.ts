@@ -64,6 +64,10 @@ export async function POST(request: Request) {
       include: { produtoFornecedor: true },
     });
     const associacaoPorProduto = new Map(associacoes.map((item) => [item.produtoId, item]));
+    const quantidadeCorteLaser = itensSolicitacao.reduce(
+      (total, item) => item.tipoCorte === "LASER" ? total + item.quantidadeSolicitada : total,
+      0,
+    );
     const grupos = new Map<string, {
       referencia: string;
       nome: string;
@@ -131,6 +135,40 @@ export async function POST(request: Request) {
         quantidade: grupo.quantidade,
         valorUnitario: grupo.preco,
         infoAdicional,
+      });
+    }
+
+    if (quantidadeCorteLaser > 0) {
+      const servicoCorteLaser = await prisma.produtoFornecedor.findFirst({
+        where: {
+          aplicativoId: solicitante.aplicativoId,
+          fornecedorId,
+          tipoServico: "CORTE_LASER",
+        },
+        select: {
+          referencia: true,
+          precoUnitarioMetro: true,
+        },
+      });
+      if (!servicoCorteLaser) {
+        throw new Error("Fornecedor sem produto de serviço Corte a laser cadastrado.");
+      }
+
+      const servicoId = Number(servicoCorteLaser.referencia?.trim());
+      if (!Number.isInteger(servicoId) || servicoId <= 0) {
+        throw new Error("O serviço Corte a laser deve possuir uma referência com o ID numérico da Olist.");
+      }
+
+      const precoServico = Number(servicoCorteLaser.precoUnitarioMetro);
+      if (!Number.isFinite(precoServico) || precoServico < 0) {
+        throw new Error("Preço inválido no serviço Corte a laser.");
+      }
+
+      itens.push({
+        produto: { id: servicoId, tipo: "S" },
+        quantidade: quantidadeCorteLaser,
+        valorUnitario: precoServico,
+        infoAdicional: "",
       });
     }
 

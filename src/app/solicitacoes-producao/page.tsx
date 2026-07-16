@@ -1936,7 +1936,9 @@ export default function SolicitacoesProducaoPage() {
 
                       {pedidoFornecedorEdicao.itens.map((item, index) => (
                         <section key={`${item.produto.id}-${index}`} className="rounded-lg border border-slate-200 p-4">
-                          <h5 className="font-semibold text-slate-900">Produto {index + 1}</h5>
+                          <h5 className="font-semibold text-slate-900">
+                            {item.produto.tipo === "S" ? "Serviço" : "Produto"} {index + 1}
+                          </h5>
                           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             <label className="text-sm text-slate-700">ID do produto
                               <input type="number" min={1} value={item.produto.id} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
@@ -1982,9 +1984,11 @@ export default function SolicitacoesProducaoPage() {
                               </div>
                             </div>
                           ))}
-                          <label className="mt-4 block text-sm text-slate-700">Informação adicional
-                            <textarea value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />
-                          </label>
+                          {item.produto.tipo !== "S" && (
+                            <label className="mt-4 block text-sm text-slate-700">Informação adicional
+                              <textarea value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />
+                            </label>
+                          )}
                         </section>
                       ))}
                     </div>
