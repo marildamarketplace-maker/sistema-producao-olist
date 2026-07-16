@@ -34,6 +34,43 @@ type ItemConferenciaFornecedor = ItemSolicitacao & {
   produtoFornecido: ProdutoFornecidoInfo | null;
 };
 
+type PedidoFornecedorItemEdicao = {
+  produto: { id: number; tipo: string };
+  quantidade: number;
+  valorUnitario: number;
+  infoAdicional: string;
+};
+
+type PedidoFornecedorEdicao = {
+  idContato: number;
+  vendedor: { id: number };
+  situacao: number;
+  data: string;
+  observacoes: string;
+  itens: PedidoFornecedorItemEdicao[];
+};
+
+type DivisaoInfoAdicional = { estampa: string; variante: string; quantidade: string; unidade: string };
+
+function extrairDivisoesInfoAdicional(info: string): DivisaoInfoAdicional[] {
+  return Array.from(info.matchAll(/<ESTAMPA>([\s\S]*?)<\/ESTAMPA>/g)).map((match) => {
+    const bloco = match[1];
+    const valor = (tag: string) => bloco.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))?.[1] ?? "";
+    return { estampa: valor("COD"), variante: valor("VAR"), quantidade: valor("QTD"), unidade: valor("UN") };
+  });
+}
+
+function escaparXmlFormulario(valor: string) {
+  return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function montarInfoAdicional(divisoes: DivisaoInfoAdicional[]) {
+  return divisoes.map((divisao) =>
+    `<ESTAMPA><COD>${escaparXmlFormulario(divisao.estampa)}</COD><VAR>${escaparXmlFormulario(divisao.variante)}</VAR>` +
+    `<QTD>${escaparXmlFormulario(divisao.quantidade)}</QTD><UN>${escaparXmlFormulario(divisao.unidade)}</UN></ESTAMPA>`,
+  ).join("");
+}
+
 type ProdutoOlistProdutoFornecedorRow = {
   produto_fornecedor_id: string;
   quantidade_usada: number | string | null;
@@ -291,7 +328,7 @@ export default function SolicitacoesProducaoPage() {
   const [envioEnviando, setEnvioEnviando] = useState(false);
   const [envioErro, setEnvioErro] = useState<string | null>(null);
   const [envioSucesso, setEnvioSucesso] = useState<{ id?: number; numeroPedido?: string } | null>(null);
-  const [pedidoFornecedorJson, setPedidoFornecedorJson] = useState("");
+  const [pedidoFornecedorEdicao, setPedidoFornecedorEdicao] = useState<PedidoFornecedorEdicao | null>(null);
 
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
@@ -471,7 +508,7 @@ export default function SolicitacoesProducaoPage() {
     setItensConferencia([]);
     setEnvioErro(null);
     setEnvioSucesso(null);
-    setPedidoFornecedorJson("");
+    setPedidoFornecedorEdicao(null);
   }
 
   async function abrirEnvioFornecedor(solicitacao: Solicitacao) {
@@ -483,7 +520,7 @@ export default function SolicitacoesProducaoPage() {
     setItensConferencia([]);
     setEnvioErro(null);
     setEnvioSucesso(null);
-    setPedidoFornecedorJson("");
+    setPedidoFornecedorEdicao(null);
     setEnvioCarregando(true);
 
     const { data, error } = await supabase
@@ -539,14 +576,7 @@ export default function SolicitacoesProducaoPage() {
     setEnvioEnviando(true);
     setEnvioErro(null);
     try {
-      let pedidoEditado: Record<string, unknown>;
-      try {
-        const parsed = JSON.parse(pedidoFornecedorJson) as unknown;
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-        pedidoEditado = parsed as Record<string, unknown>;
-      } catch {
-        throw new Error("O JSON do pedido é inválido. Corrija antes de confirmar.");
-      }
+      if (!pedidoFornecedorEdicao) throw new Error("A prévia do pedido não foi carregada.");
       const response = await fetch("/api/fornecedores/enviar", {
         method: "POST",
         headers: {
@@ -557,7 +587,7 @@ export default function SolicitacoesProducaoPage() {
           fornecedorId: fornecedorEnvioId,
           solicitacaoId: envioSolicitacao.id,
           acao: "enviar",
-          pedidoEditado,
+          pedidoEditado: pedidoFornecedorEdicao,
         }),
       });
       const json = await response.json() as { id?: number; numeroPedido?: string; error?: string };
@@ -587,15 +617,39 @@ export default function SolicitacoesProducaoPage() {
           acao: "preview",
         }),
       });
-      const json = await response.json() as { pedido?: Record<string, unknown>; error?: string };
+      const json = await response.json() as { pedido?: PedidoFornecedorEdicao; error?: string };
       if (!response.ok || !json.pedido) throw new Error(json.error ?? "Não foi possível gerar a prévia do pedido.");
-      setPedidoFornecedorJson(JSON.stringify(json.pedido, null, 2));
+      setPedidoFornecedorEdicao(json.pedido);
       setEnvioEtapa(3);
     } catch (error) {
       setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar o pedido.");
     } finally {
       setEnvioCarregando(false);
     }
+  }
+
+  function alterarPedidoFornecedor(patch: Partial<PedidoFornecedorEdicao>) {
+    setPedidoFornecedorEdicao((pedido) => pedido ? { ...pedido, ...patch } : pedido);
+  }
+
+  function alterarItemPedidoFornecedor(index: number, patch: Partial<PedidoFornecedorItemEdicao>) {
+    setPedidoFornecedorEdicao((pedido) => pedido ? {
+      ...pedido,
+      itens: pedido.itens.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
+    } : pedido);
+  }
+
+  function alterarDivisaoPedidoFornecedor(
+    itemIndex: number,
+    divisaoIndex: number,
+    campo: keyof DivisaoInfoAdicional,
+    valor: string,
+  ) {
+    const item = pedidoFornecedorEdicao?.itens[itemIndex];
+    if (!item) return;
+    const divisoes = extrairDivisoesInfoAdicional(item.infoAdicional);
+    divisoes[divisaoIndex] = { ...divisoes[divisaoIndex], [campo]: valor };
+    alterarItemPedidoFornecedor(itemIndex, { infoAdicional: montarInfoAdicional(divisoes) });
   }
 
   useEffect(() => {
@@ -1816,19 +1870,75 @@ export default function SolicitacoesProducaoPage() {
                   <div>
                     <h4 className="font-semibold text-slate-900">Revise o pedido que será enviado</h4>
                     <p className="mt-1 text-sm text-slate-600">
-                      O conteúdo abaixo é o JSON exato enviado à Olist. Você pode editar qualquer campo antes de confirmar.
+                      Edite os campos necessários. O JSON será montado somente após a confirmação.
                     </p>
                   </div>
-                  <textarea
-                    value={pedidoFornecedorJson}
-                    onChange={(event) => {
-                      setPedidoFornecedorJson(event.target.value);
-                      setEnvioErro(null);
-                    }}
-                    spellCheck={false}
-                    className="min-h-[28rem] w-full rounded-md border border-slate-300 bg-slate-950 p-4 font-mono text-sm leading-6 text-slate-100"
-                    aria-label="JSON do pedido enviado à Olist"
-                  />
+                  {pedidoFornecedorEdicao && (
+                    <div className="space-y-5">
+                      <section className="rounded-lg border border-slate-200 p-4">
+                        <h5 className="font-semibold text-slate-900">Dados do pedido</h5>
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                          <label className="text-sm text-slate-700">ID do cliente
+                            <input type="number" min={1} value={pedidoFornecedorEdicao.idContato} onChange={(event) => alterarPedidoFornecedor({ idContato: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                          </label>
+                          <label className="text-sm text-slate-700">ID do vendedor
+                            <input type="number" min={1} value={pedidoFornecedorEdicao.vendedor.id} onChange={(event) => alterarPedidoFornecedor({ vendedor: { id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                          </label>
+                          <label className="text-sm text-slate-700">Situação
+                            <input type="number" value={pedidoFornecedorEdicao.situacao} onChange={(event) => alterarPedidoFornecedor({ situacao: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                          </label>
+                          <label className="text-sm text-slate-700">Data
+                            <input type="date" value={pedidoFornecedorEdicao.data} onChange={(event) => alterarPedidoFornecedor({ data: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                          </label>
+                        </div>
+                        <label className="mt-4 block text-sm text-slate-700">Observações
+                          <textarea value={pedidoFornecedorEdicao.observacoes} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2" />
+                        </label>
+                      </section>
+
+                      {pedidoFornecedorEdicao.itens.map((item, index) => (
+                        <section key={`${item.produto.id}-${index}`} className="rounded-lg border border-slate-200 p-4">
+                          <h5 className="font-semibold text-slate-900">Produto {index + 1}</h5>
+                          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <label className="text-sm text-slate-700">ID do produto
+                              <input type="number" min={1} value={item.produto.id} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            </label>
+                            <label className="text-sm text-slate-700">Tipo
+                              <input value={item.produto.tipo} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, tipo: event.target.value } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            </label>
+                            <label className="text-sm text-slate-700">Quantidade
+                              <input type="number" min={0.0001} step="0.0001" value={item.quantidade} onChange={(event) => alterarItemPedidoFornecedor(index, { quantidade: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            </label>
+                            <label className="text-sm text-slate-700">Preço unitário
+                              <input type="number" min={0} step="0.01" value={item.valorUnitario} onChange={(event) => alterarItemPedidoFornecedor(index, { valorUnitario: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                            </label>
+                          </div>
+                          {extrairDivisoesInfoAdicional(item.infoAdicional).map((divisao, divisaoIndex) => (
+                            <div key={divisaoIndex} className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estampa/variante {divisaoIndex + 1}</p>
+                              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <label className="text-sm text-slate-700">Estampa
+                                  <input value={divisao.estampa} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "estampa", event.target.value)} placeholder="Código da estampa" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Variante
+                                  <input value={divisao.variante} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "variante", event.target.value)} placeholder="Variante" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Quantidade da divisão
+                                  <input type="number" min={0.0001} step="0.0001" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Unidade
+                                  <input value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                          <label className="mt-4 block text-sm text-slate-700">Informação adicional
+                            <textarea value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />
+                          </label>
+                        </section>
+                      ))}
+                    </div>
+                  )}
                   {envioSucesso && (
                     <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
                       Pedido criado com sucesso{envioSucesso.numeroPedido ? `: ${envioSucesso.numeroPedido}` : envioSucesso.id ? `: ID ${envioSucesso.id}` : "."}
@@ -1884,7 +1994,7 @@ export default function SolicitacoesProducaoPage() {
                   <button
                     type="button"
                     onClick={() => void confirmarEnvioFornecedor()}
-                    disabled={envioEnviando || !pedidoFornecedorJson.trim()}
+                    disabled={envioEnviando || !pedidoFornecedorEdicao}
                     className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {envioEnviando ? "Criando pedido..." : "Criar pedido na Olist"}

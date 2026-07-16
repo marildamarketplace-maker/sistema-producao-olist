@@ -5,6 +5,11 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 const ESTAMPA_VARIANTE_REGEX = /(?:^|-)EST\/([^\/-]+)-([^\/]+)(?:\/|$)/i;
 
+function extrairEstampaVariante(sku: string) {
+  const match = sku.match(ESTAMPA_VARIANTE_REGEX);
+  return match ? { estampa: match[1], variante: match[2] } : { estampa: "", variante: "" };
+}
+
 function escaparXml(valor: string) {
   return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -74,9 +79,7 @@ export async function POST(request: Request) {
       const quantidade = item.quantidadeSolicitada * consumo;
       if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Quantidade fornecida inválida para ${item.sku}.`);
       if (!Number.isFinite(preco) || preco < 0) throw new Error(`Preço inválido no produto fornecido ${referencia}.`);
-      const match = item.sku.match(ESTAMPA_VARIANTE_REGEX);
-      if (!match) throw new Error(`SKU ${item.sku} não contém estampa e variante no padrão EST/6835-D.`);
-      const [, estampa, variante] = match;
+      const { estampa, variante } = extrairEstampaVariante(item.sku);
       const grupo = grupos.get(referencia) ?? {
         referencia,
         nome: associacao.produtoFornecedor.nome,
