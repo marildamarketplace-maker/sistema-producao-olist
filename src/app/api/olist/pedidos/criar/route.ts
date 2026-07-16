@@ -102,7 +102,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
-    const body = await request.json() as { vendedorId?: unknown; clienteId?: unknown; itens?: unknown };
+    const body = await request.json() as { vendedorId?: unknown; clienteId?: unknown; itens?: unknown; acao?: unknown };
     const vendedorId = Number(body.vendedorId);
     const clienteId = Number(body.clienteId);
     if (!Number.isInteger(vendedorId) || vendedorId <= 0) throw new Error("Selecione um vendedor válido.");
@@ -157,14 +157,20 @@ export async function POST(request: Request) {
       };
     });
 
-    const resultado = await criarPedidoOlistApi(usuario.aplicativoId, {
+    const pedido = {
       idContato: clienteId,
       vendedor: { id: vendedorId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
       observacoes: criarObservacoesPedidoOlist(observacoesLinhas),
       itens,
-    });
+    };
+
+    if (body.acao === "preview") {
+      return NextResponse.json({ pedido });
+    }
+
+    const resultado = await criarPedidoOlistApi(usuario.aplicativoId, pedido);
     return NextResponse.json(resultado);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao criar pedido." }, { status: 400 });
