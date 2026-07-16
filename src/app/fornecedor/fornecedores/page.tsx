@@ -17,6 +17,7 @@ type Fornecedor = {
   id: string;
   aplicativo_id: string | null;
   vendedor_olist_id: string | null;
+  meu_cliente_olist_id: number | null;
   nome: string;
   endereco: string | null;
   created_at: string;
@@ -25,12 +26,14 @@ type Fornecedor = {
 
 type FornecedorFormData = {
   vendedor_olist_id: string;
+  meu_cliente_olist_id: string;
   nome: string;
   endereco: string;
 };
 
 const INITIAL_FORM: FornecedorFormData = {
   vendedor_olist_id: "",
+  meu_cliente_olist_id: "",
   nome: "",
   endereco: "",
 };
@@ -57,7 +60,7 @@ export default function FornecedoresPage() {
     const [fornecedoresResult, usuariosResponse] = await Promise.all([
       supabase
         .from("fornecedores")
-        .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
+        .select("id, aplicativo_id, vendedor_olist_id, meu_cliente_olist_id, nome, endereco, created_at, updated_at")
         .order("nome", { ascending: true }),
       fetch("/api/fornecedores/vendedores", {
         headers: session?.access_token
@@ -99,6 +102,7 @@ export default function FornecedoresPage() {
     setFormOpen(true);
     setFormData({
       vendedor_olist_id: fornecedor.vendedor_olist_id ?? "",
+      meu_cliente_olist_id: fornecedor.meu_cliente_olist_id?.toString() ?? "",
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
     });
@@ -114,6 +118,9 @@ export default function FornecedoresPage() {
 
     const payload = {
       vendedor_olist_id: formData.vendedor_olist_id || null,
+      meu_cliente_olist_id: formData.meu_cliente_olist_id.trim()
+        ? Number(formData.meu_cliente_olist_id)
+        : null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
       updated_at: new Date().toISOString(),
@@ -121,6 +128,13 @@ export default function FornecedoresPage() {
 
     if (!payload.nome) {
       setErrorMessage("Nome do fornecedor é obrigatório.");
+      setIsSaving(false);
+      return;
+    }
+
+    if (payload.meu_cliente_olist_id !== null &&
+        (!Number.isInteger(payload.meu_cliente_olist_id) || payload.meu_cliente_olist_id <= 0)) {
+      setErrorMessage("Informe um ID de cliente válido.");
       setIsSaving(false);
       return;
     }
@@ -242,6 +256,21 @@ export default function FornecedoresPage() {
             </span>
           </label>
 
+          <label className="text-sm text-slate-700">
+            Meu ID de cliente
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={formData.meu_cliente_olist_id}
+              onChange={(event) =>
+                setFormData((prev) => ({ ...prev, meu_cliente_olist_id: event.target.value }))
+              }
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              placeholder="ID do contato na Olist do fornecedor"
+            />
+          </label>
+
           <label className="text-sm text-slate-700 md:col-span-2">
             Endereco
             <textarea
@@ -308,6 +337,7 @@ export default function FornecedoresPage() {
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Nome</th>
                   <th className="p-3">Usuário vendedor</th>
+                  <th className="p-3">Meu ID de cliente</th>
                   <th className="p-3">Endereco</th>
                   <th className="p-3">Cadastro</th>
                   <th className="p-3 text-right">Acoes</th>
@@ -324,6 +354,7 @@ export default function FornecedoresPage() {
                         ?? fornecedor.vendedor_olist_id
                         ?? "-"}
                     </td>
+                    <td className="p-3 text-slate-700">{fornecedor.meu_cliente_olist_id ?? "-"}</td>
                     <td className="max-w-md p-3 text-slate-700">
                       {fornecedor.endereco || "-"}
                     </td>

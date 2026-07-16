@@ -117,6 +117,7 @@ model Fornecedor {
   nome         String
   endereco     String?
   vendedorOlistId String?           @map("vendedor_olist_id") @db.Uuid
+  meuClienteOlistId Int?            @map("meu_cliente_olist_id")
   createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
   aplicativoId String?             @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid

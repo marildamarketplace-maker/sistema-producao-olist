@@ -287,7 +287,9 @@ export default function SolicitacoesProducaoPage() {
   const [fornecedorEnvioId, setFornecedorEnvioId] = useState("");
   const [itensConferencia, setItensConferencia] = useState<ItemConferenciaFornecedor[]>([]);
   const [envioCarregando, setEnvioCarregando] = useState(false);
+  const [envioEnviando, setEnvioEnviando] = useState(false);
   const [envioErro, setEnvioErro] = useState<string | null>(null);
+  const [envioSucesso, setEnvioSucesso] = useState<{ id?: number; numeroPedido?: string } | null>(null);
 
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
@@ -454,6 +456,7 @@ export default function SolicitacoesProducaoPage() {
     setFornecedorEnvioId("");
     setItensConferencia([]);
     setEnvioErro(null);
+    setEnvioSucesso(null);
   }
 
   async function abrirEnvioFornecedor(solicitacao: Solicitacao) {
@@ -464,6 +467,7 @@ export default function SolicitacoesProducaoPage() {
     setFornecedorEnvioId("");
     setItensConferencia([]);
     setEnvioErro(null);
+    setEnvioSucesso(null);
     setEnvioCarregando(true);
 
     const { data, error } = await supabase
@@ -511,6 +515,32 @@ export default function SolicitacoesProducaoPage() {
       setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar conferência dos produtos.");
     } finally {
       setEnvioCarregando(false);
+    }
+  }
+
+  async function confirmarEnvioFornecedor() {
+    if (!session?.access_token || !envioSolicitacao || !fornecedorEnvioId) return;
+    setEnvioEnviando(true);
+    setEnvioErro(null);
+    try {
+      const response = await fetch("/api/fornecedores/enviar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fornecedorId: fornecedorEnvioId,
+          solicitacaoId: envioSolicitacao.id,
+        }),
+      });
+      const json = await response.json() as { id?: number; numeroPedido?: string; error?: string };
+      if (!response.ok) throw new Error(json.error ?? "Não foi possível criar o pedido na Olist.");
+      setEnvioSucesso(json);
+    } catch (error) {
+      setEnvioErro(error instanceof Error ? error.message : "Erro ao enviar para o fornecedor.");
+    } finally {
+      setEnvioEnviando(false);
     }
   }
 
@@ -1711,8 +1741,13 @@ export default function SolicitacoesProducaoPage() {
                   </div>
 
                   <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-                    Esta etapa é apenas para conferência. O envio ao fornecedor ainda não será realizado.
+                    Ao confirmar, será criado um pedido na Olist do usuário vendedor selecionado.
                   </p>
+                  {envioSucesso && (
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
+                      Pedido criado com sucesso{envioSucesso.numeroPedido ? `: ${envioSucesso.numeroPedido}` : envioSucesso.id ? `: ID ${envioSucesso.id}` : "."}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1741,13 +1776,24 @@ export default function SolicitacoesProducaoPage() {
                   {envioCarregando ? "Carregando..." : "Revisar produtos"}
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={fecharEnvioFornecedor}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                >
-                  Fechar conferência
-                </button>
+                envioSucesso ? (
+                  <button
+                    type="button"
+                    onClick={fecharEnvioFornecedor}
+                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                  >
+                    Fechar
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void confirmarEnvioFornecedor()}
+                    disabled={envioEnviando || itensConferencia.length === 0}
+                    className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {envioEnviando ? "Criando pedido..." : "Criar pedido na Olist"}
+                  </button>
+                )
               )}
             </div>
           </div>

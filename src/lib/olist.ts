@@ -407,6 +407,25 @@ export async function criarPedidoOlistApi(aplicativoId: string, pedido: Record<s
   return response.data as { id?: number; numeroPedido?: string };
 }
 
+export async function obterProdutoOlistApi(aplicativoId: string, produtoId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`produtos/${encodeURIComponent(produtoId)}`, normalizarBaseUrl(olistConfig.apiBaseUrl));
+  const response = await axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+  logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "produto-detalhe-fornecedor" });
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) throw new Error(`Produto Olist ${produtoId} não encontrado.`);
+  const payload = response.data && typeof response.data === "object"
+    ? response.data as Record<string, unknown>
+    : {};
+  return payload.data && typeof payload.data === "object"
+    ? payload.data as Record<string, unknown>
+    : payload;
+}
+
 export async function obterPedidoOlistApi(aplicativoId: string, pedidoId: string) {
   const token = await getValidOlistAccessToken(aplicativoId);
   const olistConfig = await getAplicativoOlistConfig(aplicativoId);
