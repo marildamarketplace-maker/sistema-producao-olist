@@ -25,7 +25,7 @@ type ProdutoFornecidoInfo = {
 type FornecedorEnvio = {
   id: string;
   nome: string;
-  vendedor_olist_id: number;
+  vendedor_olist_id: string;
   aplicativo_id: string;
 };
 

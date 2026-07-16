@@ -3,13 +3,19 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
-import { useAuth } from "@/components/auth-provider";
 import { supabase } from "@/lib/supabase";
+
+type UsuarioVendedorOption = {
+  id: string;
+  nome: string;
+  email: string;
+  aplicativo_id: string;
+};
 
 type Fornecedor = {
   id: string;
   aplicativo_id: string | null;
-  vendedor_olist_id: number | null;
+  vendedor_olist_id: string | null;
   nome: string;
   endereco: string | null;
   created_at: string;
@@ -17,22 +23,20 @@ type Fornecedor = {
 };
 
 type FornecedorFormData = {
-  aplicativo_id: string;
   vendedor_olist_id: string;
   nome: string;
   endereco: string;
 };
 
 const INITIAL_FORM: FornecedorFormData = {
-  aplicativo_id: "",
   vendedor_olist_id: "",
   nome: "",
   endereco: "",
 };
 
 export default function FornecedoresPage() {
-  const { usuario } = useAuth();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [usuariosVendedores, setUsuariosVendedores] = useState<UsuarioVendedorOption[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -48,18 +52,27 @@ export default function FornecedoresPage() {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const fornecedoresResult = await supabase
-      .from("fornecedores")
-      .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
-      .order("nome", { ascending: true });
+    const [fornecedoresResult, usuariosResult] = await Promise.all([
+      supabase
+        .from("fornecedores")
+        .select("id, aplicativo_id, vendedor_olist_id, nome, endereco, created_at, updated_at")
+        .order("nome", { ascending: true }),
+      supabase
+        .from("usuario")
+        .select("id, nome, email, aplicativo_id")
+        .order("nome", { ascending: true }),
+    ]);
 
-    if (fornecedoresResult.error) {
-      setErrorMessage(`Erro ao carregar fornecedores: ${fornecedoresResult.error.message}`);
+    if (fornecedoresResult.error || usuariosResult.error) {
+      setErrorMessage(
+        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? usuariosResult.error?.message}`,
+      );
       setIsLoading(false);
       return;
     }
 
     setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
+    setUsuariosVendedores((usuariosResult.data as UsuarioVendedorOption[]) ?? []);
     setIsLoading(false);
   }
 
@@ -68,7 +81,7 @@ export default function FornecedoresPage() {
   }, []);
 
   function resetForm() {
-    setFormData({ ...INITIAL_FORM, aplicativo_id: usuario?.aplicativo_id ?? "" });
+    setFormData(INITIAL_FORM);
     setEditingId(null);
     setFormOpen(false);
   }
@@ -77,8 +90,7 @@ export default function FornecedoresPage() {
     setEditingId(fornecedor.id);
     setFormOpen(true);
     setFormData({
-      aplicativo_id: fornecedor.aplicativo_id ?? "",
-      vendedor_olist_id: fornecedor.vendedor_olist_id?.toString() ?? "",
+      vendedor_olist_id: fornecedor.vendedor_olist_id ?? "",
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
     });
@@ -93,24 +105,14 @@ export default function FornecedoresPage() {
     setSuccessMessage(null);
 
     const payload = {
-      aplicativo_id: formData.aplicativo_id || usuario?.aplicativo_id || "",
-      vendedor_olist_id: formData.vendedor_olist_id.trim()
-        ? Number(formData.vendedor_olist_id)
-        : null,
+      vendedor_olist_id: formData.vendedor_olist_id || null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
-    if (!payload.aplicativo_id || !payload.nome) {
-      setErrorMessage("Aplicativo e nome do fornecedor são obrigatórios.");
-      setIsSaving(false);
-      return;
-    }
-
-    if (payload.vendedor_olist_id !== null &&
-        (!Number.isInteger(payload.vendedor_olist_id) || payload.vendedor_olist_id <= 0)) {
-      setErrorMessage("Informe um ID de vendedor válido.");
+    if (!payload.nome) {
+      setErrorMessage("Nome do fornecedor é obrigatório.");
       setIsSaving(false);
       return;
     }
@@ -199,19 +201,6 @@ export default function FornecedoresPage() {
         {formOpen && (
         <form className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <label className="text-sm text-slate-700">
-            ID do aplicativo
-            <input
-              required
-              value={formData.aplicativo_id}
-              onChange={(event) =>
-                setFormData((prev) => ({ ...prev, aplicativo_id: event.target.value }))
-              }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="UUID do aplicativo"
-            />
-          </label>
-
-          <label className="text-sm text-slate-700">
             Nome
             <input
               required
@@ -225,18 +214,24 @@ export default function FornecedoresPage() {
           </label>
 
           <label className="text-sm text-slate-700">
-            ID vendedor Olist
-            <input
-              type="number"
-              min={1}
-              step={1}
+            Usuário vendedor
+            <select
               value={formData.vendedor_olist_id}
               onChange={(event) =>
                 setFormData((prev) => ({ ...prev, vendedor_olist_id: event.target.value }))
               }
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="ID do vendedor"
-            />
+            >
+              <option value="">Nenhum vendedor</option>
+              {usuariosVendedores.map((usuario) => (
+                <option key={usuario.id} value={usuario.id}>
+                  {usuario.nome} — {usuario.email}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">
+              Usuários de todos os aplicativos são exibidos.
+            </span>
           </label>
 
           <label className="text-sm text-slate-700 md:col-span-2">
@@ -304,8 +299,7 @@ export default function FornecedoresPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Nome</th>
-                  <th className="p-3">Aplicativo</th>
-                  <th className="p-3">ID vendedor</th>
+                  <th className="p-3">Usuário vendedor</th>
                   <th className="p-3">Endereco</th>
                   <th className="p-3">Cadastro</th>
                   <th className="p-3 text-right">Acoes</th>
@@ -318,9 +312,10 @@ export default function FornecedoresPage() {
                       {fornecedor.nome}
                     </td>
                     <td className="p-3 text-slate-700">
-                      {fornecedor.aplicativo_id ?? "-"}
+                      {usuariosVendedores.find((usuario) => usuario.id === fornecedor.vendedor_olist_id)?.nome
+                        ?? fornecedor.vendedor_olist_id
+                        ?? "-"}
                     </td>
-                    <td className="p-3 text-slate-700">{fornecedor.vendedor_olist_id ?? "-"}</td>
                     <td className="max-w-md p-3 text-slate-700">
                       {fornecedor.endereco || "-"}
                     </td>
