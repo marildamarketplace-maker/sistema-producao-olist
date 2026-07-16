@@ -16,7 +16,7 @@ import {
 } from "@/lib/olist-pedido";
 
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown };
-type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; divisoes?: unknown };
+type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown; divisoes?: unknown };
 
 export async function GET(request: Request) {
   try {
@@ -115,8 +115,9 @@ export async function POST(request: Request) {
       const produtoId = Number(item.produtoId);
       const produtoCodigo = String(item.produtoCodigo ?? produtoId).trim();
       const produtoDescricao = String(item.produtoDescricao ?? produtoCodigo).trim();
-      const produtoTamanho = extrairTamanhoSku(produtoCodigo);
-      const produtoTipo = extrairTipoProdutoSku(produtoCodigo);
+      const produtoTamanho = String(item.tamanho ?? extrairTamanhoSku(produtoCodigo)).trim();
+      const produtoTipo = String(item.tipo ?? extrairTipoProdutoSku(produtoCodigo)).trim();
+      const produtoLaser = item.laser === true || String(item.laser ?? "").trim().toLowerCase() === "true";
       const produtoUnidade = String(item.produtoUnidade ?? "UN").trim() || "UN";
       const quantidade = Number(item.quantidade);
       const valorUnitario = item.valorUnitario === null || item.valorUnitario === undefined ? undefined : Number(item.valorUnitario);
@@ -139,7 +140,7 @@ export async function POST(request: Request) {
           unidade: produtoUnidade,
           estampa,
           variante,
-          laser: false,
+          laser: produtoLaser,
           tamanho: produtoTamanho,
           tipo: produtoTipo,
         });
@@ -149,7 +150,7 @@ export async function POST(request: Request) {
         ...(valorUnitario !== undefined ? { valorUnitario } : {}),
         infoAdicional: criarInfoAdicionalOlist(
           divisoes.map((divisao) => ({
-            ...divisao, tamanho: produtoTamanho, tipo: produtoTipo, laser: false,
+            ...divisao, tamanho: produtoTamanho, tipo: produtoTipo, laser: produtoLaser,
           })),
           produtoUnidade,
         ),
