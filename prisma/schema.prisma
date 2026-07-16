@@ -76,36 +76,36 @@ model Midia {
 }
 
 model Usuario {
-  id                               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId                     String     @map("aplicativo_id") @db.Uuid
+  id                               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId                     String       @map("aplicativo_id") @db.Uuid
   nome                             String
   email                            String
-  ativo                            Boolean    @default(true)
-  vendedorOlistId                  Int?       @map("vendedor_olist_id")
-  podeVisualizarEstoque            Boolean    @default(false) @map("pode_visualizar_estoque")
-  podeEditarEstoque                Boolean    @default(false) @map("pode_editar_estoque")
-  podeVisualizarBaixa              Boolean    @default(false) @map("pode_visualizar_baixa")
-  podeSolicitarBaixa               Boolean    @default(false) @map("pode_solicitar_baixa")
-  podeVisualizarDevolucao          Boolean    @default(false) @map("pode_visualizar_devolucao")
-  podeSolicitarDevolucao           Boolean    @default(false) @map("pode_solicitar_devolucao")
-  podeSolicitarProducao            Boolean    @default(false) @map("pode_solicitar_producao")
-  podeVisualizarProducao           Boolean    @default(false) @map("pode_visualizar_producao")
-  podeConfirmarProducao            Boolean    @default(false) @map("pode_confirmar_producao")
-  podeVisualizarConfiguracao       Boolean    @default(false) @map("pode_visualizar_configuracao")
-  podeEditarConfiguracao           Boolean    @default(false) @map("pode_editar_configuracao")
-  createdAt                        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                        DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
-  podeVisualizarCategoriasMidia    Boolean    @default(false) @map("pode_visualizar_categorias_midia")
-  podeVisualizarDashboard          Boolean    @default(false) @map("pode_visualizar_dashboard")
-  podeVisualizarFornecedores       Boolean    @default(false) @map("pode_visualizar_fornecedores")
-  podeVisualizarProdutosFornecedor Boolean    @default(false) @map("pode_visualizar_produtos_fornecedor")
-  podeVisualizarOlistProdutos       Boolean    @default(false) @map("pode_visualizar_olist_produtos")
-  podeVisualizarOlistContatos       Boolean    @default(false) @map("pode_visualizar_olist_contatos")
-  podeVisualizarOlistPedidos        Boolean    @default(false) @map("pode_visualizar_olist_pedidos")
-  podeCriarOlistPedido              Boolean    @default(false) @map("pode_criar_olist_pedido")
-  podeVisualizarOlistVendedores     Boolean    @default(false) @map("pode_visualizar_olist_vendedores")
-  aplicativo                       Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ativo                            Boolean      @default(true)
+  podeVisualizarEstoque            Boolean      @default(false) @map("pode_visualizar_estoque")
+  podeEditarEstoque                Boolean      @default(false) @map("pode_editar_estoque")
+  podeVisualizarBaixa              Boolean      @default(false) @map("pode_visualizar_baixa")
+  podeSolicitarBaixa               Boolean      @default(false) @map("pode_solicitar_baixa")
+  podeVisualizarDevolucao          Boolean      @default(false) @map("pode_visualizar_devolucao")
+  podeSolicitarDevolucao           Boolean      @default(false) @map("pode_solicitar_devolucao")
+  podeSolicitarProducao            Boolean      @default(false) @map("pode_solicitar_producao")
+  podeVisualizarProducao           Boolean      @default(false) @map("pode_visualizar_producao")
+  podeConfirmarProducao            Boolean      @default(false) @map("pode_confirmar_producao")
+  podeVisualizarConfiguracao       Boolean      @default(false) @map("pode_visualizar_configuracao")
+  podeEditarConfiguracao           Boolean      @default(false) @map("pode_editar_configuracao")
+  createdAt                        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                        DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  podeVisualizarCategoriasMidia    Boolean      @default(false) @map("pode_visualizar_categorias_midia")
+  podeVisualizarDashboard          Boolean      @default(false) @map("pode_visualizar_dashboard")
+  podeVisualizarFornecedores       Boolean      @default(false) @map("pode_visualizar_fornecedores")
+  podeVisualizarProdutosFornecedor Boolean      @default(false) @map("pode_visualizar_produtos_fornecedor")
+  podeCriarOlistPedido             Boolean      @default(false) @map("pode_criar_olist_pedido")
+  podeVisualizarOlistContatos      Boolean      @default(false) @map("pode_visualizar_olist_contatos")
+  podeVisualizarOlistPedidos       Boolean      @default(false) @map("pode_visualizar_olist_pedidos")
+  podeVisualizarOlistProdutos      Boolean      @default(false) @map("pode_visualizar_olist_produtos")
+  podeVisualizarOlistVendedores    Boolean      @default(false) @map("pode_visualizar_olist_vendedores")
+  vendedorOlistId                  Int?         @map("vendedor_olist_id")
   fornecedoresComoVendedor         Fornecedor[]
+  aplicativo                       Aplicativo   @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, email], map: "uq_usuario_aplicativo_email")
   @@index([aplicativoId], map: "idx_usuario_aplicativo_id")
@@ -113,17 +113,17 @@ model Usuario {
 }
 
 model Fornecedor {
-  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  nome         String
-  endereco     String?
-  vendedorOlistId String?           @map("vendedor_olist_id") @db.Uuid
-  meuClienteOlistId Int?            @map("meu_cliente_olist_id")
-  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
-  aplicativoId String?             @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo   Aplicativo?         @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  vendedor     Usuario?            @relation(fields: [vendedorOlistId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  produtos     ProdutoFornecedor[]
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome              String
+  endereco          String?
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  aplicativoId      String?             @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  vendedorOlistId   String?             @map("vendedor_olist_id") @db.Uuid
+  meuClienteOlistId Int?                @map("meu_cliente_olist_id")
+  aplicativo        Aplicativo?         @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vendedor          Usuario?            @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
+  produtos          ProdutoFornecedor[]
 
   @@index([aplicativoId], map: "idx_fornecedores_aplicativo_id")
   @@index([vendedorOlistId], map: "idx_fornecedores_vendedor_olist_id")
@@ -337,17 +337,17 @@ model ControleBuscaOlist {
 }
 
 model IntegracaoOlistToken {
-  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider     String      @default("olist")
-  accessToken  String?     @map("access_token")
-  refreshToken String?     @map("refresh_token")
-  expiresAt    DateTime?   @map("expires_at") @db.Timestamptz(6)
-  status       String      @default("nao_conectado")
-  lastLoginAt  DateTime?   @map("last_login_at") @db.Timestamptz(6)
-  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
-  aplicativoId String      @map("aplicativo_id") @db.Uuid
-  aplicativo   Aplicativo  @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider     String     @default("olist")
+  accessToken  String?    @map("access_token")
+  refreshToken String?    @map("refresh_token")
+  expiresAt    DateTime?  @map("expires_at") @db.Timestamptz(6)
+  status       String     @default("nao_conectado")
+  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  aplicativoId String     @map("aplicativo_id") @db.Uuid
+  aplicativo   Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, provider], map: "uq_integracao_olist_tokens_aplicativo_provider")
   @@index([aplicativoId], map: "idx_integracao_olist_tokens_aplicativo_id")

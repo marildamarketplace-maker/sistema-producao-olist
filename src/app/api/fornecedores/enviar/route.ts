@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { criarPedidoOlistApi, listarProdutosOlistApi, obterProdutoOlistApi } from "@/lib/olist";
+import { criarPedidoOlistApi } from "@/lib/olist";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
@@ -8,19 +8,6 @@ const ESTAMPA_VARIANTE_REGEX = /(?:^|-)EST\/([^\/-]+)-([^\/]+)(?:\/|$)/i;
 function escaparXml(valor: string) {
   return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-
-function numeroDecimal(valor: unknown) {
-  if (valor === null || valor === undefined || valor === "") return null;
-  const numero = Number(valor);
-  return Number.isFinite(numero) ? numero : null;
-}
-
-function precoProduto(produto: Record<string, unknown>) {
-  const precos = produto.precos && typeof produto.precos === "object"
-    ? produto.precos as Record<string, unknown>
-    : {};
-  return numeroDecimal(precos.precoPromocional) ?? numeroDecimal(precos.preco);
 }
 
 export async function POST(request: Request) {
@@ -67,6 +54,8 @@ export async function POST(request: Request) {
     const associacaoPorProduto = new Map(associacoes.map((item) => [item.produtoId, item]));
     const grupos = new Map<string, {
       referencia: string;
+      nome: string;
+      preco: number;
       quantidade: number;
       divisoes: Map<string, { estampa: string; variante: string; quantidade: number }>;
     }>();
@@ -76,12 +65,20 @@ export async function POST(request: Request) {
       const referencia = associacao?.produtoFornecedor.referencia?.trim();
       if (!associacao || !referencia) throw new Error(`Produto ${item.sku} sem referência de produto fornecido.`);
       const consumo = Number(associacao.quantidadeUsada);
+      const preco = Number(associacao.produtoFornecedor.precoUnitarioMetro);
       const quantidade = item.quantidadeSolicitada * consumo;
       if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Quantidade fornecida inválida para ${item.sku}.`);
+      if (!Number.isFinite(preco) || preco < 0) throw new Error(`Preço inválido no produto fornecido ${referencia}.`);
       const match = item.sku.match(ESTAMPA_VARIANTE_REGEX);
       if (!match) throw new Error(`SKU ${item.sku} não contém estampa e variante no padrão EST/6835-D.`);
       const [, estampa, variante] = match;
-      const grupo = grupos.get(referencia) ?? { referencia, quantidade: 0, divisoes: new Map() };
+      const grupo = grupos.get(referencia) ?? {
+        referencia,
+        nome: associacao.produtoFornecedor.nome,
+        preco,
+        quantidade: 0,
+        divisoes: new Map(),
+      };
       grupo.quantidade += quantidade;
       const chave = `${estampa}\u0000${variante}`;
       const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0 };
@@ -93,41 +90,21 @@ export async function POST(request: Request) {
     const itens = [];
     const observacoes: string[] = [];
     for (const grupo of grupos.values()) {
-      let produto: Record<string, unknown> | undefined;
-      if (/^\d+$/.test(grupo.referencia)) {
-        try {
-          produto = await obterProdutoOlistApi(vendedor.aplicativoId, grupo.referencia);
-        } catch {
-          produto = undefined;
-        }
-      }
-      if (!produto) {
-        const resposta = await listarProdutosOlistApi(vendedor.aplicativoId, {
-          codigo: grupo.referencia, situacao: "A", limit: 100, offset: 0,
-        });
-        produto = resposta.itens.find((item) =>
-          String(item.id ?? "") === grupo.referencia || String(item.sku ?? "") === grupo.referencia,
-        ) as Record<string, unknown> | undefined ?? resposta.itens[0] as Record<string, unknown> | undefined;
-      }
-      if (!produto?.id) throw new Error(`Produto da referência ${grupo.referencia} não encontrado na Olist.`);
-      if (produto.tipo !== "F") throw new Error(`Produto da referência ${grupo.referencia} não é fabricado.`);
-      const produtoId = Number(produto.id);
+      const produtoId = Number(grupo.referencia);
       if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`ID inválido para a referência ${grupo.referencia}.`);
-      const preco = precoProduto(produto);
-      if (preco === null) throw new Error(`Produto da referência ${grupo.referencia} não possui preço.`);
-      const unidade = String(produto.unidade ?? "UN").trim() || "UN";
+      const unidade = "MT";
       const divisoes = Array.from(grupo.divisoes.values());
       const infoAdicional = divisoes.map((divisao) =>
         `<ESTAMPA><COD>${escaparXml(divisao.estampa)}</COD><VAR>${escaparXml(divisao.variante)}</VAR>` +
         `<QTD>${divisao.quantidade}</QTD><UN>${escaparXml(unidade)}</UN></ESTAMPA>`,
       ).join("");
       for (const divisao of divisoes) {
-        observacoes.push(`${produto.descricao ?? grupo.referencia}     |     ${divisao.quantidade} ${unidade}     |     ${divisao.estampa}-${divisao.variante}`);
+        observacoes.push(`${grupo.nome}     |     ${divisao.quantidade} ${unidade}     |     ${divisao.estampa}-${divisao.variante}`);
       }
       itens.push({
         produto: { id: produtoId, tipo: "P" },
         quantidade: grupo.quantidade,
-        valorUnitario: preco,
+        valorUnitario: grupo.preco,
         infoAdicional,
       });
     }
