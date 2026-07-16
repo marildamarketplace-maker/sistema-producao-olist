@@ -21,7 +21,7 @@ function FormasRecebimentoOlistPage() {
   const [offset, setOffset] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtros, setFiltros] = useState({ nome: "", situacao: "" });
+  const [filtros, setFiltros] = useState({ nome: "", situacao: "1" });
   const [consulta, setConsulta] = useState(filtros);
   const [formaSelecionada, setFormaSelecionada] = useState<{ id: string; nome: string } | null>(null);
 
@@ -63,7 +63,7 @@ function FormasRecebimentoOlistPage() {
       <PageHeader title="Formas de recebimento Olist" description="Consulte as formas de recebimento cadastradas na Olist." />
       <form onSubmit={pesquisar} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 md:grid-cols-3 md:items-end">
         <label className="text-sm font-medium text-slate-700">Nome<input value={filtros.nome} onChange={(event) => setFiltros({ ...filtros, nome: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" /></label>
-        <label className="text-sm font-medium text-slate-700">Situação<select value={filtros.situacao} onChange={(event) => setFiltros({ ...filtros, situacao: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"><option value="">Todas</option><option value="1">Habilitada</option><option value="2">Desabilitada</option></select></label>
+        <label className="text-sm font-medium text-slate-700">Situação<select value={filtros.situacao} onChange={(event) => setFiltros({ ...filtros, situacao: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"><option value="1">Habilitada</option></select></label>
         <button disabled={carregando} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Pesquisar</button>
       </form>
       {erro && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{erro}</div>}

@@ -13,11 +13,21 @@ type UsuarioVendedorOption = {
   aplicativo_id: string;
 };
 
+type PlanoPagamentoOption = { id: string; nome: string };
+type FormaPagamentoOption = {
+  forma_olist_id: string;
+  forma_olist_nome: string | null;
+  planos: PlanoPagamentoOption[];
+};
+
 type Fornecedor = {
   id: string;
   aplicativo_id: string | null;
   vendedor_olist_id: string | null;
   meu_cliente_olist_id: number | null;
+  meu_forma_pagamento_olist_id: number | null;
+  meu_tipo_venda_enum: "venda" | "venda g" | "venda pc" | null;
+  meu_plano_pagamento_id: string | null;
   nome: string;
   endereco: string | null;
   created_at: string;
@@ -27,6 +37,9 @@ type Fornecedor = {
 type FornecedorFormData = {
   vendedor_olist_id: string;
   meu_cliente_olist_id: string;
+  meu_forma_pagamento_olist_id: string;
+  meu_tipo_venda_enum: string;
+  meu_plano_pagamento_id: string;
   nome: string;
   endereco: string;
 };
@@ -34,6 +47,9 @@ type FornecedorFormData = {
 const INITIAL_FORM: FornecedorFormData = {
   vendedor_olist_id: "",
   meu_cliente_olist_id: "",
+  meu_forma_pagamento_olist_id: "",
+  meu_tipo_venda_enum: "",
+  meu_plano_pagamento_id: "",
   nome: "",
   endereco: "",
 };
@@ -42,6 +58,8 @@ export default function FornecedoresPage() {
   const { session } = useAuth();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [usuariosVendedores, setUsuariosVendedores] = useState<UsuarioVendedorOption[]>([]);
+  const [planosPagamento, setPlanosPagamento] = useState<PlanoPagamentoOption[]>([]);
+  const [formasPagamento, setFormasPagamento] = useState<FormaPagamentoOption[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -52,31 +70,37 @@ export default function FornecedoresPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
+  const planosDaFormaSelecionada = useMemo(
+    () => formasPagamento.find((forma) => forma.forma_olist_id === formData.meu_forma_pagamento_olist_id)?.planos ?? [],
+    [formData.meu_forma_pagamento_olist_id, formasPagamento],
+  );
 
   const carregarDados = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const [fornecedoresResult, usuariosResponse] = await Promise.all([
+    const [fornecedoresResult, usuariosResponse, planosResult] = await Promise.all([
       supabase
         .from("fornecedores")
-        .select("id, aplicativo_id, vendedor_olist_id, meu_cliente_olist_id, nome, endereco, created_at, updated_at")
+        .select("id, aplicativo_id, vendedor_olist_id, meu_cliente_olist_id, meu_forma_pagamento_olist_id, meu_tipo_venda_enum, meu_plano_pagamento_id, nome, endereco, created_at, updated_at")
         .order("nome", { ascending: true }),
       fetch("/api/fornecedores/vendedores", {
         headers: session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {},
       }),
+      supabase.from("plano_pagamento").select("id, nome").eq("ativo", true).order("nome"),
     ]);
 
     const usuariosJson = await usuariosResponse.json() as {
       usuarios?: UsuarioVendedorOption[];
+      formasPagamento?: FormaPagamentoOption[];
       error?: string;
     };
 
-    if (fornecedoresResult.error || !usuariosResponse.ok) {
+    if (fornecedoresResult.error || !usuariosResponse.ok || planosResult.error) {
       setErrorMessage(
-        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? usuariosJson.error ?? "erro desconhecido"}`,
+        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? planosResult.error?.message ?? usuariosJson.error ?? "erro desconhecido"}`,
       );
       setIsLoading(false);
       return;
@@ -84,6 +108,8 @@ export default function FornecedoresPage() {
 
     setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
     setUsuariosVendedores(usuariosJson.usuarios ?? []);
+    setPlanosPagamento((planosResult.data as PlanoPagamentoOption[]) ?? []);
+    setFormasPagamento(usuariosJson.formasPagamento ?? []);
     setIsLoading(false);
   }, [session?.access_token]);
 
@@ -103,6 +129,9 @@ export default function FornecedoresPage() {
     setFormData({
       vendedor_olist_id: fornecedor.vendedor_olist_id ?? "",
       meu_cliente_olist_id: fornecedor.meu_cliente_olist_id?.toString() ?? "",
+      meu_forma_pagamento_olist_id: fornecedor.meu_forma_pagamento_olist_id?.toString() ?? "",
+      meu_tipo_venda_enum: fornecedor.meu_tipo_venda_enum ?? "",
+      meu_plano_pagamento_id: fornecedor.meu_plano_pagamento_id ?? "",
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
     });
@@ -121,6 +150,11 @@ export default function FornecedoresPage() {
       meu_cliente_olist_id: formData.meu_cliente_olist_id.trim()
         ? Number(formData.meu_cliente_olist_id)
         : null,
+      meu_forma_pagamento_olist_id: formData.meu_forma_pagamento_olist_id.trim()
+        ? Number(formData.meu_forma_pagamento_olist_id)
+        : null,
+      meu_tipo_venda_enum: formData.meu_tipo_venda_enum || null,
+      meu_plano_pagamento_id: formData.meu_plano_pagamento_id || null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
       updated_at: new Date().toISOString(),
@@ -135,6 +169,13 @@ export default function FornecedoresPage() {
     if (payload.meu_cliente_olist_id !== null &&
         (!Number.isInteger(payload.meu_cliente_olist_id) || payload.meu_cliente_olist_id <= 0)) {
       setErrorMessage("Informe um ID de cliente válido.");
+      setIsSaving(false);
+      return;
+    }
+
+    if (payload.meu_forma_pagamento_olist_id !== null &&
+        (!Number.isInteger(payload.meu_forma_pagamento_olist_id) || payload.meu_forma_pagamento_olist_id <= 0)) {
+      setErrorMessage("Informe um ID de forma de pagamento válido.");
       setIsSaving(false);
       return;
     }
@@ -271,6 +312,53 @@ export default function FornecedoresPage() {
             />
           </label>
 
+          <label className="text-sm text-slate-700">
+            Meu ID de forma de pagamento Olist
+            <select
+              value={formData.meu_forma_pagamento_olist_id}
+              onChange={(event) => setFormData((prev) => ({
+                ...prev,
+                meu_forma_pagamento_olist_id: event.target.value,
+                meu_plano_pagamento_id: "",
+              }))}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+            >
+              <option value="">Nenhuma</option>
+              {formasPagamento.map((forma) => (
+                <option key={forma.forma_olist_id} value={forma.forma_olist_id}>
+                  {forma.forma_olist_id}{forma.forma_olist_nome ? ` — ${forma.forma_olist_nome}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Meu tipo de venda
+            <select
+              value={formData.meu_tipo_venda_enum}
+              onChange={(event) => setFormData((prev) => ({ ...prev, meu_tipo_venda_enum: event.target.value }))}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+            >
+              <option value="">Nenhum</option>
+              <option value="venda">Venda</option>
+              <option value="venda g">Venda G</option>
+              <option value="venda pc">Venda PC</option>
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Meu plano de pagamento
+            <select
+              value={formData.meu_plano_pagamento_id}
+              onChange={(event) => setFormData((prev) => ({ ...prev, meu_plano_pagamento_id: event.target.value }))}
+              disabled={!formData.meu_forma_pagamento_olist_id}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+            >
+              <option value="">Nenhum</option>
+              {planosDaFormaSelecionada.map((plano) => <option key={plano.id} value={plano.id}>{plano.nome}</option>)}
+            </select>
+          </label>
+
           <label className="text-sm text-slate-700 md:col-span-2">
             Endereco
             <textarea
@@ -338,6 +426,9 @@ export default function FornecedoresPage() {
                   <th className="p-3">Nome</th>
                   <th className="p-3">Usuário vendedor</th>
                   <th className="p-3">Meu ID de cliente</th>
+                  <th className="p-3">Minha forma de pagamento Olist</th>
+                  <th className="p-3">Meu tipo de venda</th>
+                  <th className="p-3">Meu plano de pagamento</th>
                   <th className="p-3">Endereco</th>
                   <th className="p-3">Cadastro</th>
                   <th className="p-3 text-right">Acoes</th>
@@ -355,6 +446,9 @@ export default function FornecedoresPage() {
                         ?? "-"}
                     </td>
                     <td className="p-3 text-slate-700">{fornecedor.meu_cliente_olist_id ?? "-"}</td>
+                    <td className="p-3 text-slate-700">{fornecedor.meu_forma_pagamento_olist_id ?? "-"}</td>
+                    <td className="p-3 text-slate-700">{fornecedor.meu_tipo_venda_enum ?? "-"}</td>
+                    <td className="p-3 text-slate-700">{planosPagamento.find((plano) => plano.id === fornecedor.meu_plano_pagamento_id)?.nome ?? "-"}</td>
                     <td className="max-w-md p-3 text-slate-700">
                       {fornecedor.endereco || "-"}
                     </td>

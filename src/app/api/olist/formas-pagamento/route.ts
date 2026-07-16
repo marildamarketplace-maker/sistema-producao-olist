@@ -11,8 +11,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const limit = Math.min(100, Math.max(1, inteiroNaoNegativo(params.get("limit"), 50)));
   const offset = inteiroNaoNegativo(params.get("offset"), 0);
-  const situacaoNumero = Number(params.get("situacao"));
-  const situacao = situacaoNumero === 1 || situacaoNumero === 2 ? situacaoNumero : undefined;
+  const situacao = 1 as const;
 
   try {
     const usuario = await getUsuarioAutenticado(request);

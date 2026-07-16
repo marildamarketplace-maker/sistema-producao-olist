@@ -123,6 +123,7 @@ export async function GET(request: Request) {
       let total = 0;
       do {
         const resposta = await listarFormasPagamentoOlistApi(usuario.aplicativoId, {
+          situacao: 1,
           limit: 100,
           offset,
         });

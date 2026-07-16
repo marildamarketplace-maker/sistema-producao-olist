@@ -51,6 +51,11 @@ type PedidoFornecedorEdicao = {
   situacao: number;
   data: string;
   observacoes: string;
+  observacoesInternas: string;
+  pagamento: {
+    formaRecebimento: { id: number };
+    parcelas: Array<{ dias: number; valor: number; formaRecebimento: { id: number } }>;
+  };
   itens: PedidoFornecedorItemEdicao[];
 };
 
@@ -678,7 +683,7 @@ export default function SolicitacoesProducaoPage() {
       const indiceObservacao = pedido.itens
         .slice(0, itemIndex)
         .reduce((total, item) => total + extrairDivisoesInfoAdicional(item.infoAdicional).length, 0) + divisaoIndex;
-      const linhasObservacao = pedido.observacoes.split("\n.\n");
+      const linhasObservacao = pedido.observacoesInternas.split("\n.\n");
       const partes = linhasObservacao[indiceObservacao]?.split("     |     ") ?? [];
       if (partes.length >= 3) {
         linhasObservacao[indiceObservacao] = criarLinhaObservacaoPedidoOlist({
@@ -695,7 +700,7 @@ export default function SolicitacoesProducaoPage() {
 
       return {
         ...pedido,
-        observacoes: linhasObservacao.join("\n.\n"),
+        observacoesInternas: linhasObservacao.join("\n.\n"),
         itens: pedido.itens.map((item, index) => index === itemIndex
           ? { ...item, infoAdicional: montarInfoAdicional(divisoes) }
           : item),
@@ -1949,9 +1954,21 @@ export default function SolicitacoesProducaoPage() {
                             <input disabled type="date" value={pedidoFornecedorEdicao.data} onChange={(event) => alterarPedidoFornecedor({ data: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                           </label>
                         </div>
-                        <label className="mt-4 block text-sm text-slate-700">Observações
-                          <textarea disabled value={pedidoFornecedorEdicao.observacoes} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                        </label>
+                        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-sm font-semibold text-slate-800">Forma de pagamento e parcelas enviadas à Olist</p>
+                          <p className="mt-2 text-sm text-slate-700">Forma de recebimento: <strong>ID {pedidoFornecedorEdicao.pagamento.formaRecebimento.id}</strong></p>
+                          <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
+                            <table className="min-w-full text-sm"><thead className="bg-slate-100 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Parcela</th><th className="px-3 py-2">Prazo</th><th className="px-3 py-2">Valor</th><th className="px-3 py-2">Forma</th></tr></thead><tbody className="divide-y divide-slate-100">{pedidoFornecedorEdicao.pagamento.parcelas.map((parcela, index) => <tr key={`${parcela.dias}-${index}`}><td className="px-3 py-2">{index + 1}</td><td className="px-3 py-2">{parcela.dias === 0 ? "À vista" : `${parcela.dias} dias`}</td><td className="px-3 py-2 font-medium">{parcela.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="px-3 py-2">ID {parcela.formaRecebimento.id}</td></tr>)}</tbody></table>
+                          </div>
+                        </div>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                          <label className="block text-sm text-slate-700">Observações enviadas à Olist
+                            <textarea disabled value={pedidoFornecedorEdicao.observacoes || "Nenhuma observação comum."} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-32 w-full whitespace-pre-wrap rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
+                          </label>
+                          <label className="block text-sm text-slate-700">Observações internas enviadas à Olist
+                            <textarea disabled value={pedidoFornecedorEdicao.observacoesInternas || "Nenhuma observação interna."} onChange={(event) => alterarPedidoFornecedor({ observacoesInternas: event.target.value })} className="mt-1 min-h-32 w-full whitespace-pre-wrap rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
+                          </label>
+                        </div>
                       </section>
 
                       {pedidoFornecedorEdicao.itens.map((item, index) => (

@@ -22,7 +22,7 @@ function FormasPagamentoOlistPage() {
   const [offset, setOffset] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtros, setFiltros] = useState({ nome: "", situacao: "" });
+  const [filtros, setFiltros] = useState({ nome: "", situacao: "1" });
   const [consulta, setConsulta] = useState(filtros);
   const [formaSelecionada, setFormaSelecionada] = useState<{ id: string; nome: string } | null>(null);
 
@@ -71,9 +71,7 @@ function FormasPagamentoOlistPage() {
         </label>
         <label className="text-sm font-medium text-slate-700">Situação
           <select value={filtros.situacao} onChange={(event) => setFiltros({ ...filtros, situacao: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
-            <option value="">Todas</option>
             <option value="1">Habilitada</option>
-            <option value="2">Desabilitada</option>
           </select>
         </label>
         <button disabled={carregando} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Pesquisar</button>

@@ -21,6 +21,26 @@ function formatarQuantidadeDivisao(quantidade: number) {
   return quantidade.toFixed(2).replace(".", ",");
 }
 
+function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
+  const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
+    ? [0]
+    : nomePlano.split("/").map(Number);
+  if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
+    throw new Error("O plano de pagamento do fornecedor possui parcelas inválidas.");
+  }
+  const totalCentavos = Math.round(valorTotal * 100);
+  const baseCentavos = Math.floor(totalCentavos / dias.length);
+  const resto = totalCentavos - baseCentavos * dias.length;
+  return {
+    formaRecebimento: { id: formaPagamentoId },
+    parcelas: dias.map((dia, indice) => ({
+      dias: dia,
+      valor: (baseCentavos + (indice < resto ? 1 : 0)) / 100,
+      formaRecebimento: { id: formaPagamentoId },
+    })),
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const autenticado = await getUsuarioAutenticado(request);
@@ -43,6 +63,20 @@ export async function POST(request: Request) {
     const fornecedor = await prisma.fornecedor.findUnique({ where: { id: fornecedorId } });
     if (!fornecedor?.vendedorOlistId) throw new Error("Fornecedor sem usuário vendedor vinculado.");
     if (!fornecedor.meuClienteOlistId) throw new Error("Fornecedor sem Meu ID de cliente cadastrado.");
+    if (!fornecedor.meuFormaPagamentoOlistId) throw new Error("Fornecedor sem forma de pagamento Olist cadastrada.");
+    if (!fornecedor.meuPlanoPagamentoId) throw new Error("Fornecedor sem plano de pagamento cadastrado.");
+
+    const associacaoPagamento = await prisma.formaPagamentoOlistPlano.findFirst({
+      where: {
+        formaOlistId: String(fornecedor.meuFormaPagamentoOlistId),
+        planoPagamentoId: fornecedor.meuPlanoPagamentoId,
+        planoPagamento: { ativo: true },
+      },
+      select: { planoPagamento: { select: { nome: true } } },
+    });
+    if (!associacaoPagamento) {
+      throw new Error("O plano cadastrado no fornecedor não está associado à forma de pagamento selecionada.");
+    }
 
     const vendedor = await prisma.usuario.findUnique({
       where: { id: String(fornecedor.vendedorOlistId) },
@@ -184,12 +218,23 @@ export async function POST(request: Request) {
       });
     }
 
+    const observacoesComuns = [
+      fornecedor.meuTipoVenda ? `Tipo de venda: ${fornecedor.meuTipoVenda}` : "",
+      solicitacao.observacaoGeral ? `Observação do pedido: ${solicitacao.observacaoGeral.trim()}` : "",
+    ].filter(Boolean).join("\n\n");
+
     const pedidoGerado = {
       idContato: fornecedor.meuClienteOlistId,
       vendedor: { id: vendedor.vendedorOlistId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
-      observacoes: criarObservacoesPedidoOlist(observacoes),
+      observacoes: observacoesComuns,
+      observacoesInternas: criarObservacoesPedidoOlist(observacoes),
+      pagamento: criarPagamentoPedido(
+        fornecedor.meuFormaPagamentoOlistId,
+        associacaoPagamento.planoPagamento.nome,
+        itens.reduce((total, item) => total + item.quantidade * item.valorUnitario, 0),
+      ),
       itens,
     };
 
