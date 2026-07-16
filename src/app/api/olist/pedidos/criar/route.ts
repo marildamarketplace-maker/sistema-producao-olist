@@ -7,22 +7,16 @@ import {
 } from "@/lib/olist";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import {
+  criarInfoAdicionalOlist,
+  criarObservacoesPedidoOlist,
+  extrairTamanhoSku,
+  extrairTipoProdutoSku,
+  type LinhaObservacaoPedidoOlist,
+} from "@/lib/olist-pedido";
 
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown };
 type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; divisoes?: unknown };
-
-function escaparXml(valor: string) {
-  return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-
-function infoAdicional(divisoes: DivisaoInput[], unidade: string) {
-  return divisoes.map((divisao) => {
-    const quantidade = Number(divisao.quantidade);
-    const estampa = String(divisao.estampa ?? "").trim();
-    const variante = String(divisao.variante ?? "").trim();
-    return `<ESTAMPA>${estampa ? `<COD>${escaparXml(estampa)}</COD>` : ""}${variante ? `<VAR>${escaparXml(variante)}</VAR>` : ""}<QTD>${quantidade}</QTD><UN>${escaparXml(unidade)}</UN></ESTAMPA>`;
-  }).join("");
-}
 
 export async function GET(request: Request) {
   try {
@@ -115,12 +109,14 @@ export async function POST(request: Request) {
     if (!Number.isInteger(clienteId) || clienteId <= 0) throw new Error("Selecione um cliente válido.");
     if (!Array.isArray(body.itens) || body.itens.length === 0) throw new Error("Adicione ao menos um produto.");
 
-    const observacoesLinhas: string[] = [];
+    const observacoesLinhas: LinhaObservacaoPedidoOlist[] = [];
     const produtosAdicionados = new Set<number>();
     const itens = (body.itens as ItemInput[]).map((item, indice) => {
       const produtoId = Number(item.produtoId);
       const produtoCodigo = String(item.produtoCodigo ?? produtoId).trim();
       const produtoDescricao = String(item.produtoDescricao ?? produtoCodigo).trim();
+      const produtoTamanho = extrairTamanhoSku(produtoCodigo);
+      const produtoTipo = extrairTipoProdutoSku(produtoCodigo);
       const produtoUnidade = String(item.produtoUnidade ?? "UN").trim() || "UN";
       const quantidade = Number(item.quantidade);
       const valorUnitario = item.valorUnitario === null || item.valorUnitario === undefined ? undefined : Number(item.valorUnitario);
@@ -137,12 +133,26 @@ export async function POST(request: Request) {
       for (const divisao of divisoes) {
         const estampa = String(divisao.estampa ?? "").trim() || "Sem estampa";
         const variante = String(divisao.variante ?? "").trim() || "Sem variante";
-        observacoesLinhas.push(`${produtoDescricao}     |     ${Number(divisao.quantidade)} ${produtoUnidade}     |     ${estampa}-${variante}`);
+        observacoesLinhas.push({
+          descricao: produtoDescricao,
+          quantidade: Number(divisao.quantidade),
+          unidade: produtoUnidade,
+          estampa,
+          variante,
+          laser: false,
+          tamanho: produtoTamanho,
+          tipo: produtoTipo,
+        });
       }
       return {
         produto: { id: produtoId, tipo: "P" }, quantidade,
         ...(valorUnitario !== undefined ? { valorUnitario } : {}),
-        infoAdicional: infoAdicional(divisoes, produtoUnidade),
+        infoAdicional: criarInfoAdicionalOlist(
+          divisoes.map((divisao) => ({
+            ...divisao, tamanho: produtoTamanho, tipo: produtoTipo, laser: false,
+          })),
+          produtoUnidade,
+        ),
       };
     });
 
@@ -151,7 +161,7 @@ export async function POST(request: Request) {
       vendedor: { id: vendedorId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
-      observacoes: observacoesLinhas.join("\n.\n"),
+      observacoes: criarObservacoesPedidoOlist(observacoesLinhas),
       itens,
     });
     return NextResponse.json(resultado);

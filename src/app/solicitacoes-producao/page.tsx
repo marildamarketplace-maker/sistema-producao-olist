@@ -7,6 +7,7 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
+import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/olist-pedido";
 
 type Produto = {
   id: string;
@@ -50,25 +51,31 @@ type PedidoFornecedorEdicao = {
   itens: PedidoFornecedorItemEdicao[];
 };
 
-type DivisaoInfoAdicional = { estampa: string; variante: string; quantidade: string; unidade: string };
+type DivisaoInfoAdicional = {
+  estampa: string;
+  variante: string;
+  quantidade: string;
+  unidade: string;
+  laser: string;
+  tamanho: string;
+  tipo: string;
+};
 
 function extrairDivisoesInfoAdicional(info: string): DivisaoInfoAdicional[] {
   return Array.from(info.matchAll(/<ESTAMPA>([\s\S]*?)<\/ESTAMPA>/g)).map((match) => {
     const bloco = match[1];
     const valor = (tag: string) => bloco.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))?.[1] ?? "";
-    return { estampa: valor("COD"), variante: valor("VAR"), quantidade: valor("QTD"), unidade: valor("UN") };
+    return {
+      estampa: valor("COD"), variante: valor("VAR"), quantidade: valor("QTD"),
+      unidade: valor("UN"), laser: valor("LASER") || "false",
+      tamanho: valor("TAM"),
+      tipo: valor("TIPO"),
+    };
   });
 }
 
-function escaparXmlFormulario(valor: string) {
-  return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 function montarInfoAdicional(divisoes: DivisaoInfoAdicional[]) {
-  return divisoes.map((divisao) =>
-    `<ESTAMPA><COD>${escaparXmlFormulario(divisao.estampa)}</COD><VAR>${escaparXmlFormulario(divisao.variante)}</VAR>` +
-    `<QTD>${escaparXmlFormulario(divisao.quantidade)}</QTD><UN>${escaparXmlFormulario(divisao.unidade)}</UN></ESTAMPA>`,
-  ).join("");
+  return criarInfoAdicionalOlist(divisoes, "MT", { incluirTagsVazias: true });
 }
 
 type ProdutoOlistProdutoFornecedorRow = {
@@ -645,11 +652,38 @@ export default function SolicitacoesProducaoPage() {
     campo: keyof DivisaoInfoAdicional,
     valor: string,
   ) {
-    const item = pedidoFornecedorEdicao?.itens[itemIndex];
-    if (!item) return;
-    const divisoes = extrairDivisoesInfoAdicional(item.infoAdicional);
-    divisoes[divisaoIndex] = { ...divisoes[divisaoIndex], [campo]: valor };
-    alterarItemPedidoFornecedor(itemIndex, { infoAdicional: montarInfoAdicional(divisoes) });
+    setPedidoFornecedorEdicao((pedido) => {
+      if (!pedido?.itens[itemIndex]) return pedido;
+      const divisoes = extrairDivisoesInfoAdicional(pedido.itens[itemIndex].infoAdicional);
+      if (!divisoes[divisaoIndex]) return pedido;
+      divisoes[divisaoIndex] = { ...divisoes[divisaoIndex], [campo]: valor };
+
+      const indiceObservacao = pedido.itens
+        .slice(0, itemIndex)
+        .reduce((total, item) => total + extrairDivisoesInfoAdicional(item.infoAdicional).length, 0) + divisaoIndex;
+      const linhasObservacao = pedido.observacoes.split("\n.\n");
+      const partes = linhasObservacao[indiceObservacao]?.split("     |     ") ?? [];
+      if (partes.length >= 3) {
+        linhasObservacao[indiceObservacao] = criarLinhaObservacaoPedidoOlist({
+          descricao: partes[0],
+          quantidade: divisoes[divisaoIndex].quantidade,
+          unidade: divisoes[divisaoIndex].unidade,
+          estampa: divisoes[divisaoIndex].estampa,
+          variante: divisoes[divisaoIndex].variante,
+          laser: divisoes[divisaoIndex].laser,
+          tamanho: divisoes[divisaoIndex].tamanho,
+          tipo: divisoes[divisaoIndex].tipo,
+        });
+      }
+
+      return {
+        ...pedido,
+        observacoes: linhasObservacao.join("\n.\n"),
+        itens: pedido.itens.map((item, index) => index === itemIndex
+          ? { ...item, infoAdicional: montarInfoAdicional(divisoes) }
+          : item),
+      };
+    });
   }
 
   useEffect(() => {
@@ -1928,6 +1962,18 @@ export default function SolicitacoesProducaoPage() {
                                 </label>
                                 <label className="text-sm text-slate-700">Unidade
                                   <input value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Tamanho
+                                  <input value={divisao.tamanho} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", event.target.value)} placeholder="Ex.: 70x70" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Tipo do produto
+                                  <input value={divisao.tipo} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tipo", event.target.value)} placeholder="Ex.: LENCO-RELIG-FOURWAY" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                </label>
+                                <label className="text-sm text-slate-700">Corte a laser
+                                  <select value={divisao.laser} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "laser", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+                                    <option value="false">Não</option>
+                                    <option value="true">Sim</option>
+                                  </select>
                                 </label>
                               </div>
                             </div>

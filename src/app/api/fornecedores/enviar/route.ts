@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 import { criarPedidoOlistApi } from "@/lib/olist";
+import {
+  criarInfoAdicionalOlist,
+  criarObservacoesPedidoOlist,
+  extrairTamanhoSku,
+  extrairTipoProdutoSku,
+  type LinhaObservacaoPedidoOlist,
+} from "@/lib/olist-pedido";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
@@ -8,11 +15,6 @@ const ESTAMPA_VARIANTE_REGEX = /(?:^|-)EST\/([^\/-]+)-([^\/]+)(?:\/|$)/i;
 function extrairEstampaVariante(sku: string) {
   const match = sku.match(ESTAMPA_VARIANTE_REGEX);
   return match ? { estampa: match[1], variante: match[2] } : { estampa: "", variante: "" };
-}
-
-function escaparXml(valor: string) {
-  return valor.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 export async function POST(request: Request) {
@@ -67,7 +69,9 @@ export async function POST(request: Request) {
       nome: string;
       preco: number;
       quantidade: number;
-      divisoes: Map<string, { estampa: string; variante: string; quantidade: number }>;
+      divisoes: Map<string, {
+        estampa: string; variante: string; quantidade: number; laser: boolean; tamanho: string; tipo: string;
+      }>;
     }>();
 
     for (const item of itensSolicitacao) {
@@ -80,6 +84,9 @@ export async function POST(request: Request) {
       if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Quantidade fornecida inválida para ${item.sku}.`);
       if (!Number.isFinite(preco) || preco < 0) throw new Error(`Preço inválido no produto fornecido ${referencia}.`);
       const { estampa, variante } = extrairEstampaVariante(item.sku);
+      const laser = item.tipoCorte === "LASER";
+      const tamanho = extrairTamanhoSku(item.sku);
+      const tipo = extrairTipoProdutoSku(item.sku);
       const grupo = grupos.get(referencia) ?? {
         referencia,
         nome: associacao.produtoFornecedor.nome,
@@ -88,26 +95,36 @@ export async function POST(request: Request) {
         divisoes: new Map(),
       };
       grupo.quantidade += quantidade;
-      const chave = `${estampa}\u0000${variante}`;
-      const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0 };
+      const chave = `${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
+      const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, laser, tamanho, tipo };
       divisao.quantidade += quantidade;
       grupo.divisoes.set(chave, divisao);
       grupos.set(referencia, grupo);
     }
 
     const itens = [];
-    const observacoes: string[] = [];
+    const observacoes: LinhaObservacaoPedidoOlist[] = [];
     for (const grupo of grupos.values()) {
       const produtoId = Number(grupo.referencia);
       if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`ID inválido para a referência ${grupo.referencia}.`);
       const unidade = "MT";
       const divisoes = Array.from(grupo.divisoes.values());
-      const infoAdicional = divisoes.map((divisao) =>
-        `<ESTAMPA><COD>${escaparXml(divisao.estampa)}</COD><VAR>${escaparXml(divisao.variante)}</VAR>` +
-        `<QTD>${divisao.quantidade}</QTD><UN>${escaparXml(unidade)}</UN></ESTAMPA>`,
-      ).join("");
+      const infoAdicional = criarInfoAdicionalOlist(
+        divisoes,
+        unidade,
+        { incluirTagsVazias: true },
+      );
       for (const divisao of divisoes) {
-        observacoes.push(`${grupo.nome}     |     ${divisao.quantidade} ${unidade}     |     ${divisao.estampa}-${divisao.variante}`);
+        observacoes.push({
+          descricao: grupo.nome,
+          quantidade: divisao.quantidade,
+          unidade,
+          estampa: divisao.estampa,
+          variante: divisao.variante,
+          laser: divisao.laser,
+          tamanho: divisao.tamanho,
+          tipo: divisao.tipo,
+        });
       }
       itens.push({
         produto: { id: produtoId, tipo: "P" },
@@ -122,7 +139,7 @@ export async function POST(request: Request) {
       vendedor: { id: vendedor.vendedorOlistId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
-      observacoes: observacoes.join("\n.\n"),
+      observacoes: criarObservacoesPedidoOlist(observacoes),
       itens,
     };
 
