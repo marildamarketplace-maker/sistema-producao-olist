@@ -13,17 +13,37 @@ export async function GET(request: Request) {
       throw new Error("Sem permissão para consultar produtos.");
     }
 
-    const produtos = await prisma.produto.findMany({
-      where: { aplicativoId: autenticado.aplicativoId },
-      orderBy: { sku: "asc" },
-      select: { id: true, sku: true, imagemUrl: true },
-    });
+    const [produtos, tiposProduto, tamanhos] = await Promise.all([
+      prisma.produto.findMany({
+        where: { aplicativoId: autenticado.aplicativoId },
+        orderBy: { sku: "asc" },
+        select: { id: true, sku: true, imagemUrl: true },
+      }),
+      prisma.tipoProduto.findMany({
+        orderBy: { titulo: "asc" },
+        select: { id: true, sku: true, titulo: true },
+      }),
+      prisma.tamanho.findMany({
+        orderBy: { titulo: "asc" },
+        select: { id: true, sku: true, titulo: true },
+      }),
+    ]);
 
     return NextResponse.json({
       produtos: produtos.map((produto) => ({
         id: produto.id,
         sku: produto.sku,
         imagem_url: produto.imagemUrl,
+      })),
+      tiposProduto: tiposProduto.map((tipo) => ({
+        id: tipo.id,
+        codigo: tipo.sku,
+        nome: tipo.titulo,
+      })),
+      tamanhos: tamanhos.map((tamanho) => ({
+        id: tamanho.id,
+        codigo: tamanho.sku,
+        descricao: tamanho.titulo,
       })),
     });
   } catch (error) {

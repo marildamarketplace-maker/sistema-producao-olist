@@ -57,6 +57,12 @@ export async function POST(request: Request) {
     });
     if (!solicitacao) throw new Error("Solicitação em produção não encontrada neste aplicativo.");
 
+    const envioExistente = await prisma.pedidoFornecedorSolicitacao.findFirst({
+      where: { solicitacaoId },
+      select: { id: true },
+    });
+    if (envioExistente) throw new Error("Esta solicitação já foi enviada para o fornecedor.");
+
     const itensSolicitacao = await prisma.itemSolicitacaoProducao.findMany({
       where: { solicitacaoId, aplicativoId: solicitante.aplicativoId },
       orderBy: { sku: "asc" },
@@ -114,21 +120,21 @@ export async function POST(request: Request) {
     for (const grupo of grupos.values()) {
       const produtoId = Number(grupo.referencia);
       if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`ID inválido para a referência ${grupo.referencia}.`);
-      const unidade = "MT";
       const divisoes = Array.from(grupo.divisoes.values());
       const infoAdicional = criarInfoAdicionalOlist(
         divisoes.map((divisao) => ({
           ...divisao,
           quantidade: formatarQuantidadeDivisao(divisao.quantidade),
+          unidade: divisao.laser ? "UN" : "MT",
         })),
-        unidade,
+        "MT",
         { incluirTagsVazias: true },
       );
       for (const divisao of divisoes) {
         observacoes.push({
           descricao: grupo.nome,
           quantidade: formatarQuantidadeDivisao(divisao.quantidade),
-          unidade,
+          unidade: divisao.laser ? "UN" : "MT",
           estampa: divisao.estampa,
           variante: divisao.variante,
           laser: divisao.laser,

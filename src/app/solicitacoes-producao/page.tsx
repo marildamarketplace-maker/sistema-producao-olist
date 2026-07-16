@@ -6,6 +6,9 @@ import { ChevronDown, Download, Pencil, Printer, Send, XCircle } from "lucide-re
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { CampoTipoProduto, type TipoProdutoOpcao } from "@/components/campo-tipo-produto";
+import { CampoTamanho, type TamanhoOpcao } from "@/components/campo-tamanho";
+import { Switch } from "@/components/switch";
 import { supabase } from "@/lib/supabase";
 import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/olist-pedido";
 
@@ -312,6 +315,8 @@ function ordenarSolicitacoes(a: Solicitacao, b: Solicitacao) {
 export default function SolicitacoesProducaoPage() {
   const { session, usuario } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [tiposProduto, setTiposProduto] = useState<TipoProdutoOpcao[]>([]);
+  const [tamanhos, setTamanhos] = useState<TamanhoOpcao[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
@@ -389,7 +394,12 @@ export default function SolicitacoesProducaoPage() {
       setSolicitacoes(solicitacoesCarregadas.sort(ordenarSolicitacoes));
       setItensPorSolicitacao({});
       setItensCarregando({});
-      const produtosJson = await produtosResponse.json() as { produtos?: Produto[]; error?: string };
+      const produtosJson = await produtosResponse.json() as {
+        produtos?: Produto[];
+        tiposProduto?: TipoProdutoOpcao[];
+        tamanhos?: TamanhoOpcao[];
+        error?: string;
+      };
       const pedidosJson = await pedidosResponse.json() as {
         pedidos?: Array<{ solicitacaoId: string; pedidoOlistId: string }>;
         error?: string;
@@ -405,6 +415,8 @@ export default function SolicitacoesProducaoPage() {
 
       const produtosCarregados = produtosJson.produtos ?? [];
       setProdutos(produtosCarregados);
+      setTiposProduto(produtosJson.tiposProduto ?? []);
+      setTamanhos(produtosJson.tamanhos ?? []);
       const pedidosAgrupados: Record<string, string[]> = {};
       for (const pedido of pedidosJson.pedidos ?? []) {
         pedidosAgrupados[pedido.solicitacaoId] ??= [];
@@ -600,6 +612,11 @@ export default function SolicitacoesProducaoPage() {
       const json = await response.json() as { id?: number; numeroPedido?: string; error?: string };
       if (!response.ok) throw new Error(json.error ?? "Não foi possível criar o pedido na Olist.");
       setEnvioSucesso(json);
+      const pedidoOlistId = String(json.id ?? json.numeroPedido ?? "").trim();
+      setPedidosOlistPorSolicitacao((pedidos) => ({
+        ...pedidos,
+        [envioSolicitacao.id]: pedidoOlistId ? [pedidoOlistId] : ["Enviado"],
+      }));
     } catch (error) {
       setEnvioErro(error instanceof Error ? error.message : "Erro ao enviar para o fornecedor.");
     } finally {
@@ -1346,6 +1363,7 @@ export default function SolicitacoesProducaoPage() {
               const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
               const podeEditar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
               const podeCancelar = solicitacao.status !== "cancelada";
+              const jaEnviadaFornecedor = (pedidosOlistPorSolicitacao[solicitacao.id]?.length ?? 0) > 0;
 
               return (
                 <Fragment key={solicitacao.id}>
@@ -1430,9 +1448,11 @@ export default function SolicitacoesProducaoPage() {
                           <button
                             type="button"
                             onClick={() => void abrirEnvioFornecedor(solicitacao)}
-                            disabled={!session || carregandoItens || envioCarregando}
+                            disabled={!session || carregandoItens || envioCarregando || jaEnviadaFornecedor}
                             className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            title={session ? "Enviar para o fornecedor" : "Entre no sistema para enviar"}
+                            title={jaEnviadaFornecedor
+                              ? "Esta solicitação já foi enviada para o fornecedor"
+                              : session ? "Enviar para o fornecedor" : "Entre no sistema para enviar"}
                           >
                             <Send className="h-4 w-4" aria-hidden="true" />
                             Enviar para o Fornecedor
@@ -1678,14 +1698,14 @@ export default function SolicitacoesProducaoPage() {
                   />
                 </label>
 
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center gap-3 text-sm text-slate-700">
+                  <Switch
                     checked={item.corte_laser}
-                    onChange={(event) => alterarItem(index, { corte_laser: event.target.checked })}
+                    onCheckedChange={(corte_laser) => alterarItem(index, { corte_laser })}
+                    label="Corte a laser"
                   />
-                  Corte a laser
-                </label>
+                  <span>Corte a laser</span>
+                </div>
 
                 <label className="text-sm text-slate-700">
                   Observação
@@ -1967,13 +1987,25 @@ export default function SolicitacoesProducaoPage() {
                                   <input disabled inputMode="decimal" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                                 </label>
                                 <label className="text-sm text-slate-700">Unidade
-                                  <input value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                  <input disabled value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
                                 </label>
                                 <label className="text-sm text-slate-700">Tamanho
-                                  <input value={divisao.tamanho} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", event.target.value)} placeholder="Ex.: 70x70" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                  <div className="mt-1">
+                                    <CampoTamanho
+                                      opcoes={tamanhos}
+                                      valor={divisao.tamanho}
+                                      onChange={(tamanho) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", tamanho)}
+                                    />
+                                  </div>
                                 </label>
                                 <label className="text-sm text-slate-700">Tipo do produto
-                                  <input value={divisao.tipo} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tipo", event.target.value)} placeholder="Ex.: LENCO-RELIG-FOURWAY" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                                  <div className="mt-1">
+                                    <CampoTipoProduto
+                                      opcoes={tiposProduto}
+                                      valor={divisao.tipo}
+                                      onChange={(tipo) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tipo", tipo)}
+                                    />
+                                  </div>
                                 </label>
                                 <label className="text-sm text-slate-700">Corte a laser
                                   <select disabled value={divisao.laser} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "laser", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500">

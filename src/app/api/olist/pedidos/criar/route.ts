@@ -95,9 +95,11 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, max-age=0" } },
       );
     }
-    const [estampas, variantes] = await Promise.all([
+    const [estampas, variantes, tiposProduto, tamanhos] = await Promise.all([
       prisma.estampa.findMany({ orderBy: { codigo: "asc" }, select: { id: true, codigo: true, descricao: true } }),
       prisma.variante.findMany({ orderBy: { codigo: "asc" }, select: { id: true, estampaId: true, codigo: true, descricao: true } }),
+      prisma.tipoProduto.findMany({ orderBy: { titulo: "asc" }, select: { id: true, sku: true, titulo: true } }),
+      prisma.tamanho.findMany({ orderBy: { titulo: "asc" }, select: { id: true, sku: true, titulo: true } }),
     ]);
     let vendedores: Record<string, unknown>[] = [];
     try {
@@ -116,7 +118,14 @@ export async function GET(request: Request) {
     } catch (error) {
       console.warn("Não foi possível carregar os vendedores:", error);
     }
-    return NextResponse.json({ estampas, variantes, vendedores, vendedorOlistId: usuario.vendedorOlistId });
+    return NextResponse.json({
+      estampas,
+      variantes,
+      tiposProduto: tiposProduto.map((tipo) => ({ id: tipo.id, codigo: tipo.sku, nome: tipo.titulo })),
+      tamanhos: tamanhos.map((tamanho) => ({ id: tamanho.id, codigo: tamanho.sku, descricao: tamanho.titulo })),
+      vendedores,
+      vendedorOlistId: usuario.vendedorOlistId,
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar dados." }, { status: 500 });
   }
@@ -162,10 +171,11 @@ export async function POST(request: Request) {
         const laserDivisao = divisao.laser === undefined
           ? produtoLaser
           : divisao.laser === true || String(divisao.laser).trim().toLowerCase() === "true";
+        const unidadeDivisao = laserDivisao ? "UN" : "MT";
         observacoesLinhas.push({
           descricao: produtoDescricao,
           quantidade: Number(divisao.quantidade),
-          unidade: produtoUnidade,
+          unidade: unidadeDivisao,
           estampa,
           variante,
           laser: laserDivisao,
@@ -184,6 +194,9 @@ export async function POST(request: Request) {
             laser: divisao.laser === undefined
               ? produtoLaser
               : divisao.laser === true || String(divisao.laser).trim().toLowerCase() === "true",
+            unidade: (divisao.laser === undefined
+              ? produtoLaser
+              : divisao.laser === true || String(divisao.laser).trim().toLowerCase() === "true") ? "UN" : "MT",
           })),
           produtoUnidade,
         ),
