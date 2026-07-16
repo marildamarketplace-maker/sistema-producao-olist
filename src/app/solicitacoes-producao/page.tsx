@@ -875,31 +875,31 @@ export default function SolicitacoesProducaoPage() {
   async function cancelarSolicitacao(solicitacao: Solicitacao) {
     if (!podeSolicitarProducao) return;
 
-    const confirmar = window.confirm("Cancelar esta solicitação de produção?");
+    const confirmar = window.confirm(
+      solicitacao.status === "concluida"
+        ? "Cancelar esta solicitação concluída? A entrada dos produtos será estornada do estoque."
+        : "Cancelar esta solicitação de produção?",
+    );
 
     if (!confirmar) return;
 
     setSaving(true);
     setErrorMessage(null);
 
-    const { error: solicitacaoErro } = await supabase
-      .from("solicitacoes_producao")
-      .update({ status: "cancelada" })
-      .eq("id", solicitacao.id);
-
-    if (solicitacaoErro) {
-      setErrorMessage(`Erro ao cancelar solicitação: ${solicitacaoErro.message}`);
-      setSaving(false);
-      return;
-    }
-
-    const { error: itensErro } = await supabase
-      .from("itens_solicitacao_producao")
-      .update({ status_item: "cancelada" })
-      .eq("solicitacao_id", solicitacao.id);
-
-    if (itensErro) {
-      setErrorMessage(`Solicitação cancelada, mas erro ao cancelar itens: ${itensErro.message}`);
+    try {
+      if (!session?.access_token) throw new Error("Sessão expirada.");
+      const response = await fetch("/api/solicitacoes-producao/cancelar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ solicitacaoId: solicitacao.id }),
+      });
+      const json = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(json.error ?? "Erro ao cancelar solicitação.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao cancelar solicitação.");
       setSaving(false);
       return;
     }
@@ -1348,7 +1348,8 @@ export default function SolicitacoesProducaoPage() {
               const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
               const itensJaCarregados = Boolean(itensPorSolicitacao[solicitacao.id]);
               const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
-              const podeAlterar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
+              const podeEditar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
+              const podeCancelar = solicitacao.status !== "cancelada";
 
               return (
                 <Fragment key={solicitacao.id}>
@@ -1411,7 +1412,7 @@ export default function SolicitacoesProducaoPage() {
                                 if (itensCarregados?.length) editarSolicitacao(solicitacao, itensCarregados);
                               }}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={carregandoItens || saving || !podeAlterar}
+                              disabled={carregandoItens || saving || !podeEditar}
                               title="Editar solicitação"
                               aria-label="Editar solicitação"
                             >
@@ -1421,7 +1422,7 @@ export default function SolicitacoesProducaoPage() {
                               type="button"
                               onClick={() => cancelarSolicitacao(solicitacao)}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={saving || !podeAlterar}
+                              disabled={saving || !podeCancelar}
                               title="Cancelar solicitação"
                               aria-label="Cancelar solicitação"
                             >
