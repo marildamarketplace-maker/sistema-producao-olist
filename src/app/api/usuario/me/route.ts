@@ -18,6 +18,14 @@ type UsuarioRow = {
   pode_visualizar_olist_vendedores: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
+  pode_visualizar_tipos_produto: boolean;
+  pode_editar_tipos_produto: boolean;
+  pode_visualizar_tamanhos: boolean;
+  pode_editar_tamanhos: boolean;
+  pode_visualizar_estampas: boolean;
+  pode_editar_estampas: boolean;
+  pode_visualizar_variantes: boolean;
+  pode_editar_variantes: boolean;
   pode_visualizar_baixa: boolean;
   pode_solicitar_baixa: boolean;
   pode_visualizar_devolucao: boolean;
@@ -69,6 +77,14 @@ export async function GET(request: Request) {
         pode_visualizar_olist_vendedores,
         pode_visualizar_estoque,
         pode_editar_estoque,
+        pode_visualizar_tipos_produto,
+        pode_editar_tipos_produto,
+        pode_visualizar_tamanhos,
+        pode_editar_tamanhos,
+        pode_visualizar_estampas,
+        pode_editar_estampas,
+        pode_visualizar_variantes,
+        pode_editar_variantes,
         pode_visualizar_baixa,
         pode_solicitar_baixa,
         pode_visualizar_devolucao,
@@ -125,6 +141,14 @@ export async function GET(request: Request) {
     podeVisualizarOlistVendedores: Boolean(usuario.pode_visualizar_olist_vendedores),
     podeVisualizarEstoque: Boolean(usuario.pode_visualizar_estoque),
     podeEditarEstoque: Boolean(usuario.pode_editar_estoque),
+    podeVisualizarTiposProduto: Boolean(usuario.pode_visualizar_tipos_produto),
+    podeEditarTiposProduto: Boolean(usuario.pode_editar_tipos_produto),
+    podeVisualizarTamanhos: Boolean(usuario.pode_visualizar_tamanhos),
+    podeEditarTamanhos: Boolean(usuario.pode_editar_tamanhos),
+    podeVisualizarEstampas: Boolean(usuario.pode_visualizar_estampas),
+    podeEditarEstampas: Boolean(usuario.pode_editar_estampas),
+    podeVisualizarVariantes: Boolean(usuario.pode_visualizar_variantes),
+    podeEditarVariantes: Boolean(usuario.pode_editar_variantes),
     podeVisualizarBaixa: Boolean(usuario.pode_visualizar_baixa),
     podeSolicitarBaixa: Boolean(usuario.pode_solicitar_baixa),
     podeVisualizarDevolucao: Boolean(usuario.pode_visualizar_devolucao),

@@ -2,6 +2,7 @@
 
 import type { ClipboardEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { buildProdutoMockupPrompt } from "@/lib/mockup-prompt";
 import {
@@ -14,34 +15,20 @@ import {
   TipoProdutoOlist,
   VarianteOlist,
   carregarGeradorCsvOlist,
-  excluirEstampaOlist,
   excluirProdutoFinalOlist,
-  excluirTamanhoOlist,
-  excluirTipoProdutoOlist,
-  excluirVarianteOlist,
   gerarProdutosFinaisEmLoteOlist,
   gerarMockupProdutoOlist,
   montarCamposCsvProdutoOlist,
   montarCsvProdutosFabricadosOlist,
   montarCsvProdutosOlist,
-  salvarEstampaOlist,
   salvarProdutoFinalOlist,
   salvarProdutoKitFinalOlist,
-  salvarTamanhoOlist,
-  salvarTipoProdutoOlist,
-  salvarVarianteOlist,
   uploadEstampaTemporariaMockupOlist,
-  uploadImagemEstampaOlist,
   uploadMockupProdutoOlist,
-  verificarImagensEstampasOlist,
   vincularProdutosFinaisOlist,
 } from "@/lib/gerador-csv-olist";
 
 type Aba =
-  | "tipos"
-  | "tamanhos"
-  | "estampas"
-  | "variantes"
   | "estamparia"
   | "gerar"
   | "gerar-kit"
@@ -50,15 +37,13 @@ type Aba =
 type MockupQuality = "low" | "medium" | "high";
 
 const ABAS: { id: Aba; label: string }[] = [
-  { id: "tipos", label: "Tipos de Produto" },
-  { id: "tamanhos", label: "Tamanho" },
-  { id: "estampas", label: "Estampas" },
-  { id: "variantes", label: "Variantes" },
   { id: "estamparia", label: "Estamparia" },
   { id: "gerar", label: "Gerar Produto Final" },
   { id: "gerar-kit", label: "Gerar Produto Kit Final" },
   { id: "produtos-vk", label: "Produtos Criados (V/K)" },
 ];
+
+const ABA_IDS = new Set<Aba>(ABAS.map((aba) => aba.id));
 
 const MOCKUP_QUALITY_LABELS: Record<MockupQuality, string> = {
   low: "Baixa (mini)",
@@ -73,7 +58,7 @@ function withCacheBust(url: string, key?: number) {
   return `${url}${separator}v=${key}`;
 }
 
-const tipoInicial = {
+export const tipoInicial = {
   titulo: "",
   sku: "",
   descricao: "",
@@ -90,14 +75,20 @@ const tipoInicial = {
   }>,
 };
 
-const estampaInicial = {
+export type TipoProdutoCsvImportado = {
+  titulo: string; sku: string; corteLaser: boolean; tecidoCorrido: boolean; categoria: string;
+  produtoFornecedorId: string; produtoFornecido: string; slug: string; descricao: string;
+  descricaoSeo: string; palavrasChave: string; detalhesPromptIa: string;
+};
+
+export const estampaInicial = {
   codigo: "",
   descricao: "",
   palavrasChave: "",
   extra: "",
 };
 
-const varianteInicial = {
+export const varianteInicial = {
   estampaId: "",
   tamanhoId: "",
   codigo: "",
@@ -105,11 +96,18 @@ const varianteInicial = {
   palavrasChave: "",
 };
 
-const tamanhoInicial = {
+export const tamanhoInicial = {
   titulo: "",
   sku: "",
   slug: "",
   quantidadeProdutoFornecedor: "",
+};
+
+export type TamanhoCsvImportado = {
+  titulo: string;
+  sku: string;
+  slug: string;
+  quantidadeProdutoFornecedor: number;
 };
 
 type EstampaImportadaInput = {
@@ -119,7 +117,7 @@ type EstampaImportadaInput = {
   extra: string | null;
 };
 
-type VarianteImportadaInput = {
+export type VarianteImportadaInput = {
   codigo: string;
   estampaCodigo: string;
   tamanhoRef: string;
@@ -331,15 +329,6 @@ function buildTituloFinal(
     .trim();
 }
 
-function withCopySuffix(value: string | null | undefined, suffix = "-COPIA") {
-  const base = value?.trim();
-  return base ? `${base}${suffix}` : "";
-}
-
-function withSlugCopySuffix(value: string | null | undefined) {
-  return withCopySuffix(value, "-copia");
-}
-
 function formatImportCsvField(value: string | null | undefined) {
   return (value ?? "")
     .replace(/\r?\n/g, " ")
@@ -360,7 +349,7 @@ function downloadCsv(filename: string, csv: string) {
 
 function buildEstampasImportCsv(estampas: EstampaOlist[]) {
   return [
-    "codigo;descricao;palavras-chave;extra",
+    "Codigo;Descricao;Palavras-chave;Extra",
     ...estampas.map((estampa) =>
       [
         estampa.codigo,
@@ -374,7 +363,7 @@ function buildEstampasImportCsv(estampas: EstampaOlist[]) {
 
 function buildVariantesImportCsv(variantes: VarianteOlist[]) {
   return [
-    "codigo;estampa;tamanho;descricao;palavras-chave",
+    "Codigo;Estampa;Tamanho;Descricao;Palavras-chave",
     ...variantes.map((variante) =>
       [
         variante.codigo,
@@ -387,7 +376,7 @@ function buildVariantesImportCsv(variantes: VarianteOlist[]) {
   ].join("\n");
 }
 
-function parseEstampasImport(text: string): EstampaImportadaInput[] {
+export function parseEstampasImport(text: string): EstampaImportadaInput[] {
   const linhas = text
     .split(/\r?\n/)
     .map((linha) => linha.trim())
@@ -421,7 +410,7 @@ function parseEstampasImport(text: string): EstampaImportadaInput[] {
   return estampas;
 }
 
-function parseVariantesImport(text: string): VarianteImportadaInput[] {
+export function parseVariantesImport(text: string): VarianteImportadaInput[] {
   const linhas = text
     .split(/\r?\n/)
     .map((linha) => linha.trim())
@@ -466,7 +455,10 @@ function parseVariantesImport(text: string): VarianteImportadaInput[] {
 }
 
 export function GeradorCsvOlistClient() {
-  const [abaAtiva, setAbaAtiva] = useState<Aba>("tipos");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [abaAtiva, setAbaAtiva] = useState<Aba>("estamparia");
   const [dados, setDados] = useState<GeradorCsvOlistData>({
     tiposProduto: [],
     produtosFornecedor: [],
@@ -480,19 +472,6 @@ export function GeradorCsvOlistClient() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [tipoForm, setTipoForm] = useState(tipoInicial);
-  const [tipoEditId, setTipoEditId] = useState<string | null>(null);
-  const [estampaForm, setEstampaForm] = useState(estampaInicial);
-  const [estampaEditId, setEstampaEditId] = useState<string | null>(null);
-  const [estampaImagemFiles, setEstampaImagemFiles] = useState<[File | null, File | null]>([null, null]);
-  const [estampaImagemInputKey, setEstampaImagemInputKey] = useState(0);
-  const [estampaBusca, setEstampaBusca] = useState("");
-  const [varianteForm, setVarianteForm] = useState(varianteInicial);
-  const [varianteEditId, setVarianteEditId] = useState<string | null>(null);
-  const [varianteBusca, setVarianteBusca] = useState("");
-  const [tamanhoForm, setTamanhoForm] = useState(tamanhoInicial);
-  const [tamanhoEditId, setTamanhoEditId] = useState<string | null>(null);
-  const [tamanhoBusca, setTamanhoBusca] = useState("");
 
   const tiposAtivos = useMemo(
     () => dados.tiposProduto.filter((tipo) => tipo.ativo),
@@ -502,16 +481,6 @@ export function GeradorCsvOlistClient() {
     () => dados.estampas.filter((estampa) => estampa.ativo),
     [dados.estampas],
   );
-  const estampasFiltradas = useMemo(() => {
-    const busca = estampaBusca.trim().toLowerCase();
-    if (!busca) return dados.estampas;
-
-    return dados.estampas.filter((estampa) =>
-      [estampa.codigo, estampa.descricao, estampa.palavrasChave, estampa.extra].some((value) =>
-        value?.toLowerCase().includes(busca),
-      ),
-    );
-  }, [dados.estampas, estampaBusca]);
   const variantesAtivas = useMemo(
     () => dados.variantes.filter((variante) => variante.ativo),
     [dados.variantes],
@@ -520,23 +489,6 @@ export function GeradorCsvOlistClient() {
     () => dados.tamanhos.filter((tamanho) => tamanho.ativo),
     [dados.tamanhos],
   );
-  const tamanhosFiltrados = useMemo(() => {
-    const busca = tamanhoBusca.trim().toLowerCase();
-    if (!busca) return dados.tamanhos;
-
-    return dados.tamanhos.filter((tamanho) =>
-      [tamanho.titulo, tamanho.sku, tamanho.slug].some((value) => value?.toLowerCase().includes(busca)),
-    );
-  }, [dados.tamanhos, tamanhoBusca]);
-  const variantesFiltradas = useMemo(() => {
-    const busca = varianteBusca.trim().toLowerCase();
-    if (!busca) return dados.variantes;
-
-    return dados.variantes.filter((variante) =>
-      [variante.codigo, variante.estampa?.codigo, variante.tamanho?.titulo, variante.tamanho?.sku]
-        .some((value) => value?.toLowerCase().includes(busca)),
-    );
-  }, [dados.variantes, varianteBusca]);
 
   async function carregar() {
     setLoading(true);
@@ -558,6 +510,18 @@ export function GeradorCsvOlistClient() {
     carregar();
   }, []);
 
+  useEffect(() => {
+    const tab = searchParams.get("tab") as Aba | null;
+    setAbaAtiva(tab && ABA_IDS.has(tab) ? tab : "estamparia");
+  }, [searchParams]);
+
+  function selecionarAba(aba: Aba) {
+    setAbaAtiva(aba);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", aba);
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
   function toNumberOrNull(value: string) {
     const normalized = value.trim().replace(/\./g, "").replace(",", ".");
     if (!normalized) return null;
@@ -568,335 +532,6 @@ export function GeradorCsvOlistClient() {
     }
 
     return numberValue;
-  }
-
-  async function salvarTipo(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const titulo = tipoForm.titulo.trim();
-      const sku = buildSkuFromTitle(tipoForm.sku || titulo);
-      const slug = buildSlugPart(tipoForm.slug || titulo);
-
-      if (!titulo || !sku) {
-        throw new Error("Preencha o Titulo para gerar SKU e slug.");
-      }
-      if (!tipoForm.produtosFornecidos[0]?.produtoFornecedorId) {
-        throw new Error("Selecione o produto fornecido do tipo de produto.");
-      }
-
-      await salvarTipoProdutoOlist({
-        id: tipoEditId,
-        titulo,
-        sku,
-        descricao: tipoForm.descricao || null,
-        descricaoSeo: tipoForm.descricaoSeo || null,
-        palavrasChave: tipoForm.palavrasChave || null,
-        detalhesPromptIa: tipoForm.detalhesPromptIa || null,
-        corteLaser: tipoForm.corteLaser,
-        tecidoCorrido: tipoForm.tecidoCorrido,
-        slug: slug || null,
-        categoria: tipoForm.categoria || null,
-        produtosFornecidos: tipoForm.produtosFornecidos.slice(0, 1).map((item) => ({
-          produtoFornecedorId: item.produtoFornecedorId,
-          quantidadeUsada: 1,
-        })),
-      });
-      setTipoForm(tipoInicial);
-      setTipoEditId(null);
-      setMessage("Tipo de produto salvo com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar tipo.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function salvarEstampa(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const codigo = estampaForm.codigo.trim().toUpperCase();
-      if (!codigo) {
-        throw new Error("Preencha o codigo da estampa.");
-      }
-
-      const codigoDuplicado = dados.estampas.some(
-        (estampa) => estampa.codigo.toUpperCase() === codigo && estampa.id !== estampaEditId,
-      );
-      if (codigoDuplicado) {
-        throw new Error("Ja existe uma estampa cadastrada com este codigo.");
-      }
-
-      const resposta = await salvarEstampaOlist({
-        id: estampaEditId,
-        codigo,
-        descricao: estampaForm.descricao || null,
-        palavrasChave: estampaForm.palavrasChave || null,
-        extra: estampaForm.extra || null,
-      });
-      const imagensSelecionadas = estampaImagemFiles.filter((file): file is File => Boolean(file));
-      for (const [index, file] of estampaImagemFiles.entries()) {
-        if (file) {
-          await uploadImagemEstampaOlist({
-            id: resposta.estampa.id,
-            codigo: resposta.estampa.codigo,
-            file,
-            index: index as 0 | 1,
-          });
-        }
-      }
-      setEstampaForm(estampaInicial);
-      setEstampaEditId(null);
-      setEstampaImagemFiles([null, null]);
-      setEstampaImagemInputKey((key) => key + 1);
-      setMessage(
-        imagensSelecionadas.length
-          ? `Estampa e ${imagensSelecionadas.length} imagem(ns) salvas com sucesso.`
-          : "Estampa salva com sucesso.",
-      );
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar estampa.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function importarEstampas(text: string) {
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const estampas = parseEstampasImport(text);
-      const codigosImportados = new Set<string>();
-      const codigosDuplicadosNoArquivo = estampas
-        .map((estampa) => estampa.codigo)
-        .filter((codigo) => {
-          if (codigosImportados.has(codigo)) return true;
-          codigosImportados.add(codigo);
-          return false;
-        });
-
-      if (codigosDuplicadosNoArquivo.length) {
-        throw new Error(`Codigos duplicados no arquivo: ${Array.from(new Set(codigosDuplicadosNoArquivo)).join(", ")}.`);
-      }
-
-      const estampasPorCodigo = new Map(dados.estampas.map((estampa) => [estampa.codigo.toUpperCase(), estampa]));
-      const totalAtualizadas = estampas.filter((estampa) => estampasPorCodigo.has(estampa.codigo)).length;
-      const totalCriadas = estampas.length - totalAtualizadas;
-
-      await Promise.all(
-        estampas.map((estampa) =>
-          salvarEstampaOlist({
-            id: estampasPorCodigo.get(estampa.codigo)?.id ?? null,
-            ...estampa,
-          }),
-        ),
-      );
-      setMessage(`${totalCriadas} estampa(s) criada(s) e ${totalAtualizadas} substituida(s) com sucesso.`);
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao importar estampas.");
-      throw error;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function verificarImagensEstampas(ids: string[]) {
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const resultado = await verificarImagensEstampasOlist(ids);
-      setMessage(
-        `Verificacao concluida: ${resultado.totalVerificadas} estampa(s), ` +
-          `${resultado.imagem0Encontradas} imagem(ns) 0 e ${resultado.imagem1Encontradas} imagem(ns) 1 encontradas. ` +
-          `${resultado.estampasAtualizadas} estampa(s) atualizada(s).`,
-      );
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao verificar imagens das estampas.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function salvarVariante(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const codigo = varianteForm.codigo.trim().toUpperCase();
-      const estampaId = varianteForm.estampaId;
-      const tamanhoId = varianteForm.tamanhoId;
-      if (!estampaId) {
-        throw new Error("Selecione a estampa da variante.");
-      }
-      if (!tamanhoId) {
-        throw new Error("Selecione o tamanho da variante.");
-      }
-      if (!codigo) {
-        throw new Error("Preencha o codigo da variante.");
-      }
-
-      const codigoDuplicado = dados.variantes.some(
-        (variante) =>
-          variante.estampaId === estampaId &&
-          variante.codigo.toUpperCase() === codigo &&
-          variante.id !== varianteEditId,
-      );
-      if (codigoDuplicado) {
-        throw new Error("Ja existe uma variante cadastrada com este codigo para esta estampa.");
-      }
-
-      await salvarVarianteOlist({
-        id: varianteEditId,
-        estampaId,
-        tamanhoId,
-        codigo,
-        descricao: varianteForm.descricao || null,
-        palavrasChave: varianteForm.palavrasChave || null,
-      });
-      setVarianteForm(varianteInicial);
-      setVarianteEditId(null);
-      setMessage("Variante salva com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar variante.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function importarVariantes(text: string) {
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const variantes = parseVariantesImport(text);
-      const estampasPorCodigo = new Map(dados.estampas.map((estampa) => [estampa.codigo.toUpperCase(), estampa]));
-      const tamanhosPorRef = new Map<string, TamanhoOlist>();
-
-      dados.tamanhos.forEach((tamanho) => {
-        tamanhosPorRef.set(tamanho.sku.toUpperCase(), tamanho);
-        tamanhosPorRef.set(tamanho.titulo.toUpperCase(), tamanho);
-        if (tamanho.slug) {
-          tamanhosPorRef.set(tamanho.slug.toUpperCase(), tamanho);
-        }
-      });
-
-      const variantesResolvidas = variantes.map((variante, index) => {
-        const estampa = estampasPorCodigo.get(variante.estampaCodigo);
-        const tamanho = tamanhosPorRef.get(variante.tamanhoRef.toUpperCase());
-
-        if (!estampa) {
-          throw new Error(`Linha ${index + 1}: estampa nao encontrada (${variante.estampaCodigo}).`);
-        }
-        if (!tamanho) {
-          throw new Error(`Linha ${index + 1}: tamanho nao encontrado (${variante.tamanhoRef}).`);
-        }
-
-        return {
-          codigo: variante.codigo,
-          estampaId: estampa.id,
-          tamanhoId: tamanho.id,
-          descricao: variante.descricao,
-          palavrasChave: variante.palavrasChave,
-        };
-      });
-
-      const chavesImportadas = new Set<string>();
-      const chavesDuplicadasNoArquivo = variantesResolvidas
-        .map((variante) => `${variante.estampaId}:${variante.codigo}`)
-        .filter((chave) => {
-          if (chavesImportadas.has(chave)) return true;
-          chavesImportadas.add(chave);
-          return false;
-        });
-
-      if (chavesDuplicadasNoArquivo.length) {
-        throw new Error("Existem variantes duplicadas no arquivo para a mesma estampa e codigo.");
-      }
-
-      const variantesPorChave = new Map(
-        dados.variantes.map((variante) => [`${variante.estampaId}:${variante.codigo.toUpperCase()}`, variante]),
-      );
-      const totalAtualizadas = variantesResolvidas.filter((variante) =>
-        variantesPorChave.has(`${variante.estampaId}:${variante.codigo}`),
-      ).length;
-      const totalCriadas = variantesResolvidas.length - totalAtualizadas;
-
-      await Promise.all(
-        variantesResolvidas.map((variante) =>
-          salvarVarianteOlist({
-            id: variantesPorChave.get(`${variante.estampaId}:${variante.codigo}`)?.id ?? null,
-            ...variante,
-          }),
-        ),
-      );
-      setMessage(`${totalCriadas} variante(s) criada(s) e ${totalAtualizadas} substituida(s) com sucesso.`);
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao importar variantes.");
-      throw error;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function salvarTamanho(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const titulo = tamanhoForm.titulo.trim();
-      const sku = tamanhoForm.sku.trim().toUpperCase();
-      if (!titulo || !sku) {
-        throw new Error("Preencha os campos obrigatorios: Titulo e SKU.");
-      }
-
-      const skuDuplicado = dados.tamanhos.some(
-        (tamanho) => tamanho.sku.toUpperCase() === sku && tamanho.id !== tamanhoEditId,
-      );
-      if (skuDuplicado) {
-        throw new Error("Ja existe um tamanho cadastrado com este SKU.");
-      }
-      if (!tamanhoForm.quantidadeProdutoFornecedor) {
-        throw new Error("Informe a quantidade usada do produto fornecido.");
-      }
-
-      await salvarTamanhoOlist({
-        id: tamanhoEditId,
-        titulo,
-        sku,
-        slug: tamanhoForm.slug || null,
-        quantidadeProdutoFornecedor: toNumberOrNull(tamanhoForm.quantidadeProdutoFornecedor) ?? 0,
-      });
-      setTamanhoForm(tamanhoInicial);
-      setTamanhoEditId(null);
-      setMessage("Tamanho salvo com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar tamanho.");
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function gerarProdutosFinaisEmLote(payload: {
@@ -1008,235 +643,6 @@ export function GeradorCsvOlistClient() {
     }
   }
 
-  function editarTipo(tipo: TipoProdutoOlist) {
-    setTipoEditId(tipo.id);
-    setTipoForm({
-      titulo: tipo.titulo,
-      sku: tipo.sku,
-      descricao: tipo.descricao ?? "",
-      descricaoSeo: tipo.descricaoSeo ?? "",
-      palavrasChave: tipo.palavrasChave ?? "",
-      detalhesPromptIa: tipo.detalhesPromptIa ?? "",
-      corteLaser: tipo.corteLaser,
-      tecidoCorrido: tipo.tecidoCorrido,
-      slug: tipo.slug ?? "",
-      categoria: tipo.categoria ?? "",
-      produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
-        produtoFornecedorId: item.produtoFornecedorId,
-        quantidadeUsada: formatNumberForInput(item.quantidadeUsada, 4),
-      })),
-    });
-  }
-
-  function duplicarTipo(tipo: TipoProdutoOlist) {
-    setTipoEditId(null);
-    setTipoForm({
-      titulo: `${tipo.titulo} Copia`,
-      sku: withCopySuffix(tipo.sku),
-      descricao: tipo.descricao ?? "",
-      descricaoSeo: tipo.descricaoSeo ?? "",
-      palavrasChave: tipo.palavrasChave ?? "",
-      detalhesPromptIa: tipo.detalhesPromptIa ?? "",
-      corteLaser: tipo.corteLaser,
-      tecidoCorrido: tipo.tecidoCorrido,
-      slug: withSlugCopySuffix(tipo.slug),
-      categoria: tipo.categoria ?? "",
-      produtosFornecidos: tipo.produtosFornecidos.map((item) => ({
-        produtoFornecedorId: item.produtoFornecedorId,
-        quantidadeUsada: formatNumberForInput(item.quantidadeUsada, 4),
-      })),
-    });
-  }
-
-  async function excluirTipo(id: string) {
-    const confirmar = window.confirm("Excluir este tipo de produto?");
-    if (!confirmar) return;
-
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      await excluirTipoProdutoOlist(id);
-      if (tipoEditId === id) {
-        setTipoForm(tipoInicial);
-        setTipoEditId(null);
-      }
-      setMessage("Tipo de produto excluido com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir tipo.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function editarEstampa(estampa: EstampaOlist) {
-    setEstampaEditId(estampa.id);
-    setEstampaForm({
-      codigo: estampa.codigo,
-      descricao: estampa.descricao ?? "",
-      palavrasChave: estampa.palavrasChave ?? "",
-      extra: estampa.extra ?? "",
-    });
-    setEstampaImagemFiles([null, null]);
-    setEstampaImagemInputKey((key) => key + 1);
-  }
-
-  function duplicarEstampa(estampa: EstampaOlist) {
-    setEstampaEditId(null);
-    setEstampaForm({
-      codigo: withCopySuffix(estampa.codigo),
-      descricao: estampa.descricao ?? "",
-      palavrasChave: estampa.palavrasChave ?? "",
-      extra: estampa.extra ?? "",
-    });
-    setEstampaImagemFiles([null, null]);
-    setEstampaImagemInputKey((key) => key + 1);
-  }
-
-  async function excluirEstampa(id: string) {
-    const confirmar = window.confirm("Excluir esta estampa?");
-    if (!confirmar) return;
-
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      await excluirEstampaOlist(id);
-      if (estampaEditId === id) {
-        setEstampaForm(estampaInicial);
-        setEstampaEditId(null);
-        setEstampaImagemFiles([null, null]);
-        setEstampaImagemInputKey((key) => key + 1);
-      }
-      setMessage("Estampa excluida com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir estampa.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function editarVariante(variante: VarianteOlist) {
-    setVarianteEditId(variante.id);
-    setVarianteForm({
-      estampaId: variante.estampaId ?? "",
-      tamanhoId: variante.tamanhoId ?? "",
-      codigo: variante.codigo,
-      descricao: variante.descricao ?? "",
-      palavrasChave: variante.palavrasChave ?? "",
-    });
-  }
-
-  function duplicarVariante(variante: VarianteOlist) {
-    setVarianteEditId(null);
-    setVarianteForm({
-      estampaId: variante.estampaId ?? "",
-      tamanhoId: variante.tamanhoId ?? "",
-      codigo: withCopySuffix(variante.codigo),
-      descricao: variante.descricao ?? "",
-      palavrasChave: variante.palavrasChave ?? "",
-    });
-  }
-
-  function editarTamanho(tamanho: TamanhoOlist) {
-    setTamanhoEditId(tamanho.id);
-    setTamanhoForm({
-      titulo: tamanho.titulo,
-      sku: tamanho.sku,
-      slug: tamanho.slug ?? "",
-      quantidadeProdutoFornecedor: formatNumberForInput(tamanho.quantidadeProdutoFornecedor, 4),
-    });
-  }
-
-  function duplicarTamanho(tamanho: TamanhoOlist) {
-    setTamanhoEditId(null);
-    setTamanhoForm({
-      titulo: `${tamanho.titulo} Copia`,
-      sku: withCopySuffix(tamanho.sku),
-      slug: withSlugCopySuffix(tamanho.slug),
-      quantidadeProdutoFornecedor: formatNumberForInput(tamanho.quantidadeProdutoFornecedor, 4),
-    });
-  }
-
-  async function excluirTamanho(id: string) {
-    const confirmar = window.confirm("Excluir este tamanho?");
-    if (!confirmar) return;
-
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      await excluirTamanhoOlist(id);
-      if (tamanhoEditId === id) {
-        setTamanhoForm(tamanhoInicial);
-        setTamanhoEditId(null);
-      }
-      setMessage("Tamanho excluido com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir tamanho.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function excluirVariante(id: string) {
-    const confirmar = window.confirm("Excluir esta variante?");
-    if (!confirmar) return;
-
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      await excluirVarianteOlist(id);
-      if (varianteEditId === id) {
-        setVarianteForm(varianteInicial);
-        setVarianteEditId(null);
-      }
-      setMessage("Variante excluida com sucesso.");
-      await carregar();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir variante.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function excluirVariantesEmLote(ids: string[]) {
-    if (ids.length === 0) return false;
-
-    const confirmar = window.confirm(`Excluir ${ids.length} variante(s) selecionada(s)?`);
-    if (!confirmar) return false;
-
-    setSaving(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      for (const id of ids) {
-        await excluirVarianteOlist(id);
-      }
-      if (varianteEditId && ids.includes(varianteEditId)) {
-        setVarianteForm(varianteInicial);
-        setVarianteEditId(null);
-      }
-      setMessage(`${ids.length} variante(s) excluida(s) com sucesso.`);
-      await carregar();
-      return true;
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erro ao excluir variantes.");
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function salvarProdutoFinal(payload: {
     id: string;
     skuFinal: string;
@@ -1337,7 +743,7 @@ export function GeradorCsvOlistClient() {
             <button
               key={aba.id}
               type="button"
-              onClick={() => setAbaAtiva(aba.id)}
+              onClick={() => selecionarAba(aba.id)}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
                 abaAtiva === aba.id
                   ? "bg-slate-900 text-white"
@@ -1359,83 +765,6 @@ export function GeradorCsvOlistClient() {
         </section>
       ) : (
         <>
-          {abaAtiva === "tipos" && (
-            <TiposProdutoTab
-              tipos={dados.tiposProduto}
-              produtosFornecedor={dados.produtosFornecedor}
-              form={tipoForm}
-              setForm={setTipoForm}
-              editingId={tipoEditId}
-              setEditingId={setTipoEditId}
-              saving={saving}
-              onSubmit={salvarTipo}
-              onEdit={editarTipo}
-              onDuplicate={duplicarTipo}
-              onDelete={excluirTipo}
-            />
-          )}
-
-          {abaAtiva === "tamanhos" && (
-            <TamanhosTab
-              tamanhos={tamanhosFiltrados}
-              form={tamanhoForm}
-              setForm={setTamanhoForm}
-              editingId={tamanhoEditId}
-              setEditingId={setTamanhoEditId}
-              busca={tamanhoBusca}
-              setBusca={setTamanhoBusca}
-              saving={saving}
-              onSubmit={salvarTamanho}
-              onEdit={editarTamanho}
-              onDuplicate={duplicarTamanho}
-              onDelete={excluirTamanho}
-            />
-          )}
-
-          {abaAtiva === "estampas" && (
-            <EstampasTab
-              estampas={estampasFiltradas}
-              form={estampaForm}
-              setForm={setEstampaForm}
-              imagemFiles={estampaImagemFiles}
-              setImagemFiles={setEstampaImagemFiles}
-              imagemInputKey={estampaImagemInputKey}
-              resetImagemInput={() => setEstampaImagemInputKey((key) => key + 1)}
-              editingId={estampaEditId}
-              setEditingId={setEstampaEditId}
-              busca={estampaBusca}
-              setBusca={setEstampaBusca}
-              saving={saving}
-              onSubmit={salvarEstampa}
-              onImport={importarEstampas}
-              onVerifyImages={verificarImagensEstampas}
-              onEdit={editarEstampa}
-              onDuplicate={duplicarEstampa}
-              onDelete={excluirEstampa}
-            />
-          )}
-
-          {abaAtiva === "variantes" && (
-            <VariantesTab
-              variantes={variantesFiltradas}
-              estampas={estampasAtivas}
-              tamanhos={tamanhosAtivos}
-              form={varianteForm}
-              setForm={setVarianteForm}
-              editingId={varianteEditId}
-              setEditingId={setVarianteEditId}
-              busca={varianteBusca}
-              setBusca={setVarianteBusca}
-              saving={saving}
-              onSubmit={salvarVariante}
-              onImport={importarVariantes}
-              onEdit={editarVariante}
-              onDuplicate={duplicarVariante}
-              onDelete={excluirVariante}
-              onDeleteMany={excluirVariantesEmLote}
-            />
-          )}
-
           {abaAtiva === "estamparia" && (
             <EstampariaTab estampas={dados.estampas} variantes={dados.variantes} />
           )}
@@ -1603,7 +932,7 @@ function EstampariaTab({
   );
 }
 
-function TiposProdutoTab({
+export function TiposProdutoTab({
   tipos,
   produtosFornecedor,
   form,
@@ -1615,6 +944,9 @@ function TiposProdutoTab({
   onEdit,
   onDuplicate,
   onDelete,
+  onDeleteMany,
+  onImport,
+  canEdit = true,
 }: {
   tipos: TipoProdutoOlist[];
   produtosFornecedor: ProdutoFornecedorOlist[];
@@ -1627,7 +959,19 @@ function TiposProdutoTab({
   onEdit: (tipo: TipoProdutoOlist) => void;
   onDuplicate: (tipo: TipoProdutoOlist) => void;
   onDelete: (id: string) => void | Promise<void>;
+  onDeleteMany: (ids: string[]) => Promise<void>;
+  onImport: (items: TipoProdutoCsvImportado[]) => Promise<void>;
+  canEdit?: boolean;
 }) {
+  const [cadastroAberto, setCadastroAberto] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
+  const [importItems, setImportItems] = useState<TipoProdutoCsvImportado[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [pageSize, setPageSize] = useState<100 | 1000 | 99999>(100);
+  const [page, setPage] = useState(1);
   type TipoProdutoTextField = Exclude<
     keyof typeof tipoInicial,
     "produtosFornecidos" | "corteLaser" | "tecidoCorrido"
@@ -1645,13 +989,68 @@ function TiposProdutoTab({
     { key: "categoria", label: "Categoria", placeholder: "Moda > Camisetas", className: "md:col-span-2" },
     { key: "palavrasChave", label: "Palavras-chave", placeholder: "camiseta, algodao, basica", className: "md:col-span-2" },
   ];
+  const totalPages = Math.max(1, Math.ceil(tipos.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const tiposPaginados = tipos.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const allSelected = tiposPaginados.length > 0 && tiposPaginados.every((tipo) => selectedIds.includes(tipo.id));
+
+  useEffect(() => {
+    setPage((pagina) => Math.min(pagina, totalPages));
+  }, [totalPages]);
+
+  function exportCsv() {
+    const header = ["Titulo", "SKU", "Corte laser", "Tecido corrido", "Categoria", "Produto fornecido", "Produto fornecedor ID", "Slug", "Descricao", "Descricao SEO", "Palavras-chave", "Detalhes prompt IA"];
+    const rows = tipos.map((tipo) => [tipo.titulo, tipo.sku, tipo.corteLaser ? "SIM" : "NAO", tipo.tecidoCorrido ? "SIM" : "NAO", tipo.categoria, tipo.produtosFornecidos[0]?.produtoFornecedor.nome, tipo.produtosFornecidos[0]?.produtoFornecedorId, tipo.slug, tipo.descricao, tipo.descricaoSeo, tipo.palavrasChave, tipo.detalhesPromptIa].map(formatImportCsvField).join(";"));
+    downloadCsv("tipos-de-produto.csv", [header.join(";"), ...rows].join("\n"));
+  }
+
+  async function readImportFile(file: File | null) {
+    setImportErrors([]); setImportItems([]); setImportFileName(file?.name ?? "");
+    if (!file) return;
+    setImportStep(2);
+    const lines = (await file.text()).replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length < 2) { setImportErrors(["O CSV deve conter cabeçalho e ao menos uma linha."]); return; }
+    const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+    const headers = lines[0].split(";").map(normalize);
+    const index = (name: string) => headers.indexOf(normalize(name));
+    const missing = ["Titulo", "SKU", "Corte laser", "Tecido corrido", "Categoria", "Produto fornecido"].filter((name) => index(name) < 0);
+    if (missing.length) { setImportErrors([`Colunas obrigatórias ausentes: ${missing.join(", ")}.`]); return; }
+    const boolValue = (value: string) => ["sim", "s", "true", "1", "c/laser", "c/corrido"].includes(normalize(value));
+    const suppliersById = new Map(produtosFornecedor.map((item) => [item.id, item]));
+    const resolveSupplier = (id: string, label: string) => suppliersById.get(id.trim()) ?? produtosFornecedor.find((item) => normalize(`${item.nome} - ${item.fornecedorNome}`) === normalize(label)) ?? produtosFornecedor.find((item) => normalize(item.nome) === normalize(label));
+    const errors: string[] = []; const seen = new Set<string>();
+    const items = lines.slice(1).map((line, rowIndex) => {
+      const cells = line.split(";").map((cell) => cell.trim());
+      const get = (name: string) => index(name) >= 0 ? cells[index(name)] ?? "" : "";
+      const titulo = get("Titulo"); const sku = get("SKU").toUpperCase();
+      const supplier = resolveSupplier(get("Produto fornecedor ID"), get("Produto fornecido"));
+      if (!titulo) errors.push(`Linha ${rowIndex + 2}: título obrigatório.`);
+      if (!sku) errors.push(`Linha ${rowIndex + 2}: SKU obrigatório.`);
+      if (sku && seen.has(sku)) errors.push(`Linha ${rowIndex + 2}: SKU ${sku} está duplicado no arquivo.`);
+      seen.add(sku);
+      if (!supplier) errors.push(`Linha ${rowIndex + 2}: produto fornecido não encontrado.`);
+      return { titulo, sku, corteLaser: boolValue(get("Corte laser")), tecidoCorrido: boolValue(get("Tecido corrido")), categoria: get("Categoria"), produtoFornecedorId: supplier?.id ?? "", produtoFornecido: get("Produto fornecido"), slug: get("Slug"), descricao: get("Descricao"), descricaoSeo: get("Descricao SEO"), palavrasChave: get("Palavras-chave"), detalhesPromptIa: get("Detalhes prompt IA") };
+    });
+    setImportItems(items); setImportErrors(errors);
+  }
+
+  async function confirmImport() {
+    if (importErrors.length || !importItems.length) return;
+    await onImport(importItems); setImportOpen(false); setImportStep(1); setImportItems([]); setImportFileName("");
+  }
+
+  async function deleteSelected() {
+    if (!selectedIds.length || !window.confirm(`Excluir ${selectedIds.length} tipo(s) de produto selecionado(s)?`)) return;
+    await onDeleteMany(selectedIds); setSelectedIds([]);
+  }
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {editingId ? "Editar tipo de produto" : "Cadastrar tipo de produto"}
-        </h3>
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-4" onSubmit={onSubmit}>
+      {canEdit && <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <button type="button" onClick={() => setCadastroAberto((open) => !open)} className="flex w-full items-center justify-between text-left">
+          <h3 className="text-lg font-semibold text-slate-900">{editingId ? "Editar tipo de produto" : "Cadastrar tipo de produto"}</h3>
+          <span className={`text-xl text-slate-500 transition ${cadastroAberto ? "rotate-180" : ""}`}>⌄</span>
+        </button>
+        {cadastroAberto && <form className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 md:grid-cols-4" onSubmit={onSubmit}>
           {textFields.map((field) => (
             <label key={field.key} className={`text-sm text-slate-700 ${field.className ?? ""}`}>
               {field.label}
@@ -1765,29 +1164,50 @@ function TiposProdutoTab({
               </button>
             )}
           </div>
-        </form>
-      </section>
+        </form>}
+      </section>}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Tipos cadastrados</h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div><h3 className="text-lg font-semibold text-slate-900">Tipos cadastrados</h3>{selectedIds.length > 0 && <p className="text-sm text-slate-500">{selectedIds.length} selecionado(s)</p>}</div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={exportCsv} disabled={!tipos.length} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">Exportar CSV</button>
+            {canEdit && <button type="button" onClick={() => { setImportOpen(true); setImportStep(1); setImportErrors([]); setImportItems([]); }} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">Importar CSV</button>}
+            {canEdit && selectedIds.length > 0 && <button type="button" onClick={() => void deleteSelected()} disabled={saving} className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Excluir selecionados</button>}
+          </div>
+        </div>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <label className="text-sm text-slate-700">Itens por página
+            <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 100 | 1000 | 99999); setPage(1); }} className="ml-2 rounded-md border border-slate-300 bg-white px-3 py-2">
+              <option value={100}>100</option><option value={1000}>1000</option><option value={99999}>99999</option>
+            </select>
+          </label>
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>{tipos.length.toLocaleString("pt-BR")} registro(s) · Página {currentPage} de {totalPages}</span>
+            <button type="button" onClick={() => setPage((pagina) => Math.max(1, pagina - 1))} disabled={currentPage === 1} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Anterior</button>
+            <button type="button" onClick={() => setPage((pagina) => Math.min(totalPages, pagina + 1))} disabled={currentPage === totalPages} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Próxima</button>
+          </div>
+        </div>
         <TableEmpty visible={tipos.length === 0} text="Nenhum tipo de produto cadastrado." />
         {tipos.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
+                  {canEdit && <th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => { const idsPagina = tiposPaginados.map((tipo) => tipo.id); setSelectedIds((ids) => allSelected ? ids.filter((id) => !idsPagina.includes(id)) : Array.from(new Set([...ids, ...idsPagina]))); }} aria-label="Selecionar todos da página" /></th>}
                   <th className="p-3">Titulo</th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Corte laser</th>
                   <th className="p-3">Tecido corrido</th>
                   <th className="p-3">Categoria</th>
                   <th className="p-3">Produto fornecido</th>
-                  <th className="p-3">Acoes</th>
+                  {canEdit && <th className="p-3">Acoes</th>}
                 </tr>
               </thead>
               <tbody>
-                {tipos.map((tipo) => (
+                {tiposPaginados.map((tipo) => (
                   <tr key={tipo.id} className="border-b border-slate-100">
+                    {canEdit && <td className="p-3"><input type="checkbox" checked={selectedIds.includes(tipo.id)} onChange={() => setSelectedIds((ids) => ids.includes(tipo.id) ? ids.filter((id) => id !== tipo.id) : [...ids, tipo.id])} aria-label={`Selecionar ${tipo.titulo}`} /></td>}
                     <td className="p-3 font-medium text-slate-700">
                       <div>{tipo.titulo}</div>
                       <div className="mt-1 text-xs text-slate-500">{tipo.slug ?? "-"}</div>
@@ -1799,18 +1219,18 @@ function TiposProdutoTab({
                     <td className="p-3 text-slate-700">
                       {tipo.produtosFornecidos[0]?.produtoFornecedor.nome ?? "-"}
                     </td>
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => onEdit(tipo)}
+                        onClick={() => { setCadastroAberto(true); onEdit(tipo); }}
                         className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                       >
                         Editar
                       </button>
                       <button
                         type="button"
-                        onClick={() => onDuplicate(tipo)}
+                        onClick={() => { setCadastroAberto(true); onDuplicate(tipo); }}
                         className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                       >
                         Duplicar
@@ -1824,7 +1244,7 @@ function TiposProdutoTab({
                         Excluir
                       </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -1832,11 +1252,28 @@ function TiposProdutoTab({
           </div>
         )}
       </section>
+
+      {canEdit && importOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+        <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+          <div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold text-slate-900">Importar tipos de produto</h3><p className="text-sm text-slate-500">Etapa {importStep} de 2</p></div><button type="button" onClick={() => setImportOpen(false)} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Fechar</button></div>
+          {importStep === 1 ? <div className="space-y-4">
+            <p className="text-sm text-slate-600">Selecione um CSV separado por ponto e vírgula. Você pode usar o arquivo exportado como modelo.</p>
+            <input type="file" accept=".csv,text/csv" onChange={(event) => void readImportFile(event.target.files?.[0] ?? null)} className="w-full rounded-md border border-slate-300 px-3 py-3 text-sm" />
+          </div> : <div className="space-y-4">
+            <div className={`rounded-md border p-3 text-sm ${importErrors.length ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+              {importErrors.length ? <><p className="font-semibold">Foram encontrados {importErrors.length} erro(s):</p><ul className="mt-2 list-disc pl-5">{importErrors.map((item) => <li key={item}>{item}</li>)}</ul></> : `${importItems.length} registro(s) validados e prontos para importar.`}
+            </div>
+            <div className="overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left"><tr><th className="p-3">Título</th><th className="p-3">SKU</th><th className="p-3">Corte laser</th><th className="p-3">Tecido corrido</th><th className="p-3">Categoria</th><th className="p-3">Produto fornecido</th></tr></thead><tbody>{importItems.map((item, index) => <tr key={`${item.sku}-${index}`} className="border-t border-slate-100"><td className="p-3">{item.titulo}</td><td className="p-3">{item.sku}</td><td className="p-3">{item.corteLaser ? "SIM" : "NÃO"}</td><td className="p-3">{item.tecidoCorrido ? "SIM" : "NÃO"}</td><td className="p-3">{item.categoria || "-"}</td><td className="p-3">{item.produtoFornecido}</td></tr>)}</tbody></table></div>
+            <div className="flex justify-end gap-2"><button type="button" onClick={() => setImportStep(1)} className="rounded-md border border-slate-300 px-4 py-2 text-sm">Voltar</button><button type="button" onClick={() => void confirmImport()} disabled={saving || importErrors.length > 0 || importItems.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? "Importando..." : "Confirmar importação"}</button></div>
+          </div>}
+          {importFileName && <p className="mt-4 text-xs text-slate-500">Arquivo: {importFileName}</p>}
+        </div>
+      </div>}
     </div>
   );
 }
 
-function TamanhosTab({
+export function TamanhosTab({
   tamanhos,
   form,
   setForm,
@@ -1849,6 +1286,9 @@ function TamanhosTab({
   onEdit,
   onDuplicate,
   onDelete,
+  onDeleteMany,
+  onImport,
+  canEdit = true,
 }: {
   tamanhos: TamanhoOlist[];
   form: typeof tamanhoInicial;
@@ -1862,14 +1302,92 @@ function TamanhosTab({
   onEdit: (tamanho: TamanhoOlist) => void;
   onDuplicate: (tamanho: TamanhoOlist) => void;
   onDelete: (id: string) => void;
+  onDeleteMany: (ids: string[]) => Promise<void>;
+  onImport: (items: TamanhoCsvImportado[]) => Promise<void>;
+  canEdit?: boolean;
 }) {
+  const [cadastroAberto, setCadastroAberto] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
+  const [importItems, setImportItems] = useState<TamanhoCsvImportado[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState<100 | 1000 | 99999>(100);
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(tamanhos.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const tamanhosPaginados = tamanhos.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const allSelected = tamanhosPaginados.length > 0 && tamanhosPaginados.every((item) => selectedIds.includes(item.id));
+
+  useEffect(() => {
+    setPage((pagina) => Math.min(pagina, totalPages));
+  }, [totalPages]);
+
+  async function lerArquivoImportacao(file: File | null) {
+    setImportErrors([]); setImportItems([]); setImportFileName(file?.name ?? "");
+    if (!file) return;
+    setImportStep(2);
+    const linhas = (await file.text()).replace(/^\uFEFF/, "").split(/\r?\n/).filter((linha) => linha.trim());
+    if (linhas.length < 2) { setImportErrors(["O CSV deve conter cabeçalho e ao menos uma linha."]); return; }
+    const normalizar = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+    const cabecalhos = linhas[0].split(";").map(normalizar);
+    const indice = (nome: string) => cabecalhos.indexOf(normalizar(nome));
+    const ausentes = ["Titulo", "SKU", "Slug", "Quantidade usada"].filter((nome) => indice(nome) < 0);
+    if (ausentes.length) { setImportErrors([`Colunas obrigatórias ausentes: ${ausentes.join(", ")}.`]); return; }
+    const erros: string[] = []; const vistos = new Set<string>();
+    const items = linhas.slice(1).map((linha, rowIndex) => {
+      const cells = linha.split(";").map((cell) => cell.trim());
+      const get = (nome: string) => cells[indice(nome)] ?? "";
+      const titulo = get("Titulo"); const sku = get("SKU").toUpperCase(); const slug = get("Slug");
+      const quantidadeTexto = get("Quantidade usada").replace(/\./g, "").replace(",", ".");
+      const quantidade = Number(quantidadeTexto);
+      if (!titulo) erros.push(`Linha ${rowIndex + 2}: título obrigatório.`);
+      if (!sku) erros.push(`Linha ${rowIndex + 2}: SKU obrigatório.`);
+      if (sku && vistos.has(sku)) erros.push(`Linha ${rowIndex + 2}: SKU ${sku} está duplicado no arquivo.`);
+      vistos.add(sku);
+      if (!quantidadeTexto || Number.isNaN(quantidade) || quantidade < 0) erros.push(`Linha ${rowIndex + 2}: quantidade usada inválida.`);
+      return { titulo, sku, slug, quantidadeProdutoFornecedor: quantidade };
+    });
+    setImportItems(items); setImportErrors(erros);
+  }
+
+  async function confirmarImportacao() {
+    if (importErrors.length || !importItems.length) return;
+    await onImport(importItems); setImportOpen(false); setImportStep(1); setImportItems([]); setImportFileName("");
+  }
+
+  async function excluirSelecionados() {
+    if (!selectedIds.length || !window.confirm(`Excluir ${selectedIds.length} tamanho(s) selecionado(s)?`)) return;
+    await onDeleteMany(selectedIds);
+    setSelectedIds([]);
+  }
+
+  function exportarTamanhosCsv() {
+    const linhas = tamanhos.map((tamanho) =>
+      [
+        tamanho.titulo,
+        tamanho.sku,
+        tamanho.slug,
+        tamanho.quantidadeProdutoFornecedor === null
+          ? ""
+          : String(tamanho.quantidadeProdutoFornecedor).replace(".", ","),
+      ].map(formatImportCsvField).join(";"),
+    );
+    downloadCsv(
+      "tamanhos.csv",
+      ["Titulo;SKU;Slug;Quantidade usada", ...linhas].join("\n"),
+    );
+  }
+
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {editingId ? "Editar tamanho" : "Cadastrar tamanho"}
-        </h3>
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-3" onSubmit={onSubmit}>
+      {canEdit && <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <button type="button" onClick={() => setCadastroAberto((open) => !open)} className="flex w-full items-center justify-between text-left">
+          <h3 className="text-lg font-semibold text-slate-900">{editingId ? "Editar tamanho" : "Cadastrar tamanho"}</h3>
+          <span className={`text-xl text-slate-500 transition ${cadastroAberto ? "rotate-180" : ""}`}>⌄</span>
+        </button>
+        {cadastroAberto && <form className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 md:grid-cols-3" onSubmit={onSubmit}>
           <label className="text-sm text-slate-700">
             Titulo tamanho
             <input
@@ -1942,21 +1460,56 @@ function TamanhosTab({
               </button>
             )}
           </div>
-        </form>
-      </section>
+        </form>}
+      </section>}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <h3 className="text-lg font-semibold text-slate-900">Tamanhos cadastrados</h3>
-          <label className="w-full text-sm text-slate-700 md:max-w-xs">
-            Buscar
-            <input
-              value={busca}
-              onChange={(event) => setBusca(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="Titulo, SKU ou slug"
-            />
+          <div className="flex w-full flex-col gap-2 md:max-w-xl md:flex-row md:items-end md:justify-end">
+            <label className="w-full text-sm text-slate-700 md:max-w-xs">
+              Buscar
+              <input
+                value={busca}
+                onChange={(event) => setBusca(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Titulo, SKU ou slug"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={exportarTamanhosCsv}
+              disabled={tamanhos.length === 0}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Exportar CSV
+            </button>
+            {canEdit && <button
+              type="button"
+              onClick={() => { setImportOpen(true); setImportStep(1); setImportErrors([]); setImportItems([]); setImportFileName(""); }}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Importar CSV
+            </button>}
+          </div>
+        </div>
+
+        {canEdit && selectedIds.length > 0 && <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <span className="text-sm text-slate-600">{selectedIds.length} tamanho(s) selecionado(s)</span>
+          <button type="button" onClick={() => void excluirSelecionados()} disabled={saving} className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Excluir selecionados</button>
+        </div>}
+
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <label className="text-sm text-slate-700">Itens por página
+            <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 100 | 1000 | 99999); setPage(1); }} className="ml-2 rounded-md border border-slate-300 bg-white px-3 py-2">
+              <option value={100}>100</option><option value={1000}>1000</option><option value={99999}>99999</option>
+            </select>
           </label>
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>{tamanhos.length.toLocaleString("pt-BR")} registro(s) · Página {currentPage} de {totalPages}</span>
+            <button type="button" onClick={() => setPage((pagina) => Math.max(1, pagina - 1))} disabled={currentPage === 1} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Anterior</button>
+            <button type="button" onClick={() => setPage((pagina) => Math.min(totalPages, pagina + 1))} disabled={currentPage === totalPages} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Próxima</button>
+          </div>
         </div>
 
         <TableEmpty visible={tamanhos.length === 0} text="Nenhum tamanho encontrado." />
@@ -1965,34 +1518,36 @@ function TamanhosTab({
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
+                  {canEdit && <th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => { const idsPagina = tamanhosPaginados.map((item) => item.id); setSelectedIds((ids) => allSelected ? ids.filter((id) => !idsPagina.includes(id)) : Array.from(new Set([...ids, ...idsPagina]))); }} aria-label="Selecionar todos os tamanhos da página" /></th>}
                   <th className="p-3">Titulo</th>
                   <th className="p-3">SKU</th>
                   <th className="p-3">Slug</th>
                   <th className="p-3">Quantidade usada</th>
-                  <th className="p-3">Acoes</th>
+                  {canEdit && <th className="p-3">Acoes</th>}
                 </tr>
               </thead>
               <tbody>
-                {tamanhos.map((tamanho) => (
+                {tamanhosPaginados.map((tamanho) => (
                   <tr key={tamanho.id} className="border-b border-slate-100">
+                    {canEdit && <td className="p-3"><input type="checkbox" checked={selectedIds.includes(tamanho.id)} onChange={() => setSelectedIds((ids) => ids.includes(tamanho.id) ? ids.filter((id) => id !== tamanho.id) : [...ids, tamanho.id])} aria-label={`Selecionar ${tamanho.titulo}`} /></td>}
                     <td className="p-3 font-medium text-slate-700">{tamanho.titulo}</td>
                     <td className="p-3 text-slate-700">{tamanho.sku}</td>
                     <td className="p-3 text-slate-700">{tamanho.slug ?? "-"}</td>
                     <td className="p-3 text-slate-700">
                       {formatDecimal(tamanho.quantidadeProdutoFornecedor, 4)}
                     </td>
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => onEdit(tamanho)}
+                          onClick={() => { setCadastroAberto(true); onEdit(tamanho); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Editar
                         </button>
                         <button
                           type="button"
-                          onClick={() => onDuplicate(tamanho)}
+                          onClick={() => { setCadastroAberto(true); onDuplicate(tamanho); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Duplicar
@@ -2006,7 +1561,7 @@ function TamanhosTab({
                           Excluir
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -2014,11 +1569,28 @@ function TamanhosTab({
           </div>
         )}
       </section>
+
+      {canEdit && importOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+        <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+          <div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold text-slate-900">Importar tamanhos</h3><p className="text-sm text-slate-500">Etapa {importStep} de 2</p></div><button type="button" onClick={() => setImportOpen(false)} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Fechar</button></div>
+          {importStep === 1 ? <div className="space-y-4">
+            <p className="text-sm text-slate-600">Selecione um CSV separado por ponto e vírgula com as colunas Titulo, SKU, Slug e Quantidade usada.</p>
+            <input type="file" accept=".csv,text/csv" onChange={(event) => void lerArquivoImportacao(event.target.files?.[0] ?? null)} className="w-full rounded-md border border-slate-300 px-3 py-3 text-sm" />
+          </div> : <div className="space-y-4">
+            <div className={`rounded-md border p-3 text-sm ${importErrors.length ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+              {importErrors.length ? <><p className="font-semibold">Foram encontrados {importErrors.length} erro(s):</p><ul className="mt-2 list-disc pl-5">{importErrors.map((item) => <li key={item}>{item}</li>)}</ul></> : `${importItems.length} registro(s) validados e prontos para importar.`}
+            </div>
+            <div className="overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left"><tr><th className="p-3">Título</th><th className="p-3">SKU</th><th className="p-3">Slug</th><th className="p-3">Quantidade usada</th></tr></thead><tbody>{importItems.map((item, index) => <tr key={`${item.sku}-${index}`} className="border-t border-slate-100"><td className="p-3">{item.titulo}</td><td className="p-3">{item.sku}</td><td className="p-3">{item.slug || "-"}</td><td className="p-3">{formatDecimal(item.quantidadeProdutoFornecedor, 4)}</td></tr>)}</tbody></table></div>
+            <div className="flex justify-end gap-2"><button type="button" onClick={() => setImportStep(1)} className="rounded-md border border-slate-300 px-4 py-2 text-sm">Voltar</button><button type="button" onClick={() => void confirmarImportacao()} disabled={saving || importErrors.length > 0 || importItems.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? "Importando..." : "Confirmar importação"}</button></div>
+          </div>}
+          {importFileName && <p className="mt-4 text-xs text-slate-500">Arquivo: {importFileName}</p>}
+        </div>
+      </div>}
     </div>
   );
 }
 
-function EstampasTab({
+export function EstampasTab({
   estampas,
   form,
   setForm,
@@ -2037,6 +1609,8 @@ function EstampasTab({
   onEdit,
   onDuplicate,
   onDelete,
+  onDeleteMany,
+  canEdit = true,
 }: {
   estampas: EstampaOlist[];
   form: typeof estampaInicial;
@@ -2056,14 +1630,29 @@ function EstampasTab({
   onEdit: (estampa: EstampaOlist) => void;
   onDuplicate: (estampa: EstampaOlist) => void;
   onDelete: (id: string) => void;
+  onDeleteMany: (ids: string[]) => Promise<void>;
+  canEdit?: boolean;
 }) {
+  const [cadastroAberto, setCadastroAberto] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
+  const [importItems, setImportItems] = useState<EstampaImportadaInput[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const estampasIds = useMemo(() => estampas.map((estampa) => estampa.id), [estampas]);
+  const [pageSize, setPageSize] = useState<100 | 1000 | 99999>(100);
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(estampas.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const estampasPaginadas = estampas.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const estampasIds = estampasPaginadas.map((estampa) => estampa.id);
   const todasSelecionadas =
     estampasIds.length > 0 && estampasIds.every((id) => selectedIds.includes(id));
+
+  useEffect(() => {
+    setPage((pagina) => Math.min(pagina, totalPages));
+  }, [totalPages]);
 
   function toggleEstampa(id: string) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
@@ -2082,40 +1671,47 @@ function EstampasTab({
     setSelectedIds([]);
   }
 
-  async function submitImport(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setImportError(null);
+  async function excluirEstampasSelecionadas() {
+    if (!selectedIds.length || !window.confirm(`Excluir ${selectedIds.length} estampa(s) selecionada(s)?`)) return;
+    await onDeleteMany(selectedIds);
+    setSelectedIds([]);
+  }
 
+  async function lerArquivoEstampas(file: File | null) {
+    setImportErrors([]); setImportItems([]); setImportText(""); setImportFileName(file?.name ?? "");
+    if (!file) return;
+    setImportStep(2);
+    try {
+      const text = await file.text();
+      const items = parseEstampasImport(text);
+      const vistos = new Set<string>();
+      const duplicados = items.map((item) => item.codigo).filter((codigo) => vistos.has(codigo) || !vistos.add(codigo));
+      setImportText(text); setImportItems(items);
+      if (duplicados.length) setImportErrors([`Códigos duplicados no arquivo: ${Array.from(new Set(duplicados)).join(", ")}.`]);
+    } catch (error) {
+      setImportErrors([error instanceof Error ? error.message : "Erro ao validar o CSV de estampas."]);
+    }
+  }
+
+  async function confirmarImportacaoEstampas() {
+    if (!importText || importErrors.length || !importItems.length) return;
     try {
       await onImport(importText);
-      setImportText("");
-      setImportModalOpen(false);
+      setImportText(""); setImportItems([]); setImportModalOpen(false); setImportStep(1); setImportFileName("");
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Erro ao importar estampas.");
+      setImportErrors([error instanceof Error ? error.message : "Erro ao importar estampas."]);
     }
   }
 
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">
-            {editingId ? "Editar estampa" : "Cadastrar estampa"}
-          </h3>
-          <button
-            type="button"
-            onClick={() => {
-              setImportError(null);
-              setImportModalOpen(true);
-            }}
-            disabled={saving}
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            Importar em lote
-          </button>
-        </div>
+      {canEdit && <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <button type="button" onClick={() => setCadastroAberto((open) => !open)} className="flex w-full items-center justify-between text-left">
+          <h3 className="text-lg font-semibold text-slate-900">{editingId ? "Editar estampa" : "Cadastrar estampa"}</h3>
+          <span className={`text-xl text-slate-500 transition ${cadastroAberto ? "rotate-180" : ""}`}>⌄</span>
+        </button>
 
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
+        {cadastroAberto && <form className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 md:grid-cols-2" onSubmit={onSubmit}>
           <label className="text-sm text-slate-700">
             Codigo da estampa
             <input
@@ -2203,8 +1799,8 @@ function EstampasTab({
               </button>
             )}
           </div>
-        </form>
-      </section>
+        </form>}
+      </section>}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -2214,7 +1810,7 @@ function EstampasTab({
               <p className="mt-1 text-sm text-slate-500">{selectedIds.length} selecionada(s)</p>
             )}
           </div>
-          <div className="grid w-full grid-cols-1 gap-2 md:max-w-3xl md:grid-cols-2">
+          <div className="grid w-full grid-cols-1 gap-2 md:max-w-4xl md:grid-cols-3">
             <label className="w-full text-sm text-slate-700">
               Buscar por codigo
               <input
@@ -2226,16 +1822,24 @@ function EstampasTab({
             </label>
             <button
               type="button"
-              onClick={() => downloadCsv("estampas-importacao.csv", buildEstampasImportCsv(estampas))}
+              onClick={() => downloadCsv("estampas.csv", buildEstampasImportCsv(estampas))}
               disabled={estampas.length === 0}
               className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
             >
               Exportar CSV
             </button>
+            {canEdit && <button
+              type="button"
+              onClick={() => { setImportErrors([]); setImportItems([]); setImportFileName(""); setImportStep(1); setImportModalOpen(true); }}
+              disabled={saving}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Importar via CSV
+            </button>}
           </div>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        {canEdit && <div className="mb-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={verificarSelecionadas}
@@ -2243,6 +1847,14 @@ function EstampasTab({
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             Verificar imagens no Storage
+          </button>
+          <button
+            type="button"
+            onClick={() => void excluirEstampasSelecionadas()}
+            disabled={saving || selectedIds.length === 0}
+            className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            Excluir selecionadas
           </button>
           {selectedIds.length > 0 && (
             <button
@@ -2254,6 +1866,19 @@ function EstampasTab({
               Limpar selecao
             </button>
           )}
+        </div>}
+
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <label className="text-sm text-slate-700">Itens por página
+            <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 100 | 1000 | 99999); setPage(1); }} className="ml-2 rounded-md border border-slate-300 bg-white px-3 py-2">
+              <option value={100}>100</option><option value={1000}>1000</option><option value={99999}>99999</option>
+            </select>
+          </label>
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>{estampas.length.toLocaleString("pt-BR")} registro(s) · Página {currentPage} de {totalPages}</span>
+            <button type="button" onClick={() => setPage((pagina) => Math.max(1, pagina - 1))} disabled={currentPage === 1} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Anterior</button>
+            <button type="button" onClick={() => setPage((pagina) => Math.min(totalPages, pagina + 1))} disabled={currentPage === totalPages} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Próxima</button>
+          </div>
         </div>
 
         <TableEmpty visible={estampas.length === 0} text="Nenhuma estampa encontrada." />
@@ -2262,7 +1887,7 @@ function EstampasTab({
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">
+                  {canEdit && <th className="p-3">
                     <input
                       type="checkbox"
                       checked={todasSelecionadas}
@@ -2270,19 +1895,19 @@ function EstampasTab({
                       className="h-4 w-4 rounded border-slate-300"
                       aria-label="Selecionar todas as estampas"
                     />
-                  </th>
+                  </th>}
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Descricao</th>
                   <th className="p-3">Imagens</th>
                   <th className="p-3">Palavras-chave</th>
                   <th className="p-3">Extra</th>
-                  <th className="p-3">Acoes</th>
+                  {canEdit && <th className="p-3">Acoes</th>}
                 </tr>
               </thead>
               <tbody>
-                {estampas.map((estampa) => (
+                {estampasPaginadas.map((estampa) => (
                   <tr key={estampa.id} className="border-b border-slate-100">
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(estampa.id)}
@@ -2290,7 +1915,7 @@ function EstampasTab({
                         className="h-4 w-4 rounded border-slate-300"
                         aria-label={`Selecionar estampa ${estampa.codigo}`}
                       />
-                    </td>
+                    </td>}
                     <td className="p-3 font-medium text-slate-700">{estampa.codigo}</td>
                     <td className="p-3 text-slate-700">{estampa.descricao ?? "-"}</td>
                     <td className="p-3 text-slate-700">
@@ -2320,18 +1945,18 @@ function EstampasTab({
                     </td>
                     <td className="p-3 text-slate-700">{estampa.palavrasChave ?? "-"}</td>
                     <td className="p-3 text-slate-700">{estampa.extra ?? "-"}</td>
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => onEdit(estampa)}
+                          onClick={() => { setCadastroAberto(true); onEdit(estampa); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Editar
                         </button>
                         <button
                           type="button"
-                          onClick={() => onDuplicate(estampa)}
+                          onClick={() => { setCadastroAberto(true); onDuplicate(estampa); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Duplicar
@@ -2345,7 +1970,7 @@ function EstampasTab({
                           Excluir
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -2354,11 +1979,11 @@ function EstampasTab({
         )}
       </section>
 
-      {importModalOpen && (
+      {canEdit && importModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <h3 className="text-base font-semibold text-slate-900">Importar estampas</h3>
+              <div><h3 className="text-base font-semibold text-slate-900">Importar estampas via CSV</h3><p className="text-sm text-slate-500">Etapa {importStep} de 2</p></div>
               <button
                 type="button"
                 onClick={() => setImportModalOpen(false)}
@@ -2368,41 +1993,19 @@ function EstampasTab({
               </button>
             </div>
 
-            <form className="space-y-4 p-5" onSubmit={submitImport}>
-              <label className="block text-sm text-slate-700">
-                Codigo;Descricao;Palavras-chave;Extra
-                <textarea
-                  required
-                  value={importText}
-                  onChange={(event) => setImportText(event.target.value)}
-                  className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
-                  placeholder={"FLR-001;Floral azul;floral, azul, primavera;tecido claro\nFLR-002;Folhagem verde;folhagem, verde;tropical"}
-                />
-              </label>
-
-              {importError && (
-                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {importError}
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setImportModalOpen(false)}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {saving ? "Importando..." : "Importar"}
-                </button>
-              </div>
-            </form>
+            <div className="space-y-4 p-5">
+              {importStep === 1 ? <>
+                <p className="text-sm text-slate-600">Selecione um CSV com as colunas Codigo, Descricao, Palavras-chave e Extra. O arquivo exportado pode ser usado como modelo.</p>
+                <input type="file" accept=".csv,text/csv" onChange={(event) => void lerArquivoEstampas(event.target.files?.[0] ?? null)} className="w-full rounded-md border border-slate-300 px-3 py-3 text-sm" />
+              </> : <>
+                <div className={`rounded-md border p-3 text-sm ${importErrors.length ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {importErrors.length ? <><p className="font-semibold">Foram encontrados {importErrors.length} erro(s):</p><ul className="mt-2 list-disc pl-5">{importErrors.map((item) => <li key={item}>{item}</li>)}</ul></> : `${importItems.length} registro(s) validados e prontos para importar.`}
+                </div>
+                <div className="overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left"><tr><th className="p-3">Código</th><th className="p-3">Descrição</th><th className="p-3">Palavras-chave</th><th className="p-3">Extra</th></tr></thead><tbody>{importItems.map((item, index) => <tr key={`${item.codigo}-${index}`} className="border-t border-slate-100"><td className="p-3">{item.codigo}</td><td className="p-3">{item.descricao || "-"}</td><td className="p-3">{item.palavrasChave || "-"}</td><td className="p-3">{item.extra || "-"}</td></tr>)}</tbody></table></div>
+                <div className="flex justify-end gap-2"><button type="button" onClick={() => setImportStep(1)} className="rounded-md border border-slate-300 px-4 py-2 text-sm">Voltar</button><button type="button" onClick={() => void confirmarImportacaoEstampas()} disabled={saving || importErrors.length > 0 || importItems.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? "Importando..." : "Confirmar importação"}</button></div>
+              </>}
+              {importFileName && <p className="text-xs text-slate-500">Arquivo: {importFileName}</p>}
+            </div>
           </div>
         </div>
       )}
@@ -2410,7 +2013,7 @@ function EstampasTab({
   );
 }
 
-function VariantesTab({
+export function VariantesTab({
   variantes,
   estampas,
   tamanhos,
@@ -2427,6 +2030,7 @@ function VariantesTab({
   onDuplicate,
   onDelete,
   onDeleteMany,
+  canEdit = true,
 }: {
   variantes: VarianteOlist[];
   estampas: EstampaOlist[];
@@ -2444,12 +2048,19 @@ function VariantesTab({
   onDuplicate: (variante: VarianteOlist) => void;
   onDelete: (id: string) => void;
   onDeleteMany: (ids: string[]) => Promise<boolean>;
+  canEdit?: boolean;
 }) {
+  const [cadastroAberto, setCadastroAberto] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
+  const [importItems, setImportItems] = useState<VarianteImportadaInput[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState("");
   const [tamanhoFiltroId, setTamanhoFiltroId] = useState("");
   const [selecionadas, setSelecionadas] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState<100 | 1000 | 99999>(100);
+  const [page, setPage] = useState(1);
   const variantesExibidas = useMemo(
     () =>
       tamanhoFiltroId
@@ -2457,9 +2068,16 @@ function VariantesTab({
         : variantes,
     [tamanhoFiltroId, variantes],
   );
+  const totalPages = Math.max(1, Math.ceil(variantesExibidas.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const variantesPaginadas = variantesExibidas.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const todasExibidasSelecionadas =
-    variantesExibidas.length > 0 &&
-    variantesExibidas.every((variante) => selecionadas.includes(variante.id));
+    variantesPaginadas.length > 0 &&
+    variantesPaginadas.every((variante) => selecionadas.includes(variante.id));
+
+  useEffect(() => {
+    setPage((pagina) => Math.min(pagina, totalPages));
+  }, [totalPages]);
 
   function toggleVariante(id: string) {
     setSelecionadas((ids) =>
@@ -2468,7 +2086,7 @@ function VariantesTab({
   }
 
   function toggleTodasExibidas() {
-    const idsExibidos = variantesExibidas.map((variante) => variante.id);
+    const idsExibidos = variantesPaginadas.map((variante) => variante.id);
     setSelecionadas((ids) =>
       todasExibidasSelecionadas
         ? ids.filter((id) => !idsExibidos.includes(id))
@@ -2481,40 +2099,50 @@ function VariantesTab({
     if (excluiu) setSelecionadas([]);
   }
 
-  async function submitImport(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setImportError(null);
+  async function lerArquivoVariantes(file: File | null) {
+    setImportErrors([]); setImportItems([]); setImportText(""); setImportFileName(file?.name ?? "");
+    if (!file) return;
+    setImportStep(2);
+    try {
+      const text = await file.text();
+      const items = parseVariantesImport(text);
+      const estampasRef = new Set(estampas.map((item) => item.codigo.toUpperCase()));
+      const tamanhosRef = new Set(tamanhos.flatMap((item) => [item.sku, item.titulo, item.slug ?? ""]).filter(Boolean).map((value) => value.toUpperCase()));
+      const vistos = new Set<string>(); const errors: string[] = [];
+      items.forEach((item, index) => {
+        const key = `${item.estampaCodigo}:${item.codigo}`;
+        if (vistos.has(key)) errors.push(`Linha ${index + 2}: variante ${item.codigo} duplicada para a estampa ${item.estampaCodigo}.`);
+        vistos.add(key);
+        if (!estampasRef.has(item.estampaCodigo.toUpperCase())) errors.push(`Linha ${index + 2}: estampa ${item.estampaCodigo} não encontrada.`);
+        if (!tamanhosRef.has(item.tamanhoRef.toUpperCase())) errors.push(`Linha ${index + 2}: tamanho ${item.tamanhoRef} não encontrado.`);
+      });
+      setImportText(text); setImportItems(items); setImportErrors(errors);
+    } catch (error) {
+      setImportErrors([error instanceof Error ? error.message : "Erro ao validar o CSV de variantes."]);
+    }
+  }
 
+  async function confirmarImportacaoVariantes() {
+    if (!importText || importErrors.length || !importItems.length) return;
     try {
       await onImport(importText);
-      setImportText("");
-      setImportModalOpen(false);
+      setImportText(""); setImportItems([]); setImportModalOpen(false); setImportStep(1); setImportFileName("");
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Erro ao importar variantes.");
+      setImportErrors([error instanceof Error ? error.message : "Erro ao importar variantes."]);
     }
   }
 
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">
-            {editingId ? "Editar variante" : "Cadastrar variante"}
-          </h3>
-          <button
-            type="button"
-            onClick={() => {
-              setImportError(null);
-              setImportModalOpen(true);
-            }}
-            disabled={saving}
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            Importar em lote
+      {canEdit && <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="flex items-center">
+          <button type="button" onClick={() => setCadastroAberto((open) => !open)} className="flex flex-1 items-center justify-between text-left">
+            <h3 className="text-lg font-semibold text-slate-900">{editingId ? "Editar variante" : "Cadastrar variante"}</h3>
+            <span className={`mr-3 text-xl text-slate-500 transition ${cadastroAberto ? "rotate-180" : ""}`}>⌄</span>
           </button>
         </div>
 
-        <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
+        {cadastroAberto && <form className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 md:grid-cols-2" onSubmit={onSubmit}>
           <label className="text-sm text-slate-700">
             Estampa
             <select
@@ -2600,8 +2228,8 @@ function VariantesTab({
               </button>
             )}
           </div>
-        </form>
-      </section>
+        </form>}
+      </section>}
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -2632,32 +2260,41 @@ function VariantesTab({
               </select>
             </label>
             <div className="flex flex-wrap items-center gap-2 md:col-span-2 md:justify-end">
-              <span className="text-xs text-slate-500">{selecionadas.length} selecionada(s)</span>
               <button
                 type="button"
-                onClick={toggleTodasExibidas}
-                disabled={variantesExibidas.length === 0}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {todasExibidasSelecionadas ? "Desmarcar todas" : "Selecionar todas"}
-              </button>
-              <button
-                type="button"
-                onClick={excluirSelecionadas}
-                disabled={saving || selecionadas.length === 0}
-                className="rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-              >
-                Excluir selecionadas
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadCsv("variantes-importacao.csv", buildVariantesImportCsv(variantesExibidas))}
+                onClick={() => downloadCsv("variantes.csv", buildVariantesImportCsv(variantesExibidas))}
                 disabled={variantesExibidas.length === 0}
                 className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 md:mb-0"
               >
                 Exportar CSV
               </button>
+              {canEdit && <button
+                type="button"
+                onClick={() => { setImportErrors([]); setImportItems([]); setImportFileName(""); setImportStep(1); setImportModalOpen(true); }}
+                disabled={saving}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Importar via CSV
+              </button>}
             </div>
+          </div>
+        </div>
+
+        {canEdit && selecionadas.length > 0 && <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <span className="text-sm text-slate-600">{selecionadas.length} variante(s) selecionada(s)</span>
+          <button type="button" onClick={() => void excluirSelecionadas()} disabled={saving} className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Excluir selecionadas</button>
+        </div>}
+
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <label className="text-sm text-slate-700">Itens por página
+            <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 100 | 1000 | 99999); setPage(1); }} className="ml-2 rounded-md border border-slate-300 bg-white px-3 py-2">
+              <option value={100}>100</option><option value={1000}>1000</option><option value={99999}>99999</option>
+            </select>
+          </label>
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>{variantesExibidas.length.toLocaleString("pt-BR")} registro(s) · Página {currentPage} de {totalPages}</span>
+            <button type="button" onClick={() => setPage((pagina) => Math.max(1, pagina - 1))} disabled={currentPage === 1} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Anterior</button>
+            <button type="button" onClick={() => setPage((pagina) => Math.min(totalPages, pagina + 1))} disabled={currentPage === totalPages} className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:opacity-50">Próxima</button>
           </div>
         </div>
 
@@ -2667,19 +2304,19 @@ function VariantesTab({
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="p-3">Selecionar</th>
+                  {canEdit && <th className="p-3"><input type="checkbox" checked={todasExibidasSelecionadas} onChange={toggleTodasExibidas} aria-label="Selecionar todas as variantes exibidas" className="h-4 w-4 rounded border-slate-300" /></th>}
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Estampa</th>
                   <th className="p-3">Tamanho</th>
                   <th className="p-3">Descricao</th>
                   <th className="p-3">Palavras-chave</th>
-                  <th className="p-3">Acoes</th>
+                  {canEdit && <th className="p-3">Acoes</th>}
                 </tr>
               </thead>
               <tbody>
-                {variantesExibidas.map((variante) => (
+                {variantesPaginadas.map((variante) => (
                   <tr key={variante.id} className="border-b border-slate-100">
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <input
                         type="checkbox"
                         aria-label={`Selecionar variante ${variante.codigo}`}
@@ -2687,24 +2324,24 @@ function VariantesTab({
                         onChange={() => toggleVariante(variante.id)}
                         className="h-4 w-4 rounded border-slate-300"
                       />
-                    </td>
+                    </td>}
                     <td className="p-3 font-medium text-slate-700">{variante.codigo}</td>
                     <td className="p-3 text-slate-700">{variante.estampa?.codigo ?? "-"}</td>
                     <td className="p-3 text-slate-700">{variante.tamanho?.titulo ?? "-"}</td>
                     <td className="p-3 text-slate-700">{variante.descricao ?? "-"}</td>
                     <td className="p-3 text-slate-700">{variante.palavrasChave ?? "-"}</td>
-                    <td className="p-3">
+                    {canEdit && <td className="p-3">
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => onEdit(variante)}
+                          onClick={() => { setCadastroAberto(true); onEdit(variante); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Editar
                         </button>
                         <button
                           type="button"
-                          onClick={() => onDuplicate(variante)}
+                          onClick={() => { setCadastroAberto(true); onDuplicate(variante); }}
                           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Duplicar
@@ -2718,7 +2355,7 @@ function VariantesTab({
                           Excluir
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -2727,11 +2364,11 @@ function VariantesTab({
         )}
       </section>
 
-      {importModalOpen && (
+      {canEdit && importModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <h3 className="text-base font-semibold text-slate-900">Importar variantes</h3>
+              <div><h3 className="text-base font-semibold text-slate-900">Importar variantes via CSV</h3><p className="text-sm text-slate-500">Etapa {importStep} de 2</p></div>
               <button
                 type="button"
                 onClick={() => setImportModalOpen(false)}
@@ -2741,41 +2378,19 @@ function VariantesTab({
               </button>
             </div>
 
-            <form className="space-y-4 p-5" onSubmit={submitImport}>
-              <label className="block text-sm text-slate-700">
-                Codigo;Estampa;Tamanho;Descricao;Palavras-chave
-                <textarea
-                  required
-                  value={importText}
-                  onChange={(event) => setImportText(event.target.value)}
-                  className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
-                  placeholder={"VAR-001;FLR-001;P;Versao pequena;pequeno, p\nVAR-002;FLR-001;M;Versao media;medio, m"}
-                />
-              </label>
-
-              {importError && (
-                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {importError}
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setImportModalOpen(false)}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {saving ? "Importando..." : "Importar"}
-                </button>
-              </div>
-            </form>
+            <div className="space-y-4 p-5">
+              {importStep === 1 ? <>
+                <p className="text-sm text-slate-600">Selecione um CSV com as colunas Codigo, Estampa, Tamanho, Descricao e Palavras-chave. O arquivo exportado pode ser usado como modelo.</p>
+                <input type="file" accept=".csv,text/csv" onChange={(event) => void lerArquivoVariantes(event.target.files?.[0] ?? null)} className="w-full rounded-md border border-slate-300 px-3 py-3 text-sm" />
+              </> : <>
+                <div className={`rounded-md border p-3 text-sm ${importErrors.length ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {importErrors.length ? <><p className="font-semibold">Foram encontrados {importErrors.length} erro(s):</p><ul className="mt-2 list-disc pl-5">{importErrors.map((item) => <li key={item}>{item}</li>)}</ul></> : `${importItems.length} registro(s) validados e prontos para importar.`}
+                </div>
+                <div className="overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left"><tr><th className="p-3">Código</th><th className="p-3">Estampa</th><th className="p-3">Tamanho</th><th className="p-3">Descrição</th><th className="p-3">Palavras-chave</th></tr></thead><tbody>{importItems.map((item, index) => <tr key={`${item.estampaCodigo}-${item.codigo}-${index}`} className="border-t border-slate-100"><td className="p-3">{item.codigo}</td><td className="p-3">{item.estampaCodigo}</td><td className="p-3">{item.tamanhoRef}</td><td className="p-3">{item.descricao || "-"}</td><td className="p-3">{item.palavrasChave || "-"}</td></tr>)}</tbody></table></div>
+                <div className="flex justify-end gap-2"><button type="button" onClick={() => setImportStep(1)} className="rounded-md border border-slate-300 px-4 py-2 text-sm">Voltar</button><button type="button" onClick={() => void confirmarImportacaoVariantes()} disabled={saving || importErrors.length > 0 || importItems.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? "Importando..." : "Confirmar importação"}</button></div>
+              </>}
+              {importFileName && <p className="text-xs text-slate-500">Arquivo: {importFileName}</p>}
+            </div>
           </div>
         </div>
       )}

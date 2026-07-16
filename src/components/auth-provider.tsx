@@ -44,6 +44,14 @@ type UsuarioAplicativoFallbackResponse = {
   pode_visualizar_olist_vendedores: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
+  pode_visualizar_tipos_produto: boolean;
+  pode_editar_tipos_produto: boolean;
+  pode_visualizar_tamanhos: boolean;
+  pode_editar_tamanhos: boolean;
+  pode_visualizar_estampas: boolean;
+  pode_editar_estampas: boolean;
+  pode_visualizar_variantes: boolean;
+  pode_editar_variantes: boolean;
   pode_visualizar_baixa: boolean;
   pode_solicitar_baixa: boolean;
   pode_visualizar_devolucao: boolean;
@@ -92,6 +100,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_visualizar_olist_vendedores,
         pode_visualizar_estoque,
         pode_editar_estoque,
+        pode_visualizar_tipos_produto,
+        pode_editar_tipos_produto,
+        pode_visualizar_tamanhos,
+        pode_editar_tamanhos,
+        pode_visualizar_estampas,
+        pode_editar_estampas,
+        pode_visualizar_variantes,
+        pode_editar_variantes,
         pode_visualizar_baixa,
         pode_solicitar_baixa,
         pode_visualizar_devolucao,
@@ -133,6 +149,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeVisualizarOlistVendedores: Boolean(usuarioData.pode_visualizar_olist_vendedores),
       podeVisualizarEstoque: Boolean(usuarioData.pode_visualizar_estoque),
       podeEditarEstoque: Boolean(usuarioData.pode_editar_estoque),
+      podeVisualizarTiposProduto: Boolean(usuarioData.pode_visualizar_tipos_produto),
+      podeEditarTiposProduto: Boolean(usuarioData.pode_editar_tipos_produto),
+      podeVisualizarTamanhos: Boolean(usuarioData.pode_visualizar_tamanhos),
+      podeEditarTamanhos: Boolean(usuarioData.pode_editar_tamanhos),
+      podeVisualizarEstampas: Boolean(usuarioData.pode_visualizar_estampas),
+      podeEditarEstampas: Boolean(usuarioData.pode_editar_estampas),
+      podeVisualizarVariantes: Boolean(usuarioData.pode_visualizar_variantes),
+      podeEditarVariantes: Boolean(usuarioData.pode_editar_variantes),
       podeVisualizarBaixa: Boolean(usuarioData.pode_visualizar_baixa),
       podeSolicitarBaixa: Boolean(usuarioData.pode_solicitar_baixa),
       podeVisualizarDevolucao: Boolean(usuarioData.pode_visualizar_devolucao),

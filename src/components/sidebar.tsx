@@ -37,7 +37,27 @@ const menuItems: MenuItem[] = [
         href: "/estoque",
         permissions: ["podeVisualizarEstoque", "podeEditarEstoque"],
       },
-      { label: "Gerador CSV", href: "/gerador-csv-olist", permissions: ["podeEditarEstoque"] },
+      { label: "Gerador CSV Olist", href: "/gerador-csv-olist", permissions: ["podeEditarEstoque"] },
+      {
+        label: "Tipos de Produto",
+        href: "/produtos/tipos",
+        permissions: ["podeVisualizarTiposProduto", "podeEditarTiposProduto"],
+      },
+      {
+        label: "Tamanho",
+        href: "/produtos/tamanhos",
+        permissions: ["podeVisualizarTamanhos", "podeEditarTamanhos"],
+      },
+      {
+        label: "Estampas",
+        href: "/produtos/estampas",
+        permissions: ["podeVisualizarEstampas", "podeEditarEstampas"],
+      },
+      {
+        label: "Variantes",
+        href: "/produtos/variantes",
+        permissions: ["podeVisualizarVariantes", "podeEditarVariantes"],
+      },
     ],
   },
   {
@@ -149,14 +169,14 @@ export function Sidebar() {
 
   const renderSidebarContent = () => (
     <>
-      <div className="mb-8 pr-10 md:pr-0">
+      <div className="mb-5 shrink-0 pr-10 md:pr-0">
         <h1 className="text-lg font-semibold text-slate-900">ERP Shop</h1>
         <p className="mt-1 text-xs text-slate-500">
           {nomeAplicativo}
         </p>
       </div>
-      <nav>
-        <ul className="space-y-3">
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">
+        <ul className="space-y-3 pb-3">
           {visibleMenuItems.map((item) => (
             <li key={item.label}>
               {"href" in item ? (
@@ -183,7 +203,7 @@ export function Sidebar() {
           ))}
         </ul>
       </nav>
-      <div className="mt-auto border-t border-slate-200 pt-5">
+      <div className="mt-4 shrink-0 border-t border-slate-200 pt-4">
         <div className="mb-3 flex items-center justify-between rounded-md px-3 py-2">
           <span className="text-sm font-medium text-slate-700">{isDarkMode ? "Dark mode ativo" : "Dark mode inativo"}</span>
           <button type="button" role="switch" aria-checked={isDarkMode} aria-label="Alternar dark mode" onClick={toggleDarkMode} className={`theme-switch relative h-7 w-12 rounded-full transition ${isDarkMode ? "is-active" : ""}`}><span className={`theme-switch-thumb absolute top-1 h-5 w-5 rounded-full shadow transition ${isDarkMode ? "left-6" : "left-1"}`} /></button>
@@ -238,7 +258,7 @@ export function Sidebar() {
             aria-label="Fechar menu"
             onClick={() => setIsOpen(false)}
           />
-          <aside className="relative flex h-full w-80 max-w-[85vw] flex-col bg-white p-6 shadow-xl">
+          <aside className="relative flex h-full w-80 max-w-[85vw] flex-col overflow-hidden bg-white p-6 shadow-xl">
             <button
               type="button"
               onClick={() => setIsOpen(false)}
@@ -252,7 +272,7 @@ export function Sidebar() {
         </div>
       ) : null}
 
-      <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col border-r border-slate-200 bg-white p-6 md:flex">
+      <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white p-6 md:flex">
         {renderSidebarContent()}
       </aside>
     </>
