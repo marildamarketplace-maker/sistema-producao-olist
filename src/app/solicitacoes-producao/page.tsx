@@ -282,7 +282,7 @@ export default function SolicitacoesProducaoPage() {
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
   const [envioModalOpen, setEnvioModalOpen] = useState(false);
-  const [envioEtapa, setEnvioEtapa] = useState<1 | 2>(1);
+  const [envioEtapa, setEnvioEtapa] = useState<1 | 2 | 3>(1);
   const [envioSolicitacao, setEnvioSolicitacao] = useState<Solicitacao | null>(null);
   const [fornecedoresEnvio, setFornecedoresEnvio] = useState<FornecedorEnvio[]>([]);
   const [fornecedorEnvioId, setFornecedorEnvioId] = useState("");
@@ -291,6 +291,7 @@ export default function SolicitacoesProducaoPage() {
   const [envioEnviando, setEnvioEnviando] = useState(false);
   const [envioErro, setEnvioErro] = useState<string | null>(null);
   const [envioSucesso, setEnvioSucesso] = useState<{ id?: number; numeroPedido?: string } | null>(null);
+  const [pedidoFornecedorJson, setPedidoFornecedorJson] = useState("");
 
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
@@ -470,6 +471,7 @@ export default function SolicitacoesProducaoPage() {
     setItensConferencia([]);
     setEnvioErro(null);
     setEnvioSucesso(null);
+    setPedidoFornecedorJson("");
   }
 
   async function abrirEnvioFornecedor(solicitacao: Solicitacao) {
@@ -481,6 +483,7 @@ export default function SolicitacoesProducaoPage() {
     setItensConferencia([]);
     setEnvioErro(null);
     setEnvioSucesso(null);
+    setPedidoFornecedorJson("");
     setEnvioCarregando(true);
 
     const { data, error } = await supabase
@@ -536,6 +539,14 @@ export default function SolicitacoesProducaoPage() {
     setEnvioEnviando(true);
     setEnvioErro(null);
     try {
+      let pedidoEditado: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(pedidoFornecedorJson) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+        pedidoEditado = parsed as Record<string, unknown>;
+      } catch {
+        throw new Error("O JSON do pedido é inválido. Corrija antes de confirmar.");
+      }
       const response = await fetch("/api/fornecedores/enviar", {
         method: "POST",
         headers: {
@@ -545,6 +556,8 @@ export default function SolicitacoesProducaoPage() {
         body: JSON.stringify({
           fornecedorId: fornecedorEnvioId,
           solicitacaoId: envioSolicitacao.id,
+          acao: "enviar",
+          pedidoEditado,
         }),
       });
       const json = await response.json() as { id?: number; numeroPedido?: string; error?: string };
@@ -554,6 +567,34 @@ export default function SolicitacoesProducaoPage() {
       setEnvioErro(error instanceof Error ? error.message : "Erro ao enviar para o fornecedor.");
     } finally {
       setEnvioEnviando(false);
+    }
+  }
+
+  async function prepararPedidoFornecedor() {
+    if (!session?.access_token || !envioSolicitacao || !fornecedorEnvioId) return;
+    setEnvioCarregando(true);
+    setEnvioErro(null);
+    try {
+      const response = await fetch("/api/fornecedores/enviar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fornecedorId: fornecedorEnvioId,
+          solicitacaoId: envioSolicitacao.id,
+          acao: "preview",
+        }),
+      });
+      const json = await response.json() as { pedido?: Record<string, unknown>; error?: string };
+      if (!response.ok || !json.pedido) throw new Error(json.error ?? "Não foi possível gerar a prévia do pedido.");
+      setPedidoFornecedorJson(JSON.stringify(json.pedido, null, 2));
+      setEnvioEtapa(3);
+    } catch (error) {
+      setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar o pedido.");
+    } finally {
+      setEnvioCarregando(false);
     }
   }
 
@@ -1648,13 +1689,16 @@ export default function SolicitacoesProducaoPage() {
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Enviar para o Fornecedor</h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  Etapa {envioEtapa} de 2 — {envioEtapa === 1 ? "Seleção do fornecedor" : "Conferência dos produtos"}
+                  Etapa {envioEtapa} de 3 — {
+                    envioEtapa === 1 ? "Seleção do fornecedor" :
+                    envioEtapa === 2 ? "Conferência dos produtos" : "Revisão final do pedido"
+                  }
                 </p>
               </div>
               <button
                 type="button"
                 onClick={fecharEnvioFornecedor}
-                disabled={envioCarregando}
+                disabled={envioCarregando || envioEnviando}
                 className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
               >
                 Fechar
@@ -1709,7 +1753,7 @@ export default function SolicitacoesProducaoPage() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : envioEtapa === 2 ? (
                 <div className="space-y-5">
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fornecedor selecionado</p>
@@ -1764,8 +1808,27 @@ export default function SolicitacoesProducaoPage() {
                   </div>
 
                   <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-                    Ao confirmar, será criado um pedido na Olist do usuário vendedor selecionado.
+                    Continue para visualizar e editar exatamente o que será enviado à Olist.
                   </p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">Revise o pedido que será enviado</h4>
+                    <p className="mt-1 text-sm text-slate-600">
+                      O conteúdo abaixo é o JSON exato enviado à Olist. Você pode editar qualquer campo antes de confirmar.
+                    </p>
+                  </div>
+                  <textarea
+                    value={pedidoFornecedorJson}
+                    onChange={(event) => {
+                      setPedidoFornecedorJson(event.target.value);
+                      setEnvioErro(null);
+                    }}
+                    spellCheck={false}
+                    className="min-h-[28rem] w-full rounded-md border border-slate-300 bg-slate-950 p-4 font-mono text-sm leading-6 text-slate-100"
+                    aria-label="JSON do pedido enviado à Olist"
+                  />
                   {envioSucesso && (
                     <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
                       Pedido criado com sucesso{envioSucesso.numeroPedido ? `: ${envioSucesso.numeroPedido}` : envioSucesso.id ? `: ID ${envioSucesso.id}` : "."}
@@ -1780,10 +1843,11 @@ export default function SolicitacoesProducaoPage() {
             </div>
 
             <div className="flex justify-end gap-2 border-t border-slate-200 p-5">
-              {envioEtapa === 2 && (
+              {envioEtapa > 1 && !envioSucesso && (
                 <button
                   type="button"
-                  onClick={() => setEnvioEtapa(1)}
+                  onClick={() => setEnvioEtapa((etapa) => etapa === 3 ? 2 : 1)}
+                  disabled={envioCarregando || envioEnviando}
                   className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
                 >
                   Voltar
@@ -1798,6 +1862,15 @@ export default function SolicitacoesProducaoPage() {
                 >
                   {envioCarregando ? "Carregando..." : "Revisar produtos"}
                 </button>
+              ) : envioEtapa === 2 ? (
+                <button
+                  type="button"
+                  onClick={() => void prepararPedidoFornecedor()}
+                  disabled={envioCarregando || itensConferencia.length === 0}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {envioCarregando ? "Gerando prévia..." : "Revisar pedido final"}
+                </button>
               ) : (
                 envioSucesso ? (
                   <button
@@ -1811,7 +1884,7 @@ export default function SolicitacoesProducaoPage() {
                   <button
                     type="button"
                     onClick={() => void confirmarEnvioFornecedor()}
-                    disabled={envioEnviando || itensConferencia.length === 0}
+                    disabled={envioEnviando || !pedidoFornecedorJson.trim()}
                     className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {envioEnviando ? "Criando pedido..." : "Criar pedido na Olist"}

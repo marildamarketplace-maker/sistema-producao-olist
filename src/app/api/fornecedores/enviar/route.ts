@@ -19,7 +19,12 @@ export async function POST(request: Request) {
     });
     if (!solicitante?.podeSolicitarProducao) throw new Error("Sem permissão para enviar solicitações.");
 
-    const body = await request.json() as { fornecedorId?: unknown; solicitacaoId?: unknown };
+    const body = await request.json() as {
+      fornecedorId?: unknown;
+      solicitacaoId?: unknown;
+      acao?: unknown;
+      pedidoEditado?: unknown;
+    };
     const fornecedorId = String(body.fornecedorId ?? "");
     const solicitacaoId = String(body.solicitacaoId ?? "");
     if (!fornecedorId || !solicitacaoId) throw new Error("Fornecedor e solicitação são obrigatórios.");
@@ -109,14 +114,23 @@ export async function POST(request: Request) {
       });
     }
 
-    const resultado = await criarPedidoOlistApi(vendedor.aplicativoId, {
+    const pedidoGerado = {
       idContato: fornecedor.meuClienteOlistId,
       vendedor: { id: vendedor.vendedorOlistId },
       situacao: 0,
       data: new Date().toISOString().slice(0, 10),
       observacoes: observacoes.join("\n.\n"),
       itens,
-    });
+    };
+
+    if (body.acao === "preview") {
+      return NextResponse.json({ pedido: pedidoGerado });
+    }
+
+    const pedido = body.pedidoEditado && typeof body.pedidoEditado === "object" && !Array.isArray(body.pedidoEditado)
+      ? body.pedidoEditado as Record<string, unknown>
+      : pedidoGerado;
+    const resultado = await criarPedidoOlistApi(vendedor.aplicativoId, pedido);
     const pedidoOlistId = String(resultado.id ?? "").trim();
     if (!pedidoOlistId) throw new Error("A Olist criou o pedido, mas não retornou o ID para registro.");
 
