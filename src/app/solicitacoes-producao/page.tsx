@@ -1038,12 +1038,13 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const dataProcessamento = new Date();
+    const editandoSolicitacao = Boolean(solicitacaoEditandoId);
 
     setIntegrandoOlist(true);
     setErrorMessage(null);
     setResumoImportacaoOlist(null);
     setProcessamentoOlistPendente(null);
-    setPrioridadeProducao(false);
+    if (!editandoSolicitacao) setPrioridadeProducao(false);
     const resp = await axios.post(
       "/api/olist/gerar-solicitacao",
       {
@@ -1083,9 +1084,11 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const produtosAtualizados = await carregarDados();
-    setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
-    setObservacaoGeral("MV:");
-    setPrioridadeProducao(Boolean(json.prioridade_producao));
+    if (!editandoSolicitacao) {
+      setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
+      setObservacaoGeral("MV:");
+      setPrioridadeProducao(Boolean(json.prioridade_producao));
+    }
     const itensComProdutoFornecido = await Promise.all(
       itensPreparados.map(async (item) => {
         const produto = produtosAtualizados.find((produtoAtual) => produtoAtual.id === item.produto_id);
@@ -1106,7 +1109,11 @@ export default function SolicitacoesProducaoPage() {
         });
       }),
     );
-    setItensForm(itensComProdutoFornecido);
+    setItensForm((itensAtuais) =>
+      editandoSolicitacao
+        ? [...itensAtuais, ...itensComProdutoFornecido]
+        : itensComProdutoFornecido,
+    );
     setProcessamentoOlistPendente({
       periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
       periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
