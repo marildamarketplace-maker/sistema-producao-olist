@@ -212,7 +212,7 @@ model TarefaMidia {
   responsavelId         String?                   @map("responsavel_id") @db.Uuid
   nome                  String
   descricao             String
-  linkApoio             String?                   @map("link_apoio")
+  linksApoio            String[]                  @default([]) @map("links_apoio")
   periodicidade         PeriodicidadeTarefaMidia
   prioridade            PrioridadeTarefaMidia
   ativa                 Boolean                   @default(true)
@@ -243,7 +243,7 @@ model OcorrenciaTarefaMidia {
   dataConclusao         DateTime?                    @map("data_conclusao") @db.Timestamptz(6)
   usuarioConclusaoId    String?                      @map("usuario_conclusao_id") @db.Uuid
   observacao            String?
-  linkRelacionado       String?                      @map("link_relacionado")
+  linksRelacionados     String[]                     @default([]) @map("links_relacionados")
   createdAt             DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   aplicativo            Aplicativo                   @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)

@@ -59,12 +59,12 @@ export async function PATCH(request: Request) {
     const status = String(body.status ?? "");
     if (!["PENDENTE", "EM_ANDAMENTO", "CONCLUIDA", "IGNORADA"].includes(status)) throw new Error("Status inválido.");
     const observacao = String(body.observacao ?? "").trim() || null;
-    const linkRelacionado = String(body.linkRelacionado ?? "").trim() || null;
-    if (linkRelacionado) { try { new URL(linkRelacionado); } catch { throw new Error("O link relacionado deve ser uma URL válida."); } }
+    const linksRelacionados = (Array.isArray(body.linksRelacionados) ? body.linksRelacionados : [body.linkRelacionado]).map((valor) => String(valor ?? "").trim()).filter(Boolean);
+    for (const link of linksRelacionados) { try { new URL(link); } catch { throw new Error("Todos os links relacionados devem ser URLs válidas."); } }
     const concluida = status === "CONCLUIDA";
     const ocorrencia = await prisma.ocorrenciaTarefaMidia.update({
       where: { id },
-      data: { status: status as "PENDENTE" | "EM_ANDAMENTO" | "CONCLUIDA" | "IGNORADA", observacao, linkRelacionado, dataConclusao: concluida ? new Date() : null, usuarioConclusaoId: concluida ? usuario.id : null },
+      data: { status: status as "PENDENTE" | "EM_ANDAMENTO" | "CONCLUIDA" | "IGNORADA", observacao, linksRelacionados, dataConclusao: concluida ? new Date() : null, usuarioConclusaoId: concluida ? usuario.id : null },
       include: { tarefa: { include: { responsavel: { select: { id: true, nome: true } } } }, usuarioConclusao: { select: { id: true, nome: true } } },
     });
     return NextResponse.json({ ocorrencia: { ...ocorrencia, statusExibicao: ocorrencia.status } });

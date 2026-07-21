@@ -38,7 +38,7 @@ async function dadosTarefa(body: Record<string, unknown>, aplicativoId: string) 
   const prioridade = String(body.prioridade ?? "") as (typeof prioridades)[number];
   const dataInicio = dataLocal(body.dataInicio, "a data de início");
   const dataEncerramento = body.dataEncerramento ? dataLocal(body.dataEncerramento, "a data de encerramento") : null;
-  const linkApoio = textoOpcional(body.linkApoio);
+  const linksApoio = (Array.isArray(body.linksApoio) ? body.linksApoio : [body.linkApoio]).map(textoOpcional).filter((link): link is string => Boolean(link));
   const responsavelId = textoOpcional(body.responsavelId);
   const horaPrevista = textoOpcional(body.horaPrevista);
   const diasSemana = Array.isArray(body.diasSemana) ? [...new Set(body.diasSemana.map(Number))].filter((dia) => Number.isInteger(dia) && dia >= 0 && dia <= 6) : [];
@@ -50,7 +50,7 @@ async function dadosTarefa(body: Record<string, unknown>, aplicativoId: string) 
   if (!periodicidades.includes(periodicidade)) throw new Error("Periodicidade inválida.");
   if (!prioridades.includes(prioridade)) throw new Error("Prioridade inválida.");
   if (dataEncerramento && dataEncerramento < dataInicio) throw new Error("A data de encerramento deve ser posterior à data de início.");
-  validarUrl(linkApoio, "O link de apoio");
+  linksApoio.forEach((link) => validarUrl(link, "O link de apoio"));
   if (horaPrevista && !/^([01]\d|2[0-3]):[0-5]\d$/.test(horaPrevista)) throw new Error("Hora prevista inválida.");
   if ((periodicidade === "DIARIA" || periodicidade === "SEMANAL") && !diasSemana.length) throw new Error("Selecione ao menos um dia da semana.");
   if (periodicidade === "SEMANAL" && diasSemana.length !== 1) throw new Error("Selecione um dia para a tarefa semanal.");
@@ -59,7 +59,7 @@ async function dadosTarefa(body: Record<string, unknown>, aplicativoId: string) 
     const responsavel = await prisma.usuario.findFirst({ where: { id: responsavelId, aplicativoId, ativo: true }, select: { id: true } });
     if (!responsavel) throw new Error("Responsável inválido.");
   }
-  return { nome, descricao, linkApoio, periodicidade, prioridade, ativa: body.ativa !== false, dataInicio, dataEncerramento, horaPrevista, diasSemana, diaMes: periodicidade === "MENSAL" ? diaMes : null, ordinalSemanaMes: periodicidade === "MENSAL" && !diaMes ? ordinalSemanaMes : null, diaSemanaMensal: periodicidade === "MENSAL" && !diaMes ? diaSemanaMensal : null, responsavelId };
+  return { nome, descricao, linksApoio, periodicidade, prioridade, ativa: body.ativa !== false, dataInicio, dataEncerramento, horaPrevista, diasSemana, diaMes: periodicidade === "MENSAL" ? diaMes : null, ordinalSemanaMes: periodicidade === "MENSAL" && !diaMes ? ordinalSemanaMes : null, diaSemanaMensal: periodicidade === "MENSAL" && !diaMes ? diaSemanaMensal : null, responsavelId };
 }
 
 const incluir = { responsavel: { select: { id: true, nome: true } }, _count: { select: { ocorrencias: true } } } as const;
