@@ -34,7 +34,7 @@ export default function GestaoTarefasPage() {
   const [form, setForm] = useState(formVazio);
   const [ocorrenciaAberta, setOcorrenciaAberta] = useState<Ocorrencia | null>(null);
   const [execucao, setExecucao] = useState({ status: "PENDENTE" as Exclude<Status, "ATRASADA">, observacao: "", linksRelacionados: [""] as string[] });
-  const [visao, setVisao] = useState<"HOJE" | "SEMANA" | "ATRASADAS" | "PROXIMAS" | "HISTORICO">("SEMANA");
+  const [visao, setVisao] = useState<"HOJE" | "SEMANA" | "ATRASADAS" | "PROXIMAS" | "HISTORICO">("HOJE");
   const [filtros, setFiltros] = useState({ inicio: isoLocal(somaDias(new Date(), -7)), fim: isoLocal(somaDias(new Date(), 30)), periodicidade: "", status: "", responsavelId: "", tarefaId: "" });
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
