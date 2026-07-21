@@ -20,6 +20,26 @@ enum TipoVenda {
   @@map("tipo_venda")
 }
 
+enum PeriodicidadeTarefaMidia {
+  DIARIA
+  SEMANAL
+  QUINZENAL
+  MENSAL
+}
+
+enum PrioridadeTarefaMidia {
+  ALTA
+  MEDIA
+  BAIXA
+}
+
+enum StatusOcorrenciaTarefaMidia {
+  PENDENTE
+  EM_ANDAMENTO
+  CONCLUIDA
+  IGNORADA
+}
+
 model Aplicativo {
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
@@ -37,6 +57,8 @@ model Aplicativo {
   itensSolicitacaoDevolucao ItemSolicitacaoDevolucao[]
   itensSolicitacaoProducao  ItemSolicitacaoProducao[]
   midias                    Midia[]
+  tarefasMidia              TarefaMidia[]
+  ocorrenciasTarefasMidia   OcorrenciaTarefaMidia[]
   movimentacoesEstoque      MovimentacaoEstoque[]
   pedidosOlistProcessados   PedidoOlistProcessado[]
   produtos                  Produto[]
@@ -162,6 +184,7 @@ model Usuario {
   createdAt                            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
   podeVisualizarCategoriasMidia        Boolean      @default(false) @map("pode_visualizar_categorias_midia")
+  podeVisualizarTarefasMidia           Boolean      @default(false) @map("pode_visualizar_tarefas_midia")
   podeVisualizarDashboard              Boolean      @default(false) @map("pode_visualizar_dashboard")
   podeVisualizarFornecedores           Boolean      @default(false) @map("pode_visualizar_fornecedores")
   podeVisualizarProdutosFornecedor     Boolean      @default(false) @map("pode_visualizar_produtos_fornecedor")
@@ -174,11 +197,63 @@ model Usuario {
   podeVisualizarOlistFormasRecebimento Boolean      @default(false) @map("pode_visualizar_olist_formas_recebimento")
   vendedorOlistId                      Int?         @map("vendedor_olist_id")
   fornecedoresComoVendedor             Fornecedor[]
+  tarefasMidiaResponsavel               TarefaMidia[] @relation("ResponsavelTarefaMidia")
+  ocorrenciasTarefasMidiaConcluidas     OcorrenciaTarefaMidia[] @relation("UsuarioConclusaoTarefaMidia")
   aplicativo                           Aplicativo   @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, email], map: "uq_usuario_aplicativo_email")
   @@index([aplicativoId], map: "idx_usuario_aplicativo_id")
   @@map("usuario")
+}
+
+model TarefaMidia {
+  id                    String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId          String                    @map("aplicativo_id") @db.Uuid
+  responsavelId         String?                   @map("responsavel_id") @db.Uuid
+  nome                  String
+  descricao             String
+  linkApoio             String?                   @map("link_apoio")
+  periodicidade         PeriodicidadeTarefaMidia
+  prioridade            PrioridadeTarefaMidia
+  ativa                 Boolean                   @default(true)
+  dataInicio            DateTime                  @map("data_inicio") @db.Date
+  dataEncerramento      DateTime?                 @map("data_encerramento") @db.Date
+  horaPrevista          String?                   @map("hora_prevista") @db.VarChar(5)
+  diasSemana            Int[]                     @default([]) @map("dias_semana")
+  diaMes                Int?                      @map("dia_mes")
+  ordinalSemanaMes      Int?                      @map("ordinal_semana_mes")
+  diaSemanaMensal       Int?                      @map("dia_semana_mensal")
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  aplicativo            Aplicativo                @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  responsavel           Usuario?                  @relation("ResponsavelTarefaMidia", fields: [responsavelId], references: [id], onDelete: SetNull)
+  ocorrencias           OcorrenciaTarefaMidia[]
+
+  @@index([aplicativoId, ativa], map: "idx_tarefa_midia_aplicativo_ativa")
+  @@index([responsavelId], map: "idx_tarefa_midia_responsavel")
+  @@map("tarefas_midia")
+}
+
+model OcorrenciaTarefaMidia {
+  id                    String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId          String                       @map("aplicativo_id") @db.Uuid
+  tarefaId              String                       @map("tarefa_id") @db.Uuid
+  dataPrevista          DateTime                     @map("data_prevista") @db.Timestamptz(6)
+  status                StatusOcorrenciaTarefaMidia  @default(PENDENTE)
+  dataConclusao         DateTime?                    @map("data_conclusao") @db.Timestamptz(6)
+  usuarioConclusaoId    String?                      @map("usuario_conclusao_id") @db.Uuid
+  observacao            String?
+  linkRelacionado       String?                      @map("link_relacionado")
+  createdAt             DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  aplicativo            Aplicativo                   @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  tarefa                TarefaMidia                   @relation(fields: [tarefaId], references: [id], onDelete: Cascade)
+  usuarioConclusao      Usuario?                     @relation("UsuarioConclusaoTarefaMidia", fields: [usuarioConclusaoId], references: [id], onDelete: SetNull)
+
+  @@unique([tarefaId, dataPrevista], map: "uq_ocorrencia_tarefa_midia_data")
+  @@index([aplicativoId, dataPrevista], map: "idx_ocorrencia_tarefa_midia_periodo")
+  @@index([status], map: "idx_ocorrencia_tarefa_midia_status")
+  @@map("ocorrencias_tarefas_midia")
 }
 
 model Fornecedor {
@@ -239,6 +314,8 @@ model Produto {
   id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku                    String                         @unique
   imagemUrl              String?                        @map("imagem_url")
+  temFoto                Boolean                        @default(false) @map("tem_foto")
+  temVideo               Boolean                        @default(false) @map("tem_video")
   metaEstoque            Int?                           @map("meta_estoque")
   ativo                  Boolean                        @default(true)
   createdAt              DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)

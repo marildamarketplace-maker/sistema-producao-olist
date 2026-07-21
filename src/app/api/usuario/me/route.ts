@@ -11,6 +11,7 @@ type UsuarioRow = {
   pode_visualizar_fornecedores: boolean;
   pode_visualizar_produtos_fornecedor: boolean;
   pode_visualizar_categorias_midia: boolean;
+  pode_visualizar_tarefas_midia: boolean;
   pode_visualizar_olist_produtos: boolean;
   pode_visualizar_olist_contatos: boolean;
   pode_visualizar_olist_pedidos: boolean;
@@ -72,6 +73,7 @@ export async function GET(request: Request) {
         pode_visualizar_fornecedores,
         pode_visualizar_produtos_fornecedor,
         pode_visualizar_categorias_midia,
+        pode_visualizar_tarefas_midia,
         pode_visualizar_olist_produtos,
         pode_visualizar_olist_contatos,
         pode_visualizar_olist_pedidos,
@@ -138,6 +140,7 @@ export async function GET(request: Request) {
     podeVisualizarFornecedores: Boolean(usuario.pode_visualizar_fornecedores),
     podeVisualizarProdutosFornecedor: Boolean(usuario.pode_visualizar_produtos_fornecedor),
     podeVisualizarCategoriasMidia: Boolean(usuario.pode_visualizar_categorias_midia),
+    podeVisualizarTarefasMidia: Boolean(usuario.pode_visualizar_tarefas_midia),
     podeVisualizarOlistProdutos: Boolean(usuario.pode_visualizar_olist_produtos),
     podeVisualizarOlistContatos: Boolean(usuario.pode_visualizar_olist_contatos),
     podeVisualizarOlistPedidos: Boolean(usuario.pode_visualizar_olist_pedidos),

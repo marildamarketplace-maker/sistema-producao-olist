@@ -37,6 +37,7 @@ type UsuarioAplicativoFallbackResponse = {
   pode_visualizar_fornecedores: boolean;
   pode_visualizar_produtos_fornecedor: boolean;
   pode_visualizar_categorias_midia: boolean;
+  pode_visualizar_tarefas_midia: boolean;
   pode_visualizar_olist_produtos: boolean;
   pode_visualizar_olist_contatos: boolean;
   pode_visualizar_olist_pedidos: boolean;
@@ -95,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_visualizar_fornecedores,
         pode_visualizar_produtos_fornecedor,
         pode_visualizar_categorias_midia,
+        pode_visualizar_tarefas_midia,
         pode_visualizar_olist_produtos,
         pode_visualizar_olist_contatos,
         pode_visualizar_olist_pedidos,
@@ -146,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeVisualizarFornecedores: Boolean(usuarioData.pode_visualizar_fornecedores),
       podeVisualizarProdutosFornecedor: Boolean(usuarioData.pode_visualizar_produtos_fornecedor),
       podeVisualizarCategoriasMidia: Boolean(usuarioData.pode_visualizar_categorias_midia),
+      podeVisualizarTarefasMidia: Boolean(usuarioData.pode_visualizar_tarefas_midia),
       podeVisualizarOlistProdutos: Boolean(usuarioData.pode_visualizar_olist_produtos),
       podeVisualizarOlistContatos: Boolean(usuarioData.pode_visualizar_olist_contatos),
       podeVisualizarOlistPedidos: Boolean(usuarioData.pode_visualizar_olist_pedidos),

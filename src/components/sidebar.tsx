@@ -116,9 +116,19 @@ const menuItems: MenuItem[] = [
     label: "Controle de mídia",
     items: [
       {
+        label: "Produtos",
+        href: "/controle-midia/produtos",
+        permissions: ["podeVisualizarCategoriasMidia"],
+      },
+      {
         label: "Categorias",
         href: "/controle-midia/categorias",
         permissions: ["podeVisualizarCategoriasMidia"],
+      },
+      {
+        label: "Gestão de Tarefas",
+        href: "/controle-midia/tarefas",
+        permissions: ["podeVisualizarTarefasMidia"],
       },
     ],
   },
