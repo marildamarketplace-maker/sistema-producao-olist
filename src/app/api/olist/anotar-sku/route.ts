@@ -93,8 +93,8 @@ export async function POST(request: NextRequest) {
   try {
     const autenticado = await autenticar(request);
     const body = await request.json();
-    const situacoes = Array.isArray(body?.situacoes)
-      ? [...new Set(body.situacoes.map(String).filter((item: string) => SITUACOES_PERMITIDAS.has(item)))]
+    const situacoes: string[] = Array.isArray(body?.situacoes)
+      ? [...new Set<string>(body.situacoes.map((item: unknown) => String(item)).filter((item: string) => SITUACOES_PERMITIDAS.has(item)))]
       : [];
     if (situacoes.length === 0) {
       return NextResponse.json({ error: "Selecione ao menos uma situação." }, { status: 400 });
