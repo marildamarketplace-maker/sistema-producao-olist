@@ -50,7 +50,20 @@ function agregarPorSku(itens: Array<{ sku: string; tituloProduto: string | null;
   }
   return [...totais.entries()]
     .map(([sku, dados]) => ({ sku, ...dados }))
-    .sort((a, b) => a.sku.localeCompare(b.sku, "pt-BR", { numeric: true }));
+    .sort((a, b) => {
+      const tituloA = a.tituloProduto?.trim();
+      const tituloB = b.tituloProduto?.trim();
+      if (tituloA && !tituloB) return -1;
+      if (!tituloA && tituloB) return 1;
+
+      const comparacaoTitulo = (tituloA ?? "").localeCompare(tituloB ?? "", "pt-BR", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      return comparacaoTitulo !== 0
+        ? comparacaoTitulo
+        : a.sku.localeCompare(b.sku, "pt-BR", { numeric: true, sensitivity: "base" });
+    });
 }
 
 export async function GET(request: NextRequest) {
