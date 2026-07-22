@@ -181,6 +181,8 @@ model Usuario {
   podeSolicitarProducao                Boolean                 @default(false) @map("pode_solicitar_producao")
   podeVisualizarProducao               Boolean                 @default(false) @map("pode_visualizar_producao")
   podeConfirmarProducao                Boolean                 @default(false) @map("pode_confirmar_producao")
+  podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
+  podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   podeVisualizarConfiguracao           Boolean                 @default(false) @map("pode_visualizar_configuracao")
   podeEditarConfiguracao               Boolean                 @default(false) @map("pode_editar_configuracao")
   createdAt                            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)

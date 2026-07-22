@@ -62,6 +62,8 @@ type UsuarioAplicativoFallbackResponse = {
   pode_solicitar_producao: boolean;
   pode_visualizar_producao: boolean;
   pode_confirmar_producao: boolean;
+  pode_escrever_anotar_sku: boolean;
+  pode_visualizar_anotar_sku: boolean;
   pode_visualizar_configuracao: boolean;
   pode_editar_configuracao: boolean;
 };
@@ -121,6 +123,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_solicitar_producao,
         pode_visualizar_producao,
         pode_confirmar_producao,
+        pode_escrever_anotar_sku,
+        pode_visualizar_anotar_sku,
         pode_visualizar_configuracao,
         pode_editar_configuracao,
         aplicativo(nome)
@@ -173,6 +177,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeSolicitarProducao: Boolean(usuarioData.pode_solicitar_producao),
       podeVisualizarProducao: Boolean(usuarioData.pode_visualizar_producao),
       podeConfirmarProducao: Boolean(usuarioData.pode_confirmar_producao),
+      podeEscreverAnotarSku: Boolean(usuarioData.pode_escrever_anotar_sku),
+      podeVisualizarAnotarSku: Boolean(usuarioData.pode_visualizar_anotar_sku),
       podeVisualizarConfiguracao: Boolean(usuarioData.pode_visualizar_configuracao),
       podeEditarConfiguracao: Boolean(usuarioData.pode_editar_configuracao),
     } satisfies UsuarioAplicativo;

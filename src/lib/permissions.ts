@@ -28,6 +28,8 @@ export const permissionKeys = [
   "podeSolicitarProducao",
   "podeVisualizarProducao",
   "podeConfirmarProducao",
+  "podeEscreverAnotarSku",
+  "podeVisualizarAnotarSku",
   "podeVisualizarConfiguracao",
   "podeEditarConfiguracao",
 ] as const;
@@ -66,6 +68,8 @@ export const permissionLabels: Record<PermissionKey, string> = {
   podeSolicitarProducao: "Solicitar produção",
   podeVisualizarProducao: "Visualizar produção",
   podeConfirmarProducao: "Confirmar produção",
+  podeEscreverAnotarSku: "Anotar SKU - buscar (write)",
+  podeVisualizarAnotarSku: "Anotar SKU - histórico (read)",
   podeVisualizarConfiguracao: "Visualizar configurações",
   podeEditarConfiguracao: "Editar configurações",
 };

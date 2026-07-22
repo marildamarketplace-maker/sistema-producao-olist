@@ -71,7 +71,7 @@ const menuItems: MenuItem[] = [
       {
         label: "Anotar SKU",
         href: "/anotar-sku",
-        permissions: ["podeSolicitarProducao", "podeVisualizarProducao"],
+        permissions: ["podeEscreverAnotarSku", "podeVisualizarAnotarSku"],
       },
       {
         label: "Confirmar entrada",

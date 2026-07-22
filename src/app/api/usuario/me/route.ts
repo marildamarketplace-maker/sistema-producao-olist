@@ -36,6 +36,8 @@ type UsuarioRow = {
   pode_solicitar_producao: boolean;
   pode_visualizar_producao: boolean;
   pode_confirmar_producao: boolean;
+  pode_escrever_anotar_sku: boolean;
+  pode_visualizar_anotar_sku: boolean;
   pode_visualizar_configuracao: boolean;
   pode_editar_configuracao: boolean;
 };
@@ -98,6 +100,8 @@ export async function GET(request: Request) {
         pode_solicitar_producao,
         pode_visualizar_producao,
         pode_confirmar_producao,
+        pode_escrever_anotar_sku,
+        pode_visualizar_anotar_sku,
         pode_visualizar_configuracao,
         pode_editar_configuracao
       `,
@@ -165,6 +169,8 @@ export async function GET(request: Request) {
     podeSolicitarProducao: Boolean(usuario.pode_solicitar_producao),
     podeVisualizarProducao: Boolean(usuario.pode_visualizar_producao),
     podeConfirmarProducao: Boolean(usuario.pode_confirmar_producao),
+    podeEscreverAnotarSku: Boolean(usuario.pode_escrever_anotar_sku),
+    podeVisualizarAnotarSku: Boolean(usuario.pode_visualizar_anotar_sku),
     podeVisualizarConfiguracao: Boolean(usuario.pode_visualizar_configuracao),
     podeEditarConfiguracao: Boolean(usuario.pode_editar_configuracao),
   });
