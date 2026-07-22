@@ -5,7 +5,7 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2", "9"]);
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 async function autenticar(request: Request) {
   const autenticado = await getUsuarioAutenticado(request);
