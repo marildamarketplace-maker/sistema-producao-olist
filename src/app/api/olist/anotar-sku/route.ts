@@ -5,6 +5,8 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2", "9"]);
 
+export const maxDuration = 800;
+
 async function autenticar(request: Request) {
   const autenticado = await getUsuarioAutenticado(request);
   const usuario = await prisma.usuario.findUnique({
@@ -23,11 +25,30 @@ function escaparCsv(value: string | number) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
-function agregarPorSku(itens: Array<{ sku: string; quantidade: number }>) {
-  const totais = new Map<string, number>();
-  for (const item of itens) totais.set(item.sku, (totais.get(item.sku) ?? 0) + item.quantidade);
+function formatarDataBuscaCsv(data: Date) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(data);
+}
+
+function agregarPorSku(itens: Array<{ sku: string; tituloProduto: string | null; quantidade: number }>) {
+  const totais = new Map<string, { tituloProduto: string | null; quantidade: number }>();
+  for (const item of itens) {
+    const atual = totais.get(item.sku);
+    totais.set(item.sku, {
+      tituloProduto: atual?.tituloProduto || item.tituloProduto,
+      quantidade: (atual?.quantidade ?? 0) + item.quantidade,
+    });
+  }
   return [...totais.entries()]
-    .map(([sku, quantidade]) => ({ sku, quantidade }))
+    .map(([sku, dados]) => ({ sku, ...dados }))
     .sort((a, b) => a.sku.localeCompare(b.sku, "pt-BR", { numeric: true }));
 }
 
@@ -60,7 +81,14 @@ export async function GET(request: NextRequest) {
 
     const skus = agregarPorSku(busca.itens);
     if (formato === "csv") {
-      const csv = ["SKU,QTD", ...skus.map((item) => `${escaparCsv(item.sku)},${escaparCsv(item.quantidade)}`)].join("\r\n");
+      const csv = [
+        `Data da busca,${escaparCsv(formatarDataBuscaCsv(busca.createdAt))}`,
+        "",
+        "SKU,TITULO_PRODUTO,QTD",
+        ...skus.map((item) =>
+          `${escaparCsv(item.sku)},${escaparCsv(item.tituloProduto ?? "")},${escaparCsv(item.quantidade)}`,
+        ),
+      ].join("\r\n");
       return new NextResponse(`\uFEFF${csv}`, {
         headers: {
           "Content-Type": "text/csv;charset=utf-8",
@@ -89,6 +117,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  try {
+    const autenticado = await autenticar(request);
+    const buscaId = request.nextUrl.searchParams.get("id");
+    if (!buscaId) {
+      return NextResponse.json({ error: "Informe a busca que será excluída." }, { status: 400 });
+    }
+
+    const resultado = await prisma.buscaSku.deleteMany({
+      where: { id: buscaId, aplicativoId: autenticado.aplicativoId },
+    });
+    if (resultado.count === 0) {
+      return NextResponse.json({ error: "Busca não encontrada." }, { status: 404 });
+    }
+
+    return NextResponse.json({ excluida: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro ao excluir a busca." },
+      { status: 500 },
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const autenticado = await autenticar(request);
@@ -100,35 +152,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Selecione ao menos uma situação." }, { status: 400 });
     }
 
-    const { pedidos } = await buscarPedidosOlistPorDataLimite(autenticado.aplicativoId, null, null, situacoes);
-    const idsEncontrados = pedidos.map((pedido) => String(pedido.id));
-    const jaSalvos = idsEncontrados.length
-      ? await prisma.itemBuscaSku.findMany({
-          where: { aplicativoId: autenticado.aplicativoId, pedidoOlistId: { in: idsEncontrados } },
-          distinct: ["pedidoOlistId"],
-          select: { pedidoOlistId: true },
-        })
-      : [];
+    const jaSalvos = await prisma.itemBuscaSku.findMany({
+      where: { aplicativoId: autenticado.aplicativoId },
+      distinct: ["pedidoOlistId"],
+      select: { pedidoOlistId: true },
+    });
     const idsJaSalvos = new Set(jaSalvos.map((item) => item.pedidoOlistId));
-    const pedidosNovos = pedidos.filter((pedido) => !idsJaSalvos.has(String(pedido.id)));
-    const itens: Array<{ aplicativoId: string; pedidoOlistId: string; sku: string; quantidade: number }> = [];
+    const { pedidos: pedidosNovos, pedidosEncontrados } = await buscarPedidosOlistPorDataLimite(
+      autenticado.aplicativoId,
+      null,
+      null,
+      situacoes,
+      idsJaSalvos,
+    );
+    const itens: Array<{ aplicativoId: string; pedidoOlistId: string; sku: string; tituloProduto: string | null; quantidade: number }> = [];
 
     for (const pedido of pedidosNovos) {
-      const totaisPedido = new Map<string, number>();
+      const totaisPedido = new Map<string, { tituloProduto: string | null; quantidade: number }>();
       for (const item of pedido.itens ?? []) {
         const sku = String(item.produto.sku ?? "").trim();
+        const tituloProduto = String(item.produto.descricao ?? "").trim() || null;
         const quantidade = Number(item.quantidade);
         if (sku && Number.isInteger(quantidade) && quantidade > 0) {
-          totaisPedido.set(sku, (totaisPedido.get(sku) ?? 0) + quantidade);
+          const atual = totaisPedido.get(sku);
+          totaisPedido.set(sku, {
+            tituloProduto: atual?.tituloProduto || tituloProduto,
+            quantidade: (atual?.quantidade ?? 0) + quantidade,
+          });
         }
       }
-      for (const [sku, quantidade] of totaisPedido) {
-        itens.push({ aplicativoId: autenticado.aplicativoId, pedidoOlistId: String(pedido.id), sku, quantidade });
+      for (const [sku, dados] of totaisPedido) {
+        itens.push({
+          aplicativoId: autenticado.aplicativoId,
+          pedidoOlistId: String(pedido.id),
+          sku,
+          tituloProduto: dados.tituloProduto,
+          quantidade: dados.quantidade,
+        });
       }
     }
 
     if (itens.length === 0) {
-      return NextResponse.json({ busca: null, pedidosEncontrados: pedidos.length, pedidosNovos: 0 });
+      return NextResponse.json({ busca: null, pedidosEncontrados, pedidosNovos: 0 });
     }
 
     const quantidadeSkus = new Set(itens.map((item) => item.sku)).size;
@@ -145,7 +210,7 @@ export async function POST(request: NextRequest) {
       return criada;
     });
 
-    return NextResponse.json({ busca, pedidosEncontrados: pedidos.length, pedidosNovos: pedidosNovos.length });
+    return NextResponse.json({ busca, pedidosEncontrados, pedidosNovos: pedidosNovos.length });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao salvar a busca." },

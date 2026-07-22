@@ -528,6 +528,7 @@ model ItemBuscaSku {
   aplicativoId  String     @map("aplicativo_id") @db.Uuid
   pedidoOlistId String     @map("pedido_olist_id")
   sku           String
+  tituloProduto String?    @map("titulo_produto")
   quantidade    Int
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   busca         BuscaSku   @relation(fields: [buscaId], references: [id], onDelete: Cascade)

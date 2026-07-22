@@ -21,6 +21,7 @@ type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 type OlistOrderItem = {
   produto: {
     sku: string;
+    descricao?: string | null;
   };
   quantidade: number;
 };
@@ -232,6 +233,49 @@ function normalizarBaseUrl(url: string) {
 
 function aguardar(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function esperaRetryAfter(response: AxiosResponse<unknown>) {
+  const valor = response.headers["retry-after"];
+  if (valor === undefined || valor === null) return null;
+
+  const segundos = Number(valor);
+  if (Number.isFinite(segundos) && segundos >= 0) return segundos * 1000;
+
+  const data = new Date(String(valor)).getTime();
+  return Number.isNaN(data) ? null : Math.max(0, data - Date.now());
+}
+
+async function getOlistComRetry(
+  url: string,
+  token: string,
+  modulo: string,
+  maxTentativas = 12,
+) {
+  for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      validateStatus: () => true,
+    });
+
+    logIntegracaoOlist({ endpoint: url, status: response.status, modulo });
+
+    if (response.status !== 429) return response;
+    if (tentativa === maxTentativas) return response;
+
+    const esperaInformada = esperaRetryAfter(response);
+    const esperaProgressiva = Math.min(60_000, 2_000 * 2 ** (tentativa - 1));
+    const esperaMs = Math.max(esperaInformada ?? 0, esperaProgressiva) + Math.floor(Math.random() * 500);
+
+    console.warn("[olist-api] Limite de requisições atingido; nova tentativa agendada.", {
+      modulo,
+      tentativa,
+      esperaMs,
+    });
+    await aguardar(esperaMs);
+  }
+
+  throw new Error("Não foi possível concluir a consulta à Olist.");
 }
 
 function arredondarParaPar(valor: number) {
@@ -814,18 +858,7 @@ async function listarPedidosOlist(
 
     url.searchParams.set("orderBy", "asc");
 
-    const response = await axios.get(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      validateStatus: () => true,
-    });
-
-    logIntegracaoOlist({
-      endpoint: url.toString(),
-      status: response.status,
-      modulo: "pedidos",
-    });
+    const response = await getOlistComRetry(url.toString(), token, "pedidos");
 
     if (response.status < 200 || response.status >= 300) {
       validarRespostaAxiosJsonOrThrow(response);
@@ -867,18 +900,7 @@ async function buscarDetalhePedidoOlist(
     normalizarBaseUrl(olistConfig.apiBaseUrl),
   );
 
-  const response = await axios.get(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    validateStatus: () => true,
-  });
-
-  logIntegracaoOlist({
-    endpoint: url.toString(),
-    status: response.status,
-    modulo: "pedido-detalhe",
-  });
+  const response = await getOlistComRetry(url.toString(), token, "pedido-detalhe");
 
   if (response.status < 200 || response.status >= 300) {
     validarRespostaAxiosJsonOrThrow(response);
@@ -1034,6 +1056,7 @@ export async function buscarPedidosOlistPorDataLimite(
   periodoInicio: Date | null,
   periodoFim: Date | null,
   situacoes: string[],
+  pedidosOlistIdsIgnorados: ReadonlySet<string> = new Set(),
 ): Promise<{
   pedidos: OlistOrder[];
   pedidosEncontrados: number;
@@ -1053,21 +1076,24 @@ export async function buscarPedidosOlistPorDataLimite(
 
     pedidos.push(...pedidosPorSituacao);
 
-    await aguardar(500);
+    await aguardar(1_100);
   }
 
   const pedidosUnicos = Array.from(
     new Map(pedidos.map((pedido) => [String(pedido.id), pedido])).values(),
   );
+  const pedidosParaDetalhar = pedidosUnicos.filter(
+    (pedido) => !pedidosOlistIdsIgnorados.has(String(pedido.id)),
+  );
 
   const resultados = [];
 
-  for (const pedido of pedidosUnicos) {
+  for (const pedido of pedidosParaDetalhar) {
     const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedido.id);
 
     resultados.push(detalhe);
 
-    await aguardar(500);
+    await aguardar(1_100);
   }
 
   return {
