@@ -8,15 +8,18 @@ const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2
 
 export const maxDuration = 300;
 
-async function autenticar(request: Request) {
+async function autenticar(request: Request, permissao: "read" | "write") {
   const autenticado = await getUsuarioAutenticado(request);
   const usuario = await prisma.usuario.findUnique({
     where: { id: autenticado.id },
-    select: { podeSolicitarProducao: true, podeVisualizarProducao: true },
+    select: { podeEscreverAnotarSku: true, podeVisualizarAnotarSku: true },
   });
 
-  if (!usuario || (!usuario.podeSolicitarProducao && !usuario.podeVisualizarProducao)) {
-    throw new Error("Sem permissão para consultar os pedidos.");
+  const permitido = permissao === "write"
+    ? usuario?.podeEscreverAnotarSku
+    : usuario?.podeVisualizarAnotarSku;
+  if (!permitido) {
+    throw new Error(permissao === "write" ? "Sem permissão para buscar pedidos." : "Sem permissão para visualizar o histórico.");
   }
 
   return autenticado;
@@ -68,7 +71,7 @@ function agregarPorSku(itens: Array<{ sku: string; tituloProduto: string | null;
 
 export async function GET(request: NextRequest) {
   try {
-    const autenticado = await autenticar(request);
+    const autenticado = await autenticar(request, "read");
     const buscaId = request.nextUrl.searchParams.get("id");
     const formato = request.nextUrl.searchParams.get("formato");
 
@@ -152,7 +155,7 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const autenticado = await autenticar(request);
+    const autenticado = await autenticar(request, "write");
     const buscaId = request.nextUrl.searchParams.get("id");
     if (!buscaId) {
       return NextResponse.json({ error: "Informe a busca que será excluída." }, { status: 400 });
@@ -176,7 +179,7 @@ export async function DELETE(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const autenticado = await autenticar(request);
+    const autenticado = await autenticar(request, "write");
     const body = await request.json();
     const situacoes: string[] = Array.isArray(body?.situacoes)
       ? [...new Set<string>(body.situacoes.map((item: unknown) => String(item)).filter((item: string) => SITUACOES_PERMITIDAS.has(item)))]

@@ -32,7 +32,9 @@ type DetalheBusca = Busca & {
 };
 
 export default function AnotarSkuPage() {
-  const { session } = useAuth();
+  const { session, usuario } = useAuth();
+  const podeEscrever = Boolean(usuario?.podeEscreverAnotarSku);
+  const podeVisualizar = Boolean(usuario?.podeVisualizarAnotarSku);
   const [selecionadas, setSelecionadas] = useState(["0"]);
   const [buscas, setBuscas] = useState<Busca[]>([]);
   const [detalhe, setDetalhe] = useState<DetalheBusca | null>(null);
@@ -45,7 +47,10 @@ export default function AnotarSkuPage() {
   const headers = useCallback(() => ({ Authorization: `Bearer ${session?.access_token ?? ""}` }), [session?.access_token]);
 
   const carregarBuscas = useCallback(async () => {
-    if (!session?.access_token) return;
+    if (!session?.access_token || !podeVisualizar) {
+      setCarregando(false);
+      return;
+    }
     setCarregando(true);
     try {
       const response = await fetch("/api/olist/anotar-sku", { headers: headers(), cache: "no-store" });
@@ -57,7 +62,7 @@ export default function AnotarSkuPage() {
     } finally {
       setCarregando(false);
     }
-  }, [headers, session?.access_token]);
+  }, [headers, podeVisualizar, session?.access_token]);
 
   useEffect(() => { void carregarBuscas(); }, [carregarBuscas]);
 
@@ -159,14 +164,14 @@ export default function AnotarSkuPage() {
   }
 
   return (
-    <AccessGuard permissions={["podeSolicitarProducao", "podeVisualizarProducao"]}>
+    <AccessGuard permissions={["podeEscreverAnotarSku", "podeVisualizarAnotarSku"]}>
       <div className="space-y-8">
         <PageHeader title="Anotar SKU" description="Consulte pedidos novos da Olist e mantenha um histórico por SKU." />
 
         {erro && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
         {mensagem && <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{mensagem}</p>}
 
-        <section className="rounded-lg border border-slate-200 bg-white p-6">
+        {podeEscrever && <section className="rounded-lg border border-slate-200 bg-white p-6">
           <div className="flex max-w-md flex-col gap-3">
             <div className="text-sm text-slate-700">
               <span className="font-medium">Situações consultadas</span>
@@ -184,9 +189,9 @@ export default function AnotarSkuPage() {
             </button>
             <p className="text-xs text-slate-500">Mantenha esta aba aberta até a busca terminar.</p>
           </div>
-        </section>
+        </section>}
 
-        <section className="rounded-lg border border-slate-200 bg-white p-6">
+        {podeVisualizar && <section className="rounded-lg border border-slate-200 bg-white p-6">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Histórico de buscas</h2>
           {carregando ? <p className="text-sm text-slate-500">Carregando...</p> : buscas.length === 0 ? (
             <p className="text-sm text-slate-500">Nenhuma busca salva.</p>
@@ -205,14 +210,14 @@ export default function AnotarSkuPage() {
                       <button type="button" onClick={() => void baixarArquivo(busca.id, "csv")} className="mr-2 rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white">CSV</button>
                       <button type="button" onClick={() => void baixarArquivo(busca.id, "xlsx")} className="mr-2 rounded-md bg-emerald-700 px-3 py-1.5 font-medium text-white">Excel</button>
                       <button type="button" onClick={() => void baixarArquivo(busca.id, "pdf")} className="mr-2 rounded-md bg-red-700 px-3 py-1.5 font-medium text-white">PDF</button>
-                      <button type="button" onClick={() => void excluirBusca(busca)} disabled={excluindoId === busca.id} className="rounded-md border border-red-200 px-3 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">{excluindoId === busca.id ? "Excluindo..." : "Excluir"}</button>
+                      {podeEscrever && <button type="button" onClick={() => void excluirBusca(busca)} disabled={excluindoId === busca.id} className="rounded-md border border-red-200 px-3 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">{excluindoId === busca.id ? "Excluindo..." : "Excluir"}</button>}
                     </td>
                   </tr>
                 ))}</tbody>
               </table>
             </div>
           )}
-        </section>
+        </section>}
       </div>
 
       {detalhe && (
