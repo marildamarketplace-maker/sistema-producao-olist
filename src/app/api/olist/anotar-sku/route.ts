@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buscarPedidosOlistPorDataLimite } from "@/lib/olist";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { criarExcelBuscaSku, criarPdfBuscaSku } from "@/lib/exportar-busca-sku";
 
 const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2", "9"]);
 
@@ -80,9 +81,10 @@ export async function GET(request: NextRequest) {
     if (!busca) return NextResponse.json({ error: "Busca não encontrada." }, { status: 404 });
 
     const skus = agregarPorSku(busca.itens);
+    const dataBusca = formatarDataBuscaCsv(busca.createdAt);
     if (formato === "csv") {
       const csv = [
-        `Data da busca,${escaparCsv(formatarDataBuscaCsv(busca.createdAt))}`,
+        `Data da busca,${escaparCsv(dataBusca)}`,
         "",
         "SKU,TITULO_PRODUTO,QTD",
         ...skus.map((item) =>
@@ -93,6 +95,24 @@ export async function GET(request: NextRequest) {
         headers: {
           "Content-Type": "text/csv;charset=utf-8",
           "Content-Disposition": `attachment; filename="anotar-sku-${busca.id}.csv"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+    if (formato === "xlsx") {
+      return new NextResponse(Buffer.from(criarExcelBuscaSku(dataBusca, skus)), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="anotar-sku-${busca.id}.xlsx"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+    if (formato === "pdf") {
+      return new NextResponse(Buffer.from(criarPdfBuscaSku(dataBusca, skus)), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="anotar-sku-${busca.id}.pdf"`,
           "Cache-Control": "no-store",
         },
       });

@@ -113,24 +113,24 @@ export default function AnotarSkuPage() {
     }
   }
 
-  async function baixarCsv(buscaId: string) {
+  async function baixarArquivo(buscaId: string, formato: "csv" | "xlsx" | "pdf") {
     setErro(null);
     try {
-      const response = await fetch(`/api/olist/anotar-sku?id=${encodeURIComponent(buscaId)}&formato=csv`, { headers: headers() });
+      const response = await fetch(`/api/olist/anotar-sku?id=${encodeURIComponent(buscaId)}&formato=${formato}`, { headers: headers() });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error ?? "Não foi possível baixar o CSV.");
+        throw new Error(payload?.error ?? "Não foi possível baixar o arquivo.");
       }
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = `anotar-sku-${buscaId}.csv`;
+      link.download = `anotar-sku-${buscaId}.${formato}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      setErro(error instanceof Error ? error.message : "Não foi possível baixar o CSV.");
+      setErro(error instanceof Error ? error.message : "Não foi possível baixar o arquivo.");
     }
   }
 
@@ -202,7 +202,9 @@ export default function AnotarSkuPage() {
                     <td className="px-3 py-3">{busca.quantidadeSkus}</td>
                     <td className="whitespace-nowrap px-3 py-3 text-right">
                       <button type="button" onClick={() => void visualizar(busca.id)} className="mr-2 rounded-md border border-slate-300 px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50">Visualizar</button>
-                      <button type="button" onClick={() => void baixarCsv(busca.id)} className="mr-2 rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white">Baixar CSV</button>
+                      <button type="button" onClick={() => void baixarArquivo(busca.id, "csv")} className="mr-2 rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white">CSV</button>
+                      <button type="button" onClick={() => void baixarArquivo(busca.id, "xlsx")} className="mr-2 rounded-md bg-emerald-700 px-3 py-1.5 font-medium text-white">Excel</button>
+                      <button type="button" onClick={() => void baixarArquivo(busca.id, "pdf")} className="mr-2 rounded-md bg-red-700 px-3 py-1.5 font-medium text-white">PDF</button>
                       <button type="button" onClick={() => void excluirBusca(busca)} disabled={excluindoId === busca.id} className="rounded-md border border-red-200 px-3 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">{excluindoId === busca.id ? "Excluindo..." : "Excluir"}</button>
                     </td>
                   </tr>
