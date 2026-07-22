@@ -69,6 +69,11 @@ const menuItems: MenuItem[] = [
         permissions: ["podeSolicitarProducao", "podeVisualizarProducao"],
       },
       {
+        label: "Anotar SKU",
+        href: "/anotar-sku",
+        permissions: ["podeSolicitarProducao", "podeVisualizarProducao"],
+      },
+      {
         label: "Confirmar entrada",
         href: "/confirmar-producao",
         permissions: ["podeConfirmarProducao"],

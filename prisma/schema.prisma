@@ -68,6 +68,8 @@ model Aplicativo {
   usuarios                  Usuario[]
   formasPagamentoPlanos     FormaPagamentoOlistPlano[]
   formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
+  buscasSku                 BuscaSku[]
+  itensBuscaSku             ItemBuscaSku[]
 
   @@map("aplicativo")
 }
@@ -504,6 +506,37 @@ model ControleBuscaOlist {
 
   @@index([aplicativoId], map: "idx_controles_busca_olist_aplicativo_id")
   @@map("controles_busca_olist")
+}
+
+model BuscaSku {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId       String        @map("aplicativo_id") @db.Uuid
+  situacoes          String[]      @default([])
+  quantidadePedidos  Int           @default(0) @map("quantidade_pedidos")
+  quantidadeSkus     Int           @default(0) @map("quantidade_skus")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativo         Aplicativo    @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  itens              ItemBuscaSku[]
+
+  @@index([aplicativoId, createdAt], map: "idx_buscas_sku_aplicativo_created_at")
+  @@map("buscas_sku")
+}
+
+model ItemBuscaSku {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buscaId        String     @map("busca_id") @db.Uuid
+  aplicativoId   String     @map("aplicativo_id") @db.Uuid
+  pedidoOlistId  String     @map("pedido_olist_id")
+  sku            String
+  quantidade     Int
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  busca          BuscaSku   @relation(fields: [buscaId], references: [id], onDelete: Cascade)
+  aplicativo     Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+
+  @@unique([aplicativoId, pedidoOlistId, sku], map: "uq_itens_busca_sku_aplicativo_pedido_sku")
+  @@index([buscaId], map: "idx_itens_busca_sku_busca_id")
+  @@index([aplicativoId, pedidoOlistId], map: "idx_itens_busca_sku_aplicativo_pedido")
+  @@map("itens_busca_sku")
 }
 
 model IntegracaoOlistToken {
