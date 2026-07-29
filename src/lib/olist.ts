@@ -1,5 +1,6 @@
 ﻿import axios, { AxiosResponse } from "axios";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
+import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
 
 /* =========================================================
@@ -11,12 +12,30 @@ const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2
 const CONTROLE_BUSCA_BAIXA_ESTOQUE = "baixa_estoque_olist";
 const SITUACOES_BAIXA_ESTOQUE = ["7", "5", "6"];
 const SITUACAO_PRODUTO_ATIVO = "A";
+const MARGEM_RENOVACAO_TOKEN_OLIST_MS = 2 * 60 * 1000;
+
+type OpcoesTokenOlist = {
+  tokenRejeitado?: string;
+  validadeMinimaMs?: number;
+};
 
 /* =========================================================
  * TYPES
  * ======================================================= */
 
 type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
+
+class ErroRenovacaoOAuthOlist extends Error {
+  constructor(
+    message: string,
+    readonly httpStatus: number,
+    readonly codigoOAuth: string | null,
+    readonly requerReconexao: boolean,
+  ) {
+    super(message);
+    this.name = "ErroRenovacaoOAuthOlist";
+  }
+}
 
 type OlistOrderItem = {
   produto: {
@@ -231,6 +250,14 @@ function normalizarBaseUrl(url: string) {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
+function tokenValidoAlemDaMargem(
+  expiresAt: Date,
+  agora: Date,
+  validadeMinimaMs: number,
+) {
+  return expiresAt.getTime() - agora.getTime() > validadeMinimaMs;
+}
+
 function aguardar(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -249,14 +276,19 @@ function esperaRetryAfter(response: AxiosResponse<unknown>) {
 async function getOlistComRetry(
   url: string,
   token: string,
+  aplicativoId: string,
   modulo: string,
   maxTentativas = 12,
 ) {
   for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
-    const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      validateStatus: () => true,
-    });
+    const response = await executarComRenovacaoApos401(
+      aplicativoId,
+      token,
+      (accessToken) => axios.get(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true,
+      }),
+    );
 
     logIntegracaoOlist({ endpoint: url, status: response.status, modulo });
 
@@ -370,10 +402,14 @@ export async function listarContatosOlistApi(aplicativoId: string, filtros: Filt
   if (filtros.celular) url.searchParams.set("celular", filtros.celular);
   if (filtros.orderBy) url.searchParams.set("orderBy", filtros.orderBy);
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "contatos-listagem" });
   validarRespostaAxiosJsonOrThrow(response);
@@ -420,10 +456,14 @@ export async function listarPedidosOlistApi(aplicativoId: string, filtros: Filtr
   };
   Object.entries(opcionais).forEach(([chave, valor]) => { if (valor) url.searchParams.set(chave, valor); });
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos-listagem" });
   validarRespostaAxiosJsonOrThrow(response);
   if (response.status < 200 || response.status >= 300) {
@@ -451,9 +491,13 @@ export async function listarVendedoresOlistApi(aplicativoId: string, filtros: Fi
   if (filtros.nome) url.searchParams.set("nome", filtros.nome);
   if (filtros.codigo) url.searchParams.set("codigo", filtros.codigo);
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` }, validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` }, validateStatus: () => true,
+    }),
+  );
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "vendedores-listagem" });
   validarRespostaAxiosJsonOrThrow(response);
   if (response.status < 200 || response.status >= 300) {
@@ -476,10 +520,14 @@ export async function criarPedidoOlistApi(aplicativoId: string, pedido: Record<s
   const token = await getValidOlistAccessToken(aplicativoId);
   const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
-  const response = await axios.post(url.toString(), pedido, {
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.post(url.toString(), pedido, {
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      validateStatus: () => true,
+    }),
+  );
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedidos-criacao" });
   validarRespostaAxiosJsonOrThrow(response);
   if (response.status < 200 || response.status >= 300) {
@@ -493,10 +541,14 @@ export async function obterPedidoOlistApi(aplicativoId: string, pedidoId: string
   const token = await getValidOlistAccessToken(aplicativoId);
   const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL(`pedidos/${encodeURIComponent(pedidoId)}`, normalizarBaseUrl(olistConfig.apiBaseUrl));
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "pedido-detalhe-exportacao" });
   validarRespostaAxiosJsonOrThrow(response);
@@ -523,10 +575,14 @@ export async function listarProdutosOlistApi(
   if (filtros.gtin) url.searchParams.set("gtin", filtros.gtin);
   if (filtros.situacao) url.searchParams.set("situacao", filtros.situacao);
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({
     endpoint: url.toString(),
@@ -576,10 +632,14 @@ export async function listarFormasPagamentoOlistApi(
   if (filtros.nome) url.searchParams.set("nome", filtros.nome);
   if (filtros.situacao) url.searchParams.set("situacao", String(filtros.situacao));
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({
     endpoint: url.toString(),
@@ -619,10 +679,14 @@ export async function listarFormasRecebimentoOlistApi(
   if (filtros.nome) url.searchParams.set("nome", filtros.nome);
   if (filtros.situacao) url.searchParams.set("situacao", String(filtros.situacao));
 
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "formas-recebimento-listagem" });
   validarRespostaAxiosJsonOrThrow(response);
   if (response.status < 200 || response.status >= 300) {
@@ -682,14 +746,31 @@ async function renovarTokenComRefresh(aplicativoId: string, refreshToken: string
   validarRespostaAxiosJsonOrThrow(response);
 
   if (response.status < 200 || response.status >= 300) {
-    throw new Error("Falha ao renovar token OAuth.");
+    const payload =
+      response.data && typeof response.data === "object"
+        ? response.data as Record<string, unknown>
+        : {};
+    const codigoOAuth =
+      typeof payload.error === "string" ? payload.error.trim() : null;
+    const descricaoOAuth =
+      typeof payload.error_description === "string"
+        ? payload.error_description.trim().slice(0, 300)
+        : null;
+    const detalhes = [
+      `HTTP ${response.status}`,
+      codigoOAuth,
+      descricaoOAuth,
+    ].filter(Boolean).join(" — ");
+
+    throw new ErroRenovacaoOAuthOlist(
+      `Falha ao renovar token OAuth da Olist: ${detalhes}.`,
+      response.status,
+      codigoOAuth,
+      [400, 401, 403].includes(response.status),
+    );
   }
 
-  return response.data as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-  };
+  return validarPayloadTokenOAuthOlist(response.data);
 }
 
 function normalizarSituacoes(situacoes?: string[]) {
@@ -708,15 +789,24 @@ function normalizarSituacoes(situacoes?: string[]) {
   return unicas;
 }
 
-export async function getValidOlistAccessToken(aplicativoId: string) {
+export async function getValidOlistAccessToken(
+  aplicativoId: string,
+  opcoes: OpcoesTokenOlist = {},
+) {
+  const tokenRejeitado = opcoes.tokenRejeitado;
+  const validadeMinimaMs =
+    opcoes.validadeMinimaMs ?? MARGEM_RENOVACAO_TOKEN_OLIST_MS;
   const now = new Date();
 
-  const tokenRow = await prisma.integracaoOlistToken.findFirst({
-    where: { aplicativoId, provider: "olist" },
+  const tokenRow = await prisma.integracaoOlistToken.findUnique({
+    where: {
+      aplicativoId_provider: {
+        aplicativoId,
+        provider: "olist",
+      },
+    },
     select: {
-      id: true,
       accessToken: true,
-      refreshToken: true,
       expiresAt: true,
     },
   });
@@ -724,41 +814,147 @@ export async function getValidOlistAccessToken(aplicativoId: string) {
   if (
     tokenRow?.accessToken &&
     tokenRow?.expiresAt &&
-    tokenRow.expiresAt > now
+    tokenValidoAlemDaMargem(tokenRow.expiresAt, now, validadeMinimaMs) &&
+    tokenRow.accessToken !== tokenRejeitado
   ) {
     return tokenRow.accessToken;
   }
 
-  if (tokenRow?.refreshToken) {
-    const refreshed = await renovarTokenComRefresh(aplicativoId, tokenRow.refreshToken);
+  let refreshTokenRejeitado: string | null = null;
 
-    const expiresAt = refreshed.expires_in
-      ? new Date(Date.now() + refreshed.expires_in * 1000)
-      : null;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // A trava transacional é compartilhada entre todas as instâncias da aplicação.
+      // Assim, somente uma requisição por aplicativo pode renovar o token por vez.
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${"olist-token:" + aplicativoId}, 0)
+        )::text AS lock_result
+      `;
 
-    const tokenData = {
-      aplicativoId,
-      accessToken: refreshed.access_token ?? null,
-      refreshToken: refreshed.refresh_token ?? tokenRow.refreshToken,
-      expiresAt,
-      status: refreshed.access_token ? "conectado" : "erro_autenticacao",
-      updatedAt: new Date(),
-    };
-    if (tokenRow.id) {
-      await prisma.integracaoOlistToken.update({ where: { id: tokenRow.id }, data: tokenData });
-    } else {
-      await prisma.integracaoOlistToken.create({ data: {
-        provider: "olist",
-        ...tokenData,
-      } });
-    }
+      // Outra requisição pode ter renovado o token enquanto aguardávamos a trava.
+      // A releitura evita reutilizar um refresh token que já foi rotacionado.
+      const currentTokenRow = await tx.integracaoOlistToken.findUnique({
+        where: {
+          aplicativoId_provider: {
+            aplicativoId,
+            provider: "olist",
+          },
+        },
+        select: {
+          id: true,
+          accessToken: true,
+          refreshToken: true,
+          expiresAt: true,
+        },
+      });
 
-    if (refreshed.access_token) {
+      const lockedNow = new Date();
+      if (
+        currentTokenRow?.accessToken &&
+        currentTokenRow?.expiresAt &&
+        tokenValidoAlemDaMargem(
+          currentTokenRow.expiresAt,
+          lockedNow,
+          validadeMinimaMs,
+        ) &&
+        currentTokenRow.accessToken !== tokenRejeitado
+      ) {
+        return currentTokenRow.accessToken;
+      }
+
+      if (!currentTokenRow?.refreshToken) {
+        throw new Error("Falha no OAuth Olist/Tiny.");
+      }
+
+      refreshTokenRejeitado = currentTokenRow.refreshToken;
+      const refreshed = await renovarTokenComRefresh(
+        aplicativoId,
+        currentTokenRow.refreshToken,
+      );
+
+      const expiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
+
+      const tokenData = {
+        aplicativoId,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? currentTokenRow.refreshToken,
+        expiresAt,
+        status: "conectado",
+        updatedAt: new Date(),
+      };
+
+      await tx.integracaoOlistToken.update({
+        where: { id: currentTokenRow.id },
+        data: tokenData,
+      });
+
       return refreshed.access_token;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
+  } catch (error) {
+    if (error instanceof ErroRenovacaoOAuthOlist) {
+      if (error.requerReconexao && refreshTokenRejeitado) {
+        // A condição pelo refresh token impede que uma reconexão ou renovação
+        // concluída nesse intervalo tenha o status sobrescrito pelo erro antigo.
+        try {
+          await prisma.integracaoOlistToken.updateMany({
+            where: {
+              aplicativoId,
+              provider: "olist",
+              refreshToken: refreshTokenRejeitado,
+            },
+            data: {
+              status: "erro_autenticacao",
+              updatedAt: new Date(),
+            },
+          });
+        } catch (statusError) {
+          console.error("[olist-api] Falha ao registrar erro de autenticação.", {
+            aplicativoId,
+            erro:
+              statusError instanceof Error
+                ? statusError.message
+                : "Erro desconhecido",
+          });
+        }
+      }
+
+      console.error("[olist-api] Renovação OAuth rejeitada.", {
+        aplicativoId,
+        httpStatus: error.httpStatus,
+        codigoOAuth: error.codigoOAuth,
+        requerReconexao: error.requerReconexao,
+        mensagem: error.message,
+      });
     }
+
+    throw error;
+  }
+}
+
+async function executarComRenovacaoApos401<T>(
+  aplicativoId: string,
+  tokenInicial: string,
+  executar: (accessToken: string) => Promise<AxiosResponse<T>>,
+) {
+  const primeiraResposta = await executar(tokenInicial);
+  if (primeiraResposta.status !== 401) {
+    return primeiraResposta;
   }
 
-  throw new Error("Falha no OAuth Olist/Tiny.");
+  console.warn("[olist-api] Access token rejeitado; renovando e repetindo a requisição.", {
+    aplicativoId,
+  });
+
+  const tokenRenovado = await getValidOlistAccessToken(
+    aplicativoId,
+    { tokenRejeitado: tokenInicial },
+  );
+
+  return executar(tokenRenovado);
 }
 
 type CategoriaOlistImportada = {
@@ -773,10 +969,14 @@ export async function listarArvoreCategoriasOlist(aplicativoId: string): Promise
   const token = await getValidOlistAccessToken(aplicativoId);
   const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const url = new URL("categorias/todas", normalizarBaseUrl(olistConfig.apiBaseUrl));
-  const response = await axios.get(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({ endpoint: url.toString(), status: response.status, modulo: "categorias" });
   validarRespostaAxiosJsonOrThrow(response);
@@ -858,7 +1058,7 @@ async function listarPedidosOlist(
 
     url.searchParams.set("orderBy", "asc");
 
-    const response = await getOlistComRetry(url.toString(), token, "pedidos");
+    const response = await getOlistComRetry(url.toString(), token, aplicativoId, "pedidos");
 
     if (response.status < 200 || response.status >= 300) {
       validarRespostaAxiosJsonOrThrow(response);
@@ -900,7 +1100,7 @@ async function buscarDetalhePedidoOlist(
     normalizarBaseUrl(olistConfig.apiBaseUrl),
   );
 
-  const response = await getOlistComRetry(url.toString(), token, "pedido-detalhe");
+  const response = await getOlistComRetry(url.toString(), token, aplicativoId, "pedido-detalhe");
 
   if (response.status < 200 || response.status >= 300) {
     validarRespostaAxiosJsonOrThrow(response);
@@ -927,12 +1127,16 @@ async function listarProdutosOlist(token: string, aplicativoId: string, offset: 
   url.searchParams.set("limit", String(limite));
   url.searchParams.set("offset", String(offset));
 
-  const response = await axios.get(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    validateStatus: () => true,
-  });
+  const response = await executarComRenovacaoApos401(
+    aplicativoId,
+    token,
+    (accessToken) => axios.get(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      validateStatus: () => true,
+    }),
+  );
 
   logIntegracaoOlist({
     endpoint: url.toString(),

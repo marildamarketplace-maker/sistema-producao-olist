@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import { getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
+import {
+  ErroPayloadTokenOAuthOlist,
+  validarPayloadTokenOAuthOlist,
+} from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
 
 const usedAuthorizationCodes = new Set<string>();
@@ -92,17 +96,33 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Falha no callback OAuth (${response.status}).` }, { status: 500 });
   }
 
-  const tokenData = (typeof response.data === "string" ? JSON.parse(rawText) : response.data) as { access_token?: string; refresh_token?: string; expires_in?: number };
+  let tokenData;
+  try {
+    tokenData = validarPayloadTokenOAuthOlist(
+      typeof response.data === "string" ? JSON.parse(rawText) : response.data,
+      { exigirRefreshToken: grantType === "authorization_code" },
+    );
+  } catch (error) {
+    const mensagem =
+      error instanceof ErroPayloadTokenOAuthOlist
+        ? error.message
+        : "Resposta OAuth inválida da Olist.";
+    console.error("[olist-api] Payload OAuth inválido.", {
+      grant_type: grantType,
+      erro: mensagem,
+    });
+    return NextResponse.json({ error: mensagem }, { status: 502 });
+  }
   if (grantType === "authorization_code" && code) usedAuthorizationCodes.add(code);
 
-  const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
+  const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
   const existente = await prisma.integracaoOlistToken.findFirst({
     where: { aplicativoId, provider: "olist" }, select: { id: true },
   });
   const dadosToken = {
     aplicativoId,
-    accessToken: tokenData.access_token ?? null,
-    refreshToken: tokenData.refresh_token ?? null,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token ?? refreshToken,
     expiresAt,
     status: "conectado",
     lastLoginAt: new Date(),
@@ -114,7 +134,7 @@ export async function GET(req: NextRequest) {
     await prisma.integracaoOlistToken.create({ data: { provider: "olist", ...dadosToken } });
   }
 
-  const redirect = NextResponse.redirect(new URL("/configuracoes/integracoes", req.nextUrl.origin));
+  const redirect = NextResponse.redirect(new URL("/configuracoes", req.nextUrl.origin));
   redirect.cookies.set("olist_oauth_state", "", { path: "/", maxAge: 0 });
   redirect.cookies.set("olist_aplicativo_id", "", { path: "/api/olist", maxAge: 0 });
   return redirect;
