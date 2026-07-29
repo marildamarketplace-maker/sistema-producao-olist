@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const JANELA_RENOVACAO_MS = 70 * 60 * 1000;
+const JANELA_RENOVACAO_MS = 25 * 60 * 60 * 1000;
 const CONCORRENCIA_MAXIMA = 3;
 
 function verificarAutorizacao(request: NextRequest) {

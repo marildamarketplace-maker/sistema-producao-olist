@@ -133,7 +133,7 @@ O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/cal
 ### OAuth de autenticação (v3)
 - `GET /api/olist/login`: inicia OAuth2 (authorization code).
 - `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
-- `GET /api/cron/renovar-tokens-olist`: a cada hora, renova integrações conectadas cujo token expire nos próximos 70 minutos. A rota exige `Authorization: Bearer <CRON_SECRET>`.
+- `GET /api/cron/renovar-tokens-olist`: diariamente às 03:05 UTC, renova integrações conectadas cujo token expire nas próximas 25 horas. A rota exige `Authorization: Bearer <CRON_SECRET>`.
 - Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
 
 ### Cobrança diária de confirmação de produção via WhatsApp
