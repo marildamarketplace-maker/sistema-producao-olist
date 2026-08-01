@@ -78,9 +78,68 @@ export function criarExcelBuscaSku(dataBusca: string, itens: ItemExportacaoSku[]
   ]);
 }
 
-function textoPdf(valor: string, limite = 80) {
-  const resumido = valor.length > limite ? `${valor.slice(0, limite - 3)}...` : valor;
-  return resumido.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)").replaceAll(/[^\x20-\xFF]/g, "?");
+function normalizarTextoPdf(valor: string) {
+  return valor.replaceAll(/[^\x20-\xFF]/g, "?");
+}
+
+function textoPdf(valor: string, limite?: number) {
+  const normalizado = normalizarTextoPdf(valor);
+  const resumido = limite && normalizado.length > limite
+    ? `${normalizado.slice(0, limite - 3)}...`
+    : normalizado;
+  return resumido.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+}
+
+function larguraAproximadaPdf(valor: string, tamanhoFonte: number) {
+  return [...valor].reduce((largura, caractere) => {
+    if (/[MW@%&]/.test(caractere)) return largura + tamanhoFonte * 0.85;
+    if (/[ilI.,'`:;!| ]/.test(caractere)) return largura + tamanhoFonte * 0.3;
+    if (/[A-Z0-9]/.test(caractere)) return largura + tamanhoFonte * 0.62;
+    return largura + tamanhoFonte * 0.52;
+  }, 0);
+}
+
+function quebrarTextoPdf(valor: string, larguraMaxima: number, tamanhoFonte: number) {
+  const palavras = normalizarTextoPdf(valor).trim().split(/\s+/).filter(Boolean);
+  if (palavras.length === 0) return [""];
+
+  const linhas: string[] = [];
+  let linhaAtual = "";
+
+  function adicionarPalavraLonga(palavra: string) {
+    let trecho = "";
+    for (const caractere of palavra) {
+      if (trecho && larguraAproximadaPdf(trecho + caractere, tamanhoFonte) > larguraMaxima) {
+        linhas.push(trecho);
+        trecho = caractere;
+      } else {
+        trecho += caractere;
+      }
+    }
+    linhaAtual = trecho;
+  }
+
+  for (const palavra of palavras) {
+    const candidata = linhaAtual ? `${linhaAtual} ${palavra}` : palavra;
+    if (larguraAproximadaPdf(candidata, tamanhoFonte) <= larguraMaxima) {
+      linhaAtual = candidata;
+      continue;
+    }
+
+    if (linhaAtual) {
+      linhas.push(linhaAtual);
+      linhaAtual = "";
+    }
+
+    if (larguraAproximadaPdf(palavra, tamanhoFonte) > larguraMaxima) {
+      adicionarPalavraLonga(palavra);
+    } else {
+      linhaAtual = palavra;
+    }
+  }
+
+  if (linhaAtual) linhas.push(linhaAtual);
+  return linhas;
 }
 
 function bufferLatin1(valor: string) {
@@ -88,8 +147,26 @@ function bufferLatin1(valor: string) {
 }
 
 export function criarPdfBuscaSku(dataBusca: string, itens: ItemExportacaoSku[]) {
-  const porPagina = 42;
-  const paginas = Array.from({ length: Math.max(1, Math.ceil(itens.length / porPagina)) }, (_, pagina) => itens.slice(pagina * porPagina, (pagina + 1) * porPagina));
+  const linhas = itens.map((item) => {
+    // Reserva uma folga antes da coluna de quantidade, inclusive para sequências
+    // longas sem espaços, cujos glifos podem ser mais largos que a média.
+    const titulo = quebrarTextoPdf(item.tituloProduto ?? "", 270, 8);
+    return {
+      item,
+      titulo,
+      altura: Math.max(20, titulo.length * 10 + 10),
+    };
+  });
+  const paginas: typeof linhas[] = [[]];
+  let espacoRestante = 733 - 45;
+  for (const linha of linhas) {
+    if (paginas.at(-1)!.length > 0 && linha.altura > espacoRestante) {
+      paginas.push([]);
+      espacoRestante = 733 - 45;
+    }
+    paginas.at(-1)!.push(linha);
+    espacoRestante -= linha.altura;
+  }
   const objetos = new Map<number, Uint8Array>();
   const idsPaginas = paginas.map((_, indice) => 5 + indice * 2);
 
@@ -98,7 +175,7 @@ export function criarPdfBuscaSku(dataBusca: string, itens: ItemExportacaoSku[]) 
   objetos.set(3, bufferLatin1("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"));
   objetos.set(4, bufferLatin1("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"));
 
-  paginas.forEach((itensPagina, pagina) => {
+  paginas.forEach((linhasPagina, pagina) => {
     const comandos = [
       "BT /F2 16 Tf 40 805 Td (Anotar SKU) Tj ET",
       `BT /F1 10 Tf 40 786 Td (Data da busca: ${textoPdf(dataBusca)}) Tj ET`,
@@ -108,12 +185,15 @@ export function criarPdfBuscaSku(dataBusca: string, itens: ItemExportacaoSku[]) 
       "BT /F2 9 Tf 520 750 Td (QTD) Tj ET",
     ];
     let y = 733;
-    for (const item of itensPagina) {
+    for (const linha of linhasPagina) {
+      const { item } = linha;
       comandos.push(`BT /F1 8 Tf 40 ${y} Td (${textoPdf(item.sku, 32)}) Tj ET`);
-      comandos.push(`BT /F1 8 Tf 210 ${y} Td (${textoPdf(item.tituloProduto ?? "", 58)}) Tj ET`);
+      linha.titulo.forEach((trecho, indice) => {
+        comandos.push(`BT /F1 8 Tf 210 ${y - indice * 10} Td (${textoPdf(trecho)}) Tj ET`);
+      });
       comandos.push(`BT /F1 8 Tf 520 ${y} Td (${textoPdf(String(item.quantidade), 8)}) Tj ET`);
-      comandos.push(`0.92 G 40 ${y - 5} m 555 ${y - 5} l S 0 G`);
-      y -= 16;
+      comandos.push(`0.92 G 40 ${y - linha.altura + 5} m 555 ${y - linha.altura + 5} l S 0 G`);
+      y -= linha.altura;
     }
     comandos.push(`BT /F1 8 Tf 485 25 Td (Página ${pagina + 1} de ${paginas.length}) Tj ET`);
 
