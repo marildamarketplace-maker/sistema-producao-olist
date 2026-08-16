@@ -69,6 +69,27 @@ function agregarPorSku(itens: Array<{ sku: string; tituloProduto: string | null;
     });
 }
 
+async function buscarTitulosProdutosPorSku(skus: string[]) {
+  const unicos = [...new Set(skus)];
+  if (unicos.length === 0) return new Map<string, string>();
+
+  const [produtosFinais, tiposProduto] = await Promise.all([
+    prisma.produtoOlist.findMany({
+      where: { skuFinal: { in: unicos } },
+      select: { skuFinal: true, tituloFinal: true },
+    }),
+    prisma.tipoProduto.findMany({
+      where: { sku: { in: unicos } },
+      select: { sku: true, titulo: true },
+    }),
+  ]);
+
+  return new Map([
+    ...tiposProduto.map((produto) => [produto.sku, produto.titulo] as const),
+    ...produtosFinais.map((produto) => [produto.skuFinal, produto.tituloFinal] as const),
+  ]);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const autenticado = await autenticar(request, "read");
@@ -96,7 +117,14 @@ export async function GET(request: NextRequest) {
     });
     if (!busca) return NextResponse.json({ error: "Busca não encontrada." }, { status: 404 });
 
-    const skus = agregarPorSku(busca.itens);
+    const skusAgregados = agregarPorSku(busca.itens);
+    const titulosPorSku = await buscarTitulosProdutosPorSku(
+      skusAgregados.map((item) => item.sku),
+    );
+    const skus = skusAgregados.map((item) => ({
+      ...item,
+      tituloProduto: titulosPorSku.get(item.sku) ?? null,
+    }));
     const dataBusca = formatarDataBuscaCsv(busca.createdAt);
     if (formato === "csv") {
       const csv = [
@@ -207,12 +235,11 @@ export async function POST(request: NextRequest) {
       const totaisPedido = new Map<string, { tituloProduto: string | null; quantidade: number }>();
       for (const item of pedido.itens ?? []) {
         const sku = String(item.produto.sku ?? "").trim();
-        const tituloProduto = String(item.produto.descricao ?? "").trim() || null;
         const quantidade = Number(item.quantidade);
         if (sku && Number.isInteger(quantidade) && quantidade > 0) {
           const atual = totaisPedido.get(sku);
           totaisPedido.set(sku, {
-            tituloProduto: atual?.tituloProduto || tituloProduto,
+            tituloProduto: atual?.tituloProduto ?? null,
             quantidade: (atual?.quantidade ?? 0) + quantidade,
           });
         }
@@ -230,6 +257,13 @@ export async function POST(request: NextRequest) {
 
     if (itens.length === 0) {
       return NextResponse.json({ busca: null, pedidosEncontrados, pedidosNovos: 0 });
+    }
+
+    const titulosPorSku = await buscarTitulosProdutosPorSku(
+      itens.map((item) => item.sku),
+    );
+    for (const item of itens) {
+      item.tituloProduto = titulosPorSku.get(item.sku) ?? null;
     }
 
     const quantidadeSkus = new Set(itens.map((item) => item.sku)).size;

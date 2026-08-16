@@ -53,6 +53,29 @@ export async function PATCH(request: Request) {
   try {
     const usuario = await usuarioComAcesso(request);
     const body = await request.json() as Record<string, unknown>;
+    const ids = Array.isArray(body.ids)
+      ? [...new Set(body.ids.map((valor) => String(valor).trim()).filter(Boolean))]
+      : [];
+    if (ids.length > 0) {
+      if (ids.length > 500) throw new Error("Selecione no máximo 500 ocorrências por vez.");
+      if (body.status !== "CONCLUIDA") throw new Error("A ação em lote disponível é concluir ocorrências.");
+
+      const resultado = await prisma.ocorrenciaTarefaMidia.updateMany({
+        where: {
+          id: { in: ids },
+          aplicativoId: usuario.aplicativoId,
+          status: { not: "CONCLUIDA" },
+        },
+        data: {
+          status: "CONCLUIDA",
+          dataConclusao: new Date(),
+          usuarioConclusaoId: usuario.id,
+        },
+      });
+
+      return NextResponse.json({ atualizadas: resultado.count });
+    }
+
     const id = String(body.id ?? "");
     const existente = await prisma.ocorrenciaTarefaMidia.findFirst({ where: { id, aplicativoId: usuario.aplicativoId } });
     if (!existente) throw new Error("Ocorrência não encontrada.");
