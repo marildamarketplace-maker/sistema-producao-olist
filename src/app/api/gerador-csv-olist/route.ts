@@ -1448,7 +1448,8 @@ export async function POST(request: Request) {
         ${data.pesoBruto},
         ${data.larguraEmbalagem},
         ${data.alturaEmbalagem},
-        ${data.comprimentoEmbalagem}
+        ${data.comprimentoEmbalagem},
+        NOW()
       )`);
 
       await prisma.$executeRaw(Prisma.sql`
@@ -1470,7 +1471,8 @@ export async function POST(request: Request) {
           peso_bruto,
           largura_embalagem,
           altura_embalagem,
-          comprimento_embalagem
+          comprimento_embalagem,
+          updated_at
         )
         VALUES ${Prisma.join(valoresSql)}
         ON CONFLICT (sku_final) DO UPDATE SET

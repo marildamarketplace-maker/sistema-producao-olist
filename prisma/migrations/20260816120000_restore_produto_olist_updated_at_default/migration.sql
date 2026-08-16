@@ -1,0 +1,2 @@
+ALTER TABLE "produto_olist"
+  ALTER COLUMN "updated_at" SET DEFAULT CURRENT_TIMESTAMP;
