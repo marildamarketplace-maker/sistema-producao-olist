@@ -39,6 +39,11 @@ const menuItems: MenuItem[] = [
       },
       { label: "Gerador CSV Olist", href: "/gerador-csv-olist", permissions: ["podeEditarEstoque"] },
       {
+        label: "Calculadora de Preços",
+        href: "/produtos/calculadora-precos",
+        permissions: ["podeVisualizarEstoque", "podeEditarEstoque"],
+      },
+      {
         label: "Tipos de Produto",
         href: "/produtos/tipos",
         permissions: ["podeVisualizarTiposProduto", "podeEditarTiposProduto"],
