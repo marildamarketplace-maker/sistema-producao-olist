@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DEFAULT_PERCENTAGES } from "@/lib/marketplaceFees";
-import { calculateMarketplacePrices, MarketplacePricing } from "@/lib/pricingCalculator";
+import { MarketplacePricing, PricingCalculatorUtils } from "@/lib/pricingCalculator";
 
 type FormState = {
   pricePerMeter: string;
@@ -84,7 +84,7 @@ export function PricingCalculator() {
     if (hasInvalidValue || values.pricePerMeter <= 0 || values.metersUsed <= 0 || totalPercentage >= 80) return null;
 
     try {
-      return calculateMarketplacePrices(values);
+      return PricingCalculatorUtils.calculateMarketplacePrices(values);
     } catch {
       return null;
     }

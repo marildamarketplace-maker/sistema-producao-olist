@@ -1231,6 +1231,90 @@ export async function POST(request: Request) {
       return NextResponse.json({ variante: normalizeVariante(variante) });
     }
 
+    if (body.action === "importar-variantes") {
+      if (!Array.isArray(payload.itens) || payload.itens.length === 0) {
+        throw new Error("Informe ao menos uma variante para importar.");
+      }
+      if (payload.itens.length > 5000) {
+        throw new Error("O arquivo pode conter no maximo 5.000 variantes por importacao.");
+      }
+
+      const itens = payload.itens.map((valor, index) => {
+        if (!valor || typeof valor !== "object") {
+          throw new Error(`Linha ${index + 1}: registro invalido.`);
+        }
+        const item = valor as Record<string, unknown>;
+        return {
+          linha: index + 1,
+          codigo: requiredString(item.codigo, `codigo da linha ${index + 1}`).toUpperCase(),
+          estampaCodigo: requiredString(item.estampaCodigo, `estampa da linha ${index + 1}`).toUpperCase(),
+          tamanhoRef: requiredString(item.tamanhoRef, `tamanho da linha ${index + 1}`).toUpperCase(),
+          descricao: optionalString(item.descricao),
+          palavrasChave: optionalString(item.palavrasChave),
+        };
+      });
+
+      const duplicadas = new Map<string, number>();
+      for (const item of itens) {
+        const chave = `${item.estampaCodigo}:${item.tamanhoRef}:${item.codigo}`;
+        const primeiraLinha = duplicadas.get(chave);
+        if (primeiraLinha) {
+          throw new Error(`Linha ${item.linha}: variante ${item.codigo} duplicada para a estampa ${item.estampaCodigo} (primeira ocorrencia na linha ${primeiraLinha}).`);
+        }
+        duplicadas.set(chave, item.linha);
+      }
+
+      const codigosEstampa = [...new Set(itens.map((item) => item.estampaCodigo))];
+      const referenciasTamanho = [...new Set(itens.map((item) => item.tamanhoRef))];
+      const [estampas, tamanhos] = await Promise.all([
+        prisma.estampa.findMany({ where: { codigo: { in: codigosEstampa } }, select: { id: true, codigo: true } }),
+        prisma.tamanho.findMany({
+          where: { OR: [{ sku: { in: referenciasTamanho } }, { titulo: { in: referenciasTamanho, mode: "insensitive" } }, { slug: { in: referenciasTamanho, mode: "insensitive" } }] },
+          select: { id: true, sku: true, titulo: true, slug: true },
+        }),
+      ]);
+      const estampasPorCodigo = new Map(estampas.map((item) => [item.codigo.toUpperCase(), item]));
+      const tamanhosPorRef = new Map<string, (typeof tamanhos)[number]>();
+      for (const tamanho of tamanhos) {
+        tamanhosPorRef.set(tamanho.sku.toUpperCase(), tamanho);
+        tamanhosPorRef.set(tamanho.titulo.toUpperCase(), tamanho);
+        if (tamanho.slug) tamanhosPorRef.set(tamanho.slug.toUpperCase(), tamanho);
+      }
+
+      const resolvidos = itens.map((item) => {
+        const estampa = estampasPorCodigo.get(item.estampaCodigo);
+        const tamanho = tamanhosPorRef.get(item.tamanhoRef);
+        if (!estampa) throw new Error(`Linha ${item.linha}: estampa ${item.estampaCodigo} nao encontrada.`);
+        if (!tamanho) throw new Error(`Linha ${item.linha}: tamanho ${item.tamanhoRef} nao encontrado.`);
+        return { ...item, estampaId: estampa.id, tamanhoId: tamanho.id };
+      });
+
+      const existentes = await prisma.variante.findMany({
+        where: {
+          OR: resolvidos.map((item) => ({
+            estampaId: item.estampaId,
+            tamanhoId: item.tamanhoId,
+            codigo: item.codigo,
+          })),
+        },
+        select: { estampaId: true, tamanhoId: true, codigo: true },
+      });
+      const atualizadas = existentes.length;
+      const valoresSql = resolvidos.map((item) => Prisma.sql`(
+        ${item.codigo}, ${item.descricao}, ${item.palavrasChave}, ${item.estampaId}::uuid, ${item.tamanhoId}::uuid
+      )`);
+      await prisma.$executeRaw(Prisma.sql`
+        INSERT INTO variante (codigo, descricao, palavras_chave, estampa_id, tamanho_id)
+        VALUES ${Prisma.join(valoresSql)}
+        ON CONFLICT (estampa_id, tamanho_id, codigo) DO UPDATE SET
+          descricao = EXCLUDED.descricao,
+          palavras_chave = EXCLUDED.palavras_chave,
+          updated_at = NOW()
+      `);
+
+      return NextResponse.json({ total: resolvidos.length, criadas: resolvidos.length - atualizadas, atualizadas });
+    }
+
     if (body.action === "excluir-variante") {
       const id = requiredString(payload.id, "id");
       await prisma.variante.delete({ where: { id } });
@@ -1290,7 +1374,6 @@ export async function POST(request: Request) {
 
     if (body.action === "gerar-produtos-finais-lote") {
       const tipoProdutoId = requiredString(payload.tipoProdutoId, "tipoProdutoId");
-      const tamanhoId = requiredString(payload.tamanhoId, "tamanhoId");
       const estampaIds = Array.from(
         new Set(
           (Array.isArray(payload.estampaIds) ? payload.estampaIds : []).filter(
@@ -1298,22 +1381,38 @@ export async function POST(request: Request) {
           ),
         ),
       );
-      const precoCusto = optionalNumber(payload.precoCusto, "precoCusto");
-      const preco = optionalNumber(payload.preco, "preco");
-      const pesoLiquido = optionalNumber(payload.pesoLiquido, "pesoLiquido");
-      const pesoBruto = optionalNumber(payload.pesoBruto, "pesoBruto");
-      const larguraEmbalagem = optionalNumber(payload.larguraEmbalagem, "larguraEmbalagem");
-      const alturaEmbalagem = optionalNumber(payload.alturaEmbalagem, "alturaEmbalagem");
-      const comprimentoEmbalagem = optionalNumber(payload.comprimentoEmbalagem, "comprimentoEmbalagem");
+      const tamanhosPayload = (Array.isArray(payload.tamanhos) ? payload.tamanhos : []).map(
+        (item, index) => {
+          const tamanho = item && typeof item === "object" ? item as Record<string, unknown> : {};
+          const alturaEmbalagem = optionalNumber(tamanho.alturaEmbalagem, `tamanhos[${index}].alturaEmbalagem`);
+          if (alturaEmbalagem === null || alturaEmbalagem < 1) {
+            throw new Error("A altura da embalagem deve ser no minimo 1.");
+          }
+          return {
+            tamanhoId: requiredString(tamanho.tamanhoId, `tamanhos[${index}].tamanhoId`),
+            precoCusto: optionalNumber(tamanho.precoCusto, `tamanhos[${index}].precoCusto`),
+            preco: optionalNumber(tamanho.preco, `tamanhos[${index}].preco`),
+            pesoLiquido: optionalNumber(tamanho.pesoLiquido, `tamanhos[${index}].pesoLiquido`),
+            pesoBruto: optionalNumber(tamanho.pesoBruto, `tamanhos[${index}].pesoBruto`),
+            larguraEmbalagem: optionalNumber(tamanho.larguraEmbalagem, `tamanhos[${index}].larguraEmbalagem`),
+            alturaEmbalagem,
+            comprimentoEmbalagem: optionalNumber(
+              tamanho.comprimentoEmbalagem,
+              `tamanhos[${index}].comprimentoEmbalagem`,
+            ),
+          };
+        },
+      );
+      const tamanhoIds = Array.from(new Set(tamanhosPayload.map((item) => item.tamanhoId)));
 
       if (estampaIds.length === 0) {
         throw new Error("Selecione ao menos uma estampa.");
       }
-      if (alturaEmbalagem === null || alturaEmbalagem < 1) {
-        throw new Error("A altura da embalagem deve ser no minimo 1.");
+      if (tamanhoIds.length === 0) {
+        throw new Error("Selecione ao menos um tamanho.");
       }
 
-      const [tipoProduto, tamanho, estampas, variantes] = await Promise.all([
+      const [tipoProduto, tamanhos, estampas, variantes] = await Promise.all([
         prisma.tipoProduto.findUniqueOrThrow({
           where: { id: tipoProdutoId },
           include: {
@@ -1324,40 +1423,50 @@ export async function POST(request: Request) {
             },
           },
         }),
-        prisma.tamanho.findUniqueOrThrow({ where: { id: tamanhoId } }),
+        prisma.tamanho.findMany({ where: { id: { in: tamanhoIds } } }),
         prisma.estampa.findMany({ where: { id: { in: estampaIds } } }),
         prisma.variante.findMany({
           where: {
             estampaId: { in: estampaIds },
-            tamanhoId,
+            tamanhoId: { in: tamanhoIds },
           },
         }),
       ]);
       const produtoFornecedorTipo = tipoProduto.produtosFornecedor[0]?.produtoFornecedor ?? null;
-      const quantidadeProdutoFornecedor = decimalToNumber(tamanho.quantidadeProdutoFornecedor);
 
       if (!produtoFornecedorTipo) {
         throw new Error("O tipo de produto selecionado nao possui produto fornecido associado.");
       }
-      if (quantidadeProdutoFornecedor === null || quantidadeProdutoFornecedor <= 0) {
-        throw new Error("O tamanho selecionado nao possui quantidade usada do produto fornecido.");
-      }
       if (estampas.length !== estampaIds.length) {
         throw new Error("Uma ou mais estampas selecionadas nao foram encontradas.");
       }
+      if (tamanhos.length !== tamanhoIds.length) {
+        throw new Error("Um ou mais tamanhos selecionados nao foram encontrados.");
+      }
       if (variantes.length === 0) {
-        throw new Error("Nenhuma variante encontrada para as estampas e tamanho selecionados.");
+        throw new Error("Nenhuma variante encontrada para as estampas e tamanhos selecionados.");
       }
 
-      const precoCustoCalculado =
-        Number(produtoFornecedorTipo.precoUnitarioMetro) * quantidadeProdutoFornecedor;
       const estampasPorId = new Map(estampas.map((estampa) => [estampa.id, estampa]));
+      const tamanhosPorId = new Map(tamanhos.map((tamanho) => [tamanho.id, tamanho]));
+      const valoresPorTamanhoId = new Map(tamanhosPayload.map((item) => [item.tamanhoId, item]));
       const skusGerados = new Set<string>();
       const produtosData = variantes.map((variante) => {
         const estampa = variante.estampaId ? estampasPorId.get(variante.estampaId) : null;
+        const tamanho = variante.tamanhoId ? tamanhosPorId.get(variante.tamanhoId) : null;
+        const valores = variante.tamanhoId ? valoresPorTamanhoId.get(variante.tamanhoId) : null;
         if (!estampa) {
           throw new Error(`Estampa da variante ${variante.codigo} nao encontrada.`);
         }
+        if (!tamanho || !valores) {
+          throw new Error(`Tamanho da variante ${variante.codigo} nao encontrado.`);
+        }
+        const quantidadeProdutoFornecedor = decimalToNumber(tamanho.quantidadeProdutoFornecedor);
+        if (quantidadeProdutoFornecedor === null || quantidadeProdutoFornecedor <= 0) {
+          throw new Error(`O tamanho ${tamanho.titulo} nao possui quantidade usada do produto fornecido.`);
+        }
+        const precoCustoCalculado =
+          Number(produtoFornecedorTipo.precoUnitarioMetro) * quantidadeProdutoFornecedor;
 
         const skuFinal = buildProdutoFinalSku(
           tipoProduto,
@@ -1397,7 +1506,7 @@ export async function POST(request: Request) {
           tipoProdutoId,
           estampaId: estampa.id,
           varianteId: variante.id,
-          tamanhoId,
+          tamanhoId: tamanho.id,
           skuFinal,
           tituloFinal,
           descricaoFinal: descricaoFinal || null,
@@ -1415,13 +1524,13 @@ export async function POST(request: Request) {
             variante.codigo,
           ]) || null,
           categoria: tipoProduto.categoria,
-          precoCusto: precoCustoCalculado ?? precoCusto,
-          preco,
-          pesoLiquido,
-          pesoBruto,
-          larguraEmbalagem,
-          alturaEmbalagem,
-          comprimentoEmbalagem,
+          precoCusto: precoCustoCalculado ?? valores.precoCusto,
+          preco: valores.preco,
+          pesoLiquido: valores.pesoLiquido,
+          pesoBruto: valores.pesoBruto,
+          larguraEmbalagem: valores.larguraEmbalagem,
+          alturaEmbalagem: valores.alturaEmbalagem,
+          comprimentoEmbalagem: valores.comprimentoEmbalagem,
         };
       });
       const existentes = await prisma.produtoOlist.findMany({

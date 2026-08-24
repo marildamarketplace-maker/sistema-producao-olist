@@ -631,7 +631,7 @@ model Variante {
   estampa       Estampa?       @relation(fields: [estampaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tamanho       Tamanho?       @relation(fields: [tamanhoId], references: [id], onUpdate: NoAction)
 
-  @@unique([estampaId, codigo], map: "uq_variante_estampa_codigo")
+  @@unique([estampaId, tamanhoId, codigo], map: "uq_variante_estampa_tamanho_codigo")
   @@index([estampaId], map: "idx_variante_estampa_id")
   @@index([tamanhoId], map: "idx_variante_tamanho_id")
   @@map("variante")

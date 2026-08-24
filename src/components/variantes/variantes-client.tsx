@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { VariantesTab, parseVariantesImport, varianteInicial } from "@/components/gerador-csv-olist/gerador-csv-olist-client";
-import { carregarGeradorCsvOlist, excluirVarianteOlist, salvarVarianteOlist, type EstampaOlist, type TamanhoOlist, type VarianteOlist } from "@/lib/gerador-csv-olist";
+import { carregarGeradorCsvOlist, excluirVarianteOlist, importarVariantesOlist, salvarVarianteOlist, type EstampaOlist, type TamanhoOlist, type VarianteOlist } from "@/lib/gerador-csv-olist";
 
 export function VariantesClient() {
   const { usuario } = useAuth();
@@ -54,14 +54,8 @@ export function VariantesClient() {
     setSaving(true); setMessage(null); setError(null);
     try {
       const items = parseVariantesImport(text);
-      const estampasPorCodigo = new Map(estampas.map((item) => [item.codigo.toUpperCase(), item]));
-      const tamanhosPorRef = new Map<string, TamanhoOlist>();
-      tamanhos.forEach((item) => { tamanhosPorRef.set(item.sku.toUpperCase(), item); tamanhosPorRef.set(item.titulo.toUpperCase(), item); if (item.slug) tamanhosPorRef.set(item.slug.toUpperCase(), item); });
-      const existentes = new Map(variantes.map((item) => [`${item.estampaId}:${item.codigo.toUpperCase()}`, item]));
-      const resolvidos = items.map((item) => { const estampa = estampasPorCodigo.get(item.estampaCodigo); const tamanho = tamanhosPorRef.get(item.tamanhoRef.toUpperCase()); if (!estampa || !tamanho) throw new Error(`Referência inválida para ${item.codigo}.`); return { item, estampa, tamanho }; });
-      const atualizadas = resolvidos.filter(({ item, estampa }) => existentes.has(`${estampa.id}:${item.codigo}`)).length;
-      await Promise.all(resolvidos.map(({ item, estampa, tamanho }) => salvarVarianteOlist({ id: existentes.get(`${estampa.id}:${item.codigo}`)?.id ?? null, estampaId: estampa.id, tamanhoId: tamanho.id, codigo: item.codigo, descricao: item.descricao, palavrasChave: item.palavrasChave })));
-      setMessage(`${resolvidos.length - atualizadas} variante(s) criada(s) e ${atualizadas} sobrescrita(s) com sucesso.`); await load();
+      const resultado = await importarVariantesOlist(items);
+      setMessage(`${resultado.criadas} variante(s) criada(s) e ${resultado.atualizadas} sobrescrita(s) com sucesso.`); await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Erro ao importar variantes."); throw cause; }
     finally { setSaving(false); }
   }

@@ -376,6 +376,21 @@ export function salvarVarianteOlist(payload: {
   });
 }
 
+export type VarianteImportacaoOlist = {
+  codigo: string;
+  estampaCodigo: string;
+  tamanhoRef: string;
+  descricao: string | null;
+  palavrasChave: string | null;
+};
+
+export function importarVariantesOlist(itens: VarianteImportacaoOlist[]) {
+  return requestGeradorCsv<{ total: number; criadas: number; atualizadas: number }>({
+    method: "POST",
+    body: JSON.stringify({ action: "importar-variantes", payload: { itens } }),
+  });
+}
+
 export function excluirVarianteOlist(id: string) {
   return requestGeradorCsv<{ ok: true }>({
     method: "POST",
@@ -428,14 +443,16 @@ export function gerarProdutoFinalOlist(payload: {
 export function gerarProdutosFinaisEmLoteOlist(payload: {
   tipoProdutoId: string;
   estampaIds: string[];
-  tamanhoId: string;
-  precoCusto?: number | null;
-  preco?: number | null;
-  pesoLiquido?: number | null;
-  pesoBruto?: number | null;
-  larguraEmbalagem?: number | null;
-  alturaEmbalagem?: number | null;
-  comprimentoEmbalagem?: number | null;
+  tamanhos: Array<{
+    tamanhoId: string;
+    precoCusto?: number | null;
+    preco?: number | null;
+    pesoLiquido?: number | null;
+    pesoBruto?: number | null;
+    larguraEmbalagem?: number | null;
+    alturaEmbalagem?: number | null;
+    comprimentoEmbalagem?: number | null;
+  }>;
 }) {
   return requestGeradorCsv<{ criados: number; sobrescritos: number; total: number }>({
     method: "POST",
@@ -637,7 +654,6 @@ function produtoPaiSku(produto: ProdutoFinalOlist) {
       [
         `TP/${cleanCodePart(skuTipoProduto.replace(/^MEURY2-+/i, ""))}`,
         ...tipoProdutoMarkers(produto.tipoProduto),
-        produto.tamanho?.sku ? `TA/${cleanCodePart(produto.tamanho.sku)}` : "",
         `EST/${cleanCodePart(produto.estampa?.codigo)}`,
       ],
       "-",
@@ -648,7 +664,6 @@ function produtoPaiSku(produto: ProdutoFinalOlist) {
     [
       produto.tipoProduto.sku,
       ...tipoProdutoMarkers(produto.tipoProduto),
-      produto.tamanho?.sku,
       produto.estampa?.codigo,
     ],
     "-",
@@ -676,6 +691,7 @@ function buildParentDescricaoCsv(produto: ProdutoFinalOlist, variables: Record<s
   if (hasTemplateVariable(produto.tipoProduto.titulo)) {
     return renderTemplateCsv(produto.tipoProduto.titulo.replace(/\s*-\s*\$\{VARIANTE\}/g, " ${VARIANTE}"), {
       ...variables,
+      TAMANHO: undefined,
       ESTAMPA: produto.estampa?.codigo,
       VARIANTE: undefined,
     });
@@ -683,7 +699,6 @@ function buildParentDescricaoCsv(produto: ProdutoFinalOlist, variables: Record<s
 
   return joinCleanUnique([
     produto.tipoProduto.titulo,
-    produto.tamanho?.titulo,
     produto.estampa?.codigo,
   ]);
 }
@@ -843,7 +858,12 @@ export function montarLinhaCsvProdutoOlist(
           "",
         ];
     const codigoPai = !isParent && temVariacao ? parentSku : "";
-    const variacoes = !isParent && produto.variante ? `Cor:${produto.variante.codigo}` : "";
+    const variacoes = !isParent
+      ? [
+          produto.variante ? `Cor:${produto.variante.codigo}` : null,
+          produto.tamanho ? `Tamanho:${produto.tamanho.titulo}` : null,
+        ].filter((item): item is string => Boolean(item)).join("||")
+      : "";
     const descricaoBase = isParent
       ? buildParentDescricaoCsv(produto, variables)
       : produto.tituloFinal || joinClean([
@@ -894,7 +914,6 @@ export function montarLinhaCsvProdutoOlist(
       ? slugCsv([
           produto.tipoProduto.titulo,
           ...tipoProdutoMarkers(produto.tipoProduto),
-          produto.tamanho?.slug ?? produto.tamanho?.titulo,
           produto.estampa?.codigo,
         ])
       : produto.slugFinal || slugCsv([
