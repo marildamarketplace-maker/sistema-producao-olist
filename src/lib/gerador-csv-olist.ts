@@ -871,8 +871,8 @@ export function montarLinhaCsvProdutoOlist(
     const codigoPai = !isParent && temVariacao ? parentSku : "";
     const variacoes = !isParent
       ? [
-          produto.tamanho ? `Tamanho:${produto.tamanho.titulo}` : null,
           produto.variante ? `Cor:${produto.variante.codigo}` : null,
+          produto.tamanho ? `Tamanho:${produto.tamanho.titulo}` : null,
         ].filter((item): item is string => Boolean(item)).join("||")
       : "";
     const descricaoBase = isParent
