@@ -1301,10 +1301,10 @@ export async function POST(request: Request) {
       });
       const atualizadas = existentes.length;
       const valoresSql = resolvidos.map((item) => Prisma.sql`(
-        ${item.codigo}, ${item.descricao}, ${item.palavrasChave}, ${item.estampaId}::uuid, ${item.tamanhoId}::uuid
+        ${item.codigo}, ${item.descricao}, ${item.palavrasChave}, ${item.estampaId}::uuid, ${item.tamanhoId}::uuid, NOW(), NOW()
       )`);
       await prisma.$executeRaw(Prisma.sql`
-        INSERT INTO variante (codigo, descricao, palavras_chave, estampa_id, tamanho_id)
+        INSERT INTO variante (codigo, descricao, palavras_chave, estampa_id, tamanho_id, created_at, updated_at)
         VALUES ${Prisma.join(valoresSql)}
         ON CONFLICT (estampa_id, tamanho_id, codigo) DO UPDATE SET
           descricao = EXCLUDED.descricao,
