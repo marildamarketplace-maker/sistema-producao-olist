@@ -674,6 +674,17 @@ function truncate(value: string | null | undefined, length: number) {
   return value ? value.slice(0, length) : "";
 }
 
+const MAX_VARIATION_NAME_LENGTH = 30;
+
+function buildVariationDescription(produto: ProdutoFinalOlist) {
+  const description = joinCleanUnique([
+    produto.tamanho?.titulo,
+    produto.variante?.codigo,
+  ], " - ");
+
+  return truncate(description, MAX_VARIATION_NAME_LENGTH).trim();
+}
+
 function renderTemplateCsv(
   template: string | null | undefined,
   variables: Record<string, string | null | undefined>,
@@ -860,18 +871,20 @@ export function montarLinhaCsvProdutoOlist(
     const codigoPai = !isParent && temVariacao ? parentSku : "";
     const variacoes = !isParent
       ? [
-          produto.variante ? `Cor:${produto.variante.codigo}` : null,
           produto.tamanho ? `Tamanho:${produto.tamanho.titulo}` : null,
+          produto.variante ? `Cor:${produto.variante.codigo}` : null,
         ].filter((item): item is string => Boolean(item)).join("||")
       : "";
     const descricaoBase = isParent
       ? buildParentDescricaoCsv(produto, variables)
-      : produto.tituloFinal || joinClean([
-          produto.tipoProduto.titulo,
-          produto.tamanho?.titulo,
-          produto.estampa?.codigo,
-          produto.variante?.codigo,
-        ]);
+      : temVariacao
+        ? buildVariationDescription(produto)
+        : produto.tituloFinal || joinClean([
+            produto.tipoProduto.titulo,
+            produto.tamanho?.titulo,
+            produto.estampa?.codigo,
+            produto.variante?.codigo,
+          ]);
     const descricao = hasTemplateVariable(descricaoBase)
       ? renderTemplateCsv(descricaoBase, variables)
       : descricaoBase;
