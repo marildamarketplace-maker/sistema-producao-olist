@@ -60,7 +60,7 @@ Objetos fotografados ou renderizados com dobra, volume, sombra, perspectiva, fix
 
 ### Segmentação sugerida para pesquisa
 
-A mesma chamada multimodal também pode sugerir `publicos_sugeridos`, `contextos_uso` e `afinidades_visuais`. Cada sugestão inclui confiança e evidências visuais em `ai_metadata.response.segmentacaoBusca`. Somente termos com confiança igual ou superior a `AI_MIN_SEGMENTATION_CONFIDENCE` são materializados nas colunas pesquisáveis.
+A mesma chamada multimodal também pode sugerir `publicos_sugeridos`, `contextos_uso` e `afinidades_visuais`. Cada sugestão inclui confiança e pode incluir até duas evidências visuais em `ai_metadata.response.segmentacaoBusca`. Somente termos com confiança igual ou superior a `AI_MIN_SEGMENTATION_CONFIDENCE` são materializados nas colunas pesquisáveis.
 
 As listas podem ficar vazias e isso não aciona fallback, retry ou uma nova chamada de IA. Os termos entram no Full Text Search com peso inferior a código, título, tema, descrição e demais fatos visuais. A classificação não infere gênero, religião, nacionalidade, condição de saúde ou outros atributos pessoais do comprador; ela representa apenas afinidades visuais úteis para busca.
 
@@ -77,6 +77,21 @@ A busca expande sinônimos sem chamar IA. Por exemplo, `poá`, `poa`, `bolinhas`
 - O prefixo estável do prompt usa cache do provider e a quantidade de tokens em cache é registrada em `ai_metadata.usage.cached_input_tokens`.
 - `ESTAMPA_PREVIEW_ALLOWED_HOSTS` limita as origens permitidas (atualmente `storage.googleapis.com`), incluindo todos os redirects, reduzindo risco de SSRF.
 - `ESTAMPA_PREVIEW_MAX_BYTES` limita o preview em memória; padrão `10485760` bytes.
+
+## Batch econômico de estampas
+
+O envio em lote fica desativado por padrão e nunca é iniciado pelo servidor HTTP ou pelo worker síncrono. Depois de aplicar a migration `20260831190000_add_estampa_ai_batches`, habilite explicitamente:
+
+```bash
+AI_BATCH_ENABLED=true npm run batch:estampas -- submit
+npm run batch:estampas -- sync
+```
+
+O primeiro comando reserva no máximo `AI_BATCH_MAX_JOBS` jobs, envia um JSONL à Batch API e os deixa em `WAITING_PROVIDER`. O segundo reconcilia lotes enviados e importa os resultados no mesmo registro de `estampas`. Ambos podem ser executados novamente: locks, `custom_id`, `content_hash` e estados persistentes impedem processamento concorrente ou aplicação de resultado sobre uma versão diferente da imagem.
+
+- `AI_MAX_OUTPUT_TOKENS`: proteção de saída por análise; padrão `700`.
+- `AI_BATCH_ENABLED`: autorização explícita para envio; padrão `false`.
+- `AI_BATCH_MAX_JOBS`: limite por lote; padrão `500`, máximo `5000`.
 - Baixa confiança mesmo após o fallback é falha definitiva: repetir os mesmos dois modelos não consome novas tentativas automaticamente.
 
 ## Deploy em Produção

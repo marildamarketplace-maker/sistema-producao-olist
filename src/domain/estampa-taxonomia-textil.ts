@@ -1,3 +1,5 @@
+import { expandirTermosPesquisaTaxonomia } from "@/domain/estampa-sinonimos-pesquisa";
+
 export const PADROES_TEXTEIS_ESTAMPA = [
   "poá",
   "floral",
@@ -68,6 +70,10 @@ export function expandirConsultaComVocabularioTextil(consulta: string) {
       return sinonimos ? `(${agruparTermosWebsearch(sinonimos)})` : escaparTermoWebsearch(token);
     })
     .join(" ");
+}
+
+export function expandirPadroesTexteisParaPesquisa(padroes: readonly string[]) {
+  return expandirTermosPesquisaTaxonomia(padroes);
 }
 
 function agruparTermosWebsearch(termos: readonly string[]) {

@@ -4,7 +4,7 @@ import type {
   ImageAnalysisProvider,
   ImageAnalysisResult,
 } from "@/services/image-analysis/ImageAnalysisProvider";
-import { AI_PRIMARY_MODEL } from "@/config/ai";
+import { AI_MAX_OUTPUT_TOKENS, AI_PRIMARY_MODEL } from "@/config/ai";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -144,7 +144,7 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
         body: JSON.stringify({
           model: this.model,
           store: false,
-          max_output_tokens: 1_200,
+          max_output_tokens: AI_MAX_OUTPUT_TOKENS,
           prompt_cache_key: input.promptVersion.trim(),
           text: {
             format: {
@@ -156,9 +156,14 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
           },
           input: [
             {
-              role: "user",
+              role: "developer",
               content: [
                 { type: "input_text", text: input.prompt.trim() },
+              ],
+            },
+            {
+              role: "user",
+              content: [
                 {
                   type: "input_image",
                   detail: this.imageDetail,

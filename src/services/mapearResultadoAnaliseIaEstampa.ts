@@ -9,6 +9,10 @@ import {
   AI_MIN_SEGMENTATION_CONFIDENCE,
   AI_MIN_TEXTILE_PATTERN_CONFIDENCE,
 } from "@/config/ai";
+import {
+  calcularCustoEstimadoAnaliseIa,
+  obterPrecosModeloAnaliseIa,
+} from "@/services/metricasCustoAnaliseIa";
 
 export function criarAtualizacaoResultadoAnaliseIa(
   resultado: ImageAnalysisResult<AnaliseVisualEstampa>,
@@ -27,6 +31,10 @@ export function criarAtualizacaoResultadoAnaliseIa(
     analise,
     AI_MIN_TEXTILE_PATTERN_CONFIDENCE,
   );
+  const precosModelo = obterPrecosModeloAnaliseIa(resultado.model);
+  const metricasCusto = precosModelo
+    ? calcularCustoEstimadoAnaliseIa(resultado.usage, precosModelo)
+    : null;
   const aiMetadata: JsonValue = {
     provider: resultado.provider,
     model: resultado.model,
@@ -48,6 +56,8 @@ export function criarAtualizacaoResultadoAnaliseIa(
       output_tokens: resultado.usage.outputTokens,
       total_tokens: resultado.usage.totalTokens,
       cached_input_tokens: resultado.usage.cachedInputTokens ?? null,
+      cache_hit_rate: metricasCusto?.cacheHitRate ?? null,
+      estimated_cost_usd: metricasCusto?.estimatedCostUsd ?? null,
     },
     response: analise as unknown as JsonValue,
   };

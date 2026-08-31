@@ -41,6 +41,12 @@ function paraLista(valor: string[] | string | null | undefined): string[] {
 }
 
 export function construirTextoPesquisa(dados: DadosTextoPesquisa): string {
+  const termosTaxonomia = expandirTermosPesquisaTaxonomia([
+    ...paraLista(dados.padroesTexteis),
+    ...paraLista(dados.cores),
+    ...paraLista(dados.coresPrincipais),
+    ...paraLista(dados.coresSecundarias),
+  ]);
   const candidatos = [
     dados.codigo,
     dados.variante,
@@ -64,6 +70,7 @@ export function construirTextoPesquisa(dados: DadosTextoPesquisa): string {
     ...paraLista(dados.contextosUso),
     ...paraLista(dados.afinidadesVisuais),
     ...paraLista(dados.padroesTexteis),
+    ...termosTaxonomia,
   ];
 
   const vistos = new Set<string>();
@@ -83,3 +90,4 @@ export function construirTextoPesquisa(dados: DadosTextoPesquisa): string {
 
   return termos.join(" ");
 }
+import { expandirTermosPesquisaTaxonomia } from "@/domain/estampa-sinonimos-pesquisa";

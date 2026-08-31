@@ -626,56 +626,84 @@ model EstampaJob {
   finishedAt        DateTime?        @map("finished_at") @db.Timestamptz(6)
   lockedAt          DateTime?        @map("locked_at") @db.Timestamptz(6)
   workerId          String?          @map("worker_id")
+  batchId           String?          @map("batch_id") @db.Uuid
+  providerCustomId  String?          @map("provider_custom_id")
+  batch             EstampaAiBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@unique([estampaId, tipo], map: "uq_estampa_jobs_estampa_tipo")
   @@index([status], map: "idx_estampa_jobs_status")
   @@index([estampaId], map: "idx_estampa_jobs_estampa_id")
   @@index([createdAt], map: "idx_estampa_jobs_created_at")
   @@index([status, nextAttemptAt], map: "idx_estampa_jobs_status_next_attempt_at")
+  @@index([batchId], map: "idx_estampa_jobs_batch_id")
   @@map("estampa_jobs")
 }
 
+model EstampaAiBatch {
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider             String               @default("openai")
+  providerBatchId      String?              @unique @map("provider_batch_id")
+  inputFileId          String?              @map("input_file_id")
+  outputFileId         String?              @map("output_file_id")
+  errorFileId          String?              @map("error_file_id")
+  status               StatusEstampaAiBatch @default(PREPARING)
+  quantidadeJobs       Int                  @default(0) @map("quantidade_jobs")
+  quantidadeConcluidos Int                  @default(0) @map("quantidade_concluidos")
+  quantidadeFalhas     Int                  @default(0) @map("quantidade_falhas")
+  ultimoErro           String?              @map("ultimo_erro")
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  submittedAt          DateTime?            @map("submitted_at") @db.Timestamptz(6)
+  completedAt          DateTime?            @map("completed_at") @db.Timestamptz(6)
+  failedAt             DateTime?            @map("failed_at") @db.Timestamptz(6)
+  lastCheckedAt        DateTime?            @map("last_checked_at") @db.Timestamptz(6)
+  jobs                 EstampaJob[]
+
+  @@index([status, createdAt], map: "idx_estampa_ai_batches_status_created_at")
+  @@map("estampa_ai_batches")
+}
+
 model EstampaCatalogoIa {
-  id                   BigInt    @id @default(autoincrement())
-  codigo               String
-  variante             String?
-  previewUrl           String?   @map("preview_url")
-  storageKey           String?   @map("storage_key")
-  originalRelativePath String?   @map("original_relative_path")
-  originalFilename     String?   @map("original_filename")
-  originalExtension    String?   @map("original_extension")
-  contentHash          String?   @map("content_hash")
-  processingStatus     String    @map("processing_status")
-  createdAt            DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(6)
-  titulo               String?
-  descricao            String?
-  tema                 String?
-  subtemas             String[]  @default([])
-  palavrasChave        String[]  @default([]) @map("palavras_chave")
-  cores                String[]  @default([])
-  elementosVisuais     String[]  @default([]) @map("elementos_visuais")
-  ocasioes             String[]  @default([])
-  categorias           String[]  @default([])
-  estilo               String?
-  tipoImagem           String    @default("INDEFINIDO") @map("tipo_imagem")
-  conteudosImagem      String[]  @default([]) @map("conteudos_imagem")
-  suporteAplicacao     String    @default("NAO_APLICAVEL") @map("suporte_aplicacao")
-  descricaoAplicacao   String?   @map("descricao_aplicacao")
-  confiancaTipoImagem  Float?    @map("confianca_tipo_imagem")
-  publicosSugeridos    String[]  @default([]) @map("publicos_sugeridos")
-  contextosUso         String[]  @default([]) @map("contextos_uso")
-  afinidadesVisuais    String[]  @default([]) @map("afinidades_visuais")
-  confiancaSegmentacao Float?    @map("confianca_segmentacao")
-  padroesTexteis       String[]  @default([]) @map("padroes_texteis")
-  confiancaPadraoTextil Float?   @map("confianca_padrao_textil")
-  textoPesquisa        String?   @map("texto_pesquisa")
-  aiMetadata           Json?     @map("ai_metadata")
-  aiProcessedHash      String?   @map("ai_processed_hash")
-  processingError      String?   @map("processing_error")
-  processedAt          DateTime? @map("processed_at") @db.Timestamptz(6)
-  isActive             Boolean   @default(true) @map("is_active")
-  arquivoId            String?   @map("arquivo_id")
+  id                    BigInt    @id @default(autoincrement())
+  codigo                String
+  variante              String?
+  previewUrl            String?   @map("preview_url")
+  storageKey            String?   @map("storage_key")
+  originalRelativePath  String?   @map("original_relative_path")
+  originalFilename      String?   @map("original_filename")
+  originalExtension     String?   @map("original_extension")
+  contentHash           String?   @map("content_hash")
+  processingStatus      String    @map("processing_status")
+  createdAt             DateTime  @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @map("updated_at") @db.Timestamptz(6)
+  titulo                String?
+  descricao             String?
+  tema                  String?
+  subtemas              String[]  @default([])
+  palavrasChave         String[]  @default([]) @map("palavras_chave")
+  cores                 String[]  @default([])
+  elementosVisuais      String[]  @default([]) @map("elementos_visuais")
+  ocasioes              String[]  @default([])
+  categorias            String[]  @default([])
+  estilo                String?
+  tipoImagem            String    @default("INDEFINIDO") @map("tipo_imagem")
+  conteudosImagem       String[]  @default([]) @map("conteudos_imagem")
+  suporteAplicacao      String    @default("NAO_APLICAVEL") @map("suporte_aplicacao")
+  descricaoAplicacao    String?   @map("descricao_aplicacao")
+  confiancaTipoImagem   Float?    @map("confianca_tipo_imagem")
+  publicosSugeridos     String[]  @default([]) @map("publicos_sugeridos")
+  contextosUso          String[]  @default([]) @map("contextos_uso")
+  afinidadesVisuais     String[]  @default([]) @map("afinidades_visuais")
+  confiancaSegmentacao  Float?    @map("confianca_segmentacao")
+  padroesTexteis        String[]  @default([]) @map("padroes_texteis")
+  confiancaPadraoTextil Float?    @map("confianca_padrao_textil")
+  textoPesquisa         String?   @map("texto_pesquisa")
+  aiMetadata            Json?     @map("ai_metadata")
+  aiProcessedHash       String?   @map("ai_processed_hash")
+  processingError       String?   @map("processing_error")
+  processedAt           DateTime? @map("processed_at") @db.Timestamptz(6)
+  isActive              Boolean   @default(true) @map("is_active")
+  arquivoId             String?   @map("arquivo_id")
 
   @@unique([codigo, variante, arquivoId], map: "estampas_codigo_variante_arquivo_unique")
   @@index([aiProcessedHash])
@@ -846,6 +874,17 @@ enum TipoJobEstampa {
 enum StatusJobEstampa {
   PENDING
   PROCESSING
+  WAITING_PROVIDER
   COMPLETED
   FAILED
+}
+
+enum StatusEstampaAiBatch {
+  PREPARING
+  SUBMITTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
 }

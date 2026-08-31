@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "worker:estampas": "tsx scripts/estampas-worker.ts"
+    "worker:estampas": "tsx scripts/estampas-worker.ts",
+    "batch:estampas": "tsx scripts/estampas-batch.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

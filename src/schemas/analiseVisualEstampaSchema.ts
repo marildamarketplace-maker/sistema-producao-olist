@@ -53,15 +53,15 @@ const descricaoVisualSchema = texto("descricao", 20, 500)
     }
   });
 
-const palavrasChaveSchema = lista("palavrasChave", 5, 24, 50).describe(
+const palavrasChaveSchema = lista("palavrasChave", 4, 16, 50).describe(
   "Termos relevantes em português do Brasil para pesquisa interna: elementos, temas, estilos, cores, ocasiões e combinações visuais úteis. Sem termos genéricos, inventados ou duplicados.",
 );
 
-const coresPrincipaisSchema = lista("coresPrincipais", 1, 5, 30).describe(
+const coresPrincipaisSchema = lista("coresPrincipais", 1, 4, 30).describe(
   "Cores dominantes da composição, com nomes comuns em português do Brasil e sem códigos RGB ou pequenas variações desnecessárias.",
 );
 
-const coresSecundariasSchema = lista("coresSecundarias", 0, 6, 30).describe(
+const coresSecundariasSchema = lista("coresSecundarias", 0, 4, 30).describe(
   "Cores visualmente relevantes usadas como apoio, detalhes ou acentos, sem repetir as cores principais.",
 );
 
@@ -73,7 +73,7 @@ const elementosVisuaisGenericos = new Set([
   "objeto decorativo",
 ]);
 
-const elementosVisuaisSchema = lista("elementosVisuais", 1, 16, 60)
+const elementosVisuaisSchema = lista("elementosVisuais", 1, 12, 60)
   .describe(
     "Objetos, símbolos, personagens e componentes reconhecíveis realmente visíveis na imagem, descritos em português do Brasil com nomes específicos e úteis para pesquisa.",
   )
@@ -93,15 +93,15 @@ const temaSchema = texto("tema", 2, 80).describe(
   "Conceito visual principal da estampa em português do Brasil. Deve ser sustentado pela imagem; quando não houver contexto temático específico, use o motivo visual predominante, como Floral, Geométrico ou Abstrato.",
 );
 
-const subtemasSchema = lista("subtemas", 0, 8, 80).describe(
+const subtemasSchema = lista("subtemas", 0, 5, 80).describe(
   "Recortes mais específicos do tema principal claramente sustentados pela imagem. Use uma lista vazia quando não houver refinamentos visuais seguros.",
 );
 
-const categoriasSchema = lista("categorias", 1, 8, 50).describe(
+const categoriasSchema = lista("categorias", 1, 5, 50).describe(
   "Rótulos amplos, concisos e úteis para filtros do catálogo, derivados somente do conteúdo visual observado.",
 );
 
-const ocasioesSchema = lista("ocasioes", 0, 8, 80).describe(
+const ocasioesSchema = lista("ocasioes", 0, 4, 80).describe(
   "Datas, campanhas, celebrações ou situações de uso reconhecíveis por evidência visual clara. Deve ser uma lista vazia quando a ocasião for apenas uma associação possível.",
 );
 
@@ -152,15 +152,14 @@ const sugestaoSegmentacaoSchema = <T extends readonly [string, ...string[]]>(
         .array(texto(`Evidência de ${campo}`, 3, 120), {
           error: `As evidências de ${campo} devem ser uma lista.`,
         })
-        .min(1, `Uma sugestão de ${campo} deve possuir evidência visual.`)
-        .max(4, `Uma sugestão de ${campo} deve possuir no máximo 4 evidências.`),
+        .max(2, `Uma sugestão de ${campo} deve possuir no máximo 2 evidências.`),
     })
     .strict();
 
 const listaSegmentacao = <T extends z.ZodType>(schema: T, campo: string) =>
   z
     .array(schema, { error: `${campo} deve ser uma lista.` })
-    .max(6, `${campo} deve possuir no máximo 6 itens.`)
+    .max(4, `${campo} deve possuir no máximo 4 itens.`)
     .superRefine((itens, context) => {
       const termos = new Set<string>();
       itens.forEach((item, index) => {

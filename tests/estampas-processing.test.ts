@@ -3,13 +3,14 @@ import { Buffer } from "node:buffer";
 import test from "node:test";
 
 import type { EstampaCatalogo } from "../src/repositories/catalogo-estampas-repository";
-import { validarAnaliseVisualEstampa } from "../src/schemas/analiseVisualEstampaSchema";
+import { analiseVisualEstampaStructuredOutput, validarAnaliseVisualEstampa } from "../src/schemas/analiseVisualEstampaSchema";
 import {
   analisarImagemEstampaComFallback,
   AnaliseVisualQualidadeInsuficienteError,
   PROMPT_APRESENTACAO_IMAGEM,
   PROMPT_SEGMENTACAO_BUSCA,
   PROMPT_CLASSIFICACAO_TEXTIL,
+  PROMPT_ANALISE_VISUAL_ESTAMPA,
 } from "../src/services/analisarVisualEstampaService";
 import { carregarPreviewEstampa, CarregarPreviewEstampaError } from "../src/services/carregarPreviewEstampaService";
 import { construirTextoPesquisa } from "../src/services/construirTextoPesquisa";
@@ -17,6 +18,8 @@ import { expandirConsultaComVocabularioTextil } from "../src/domain/estampa-taxo
 import { analiseCorrespondeAoConteudoAtual, estampaPrecisaReprocessamento } from "../src/services/controleVersaoAnaliseEstampa";
 import type { ImageAnalysisProvider } from "../src/services/image-analysis/ImageAnalysisProvider";
 import { OpenAIImageAnalysisProvider } from "../src/services/image-analysis/OpenAIImageAnalysisProvider";
+import { calcularCustoEstimadoAnaliseIa, PRECOS_GPT_4O_MINI } from "../src/services/metricasCustoAnaliseIa";
+import { criarCustomIdBatchEstampa, criarLinhaBatchAnaliseEstampa, serializarLinhasBatch } from "../src/services/image-analysis/criarRequisicaoBatchAnaliseEstampa";
 import { criarAtualizacaoResultadoAnaliseIa, materializarClassificacaoTextil, materializarSegmentacaoBusca } from "../src/services/mapearResultadoAnaliseIaEstampa";
 import { verificarNecessidadeAnaliseIa } from "../src/services/verificarNecessidadeAnaliseIa";
 import {
@@ -157,7 +160,7 @@ test("schema aceita resposta completa e rejeita confiança fora de 0 a 1", () =>
   assert.throws(() => validarAnaliseVisualEstampa({ ...analiseValida, confianca: 1.2 }));
 });
 
-test("segmentação aceita listas vazias e exige termos controlados com evidência", () => {
+test("segmentação aceita listas e evidências compactas com termos controlados", () => {
   assert.deepEqual(validarAnaliseVisualEstampa({
     ...analiseValida,
     segmentacaoBusca: {
@@ -177,11 +180,18 @@ test("segmentação aceita listas vazias e exige termos controlados com evidênc
       publicosSugeridos: [{ termo: "mulheres", confianca: 0.9, evidencias: ["cor rosa"] }],
     },
   }));
-  assert.throws(() => validarAnaliseVisualEstampa({
+  assert.deepEqual(validarAnaliseVisualEstampa({
     ...analiseValida,
     segmentacaoBusca: {
       ...analiseValida.segmentacaoBusca,
       publicosSugeridos: [{ termo: "geral", confianca: 0.9, evidencias: [] }],
+    },
+  }).segmentacaoBusca.publicosSugeridos[0]?.evidencias, []);
+  assert.throws(() => validarAnaliseVisualEstampa({
+    ...analiseValida,
+    segmentacaoBusca: {
+      ...analiseValida.segmentacaoBusca,
+      publicosSugeridos: [{ termo: "geral", confianca: 0.9, evidencias: ["amplo", "neutro", "versátil"] }],
     },
   }));
 });
@@ -203,21 +213,21 @@ test("materialização aplica o limiar sem invalidar sugestões vazias ou fracas
 });
 
 test("prompt de segmentação proíbe inferência sensível e aceita ausência de sugestão", () => {
-  assert.match(PROMPT_SEGMENTACAO_BUSCA, /não associe cores, flores ou estilos isolados a gênero/iu);
-  assert.match(PROMPT_SEGMENTACAO_BUSCA, /não autoriza diagnosticar condição médica/iu);
-  assert.match(PROMPT_SEGMENTACAO_BUSCA, /listas podem e devem ficar vazias/iu);
+  assert.match(PROMPT_SEGMENTACAO_BUSCA, /não associe cor, flor ou estilo isolado a gênero/iu);
+  assert.match(PROMPT_SEGMENTACAO_BUSCA, /não infira idade, etnia, religião, saúde ou identidade/iu);
+  assert.match(PROMPT_SEGMENTACAO_BUSCA, /listas podem ficar vazias/iu);
 });
 
-test("classificação usa vocabulário têxtil canônico e exige evidência", () => {
+test("classificação usa vocabulário têxtil canônico com evidência opcional", () => {
   assert.deepEqual(materializarClassificacaoTextil(
     validarAnaliseVisualEstampa(analiseValida),
     0.7,
   ), { padroes: ["poá"], confianca: 0.94 });
-  assert.match(PROMPT_CLASSIFICACAO_TEXTIL, /use "poá" quando houver repetição predominante de círculos ou bolinhas/iu);
+  assert.match(PROMPT_CLASSIFICACAO_TEXTIL, /use poá para repetição dominante de círculos ou bolinhas/iu);
   assert.throws(() => validarAnaliseVisualEstampa({
     ...analiseValida,
     classificacaoTextil: {
-      padroesTexteis: [{ termo: "bolinhas", confianca: 0.95, evidencias: ["bolinhas repetidas"] }],
+      padroesTexteis: [{ termo: "bolinhas", confianca: 0.95, evidencias: [] }],
     },
   }));
 });
@@ -335,7 +345,7 @@ test("persistência materializa os campos pesquisáveis da apresentação", () =
 test("classificação não aceita bandeira física como estampa plana", () => {
   assert.match(
     PROMPT_APRESENTACAO_IMAGEM,
-    /bandeira fotografada pendurada em uma parede[\s\S]+não é ESTAMPA plana/iu,
+    /bandeira fotografada pendurada em uma parede[\s\S]+não ESTAMPA plana/iu,
   );
   const bandeiraAplicada = {
     ...analiseValida,
@@ -549,8 +559,58 @@ test("provider centraliza detalhe econômico, cache do prompt e telemetria", asy
 
   assert.equal(payloadEnviado?.store, false);
   assert.equal(payloadEnviado?.prompt_cache_key, "prompt-v3");
-  const input = payloadEnviado?.input as Array<{ content: Array<Record<string, unknown>> }>;
-  assert.equal(input[0]?.content[1]?.detail, "low");
+  const input = payloadEnviado?.input as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+  assert.equal(input[0]?.role, "developer");
+  assert.equal(input[1]?.role, "user");
+  assert.equal(input[1]?.content[0]?.detail, "low");
+  assert.equal(payloadEnviado?.max_output_tokens, 700);
   assert.equal(resultado.imageDetail, "low");
   assert.equal(resultado.usage.cachedInputTokens, 80);
+});
+
+test("custo considera cache e desconto de batch sem contar tokens duas vezes", () => {
+  const normal = calcularCustoEstimadoAnaliseIa({
+    inputTokens: 5_744,
+    cachedInputTokens: 2_464,
+    outputTokens: 230,
+  }, PRECOS_GPT_4O_MINI);
+  const batch = calcularCustoEstimadoAnaliseIa({
+    inputTokens: 5_744,
+    cachedInputTokens: 2_464,
+    outputTokens: 230,
+  }, PRECOS_GPT_4O_MINI, 0.5);
+  assert.equal(normal.inputTokens, 5_744);
+  assert.equal(normal.cachedInputTokens, 2_464);
+  assert.equal(batch.estimatedCostUsd, normal.estimatedCostUsd / 2);
+});
+
+test("texto de pesquisa expande sinônimos sem duplicar os arrays persistidos", () => {
+  const texto = construirTextoPesquisa({
+    codigo: "5635",
+    padroesTexteis: ["poá"],
+    cores: ["azul marinho"],
+  });
+  assert.match(texto, /poá/iu);
+  assert.match(texto, /bolinhas/iu);
+  assert.match(texto, /polka dot/iu);
+  assert.match(texto, /marinho/iu);
+});
+
+test("item Batch é idempotente, usa preview remoto permitido e detail low", () => {
+  const customId = criarCustomIdBatchEstampa({ estampaId: "6844", contentHash: "hash-atual" });
+  const linha = criarLinhaBatchAnaliseEstampa({
+    customId,
+    previewUrl: "https://storage.googleapis.com/catalogo/6844-a.webp",
+  });
+  assert.match(customId, /estampa:6844:hash:hash-atual:prompt:/u);
+  const body = linha.body as { input: Array<{ role: string; content: Array<Record<string, unknown>> }> };
+  assert.equal(body.input[0]?.role, "developer");
+  assert.equal(body.input[1]?.content[0]?.detail, "low");
+  assert.equal(serializarLinhasBatch([linha]).split("\n").filter(Boolean).length, 1);
+});
+
+test("prompt e schema permanecem compactos para controlar custo de entrada", () => {
+  const schema = JSON.stringify(analiseVisualEstampaStructuredOutput.jsonSchema);
+  assert.ok(PROMPT_ANALISE_VISUAL_ESTAMPA.length < 4_000);
+  assert.ok(schema.length < 8_000);
 });

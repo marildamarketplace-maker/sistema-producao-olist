@@ -46,7 +46,25 @@ export const AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS = inteiroEntre(
   "AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS",
 );
 
-export const AI_ANALYSIS_PROMPT_VERSION = "estampa-visual-v5-vocabulario-textil";
+export const AI_MAX_OUTPUT_TOKENS = inteiroEntre(
+  process.env.AI_MAX_OUTPUT_TOKENS,
+  700,
+  300,
+  1_200,
+  "AI_MAX_OUTPUT_TOKENS",
+);
+
+export const AI_BATCH_ENABLED = booleanoEnv(process.env.AI_BATCH_ENABLED, false);
+
+export const AI_BATCH_MAX_JOBS = inteiroEntre(
+  process.env.AI_BATCH_MAX_JOBS,
+  500,
+  1,
+  5_000,
+  "AI_BATCH_MAX_JOBS",
+);
+
+export const AI_ANALYSIS_PROMPT_VERSION = "estampa-visual-v6-compacto";
 
 function numeroEntreZeroEUm(value: string | undefined, fallback: number, name: string) {
   if (!value?.trim()) return fallback;
@@ -82,4 +100,12 @@ function inteiroEntre(
     throw new Error(`${name} deve ser um inteiro entre ${minimo} e ${maximo}.`);
   }
   return parsed;
+}
+
+function booleanoEnv(value: string | undefined, fallback: boolean) {
+  if (!value?.trim()) return fallback;
+  const normalizado = value.trim().toLowerCase();
+  if (normalizado === "true") return true;
+  if (normalizado === "false") return false;
+  throw new Error("Variável booleana de IA deve ser true ou false.");
 }

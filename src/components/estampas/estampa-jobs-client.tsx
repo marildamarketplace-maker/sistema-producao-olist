@@ -6,12 +6,13 @@ import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import type { EstampaJobPainel } from "@/services/consultarEstampaJobsPainelService";
 
-const STATUS = ["TODOS", "PENDING", "PROCESSING", "COMPLETED", "FAILED"] as const;
+const STATUS = ["TODOS", "PENDING", "PROCESSING", "WAITING_PROVIDER", "COMPLETED", "FAILED"] as const;
 type FiltroStatus = (typeof STATUS)[number];
 
 const statusClasses: Record<Exclude<FiltroStatus, "TODOS">, string> = {
   PENDING: "bg-amber-50 text-amber-800",
   PROCESSING: "bg-blue-50 text-blue-700",
+  WAITING_PROVIDER: "bg-violet-50 text-violet-700",
   COMPLETED: "bg-emerald-50 text-emerald-700",
   FAILED: "bg-red-50 text-red-700",
 };
@@ -119,7 +120,7 @@ export function EstampaJobsClient() {
                   <td className="max-w-64 px-4 py-3 text-slate-600">{job.status === "FAILED" ? <span className="line-clamp-2 text-red-700" title={job.ultimoErro ?? undefined}>{job.ultimoErro ?? "Falha sem detalhe."}</span> : "—"}</td>
                   <td className="px-4 py-3"><div className="flex items-center gap-2">
                     {job.analise && <button type="button" onClick={() => setSelecionado(job)} title="Visualizar análise" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" /></button>}
-                    {podeReprocessar && job.status !== "PENDING" && job.status !== "PROCESSING" && <button type="button" onClick={() => void reprocessar(job)} disabled={reprocessando === job.estampaId} className="whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">{reprocessando === job.estampaId ? "Solicitando..." : "Reprocessar IA"}</button>}
+                    {podeReprocessar && job.status !== "PENDING" && job.status !== "PROCESSING" && job.status !== "WAITING_PROVIDER" && <button type="button" onClick={() => void reprocessar(job)} disabled={reprocessando === job.estampaId} className="whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">{reprocessando === job.estampaId ? "Solicitando..." : "Reprocessar IA"}</button>}
                   </div></td>
                 </tr>
               ))}
