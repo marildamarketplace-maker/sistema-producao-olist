@@ -84,6 +84,9 @@ export default function EstoquePage() {
   const [manualFormOpen, setManualFormOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [skusIgnorados, setSkusIgnorados] = useState<string[]>([]);
+  const [ignoradosSemSku, setIgnoradosSemSku] = useState(0);
+  const [modalIgnoradosAberto, setModalIgnoradosAberto] = useState(false);
 
   const [produtoId, setProdutoId] = useState("");
   const [produtoBusca, setProdutoBusca] = useState("");
@@ -373,6 +376,9 @@ export default function EstoquePage() {
     setImportingProdutos(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setSkusIgnorados([]);
+    setIgnoradosSemSku(0);
+    setModalIgnoradosAberto(false);
 
     const resp = await axios.post(
       "/api/olist/produtos/importar",
@@ -390,6 +396,11 @@ export default function EstoquePage() {
       return;
     }
 
+    const novosSkusIgnorados = Array.isArray(resp.data?.skusIgnorados)
+      ? resp.data.skusIgnorados.map(String)
+      : [];
+    const novoTotalSemSku = Number(resp.data?.ignoradosSemSku ?? 0);
+
     setSuccessMessage(
       `Produtos importados: ${resp.data?.lidos ?? 0}. Criados: ${
         resp.data?.criados ?? 0
@@ -397,6 +408,9 @@ export default function EstoquePage() {
         resp.data?.ignorados ?? 0
       }.`,
     );
+    setSkusIgnorados(novosSkusIgnorados);
+    setIgnoradosSemSku(novoTotalSemSku);
+    setModalIgnoradosAberto((resp.data?.ignorados ?? 0) > 0);
     await carregarDados();
     setImportingProdutos(false);
   }
@@ -428,7 +442,18 @@ export default function EstoquePage() {
       </div>
 
       {successMessage && (
-        <p className="-mt-4 text-sm text-emerald-700">{successMessage}</p>
+        <div className="-mt-4 flex flex-wrap items-center gap-2 text-sm text-emerald-700">
+          <p>{successMessage}</p>
+          {(skusIgnorados.length > 0 || ignoradosSemSku > 0) && (
+            <button
+              type="button"
+              onClick={() => setModalIgnoradosAberto(true)}
+              className="font-semibold underline underline-offset-2 hover:text-emerald-900"
+            >
+              Ver ignorados
+            </button>
+          )}
+        </div>
       )}
 
       {podeEditarEstoque && (
@@ -623,6 +648,54 @@ export default function EstoquePage() {
           </div>
         )}
       </section>
+
+      {modalIgnoradosAberto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-produtos-ignorados"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 id="titulo-produtos-ignorados" className="text-lg font-semibold text-slate-900">
+                  Produtos ignorados
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  {skusIgnorados.length} com SKU
+                  {ignoradosSemSku > 0 ? ` e ${ignoradosSemSku} sem SKU` : ""}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalIgnoradosAberto(false)}
+                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5">
+              {skusIgnorados.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {skusIgnorados.map((sku, index) => (
+                    <div
+                      key={`${sku}-${index}`}
+                      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-800"
+                    >
+                      {sku}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-600">
+                  Nenhum dos produtos ignorados possui SKU para exibir.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {produtoMovimentacoesAberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">

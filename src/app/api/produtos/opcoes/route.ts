@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
     const [produtos, tiposProduto, tamanhos] = await Promise.all([
       prisma.produto.findMany({
-        where: { aplicativoId: autenticado.aplicativoId },
+        where: { aplicativoId: autenticado.aplicativoId, ativo: true },
         orderBy: { sku: "asc" },
         select: { id: true, sku: true, imagemUrl: true },
       }),

@@ -229,44 +229,24 @@ export default function ConfirmarProducaoPage() {
       return;
     }
 
-    for (const { item, qtd } of atualizacoes) {
-      const { error: updateError } = await supabase
-        .from("itens_solicitacao_producao")
-        .update({ quantidade_produzida: qtd })
-        .eq("id", item.id);
+    const response = await fetch("/api/solicitacoes-producao/confirmar", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session?.access_token ?? ""}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        solicitacaoId: solicitacao.id,
+        itens: atualizacoes.map(({ item, qtd }) => ({
+          id: item.id,
+          quantidadeProduzida: qtd,
+        })),
+      }),
+    });
+    const resultado = await response.json() as { error?: string };
 
-      if (updateError) {
-        setMessage(`Erro ao atualizar item ${item.sku}: ${updateError.message}`);
-        setSavingId(null);
-        return;
-      }
-
-      if (qtd > 0) {
-        const { error: movError } = await supabase.from("movimentacoes_estoque").insert({
-          produto_id: item.produto_id,
-          sku: item.sku,
-          tipo_movimento: "entrada",
-          quantidade: qtd,
-          origem: "PRODUCAO",
-          referencia_id: solicitacao.id,
-          observacao: "Entrada por confirmação de produção",
-        });
-
-        if (movError) {
-          setMessage(`Erro ao criar movimentação de ${item.sku}: ${movError.message}`);
-          setSavingId(null);
-          return;
-        }
-      }
-    }
-
-    const { error: statusError } = await supabase
-      .from("solicitacoes_producao")
-      .update({ status: "concluida" })
-      .eq("id", solicitacao.id);
-
-    if (statusError) {
-      setMessage(`Erro ao concluir solicitação: ${statusError.message}`);
+    if (!response.ok) {
+      setMessage(resultado.error ?? "Erro ao confirmar produção.");
       setSavingId(null);
       return;
     }

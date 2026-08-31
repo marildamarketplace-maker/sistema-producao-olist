@@ -1,43 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
   provider = "postgresql"
-}
-
-enum TipoServicoProdutoFornecedor {
-  CORTE_LASER
-
-  @@map("tipo_servico_produto_fornecedor")
-}
-
-enum TipoVenda {
-  VENDA    @map("venda")
-  VENDA_G  @map("venda g")
-  VENDA_PC @map("venda pc")
-
-  @@map("tipo_venda")
-}
-
-enum PeriodicidadeTarefaMidia {
-  DIARIA
-  SEMANAL
-  QUINZENAL
-  MENSAL
-}
-
-enum PrioridadeTarefaMidia {
-  ALTA
-  MEDIA
-  BAIXA
-}
-
-enum StatusOcorrenciaTarefaMidia {
-  PENDENTE
-  EM_ANDAMENTO
-  CONCLUIDA
-  IGNORADA
 }
 
 model Aplicativo {
@@ -48,28 +15,28 @@ model Aplicativo {
   createdAt                 DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                     @default(now()) @map("updated_at") @db.Timestamptz(6)
   baixasEstoqueOlist        BaixaEstoqueOlist[]
+  buscasSku                 BuscaSku[]
   categoriasOlist           CategoriaOlist[]
   configuracoesSistema      ConfiguracaoSistema[]
   controlesBuscaOlist       ControleBuscaOlist[]
+  formasPagamentoPlanos     FormaPagamentoOlistPlano[]
+  formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
   fornecedores              Fornecedor[]
   integracoesOlistToken     IntegracaoOlistToken[]
   itensBaixaEstoqueOlist    ItemBaixaEstoqueOlist[]
+  itensBuscaSku             ItemBuscaSku[]
   itensSolicitacaoDevolucao ItemSolicitacaoDevolucao[]
   itensSolicitacaoProducao  ItemSolicitacaoProducao[]
   midias                    Midia[]
-  tarefasMidia              TarefaMidia[]
-  ocorrenciasTarefasMidia   OcorrenciaTarefaMidia[]
   movimentacoesEstoque      MovimentacaoEstoque[]
+  ocorrenciasTarefasMidia   OcorrenciaTarefaMidia[]
   pedidosOlistProcessados   PedidoOlistProcessado[]
   produtos                  Produto[]
   produtosFornecedor        ProdutoFornecedor[]
   solicitacoesDevolucao     SolicitacaoDevolucao[]
   solicitacoesProducao      SolicitacaoProducao[]
+  tarefasMidia              TarefaMidia[]
   usuarios                  Usuario[]
-  formasPagamentoPlanos     FormaPagamentoOlistPlano[]
-  formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
-  buscasSku                 BuscaSku[]
-  itensBuscaSku             ItemBuscaSku[]
 
   @@map("aplicativo")
 }
@@ -166,14 +133,6 @@ model Usuario {
   ativo                                Boolean                 @default(true)
   podeVisualizarEstoque                Boolean                 @default(false) @map("pode_visualizar_estoque")
   podeEditarEstoque                    Boolean                 @default(false) @map("pode_editar_estoque")
-  podeVisualizarTiposProduto           Boolean                 @default(false) @map("pode_visualizar_tipos_produto")
-  podeEditarTiposProduto               Boolean                 @default(false) @map("pode_editar_tipos_produto")
-  podeVisualizarTamanhos               Boolean                 @default(false) @map("pode_visualizar_tamanhos")
-  podeEditarTamanhos                   Boolean                 @default(false) @map("pode_editar_tamanhos")
-  podeVisualizarEstampas               Boolean                 @default(false) @map("pode_visualizar_estampas")
-  podeEditarEstampas                   Boolean                 @default(false) @map("pode_editar_estampas")
-  podeVisualizarVariantes              Boolean                 @default(false) @map("pode_visualizar_variantes")
-  podeEditarVariantes                  Boolean                 @default(false) @map("pode_editar_variantes")
   podeVisualizarBaixa                  Boolean                 @default(false) @map("pode_visualizar_baixa")
   podeSolicitarBaixa                   Boolean                 @default(false) @map("pode_solicitar_baixa")
   podeVisualizarDevolucao              Boolean                 @default(false) @map("pode_visualizar_devolucao")
@@ -181,14 +140,11 @@ model Usuario {
   podeSolicitarProducao                Boolean                 @default(false) @map("pode_solicitar_producao")
   podeVisualizarProducao               Boolean                 @default(false) @map("pode_visualizar_producao")
   podeConfirmarProducao                Boolean                 @default(false) @map("pode_confirmar_producao")
-  podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
-  podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   podeVisualizarConfiguracao           Boolean                 @default(false) @map("pode_visualizar_configuracao")
   podeEditarConfiguracao               Boolean                 @default(false) @map("pode_editar_configuracao")
   createdAt                            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
   podeVisualizarCategoriasMidia        Boolean                 @default(false) @map("pode_visualizar_categorias_midia")
-  podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
   podeVisualizarDashboard              Boolean                 @default(false) @map("pode_visualizar_dashboard")
   podeVisualizarFornecedores           Boolean                 @default(false) @map("pode_visualizar_fornecedores")
   podeVisualizarProdutosFornecedor     Boolean                 @default(false) @map("pode_visualizar_produtos_fornecedor")
@@ -197,12 +153,23 @@ model Usuario {
   podeVisualizarOlistPedidos           Boolean                 @default(false) @map("pode_visualizar_olist_pedidos")
   podeVisualizarOlistProdutos          Boolean                 @default(false) @map("pode_visualizar_olist_produtos")
   podeVisualizarOlistVendedores        Boolean                 @default(false) @map("pode_visualizar_olist_vendedores")
+  vendedorOlistId                      Int?                    @map("vendedor_olist_id")
+  podeEditarEstampas                   Boolean                 @default(false) @map("pode_editar_estampas")
+  podeEditarTamanhos                   Boolean                 @default(false) @map("pode_editar_tamanhos")
+  podeEditarTiposProduto               Boolean                 @default(false) @map("pode_editar_tipos_produto")
+  podeVisualizarEstampas               Boolean                 @default(false) @map("pode_visualizar_estampas")
+  podeVisualizarTamanhos               Boolean                 @default(false) @map("pode_visualizar_tamanhos")
+  podeVisualizarTiposProduto           Boolean                 @default(false) @map("pode_visualizar_tipos_produto")
+  podeEditarVariantes                  Boolean                 @default(false) @map("pode_editar_variantes")
+  podeVisualizarVariantes              Boolean                 @default(false) @map("pode_visualizar_variantes")
   podeVisualizarOlistFormasPagamento   Boolean                 @default(false) @map("pode_visualizar_olist_formas_pagamento")
   podeVisualizarOlistFormasRecebimento Boolean                 @default(false) @map("pode_visualizar_olist_formas_recebimento")
-  vendedorOlistId                      Int?                    @map("vendedor_olist_id")
+  podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
+  podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
+  podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   fornecedoresComoVendedor             Fornecedor[]
-  tarefasMidiaResponsavel              TarefaMidia[]           @relation("ResponsavelTarefaMidia")
   ocorrenciasTarefasMidiaConcluidas    OcorrenciaTarefaMidia[] @relation("UsuarioConclusaoTarefaMidia")
+  tarefasMidiaResponsavel              TarefaMidia[]           @relation("ResponsavelTarefaMidia")
   aplicativo                           Aplicativo              @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([aplicativoId, email], map: "uq_usuario_aplicativo_email")
@@ -216,7 +183,6 @@ model TarefaMidia {
   responsavelId    String?                  @map("responsavel_id") @db.Uuid
   nome             String
   descricao        String
-  linksApoio       String[]                 @default([]) @map("links_apoio")
   periodicidade    PeriodicidadeTarefaMidia
   prioridade       PrioridadeTarefaMidia
   ativa            Boolean                  @default(true)
@@ -229,9 +195,10 @@ model TarefaMidia {
   diaSemanaMensal  Int?                     @map("dia_semana_mensal")
   createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  aplicativo       Aplicativo               @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
-  responsavel      Usuario?                 @relation("ResponsavelTarefaMidia", fields: [responsavelId], references: [id], onDelete: SetNull)
+  linksApoio       String[]                 @default([]) @map("links_apoio")
   ocorrencias      OcorrenciaTarefaMidia[]
+  aplicativo       Aplicativo               @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  responsavel      Usuario?                 @relation("ResponsavelTarefaMidia", fields: [responsavelId], references: [id])
 
   @@index([aplicativoId, ativa], map: "idx_tarefa_midia_aplicativo_ativa")
   @@index([responsavelId], map: "idx_tarefa_midia_responsavel")
@@ -247,12 +214,12 @@ model OcorrenciaTarefaMidia {
   dataConclusao      DateTime?                   @map("data_conclusao") @db.Timestamptz(6)
   usuarioConclusaoId String?                     @map("usuario_conclusao_id") @db.Uuid
   observacao         String?
-  linksRelacionados  String[]                    @default([]) @map("links_relacionados")
   createdAt          DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  linksRelacionados  String[]                    @default([]) @map("links_relacionados")
   aplicativo         Aplicativo                  @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
   tarefa             TarefaMidia                 @relation(fields: [tarefaId], references: [id], onDelete: Cascade)
-  usuarioConclusao   Usuario?                    @relation("UsuarioConclusaoTarefaMidia", fields: [usuarioConclusaoId], references: [id], onDelete: SetNull)
+  usuarioConclusao   Usuario?                    @relation("UsuarioConclusaoTarefaMidia", fields: [usuarioConclusaoId], references: [id])
 
   @@unique([tarefaId, dataPrevista], map: "uq_ocorrencia_tarefa_midia_data")
   @@index([aplicativoId, dataPrevista], map: "idx_ocorrencia_tarefa_midia_periodo")
@@ -270,13 +237,13 @@ model Fornecedor {
   vendedorOlistId          String?                       @map("vendedor_olist_id") @db.Uuid
   meuClienteOlistId        Int?                          @map("meu_cliente_olist_id")
   meuFormaPagamentoOlistId Int?                          @map("meu_forma_pagamento_olist_id")
-  meuTipoVenda             TipoVenda?                    @map("meu_tipo_venda_enum")
   meuPlanoPagamentoId      String?                       @map("meu_plano_pagamento_id") @db.Uuid
+  meuTipoVenda             TipoVenda?                    @map("meu_tipo_venda_enum")
   aplicativo               Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  meuPlanoPagamento        PlanoPagamento?               @relation(fields: [meuPlanoPagamentoId], references: [id])
   vendedor                 Usuario?                      @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
-  meuPlanoPagamento        PlanoPagamento?               @relation(fields: [meuPlanoPagamentoId], references: [id], onDelete: SetNull)
-  produtos                 ProdutoFornecedor[]
   pedidosSolicitacao       PedidoFornecedorSolicitacao[]
+  produtos                 ProdutoFornecedor[]
 
   @@index([aplicativoId], map: "idx_fornecedores_aplicativo_id")
   @@index([vendedorOlistId], map: "idx_fornecedores_vendedor_olist_id")
@@ -318,14 +285,14 @@ model Produto {
   id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku                    String                         @unique
   imagemUrl              String?                        @map("imagem_url")
-  temFoto                Boolean                        @default(false) @map("tem_foto")
-  temVideo               Boolean                        @default(false) @map("tem_video")
   metaEstoque            Int?                           @map("meta_estoque")
   ativo                  Boolean                        @default(true)
   createdAt              DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
   minimoEstoque          Int?                           @map("minimo_estoque")
   aplicativoId           String?                        @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   idCadastroOlist        String?                        @map("id_cadastro_olist")
+  temFoto                Boolean                        @default(false) @map("tem_foto")
+  temVideo               Boolean                        @default(false) @map("tem_video")
   produtosOlist          ProdutoOlist[]
   produtoFornecedorOlist ProdutoOlistProdutoFornecedor?
   aplicativo             Aplicativo?                    @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -358,8 +325,8 @@ model SolicitacaoProducao {
   createdAt          DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
   prioridadeProducao Boolean                       @default(false) @map("prioridade_producao")
   aplicativoId       String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo         Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   pedidosFornecedor  PedidoFornecedorSolicitacao[]
+  aplicativo         Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([aplicativoId], map: "idx_solicitacoes_producao_aplicativo_id")
   @@map("solicitacoes_producao")
@@ -371,8 +338,8 @@ model PedidoFornecedorSolicitacao {
   fornecedorId  String              @map("fornecedor_id") @db.Uuid
   solicitacaoId String              @map("solicitacao_id") @db.Uuid
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  fornecedor    Fornecedor          @relation(fields: [fornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fornecedor    Fornecedor          @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
+  solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onUpdate: NoAction)
 
   @@unique([pedidoOlistId, fornecedorId], map: "uq_pedido_fornecedor_solicitacao_pedido_fornecedor")
   @@index([fornecedorId], map: "idx_pedido_fornecedor_solicitacao_fornecedor_id")
@@ -530,11 +497,11 @@ model ItemBuscaSku {
   aplicativoId  String     @map("aplicativo_id") @db.Uuid
   pedidoOlistId String     @map("pedido_olist_id")
   sku           String
-  tituloProduto String?    @map("titulo_produto")
   quantidade    Int
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  busca         BuscaSku   @relation(fields: [buscaId], references: [id], onDelete: Cascade)
+  tituloProduto String?    @map("titulo_produto")
   aplicativo    Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  busca         BuscaSku   @relation(fields: [buscaId], references: [id], onDelete: Cascade)
 
   @@unique([aplicativoId, pedidoOlistId, sku], map: "uq_itens_busca_sku_aplicativo_pedido_sku")
   @@index([buscaId], map: "idx_itens_busca_sku_busca_id")
@@ -603,19 +570,128 @@ model TipoProdutoProdutoFornecedor {
 }
 
 model Estampa {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  codigo        String         @unique
-  descricao     String?
-  palavrasChave String?        @map("palavras_chave")
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  extra         String?
-  imagemUrl     String?        @map("imagem_url")
-  imagemUrl2    String?        @map("imagem_url_2")
-  produtosOlist ProdutoOlist[]
-  variantes     Variante[]
+  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo               String
+  varianteCatalogo     String?        @map("variante")
+  descricao            String?
+  palavrasChave        String?        @map("palavras_chave")
+  previewUrl           String?        @map("preview_url")
+  storageKey           String?        @map("storage_key")
+  originalRelativePath String?        @map("original_relative_path")
+  originalFilename     String?        @map("original_filename")
+  contentHash          String?        @map("content_hash")
+  titulo               String?
+  tema                 String?
+  subtemas             String[]       @default([])
+  cores                String[]       @default([])
+  elementosVisuais     String[]       @default([]) @map("elementos_visuais")
+  ocasioes             String[]       @default([])
+  categorias           String[]       @default([])
+  estilo               String?
+  textoPesquisa        String?        @map("texto_pesquisa")
+  aiMetadata           Json?          @map("ai_metadata")
+  aiProcessedHash      String?        @map("ai_processed_hash")
+  processingStatus     String         @default("PENDING") @map("processing_status")
+  processingError      String?        @map("processing_error")
+  processedAt          DateTime?      @map("processed_at") @db.Timestamptz(6)
+  isActive             Boolean        @default(true) @map("is_active")
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  extra                String?
+  imagemUrl            String?        @map("imagem_url")
+  imagemUrl2           String?        @map("imagem_url_2")
+  produtosOlist        ProdutoOlist[]
+  variantes            Variante[]
 
+  @@index([processingStatus], map: "idx_estampa_processing_status")
+  @@index([contentHash], map: "idx_estampa_content_hash")
   @@map("estampa")
+}
+
+model EstampaJob {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  estampaId         BigInt           @map("estampa_id")
+  tipo              TipoJobEstampa   @default(AI_ANALYSIS)
+  status            StatusJobEstampa @default(PENDING)
+  tentativas        Int              @default(0)
+  maxTentativas     Int              @default(3) @map("max_tentativas")
+  ultimoErro        String?          @map("ultimo_erro")
+  nextAttemptAt     DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  manualRequested   Boolean          @default(false) @map("manual_requested")
+  manualRequestedAt DateTime?        @map("manual_requested_at") @db.Timestamptz(6)
+  manualRequestedBy String?          @map("manual_requested_by") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  startedAt         DateTime?        @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime?        @map("finished_at") @db.Timestamptz(6)
+  lockedAt          DateTime?        @map("locked_at") @db.Timestamptz(6)
+  workerId          String?          @map("worker_id")
+
+  @@unique([estampaId, tipo], map: "uq_estampa_jobs_estampa_tipo")
+  @@index([status], map: "idx_estampa_jobs_status")
+  @@index([estampaId], map: "idx_estampa_jobs_estampa_id")
+  @@index([createdAt], map: "idx_estampa_jobs_created_at")
+  @@index([status, nextAttemptAt], map: "idx_estampa_jobs_status_next_attempt_at")
+  @@map("estampa_jobs")
+}
+
+model EstampaCatalogoIa {
+  id                   BigInt    @id @default(autoincrement())
+  codigo               String
+  variante             String?
+  previewUrl           String?   @map("preview_url")
+  storageKey           String?   @map("storage_key")
+  originalRelativePath String?   @map("original_relative_path")
+  originalFilename     String?   @map("original_filename")
+  originalExtension    String?   @map("original_extension")
+  contentHash          String?   @map("content_hash")
+  processingStatus     String    @map("processing_status")
+  createdAt            DateTime  @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(6)
+  titulo               String?
+  descricao            String?
+  tema                 String?
+  subtemas             String[]  @default([])
+  palavrasChave        String[]  @default([]) @map("palavras_chave")
+  cores                String[]  @default([])
+  elementosVisuais     String[]  @default([]) @map("elementos_visuais")
+  ocasioes             String[]  @default([])
+  categorias           String[]  @default([])
+  estilo               String?
+  tipoImagem           String    @default("INDEFINIDO") @map("tipo_imagem")
+  conteudosImagem      String[]  @default([]) @map("conteudos_imagem")
+  suporteAplicacao     String    @default("NAO_APLICAVEL") @map("suporte_aplicacao")
+  descricaoAplicacao   String?   @map("descricao_aplicacao")
+  confiancaTipoImagem  Float?    @map("confianca_tipo_imagem")
+  publicosSugeridos    String[]  @default([]) @map("publicos_sugeridos")
+  contextosUso         String[]  @default([]) @map("contextos_uso")
+  afinidadesVisuais    String[]  @default([]) @map("afinidades_visuais")
+  confiancaSegmentacao Float?    @map("confianca_segmentacao")
+  padroesTexteis       String[]  @default([]) @map("padroes_texteis")
+  confiancaPadraoTextil Float?   @map("confianca_padrao_textil")
+  textoPesquisa        String?   @map("texto_pesquisa")
+  aiMetadata           Json?     @map("ai_metadata")
+  aiProcessedHash      String?   @map("ai_processed_hash")
+  processingError      String?   @map("processing_error")
+  processedAt          DateTime? @map("processed_at") @db.Timestamptz(6)
+  isActive             Boolean   @default(true) @map("is_active")
+  arquivoId            String?   @map("arquivo_id")
+
+  @@unique([codigo, variante, arquivoId], map: "estampas_codigo_variante_arquivo_unique")
+  @@index([aiProcessedHash])
+  @@index([categorias], map: "estampas_categorias_gin", type: Gin)
+  @@index([publicosSugeridos], map: "estampas_publicos_sugeridos_gin", type: Gin)
+  @@index([contextosUso], map: "estampas_contextos_uso_gin", type: Gin)
+  @@index([afinidadesVisuais], map: "estampas_afinidades_visuais_gin", type: Gin)
+  @@index([padroesTexteis], map: "estampas_padroes_texteis_gin", type: Gin)
+  @@index([conteudosImagem], map: "estampas_conteudos_imagem_gin", type: Gin)
+  @@index([cores], map: "estampas_cores_gin", type: Gin)
+  @@index([palavrasChave], map: "estampas_palavras_chave_gin", type: Gin)
+  @@index([tipoImagem], map: "idx_estampas_tipo_imagem")
+  @@index([suporteAplicacao], map: "idx_estampas_suporte_aplicacao")
+  @@index([processingStatus], map: "idx_estampas_processing_status")
+  @@index([contentHash], map: "idx_estampas_content_hash")
+  @@map("estampas")
 }
 
 model Variante {
@@ -727,4 +803,49 @@ model ProdutoOlistProdutoFornecedor {
   @@index([produtoOlistId], map: "idx_produto_olist_produto_fornecedor_produto_olist_id")
   @@index([produtoFornecedorId], map: "idx_produto_olist_produto_fornecedor_produto_id")
   @@map("produto_olist_produto_fornecedor")
+}
+
+enum TipoServicoProdutoFornecedor {
+  CORTE_LASER
+
+  @@map("tipo_servico_produto_fornecedor")
+}
+
+enum TipoVenda {
+  VENDA    @map("venda")
+  VENDA_G  @map("venda g")
+  VENDA_PC @map("venda pc")
+
+  @@map("tipo_venda")
+}
+
+enum PeriodicidadeTarefaMidia {
+  DIARIA
+  SEMANAL
+  QUINZENAL
+  MENSAL
+}
+
+enum PrioridadeTarefaMidia {
+  ALTA
+  MEDIA
+  BAIXA
+}
+
+enum StatusOcorrenciaTarefaMidia {
+  PENDENTE
+  EM_ANDAMENTO
+  CONCLUIDA
+  IGNORADA
+}
+
+enum TipoJobEstampa {
+  AI_ANALYSIS
+}
+
+enum StatusJobEstampa {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }

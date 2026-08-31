@@ -1186,6 +1186,8 @@ export async function importarProdutosOlist(aplicativoId: string) {
   let criados = 0;
   let atualizados = 0;
   let ignorados = 0;
+  let ignoradosSemSku = 0;
+  const skusIgnorados: string[] = [];
   const vistos = new Set<string>();
 
   while (true) {
@@ -1204,8 +1206,15 @@ export async function importarProdutosOlist(aplicativoId: string) {
 
       const produto = normalizarProdutoOlist(produtoOlist);
 
-      if (!produto || vistos.has(produto.sku)) {
+      if (!produto) {
         ignorados += 1;
+        ignoradosSemSku += 1;
+        continue;
+      }
+
+      if (vistos.has(produto.sku)) {
+        ignorados += 1;
+        skusIgnorados.push(produto.sku);
         continue;
       }
 
@@ -1252,6 +1261,8 @@ export async function importarProdutosOlist(aplicativoId: string) {
     criados,
     atualizados,
     ignorados,
+    ignoradosSemSku,
+    skusIgnorados,
   };
 }
 
@@ -1732,7 +1743,7 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
   ];
   const produtos = skus.length
     ? await prisma.produto.findMany({
-        where: { sku: { in: skus }, ativo: true },
+        where: { sku: { in: skus } },
         select: { id: true, sku: true },
       })
     : [];
@@ -1916,18 +1927,13 @@ export async function confirmarBaixaEstoqueOlist(input: {
   const skus = [...new Set(skusInformados)];
 
   const produtos = await prisma.produto.findMany({
-    where: { sku: { in: skus }, ativo: true },
+    where: { sku: { in: skus } },
     select: { id: true, sku: true },
   });
   let produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
   const ausentes = skus.filter((sku) => !produtoPorSku.has(sku));
 
   if (ausentes.length > 0) {
-    await prisma.produto.updateMany({
-      where: { sku: { in: ausentes } },
-      data: { ativo: true },
-    });
-
     await prisma.produto.createMany({
       data: ausentes.map((sku) => ({
         sku,
@@ -1939,7 +1945,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
     });
 
     const produtosAtualizados = await prisma.produto.findMany({
-      where: { sku: { in: skus }, ativo: true },
+      where: { sku: { in: skus } },
       select: { id: true, sku: true },
     });
 

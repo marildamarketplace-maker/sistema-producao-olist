@@ -140,6 +140,16 @@ const menuItems: MenuItem[] = [
         href: "/controle-midia/tarefas",
         permissions: ["podeVisualizarTarefasMidia"],
       },
+      {
+        label: "Pesquisar estampas",
+        href: "/controle-midia/estampas",
+        permissions: ["podeVisualizarEstampas", "podeEditarEstampas"],
+      },
+      {
+        label: "Jobs de IA",
+        href: "/controle-midia/estampas/jobs",
+        permissions: ["podeVisualizarEstampas", "podeEditarEstampas"],
+      },
     ],
   },
   {

@@ -1,5 +1,84 @@
 # ERP Shop (Olist + Supabase)
 
+## Worker de estampas
+
+O consumidor de jobs `AI_ANALYSIS` roda como um processo Node separado do servidor Next.js:
+
+```bash
+npm run worker:estampas
+```
+
+Para executar a análise visual e persistir os metadados no catálogo, habilite explicitamente o modo real:
+
+```bash
+ESTAMPA_AI_PROCESSOR_MODE=live npm run worker:estampas
+```
+
+Para validar somente a infraestrutura do worker em um ambiente de teste, use o stub:
+
+```bash
+ESTAMPA_AI_PROCESSOR_MODE=stub ESTAMPA_ALLOW_STUB_COMPLETION=true npm run worker:estampas
+```
+
+O stub altera status e `ai_processed_hash`; por segurança ele exige a confirmação acima e deve ser usado somente contra um banco isolado. Para o catálogo real, use sempre `live`.
+
+Configurações opcionais:
+
+- `ESTAMPA_WORKER_ID`: identificação da instância; por padrão é gerada com hostname, PID e UUID.
+- `ESTAMPA_WORKER_CONCURRENCY`: quantidade máxima de jobs simultâneos; padrão `2` e limite `8`.
+- `ESTAMPA_WORKER_POLL_MS`: intervalo sem trabalho antes de uma nova consulta; padrão `5000`.
+- `ESTAMPA_WORKER_LOCK_TIMEOUT_MS`: tempo para considerar abandonado um lock sem heartbeat; padrão `900000` (15 minutos).
+- `ESTAMPA_DETECTOR_INTERVAL_MS`: intervalo entre varreduras de estampas `PENDING`; padrão `60000` (1 minuto).
+
+Em produção, execute esse comando em um serviço de processo contínuo separado da aplicação web. Encerrar com `SIGINT` ou `SIGTERM` interrompe novas aquisições e aguarda o lote atual terminar. Jobs interrompidos abruptamente são recuperados por outra instância após o timeout do lock.
+
+Durante o processamento, cada job renova `locked_at` a cada terço do timeout configurado. A recuperação considera travado apenas um job `PROCESSING` cujo `locked_at` — ou `started_at` quando o lock não estiver preenchido — tenha expirado. O job volta para `PENDING` se ainda possuir tentativas; caso contrário, termina em `FAILED`. A seleção e a recuperação usam locks do PostgreSQL com `SKIP LOCKED`, permitindo que várias instâncias executem a manutenção sem recuperar o mesmo job duas vezes.
+
+### Reprocessamento manual de IA
+
+Usuários autenticados com `podeEditarEstampas` podem solicitar um novo processamento por:
+
+```text
+POST /api/estampas/{id}/reprocessar-ia
+Authorization: Bearer {token}
+```
+
+O job é registrado como solicitação manual e ignora a comparação entre `content_hash` e `ai_processed_hash`. Existe uma única linha de `estampa_jobs` por estampa e tipo. Uma nova versão ou solicitação manual reutiliza essa linha, reinicia `tentativas` em zero e mantém a proteção transacional contra dois processamentos simultâneos. `tentativas` representa a tentativa atual e é incrementada somente quando um worker assume o job.
+
+### Classificação da apresentação da imagem
+
+A análise visual `estampa-visual-v5-vocabulario-textil` persiste, além dos metadados da arte:
+
+- `tipo_imagem`: `ESTAMPA`, `LAYOUT`, `APLICACAO_PRODUTO` ou `INDEFINIDO`;
+- `conteudos_imagem`: conteúdos reconhecidos na composição, incluindo arte plana, aplicação, texto, variantes, modelo real e manequim;
+- `suporte_aplicacao`: `MODELO_REAL`, `MANEQUIM`, `PRODUTO_ISOLADO`, `AMBIENTE`, `MISTO`, `OUTRO` ou `NAO_APLICAVEL`;
+- `descricao_aplicacao` e `confianca_tipo_imagem`.
+
+Layouts mistos permanecem classificados como `LAYOUT`, enquanto `conteudos_imagem` registra todas as partes presentes. A classificação não identifica pessoas nem infere atributos pessoais, material, tecido ou dimensões. Registros processados com versões anteriores do prompt permanecem `INDEFINIDO` até um reprocessamento manual explícito, evitando novas chamadas de IA apenas por mudança do prompt.
+
+Objetos fotografados ou renderizados com dobra, volume, sombra, perspectiva, fixação ou cenário são tratados como aplicação. Por exemplo, uma bandeira pendurada em uma parede é `APLICACAO_PRODUTO`; somente a arte digital plana da bandeira é `ESTAMPA`. As evidências usadas nessa decisão ficam registradas na resposta estruturada dentro de `ai_metadata`.
+
+### Segmentação sugerida para pesquisa
+
+A mesma chamada multimodal também pode sugerir `publicos_sugeridos`, `contextos_uso` e `afinidades_visuais`. Cada sugestão inclui confiança e evidências visuais em `ai_metadata.response.segmentacaoBusca`. Somente termos com confiança igual ou superior a `AI_MIN_SEGMENTATION_CONFIDENCE` são materializados nas colunas pesquisáveis.
+
+As listas podem ficar vazias e isso não aciona fallback, retry ou uma nova chamada de IA. Os termos entram no Full Text Search com peso inferior a código, título, tema, descrição e demais fatos visuais. A classificação não infere gênero, religião, nacionalidade, condição de saúde ou outros atributos pessoais do comprador; ela representa apenas afinidades visuais úteis para busca.
+
+### Vocabulário têxtil
+
+`padroes_texteis` armazena termos canônicos usados por profissionais de tecidos e estampas, como `poá`, `vichy`, `paisley`, `pied-de-poule`, `animal print`, `listrado` e `xadrez`. A confiança e as evidências permanecem em `ai_metadata.response.classificacaoTextil`.
+
+A busca expande sinônimos sem chamar IA. Por exemplo, `poá`, `poa`, `bolinhas`, `pontos` e `polka dot` consultam o mesmo grupo. A migration faz um backfill conservador de `poá` usando títulos, descrições e palavras-chave já existentes; ela não reprocessa imagens.
+
+### Custo e segurança dos previews
+
+- O modelo primário usa `AI_PRIMARY_IMAGE_DETAIL=low`; o fallback de maior capacidade usa `AI_FALLBACK_IMAGE_DETAIL=high` somente quando necessário.
+- `AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS` é `1` por padrão para não repetir uma resposta inválida antes do fallback.
+- O prefixo estável do prompt usa cache do provider e a quantidade de tokens em cache é registrada em `ai_metadata.usage.cached_input_tokens`.
+- `ESTAMPA_PREVIEW_ALLOWED_HOSTS` limita as origens permitidas (atualmente `storage.googleapis.com`), incluindo todos os redirects, reduzindo risco de SSRF.
+- `ESTAMPA_PREVIEW_MAX_BYTES` limita o preview em memória; padrão `10485760` bytes.
+- Baixa confiança mesmo após o fallback é falha definitiva: repetir os mesmos dois modelos não consome novas tentativas automaticamente.
+
 ## Deploy em Produção
 
 ### 1) Supabase
