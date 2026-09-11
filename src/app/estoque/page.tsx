@@ -663,8 +663,10 @@ export default function EstoquePage() {
                   Produtos ignorados
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  {skusIgnorados.length} com SKU
-                  {ignoradosSemSku > 0 ? ` e ${ignoradosSemSku} sem SKU` : ""}.
+                  {skusIgnorados.length} por SKU duplicado
+                  {ignoradosSemSku > 0
+                    ? ` e ${ignoradosSemSku} por SKU não informado pela Olist`
+                    : ""}.
                 </p>
               </div>
               <button
@@ -681,15 +683,16 @@ export default function EstoquePage() {
                   {skusIgnorados.map((sku, index) => (
                     <div
                       key={`${sku}-${index}`}
-                      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-800"
+                      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800"
                     >
-                      {sku}
+                      <span className="font-medium text-slate-600">SKU duplicado — </span>
+                      <span className="font-mono">{sku}</span>
                     </div>
                   ))}
                 </div>
               ) : (
                 <p className="text-sm text-slate-600">
-                  Nenhum dos produtos ignorados possui SKU para exibir.
+                  SKU não informado pela Olist — não há código para exibir.
                 </p>
               )}
             </div>

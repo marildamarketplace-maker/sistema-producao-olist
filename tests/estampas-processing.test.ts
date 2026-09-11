@@ -18,6 +18,7 @@ import { expandirConsultaComVocabularioTextil } from "../src/domain/estampa-taxo
 import { analiseCorrespondeAoConteudoAtual, estampaPrecisaReprocessamento } from "../src/services/controleVersaoAnaliseEstampa";
 import type { ImageAnalysisProvider } from "../src/services/image-analysis/ImageAnalysisProvider";
 import { OpenAIImageAnalysisProvider } from "../src/services/image-analysis/OpenAIImageAnalysisProvider";
+import { ImageAnalysisProviderError } from "../src/services/image-analysis/ImageAnalysisProviderError";
 import { calcularCustoEstimadoAnaliseIa, PRECOS_GPT_4O_MINI } from "../src/services/metricasCustoAnaliseIa";
 import { criarCustomIdBatchEstampa, criarLinhaBatchAnaliseEstampa, serializarLinhasBatch } from "../src/services/image-analysis/criarRequisicaoBatchAnaliseEstampa";
 import { criarAtualizacaoResultadoAnaliseIa, materializarClassificacaoTextil, materializarSegmentacaoBusca } from "../src/services/mapearResultadoAnaliseIaEstampa";
@@ -613,4 +614,45 @@ test("prompt e schema permanecem compactos para controlar custo de entrada", () 
   const schema = JSON.stringify(analiseVisualEstampaStructuredOutput.jsonSchema);
   assert.ok(PROMPT_ANALISE_VISUAL_ESTAMPA.length < 4_000);
   assert.ok(schema.length < 8_000);
+});
+
+test("fallback aceita erro estruturado do Codex e preserva metadados sem custo de API", async () => {
+  let chamadasFallback = 0;
+  const primary: ImageAnalysisProvider = {
+    name: "codex-local", model: "cli-primary",
+    async analyzeImage() {
+      throw new ImageAnalysisProviderError("JSON inválido", {
+        provider: "codex-local", code: "INVALID_STRUCTURED_OUTPUT", retriable: true,
+      });
+    },
+  };
+  const fallback: ImageAnalysisProvider = {
+    name: "codex-local", model: "gpt-5.4-mini",
+    async analyzeImage(input) {
+      chamadasFallback += 1;
+      return {
+        provider: this.name, model: this.model, analyzedAt: new Date(0).toISOString(),
+        promptVersion: "v-test", fallbackUsed: false, fallbackReason: null,
+        primaryModel: this.model, primaryAttempts: 1,
+        data: input.output.parse(analiseValida), requestId: "thread-codex",
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, cachedInputTokens: 80 },
+      };
+    },
+  };
+  const final = await analisarImagemEstampaComFallback({
+    image: { buffer: Buffer.from([1]), mimeType: "image/png", sizeBytes: 1 },
+    prompt: "Analise", promptVersion: "v-test", output: analiseVisualEstampaStructuredOutput,
+  }, primary, fallback);
+  assert.equal(chamadasFallback, 1);
+  assert.equal(final.provider, "codex-local");
+  assert.equal(final.fallbackUsed, true);
+  assert.equal(final.primaryModel, "cli-primary");
+  const update = criarAtualizacaoResultadoAnaliseIa(final);
+  const metadata = update.ai_metadata as { provider: string; usage: { estimated_cost_usd: number | null; input_tokens: number } };
+  assert.equal(metadata.provider, "codex-local");
+  assert.equal(metadata.usage.estimated_cost_usd, null);
+  assert.equal(metadata.usage.input_tokens, 100);
+  const apiUpdate = criarAtualizacaoResultadoAnaliseIa({ ...final, provider: "openai" });
+  const apiMetadata = apiUpdate.ai_metadata as { usage: { estimated_cost_usd: number | null } };
+  assert.ok(Number(apiMetadata.usage.estimated_cost_usd) > 0);
 });

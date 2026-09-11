@@ -14,6 +14,42 @@ Para executar a análise visual e persistir os metadados no catálogo, habilite 
 ESTAMPA_AI_PROCESSOR_MODE=live npm run worker:estampas
 ```
 
+Escolha o provedor em cada execução:
+
+```bash
+# OpenAI Responses API (usa OPENAI_API_KEY)
+ESTAMPA_AI_PROCESSOR_MODE=live npm run worker:estampas -- --provider=openai
+
+# Codex CLI local (usa login ChatGPT)
+ESTAMPA_AI_PROCESSOR_MODE=live npm run worker:estampas -- --provider=codex-local
+
+# Ajuda, sem iniciar o processamento
+npm run worker:estampas -- --help
+```
+
+`--provider` prevalece sobre `IMAGE_ANALYSIS_PROVIDER` no ambiente ou `.env`. Sem ambos, o padrão continua sendo `openai`. Argumentos desconhecidos e provedores inválidos encerram o processo antes de assumir jobs.
+
+### Codex CLI local
+
+Instale/atualize o Codex CLI e execute `codex login` com sua conta ChatGPT no mesmo usuário do sistema que executará o worker. Confira com `codex login status`. Este modo exige login ChatGPT e não aceita autenticação por API key. Usa os limites de uso do Codex da conta; a análise continua sendo realizada na nuvem, portanto a máquina precisa permanecer ligada e conectada.
+
+O worker verifica o executável, as opções necessárias e o login antes de assumir jobs. `CODEX_CLI_PATH` pode apontar para um executável absoluto quando `codex` não estiver no PATH. O CLI precisa oferecer `--image`, `--output-schema`, `--output-last-message`, `--json`, `--ephemeral` e `--ignore-user-config`.
+
+Configuração exclusiva deste provedor:
+
+- `CODEX_CLI_PATH`: executável, padrão `codex`; informe somente o caminho, sem argumentos de shell.
+- `CODEX_CLI_PRIMARY_MODEL`: modelo primário, padrão `gpt-5.4-mini`.
+- `CODEX_CLI_FALLBACK_MODEL`: modelo de fallback, padrão `gpt-5.4`; deve ser diferente do primário. Ambos precisam estar disponíveis na sua conta Codex.
+- `CODEX_CLI_TIMEOUT_MS`: timeout por execução, padrão `180000` (3 minutos).
+
+O fallback permanece no provedor selecionado: `codex-local` nunca troca automaticamente para a API. `AI_PRIMARY_MODEL`, `AI_FALLBACK_MODEL`, `AI_*_IMAGE_DETAIL` e `AI_MAX_OUTPUT_TOKENS` continuam configurando as chamadas da API, não o CLI. As regras de confiança e validação do catálogo são compartilhadas. Tokens reportados pelo CLI ficam nos metadados; `estimated_cost_usd` fica `null`, pois os preços da API não representam o uso da assinatura.
+
+Cada análise usa um diretório temporário privado, recebe o preview e o mesmo JSON Schema e tem a resposta novamente validada pela aplicação. O subprocesso é iniciado sem shell, com prompt por stdin, sandbox `read-only`, sem aprovação interativa e com shell, apps/plugins, memórias e subagentes desabilitados. A configuração pessoal `config.toml` não é carregada; o login salvo continua disponível. Chaves do banco, Olist e API não são herdadas no ambiente. Os temporários são removidos após sucesso ou erro; no macOS/Linux, timeout encerra também o grupo de subprocessos. Encerramento forçado do próprio worker pode deixar temporários no diretório temporário do sistema.
+
+Erros de limite de uso, timeout e falha temporária seguem o retry/backoff já existente. Erros de autenticação/configuração durante uma análise falham sem retry automático; corrija a causa e use o fluxo de reprocessamento. A validação inicial não faz inferência nem confirma acesso a cada modelo. Para validar sua conta e os modelos, comece com uma fila de teste isolada; iniciar o worker consome os jobs pendentes existentes. `batch:estampas` continua sendo exclusivo da Batch API.
+
+Referências: [execução automatizada](https://learn.chatgpt.com/docs/non-interactive-mode), [autenticação](https://learn.chatgpt.com/docs/auth) e [configuração do Codex](https://learn.chatgpt.com/docs/config-file/config-reference).
+
 Para validar somente a infraestrutura do worker em um ambiente de teste, use o stub:
 
 ```bash
@@ -25,7 +61,7 @@ O stub altera status e `ai_processed_hash`; por segurança ele exige a confirma�
 Configurações opcionais:
 
 - `ESTAMPA_WORKER_ID`: identificação da instância; por padrão é gerada com hostname, PID e UUID.
-- `ESTAMPA_WORKER_CONCURRENCY`: quantidade máxima de jobs simultâneos; padrão `2` e limite `8`.
+- `ESTAMPA_WORKER_CONCURRENCY`: quantidade máxima de jobs simultâneos; padrão `2` para API ou `1` para Codex CLI, limite `8`. Um valor explícito no ambiente/`.env` prevalece sobre esses padrões.
 - `ESTAMPA_WORKER_POLL_MS`: intervalo sem trabalho antes de uma nova consulta; padrão `5000`.
 - `ESTAMPA_WORKER_LOCK_TIMEOUT_MS`: tempo para considerar abandonado um lock sem heartbeat; padrão `900000` (15 minutos).
 - `ESTAMPA_DETECTOR_INTERVAL_MS`: intervalo entre varreduras de estampas `PENDING`; padrão `60000` (1 minuto).

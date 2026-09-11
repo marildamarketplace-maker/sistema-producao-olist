@@ -1,12 +1,8 @@
 import type { EstampaCatalogo } from "@/repositories/catalogo-estampas-repository";
 import {
   AI_ANALYSIS_PROMPT_VERSION,
-  AI_FALLBACK_IMAGE_DETAIL,
-  AI_FALLBACK_MODEL,
   AI_MIN_CONFIDENCE,
   AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS,
-  AI_PRIMARY_IMAGE_DETAIL,
-  AI_PRIMARY_MODEL,
 } from "@/config/ai";
 import {
   analiseVisualEstampaStructuredOutput,
@@ -19,7 +15,7 @@ import type {
   ImageAnalysisResult,
 } from "@/services/image-analysis/ImageAnalysisProvider";
 import { criarImageAnalysisProvider } from "@/services/image-analysis/imageAnalysisProviderFactory";
-import { ImageAnalysisProviderError } from "@/services/image-analysis/OpenAIImageAnalysisProvider";
+import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 
 const PROMPT_VISUAL_BASE = `Analise somente o conteúdo visual em português do Brasil. Use evidência observável; não invente contexto. Não infira material, tecido, metragem, tamanho, preço, marketplace ou produto não visível. Sem linguagem comercial.
 
@@ -49,14 +45,8 @@ export const PROMPT_ANALISE_VISUAL_ESTAMPA = `${PROMPT_VISUAL_BASE}\n\n${PROMPT_
 
 export async function analisarVisualEstampa(
   estampa: EstampaCatalogo,
-  primaryProvider: ImageAnalysisProvider = criarImageAnalysisProvider(
-    AI_PRIMARY_MODEL,
-    AI_PRIMARY_IMAGE_DETAIL,
-  ),
-  fallbackProvider: ImageAnalysisProvider = criarImageAnalysisProvider(
-    AI_FALLBACK_MODEL,
-    AI_FALLBACK_IMAGE_DETAIL,
-  ),
+  primaryProvider: ImageAnalysisProvider = criarImageAnalysisProvider("primary"),
+  fallbackProvider: ImageAnalysisProvider = criarImageAnalysisProvider("fallback"),
 ): Promise<ImageAnalysisResult<AnaliseVisualEstampa>> {
   const carregamentoIniciadoEm = Date.now();
   console.info("[estampas-ai] Carregando preview da estampa.", {

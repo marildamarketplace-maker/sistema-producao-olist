@@ -31,7 +31,9 @@ export function criarAtualizacaoResultadoAnaliseIa(
     analise,
     AI_MIN_TEXTILE_PATTERN_CONFIDENCE,
   );
-  const precosModelo = obterPrecosModeloAnaliseIa(resultado.model);
+  const precosModelo = resultado.provider === "openai"
+    ? obterPrecosModeloAnaliseIa(resultado.model)
+    : null;
   const metricasCusto = precosModelo
     ? calcularCustoEstimadoAnaliseIa(resultado.usage, precosModelo)
     : null;
