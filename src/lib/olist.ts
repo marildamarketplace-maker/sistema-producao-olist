@@ -2,6 +2,7 @@
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
+import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -1174,6 +1175,8 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
     idCadastroOlist,
     imagemUrl: null,
     ativo: situacao === SITUACAO_PRODUTO_ATIVO,
+    dataCriacao: produto.dataCriacao,
+    dataAlteracao: produto.dataAlteracao,
   };
 }
 
@@ -1188,7 +1191,10 @@ export async function importarProdutosOlist(aplicativoId: string) {
   let ignorados = 0;
   let ignoradosSemSku = 0;
   const skusIgnorados: string[] = [];
-  const vistos = new Set<string>();
+  const produtosPorSku = new Map<
+    string,
+    NonNullable<ReturnType<typeof normalizarProdutoOlist>>
+  >();
 
   while (true) {
     const pagina = await listarProdutosOlist(token, aplicativoId, offset, limite);
@@ -1212,39 +1218,19 @@ export async function importarProdutosOlist(aplicativoId: string) {
         continue;
       }
 
-      if (vistos.has(produto.sku)) {
+      const produtoSelecionado = produtosPorSku.get(produto.sku);
+
+      if (produtoSelecionado) {
         ignorados += 1;
         skusIgnorados.push(produto.sku);
+        produtosPorSku.set(
+          produto.sku,
+          selecionarProdutoOlistPrioritario(produtoSelecionado, produto),
+        );
         continue;
       }
 
-      vistos.add(produto.sku);
-
-      const existente = await prisma.produto.findUnique({
-        where: { sku: produto.sku },
-        select: { id: true },
-      });
-
-      await prisma.produto.upsert({
-        where: { sku: produto.sku },
-        create: {
-          sku: produto.sku,
-          idCadastroOlist: produto.idCadastroOlist,
-          imagemUrl: produto.imagemUrl,
-          ativo: produto.ativo,
-        },
-        update: {
-          idCadastroOlist: produto.idCadastroOlist,
-          imagemUrl: produto.imagemUrl,
-          ativo: produto.ativo,
-        },
-      });
-
-      if (existente) {
-        atualizados += 1;
-      } else {
-        criados += 1;
-      }
+      produtosPorSku.set(produto.sku, produto);
     }
 
     offset += pagina.produtos.length;
@@ -1254,6 +1240,34 @@ export async function importarProdutosOlist(aplicativoId: string) {
     }
 
     await aguardar(300);
+  }
+
+  for (const produto of produtosPorSku.values()) {
+    const existente = await prisma.produto.findUnique({
+      where: { sku: produto.sku },
+      select: { id: true },
+    });
+
+    await prisma.produto.upsert({
+      where: { sku: produto.sku },
+      create: {
+        sku: produto.sku,
+        idCadastroOlist: produto.idCadastroOlist,
+        imagemUrl: produto.imagemUrl,
+        ativo: produto.ativo,
+      },
+      update: {
+        idCadastroOlist: produto.idCadastroOlist,
+        imagemUrl: produto.imagemUrl,
+        ativo: produto.ativo,
+      },
+    });
+
+    if (existente) {
+      atualizados += 1;
+    } else {
+      criados += 1;
+    }
   }
 
   return {

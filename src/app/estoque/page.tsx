@@ -663,7 +663,8 @@ export default function EstoquePage() {
                   Produtos ignorados
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  {skusIgnorados.length} por SKU duplicado
+                  {skusIgnorados.length} por SKU duplicado — cadastro ativo priorizado; em caso
+                  de empate, o mais recente é selecionado
                   {ignoradosSemSku > 0
                     ? ` e ${ignoradosSemSku} por SKU não informado pela Olist`
                     : ""}.
@@ -685,7 +686,9 @@ export default function EstoquePage() {
                       key={`${sku}-${index}`}
                       className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800"
                     >
-                      <span className="font-medium text-slate-600">SKU duplicado — </span>
+                      <span className="font-medium text-slate-600">
+                        SKU duplicado — ativo priorizado e data usada como desempate —{" "}
+                      </span>
                       <span className="font-mono">{sku}</span>
                     </div>
                   ))}
