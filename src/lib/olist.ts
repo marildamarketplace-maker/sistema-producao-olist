@@ -1791,7 +1791,7 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
       itens: [...itensAgrupados.values()].map((item) => {
         const produto = produtoPorSku.get(item.sku);
 
-        if (!produto) {
+        if (!produto && item.sku) {
           produtosAusentesMap.set(item.sku, {
             sku: item.sku,
           });
@@ -1805,6 +1805,7 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
           produto_id: produto?.id ?? null,
           produto_cadastrado: Boolean(produto),
           detalhe_pendente: false,
+          sku_editavel: !item.sku,
         };
       }),
     };

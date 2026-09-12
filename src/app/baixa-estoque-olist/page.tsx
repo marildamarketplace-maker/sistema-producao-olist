@@ -27,6 +27,7 @@ type ItemBaixaForm = {
   observacao: string;
   produto_cadastrado?: boolean;
   detalhe_pendente?: boolean;
+  sku_editavel?: boolean;
 };
 
 type ResultadoBusca = {
@@ -229,6 +230,7 @@ export default function BaixaEstoqueOlistPage() {
           quantidade: String(item.quantidade),
           pedido_olist_id: pedido.id,
           observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
+          sku_editavel: item.sku_editavel ?? !item.sku.trim(),
         })),
       );
 
@@ -270,17 +272,17 @@ export default function BaixaEstoqueOlistPage() {
     );
   }
 
-  function alterarQuantidadeItemAutomatico(
+  function alterarItemAutomatico(
     pedidoId: string,
     itemOlistId: string,
-    sku: string,
-    quantidade: string,
+    skuAtual: string,
+    patch: Partial<ItemBaixaForm>,
   ) {
     if (!podeSolicitarBaixa) return;
 
     const correspondeAoItem = (item: ItemBaixaForm) =>
       item.pedido_olist_id === pedidoId &&
-      (itemOlistId ? item.item_olist_id === itemOlistId : item.sku === sku);
+      (itemOlistId ? item.item_olist_id === itemOlistId : item.sku === skuAtual);
 
     setResultadoBusca((anterior) => {
       if (!anterior) return anterior;
@@ -292,7 +294,7 @@ export default function BaixaEstoqueOlistPage() {
             ? {
                 ...pedido,
                 itens: pedido.itens.map((item) =>
-                  correspondeAoItem(item) ? { ...item, quantidade } : item,
+                  correspondeAoItem(item) ? { ...item, ...patch } : item,
                 ),
               }
             : pedido,
@@ -302,7 +304,7 @@ export default function BaixaEstoqueOlistPage() {
 
     setItensForm((anteriores) =>
       anteriores.map((item) =>
-        correspondeAoItem(item) ? { ...item, quantidade } : item,
+        correspondeAoItem(item) ? { ...item, ...patch } : item,
       ),
     );
   }
@@ -348,6 +350,7 @@ export default function BaixaEstoqueOlistPage() {
       pedido_olist_id: pedido.id,
       observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
       detalhe_pendente: false,
+      sku_editavel: item.sku_editavel ?? !item.sku.trim(),
     }));
 
     setItensForm((anteriores) => {
@@ -576,9 +579,30 @@ export default function BaixaEstoqueOlistPage() {
                                     key={`${pedido.id}-${item.item_olist_id || item.sku || itemIndex}`}
                                     className="flex min-w-64 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
                                   >
-                                    <span className="font-mono text-sm font-medium text-slate-800">
-                                      {item.sku || "Sem SKU"}
-                                    </span>
+                                    {item.sku_editavel || !item.sku.trim() ? (
+                                      <label className="text-xs font-medium text-amber-800">
+                                        SKU não informado
+                                        <input
+                                          required
+                                          value={item.sku}
+                                          onChange={(event) =>
+                                            alterarItemAutomatico(
+                                              pedido.id,
+                                              item.item_olist_id,
+                                              item.sku,
+                                              { sku: event.target.value, sku_editavel: true },
+                                            )
+                                          }
+                                          placeholder="Digite o SKU"
+                                          aria-label={`SKU do item sem código no pedido ${pedido.id}`}
+                                          className="mt-1 block w-44 rounded-md border border-amber-300 bg-white px-2 py-1 font-mono text-sm text-slate-900"
+                                        />
+                                      </label>
+                                    ) : (
+                                      <span className="font-mono text-sm font-medium text-slate-800">
+                                        {item.sku}
+                                      </span>
+                                    )}
                                     <label className="flex items-center gap-2 text-xs text-slate-600">
                                       Qtd.
                                       <input
@@ -589,11 +613,11 @@ export default function BaixaEstoqueOlistPage() {
                                         inputMode="numeric"
                                         value={item.quantidade}
                                         onChange={(event) =>
-                                          alterarQuantidadeItemAutomatico(
+                                          alterarItemAutomatico(
                                             pedido.id,
                                             item.item_olist_id,
                                             item.sku,
-                                            event.target.value,
+                                            { quantidade: event.target.value },
                                           )
                                         }
                                         aria-label={`Quantidade a baixar do SKU ${item.sku} no pedido ${pedido.id}`}
@@ -660,9 +684,18 @@ export default function BaixaEstoqueOlistPage() {
                   SKU/referência
                   <input
                     required
-                    disabled={itemAutomatico}
+                    disabled={itemAutomatico && !item.sku_editavel}
                     value={item.sku}
-                    onChange={(event) => alterarItem(index, { sku: event.target.value })}
+                    onChange={(event) =>
+                      itemAutomatico
+                        ? alterarItemAutomatico(
+                            item.pedido_olist_id,
+                            item.item_olist_id,
+                            item.sku,
+                            { sku: event.target.value, sku_editavel: true },
+                          )
+                        : alterarItem(index, { sku: event.target.value })
+                    }
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-600"
                   />
                 </label>
@@ -677,11 +710,11 @@ export default function BaixaEstoqueOlistPage() {
                     value={item.quantidade}
                     onChange={(event) =>
                       itemAutomatico
-                        ? alterarQuantidadeItemAutomatico(
+                        ? alterarItemAutomatico(
                             item.pedido_olist_id,
                             item.item_olist_id,
                             item.sku,
-                            event.target.value,
+                            { quantidade: event.target.value },
                           )
                         : alterarItem(index, { quantidade: event.target.value })
                     }
