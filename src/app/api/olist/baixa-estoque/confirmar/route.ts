@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { confirmarBaixaEstoqueOlist } from "@/lib/olist";
+import { prisma } from "@/lib/prisma";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 type ItemBaixaPayload = {
   sku?: unknown;
@@ -12,11 +14,22 @@ type ItemBaixaPayload = {
 
 export async function POST(req: NextRequest) {
   try {
+    const autenticado = await getUsuarioAutenticado(req);
+    const usuario = await prisma.usuario.findUnique({
+      where: { id: autenticado.id },
+      select: { podeSolicitarBaixa: true },
+    });
+
+    if (!usuario?.podeSolicitarBaixa) {
+      return NextResponse.json({ error: "Sem permissão para solicitar baixa de estoque." }, { status: 403 });
+    }
+
     const body = await req.json();
     const origem = body?.origem === "automatica" ? "automatica" : "manual";
     const itens = (Array.isArray(body?.itens) ? body.itens : []) as ItemBaixaPayload[];
 
     const result = await confirmarBaixaEstoqueOlist({
+      aplicativoId: autenticado.aplicativoId,
       origem,
       observacao: typeof body?.observacao === "string" ? body.observacao : null,
       periodoFimBusca: typeof body?.periodo_fim_busca === "string" ? body.periodo_fim_busca : null,
