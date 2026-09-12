@@ -6,7 +6,6 @@ import { ChevronDown } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
-import { QUANTIDADE_ESTOQUE_MAXIMA, quantidadeEstoqueValida } from "@/lib/quantidade-estoque";
 import { supabase } from "@/lib/supabase";
 
 type PedidoOlistBaixa = {
@@ -230,7 +229,7 @@ export default function BaixaEstoqueOlistPage() {
           quantidade: String(item.quantidade),
           pedido_olist_id: pedido.id,
           observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
-          sku_editavel: item.sku_editavel ?? !item.sku.trim(),
+          sku_editavel: !item.sku.trim(),
         })),
       );
 
@@ -269,43 +268,6 @@ export default function BaixaEstoqueOlistPage() {
 
     setItensForm((anteriores) =>
       anteriores.map((item, i) => (i === index ? { ...item, ...patch } : item)),
-    );
-  }
-
-  function alterarItemAutomatico(
-    pedidoId: string,
-    itemOlistId: string,
-    skuAtual: string,
-    patch: Partial<ItemBaixaForm>,
-  ) {
-    if (!podeSolicitarBaixa) return;
-
-    const correspondeAoItem = (item: ItemBaixaForm) =>
-      item.pedido_olist_id === pedidoId &&
-      (itemOlistId ? item.item_olist_id === itemOlistId : item.sku === skuAtual);
-
-    setResultadoBusca((anterior) => {
-      if (!anterior) return anterior;
-
-      return {
-        ...anterior,
-        pedidos: anterior.pedidos.map((pedido) =>
-          pedido.id === pedidoId
-            ? {
-                ...pedido,
-                itens: pedido.itens.map((item) =>
-                  correspondeAoItem(item) ? { ...item, ...patch } : item,
-                ),
-              }
-            : pedido,
-        ),
-      };
-    });
-
-    setItensForm((anteriores) =>
-      anteriores.map((item) =>
-        correspondeAoItem(item) ? { ...item, ...patch } : item,
-      ),
     );
   }
 
@@ -350,7 +312,7 @@ export default function BaixaEstoqueOlistPage() {
       pedido_olist_id: pedido.id,
       observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
       detalhe_pendente: false,
-      sku_editavel: item.sku_editavel ?? !item.sku.trim(),
+      sku_editavel: !item.sku.trim(),
     }));
 
     setItensForm((anteriores) => {
@@ -427,12 +389,10 @@ export default function BaixaEstoqueOlistPage() {
       observacao: item.observacao.trim() || null,
     }));
 
-    const itemInvalido = itens.find(
-      (item) => !item.sku || !quantidadeEstoqueValida(item.quantidade),
-    );
+    const itemInvalido = itens.find((item) => !item.sku || Number.isNaN(item.quantidade) || item.quantidade <= 0);
 
     if (itemInvalido) {
-      setErrorMessage("Preencha o SKU e uma quantidade inteira maior que zero para todos os itens.");
+      setErrorMessage("Preencha SKU, descricao e quantidade valida para todos os itens.");
       setSalvando(false);
       return;
     }
@@ -445,10 +405,7 @@ export default function BaixaEstoqueOlistPage() {
         periodo_fim_busca: modoAtual === "automatica" ? resultadoBusca?.periodo_fim ?? null : null,
         itens,
       },
-      {
-        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
-        validateStatus: () => true,
-      },
+      { validateStatus: () => true },
     );
 
     if (resp.status < 200 || resp.status >= 300) {
@@ -552,7 +509,7 @@ export default function BaixaEstoqueOlistPage() {
                       </th>
                       <th className="p-3">Pedido Olist</th>
                       <th className="p-3">Itens</th>
-                      <th className="p-3">Produtos e quantidade a baixar</th>
+                      <th className="p-3">Produtos</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -572,62 +529,7 @@ export default function BaixaEstoqueOlistPage() {
                         <td className="p-3 text-slate-700">
                           {pedido.detalhe_pendente
                             ? "Sincronize o pedido no formulario"
-                            : (
-                              <div className="space-y-2">
-                                {pedido.itens.map((item, itemIndex) => (
-                                  <div
-                                    key={`${pedido.id}-${item.item_olist_id || item.sku || itemIndex}`}
-                                    className="flex min-w-64 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-                                  >
-                                    {item.sku_editavel || !item.sku.trim() ? (
-                                      <label className="text-xs font-medium text-amber-800">
-                                        SKU não informado
-                                        <input
-                                          required
-                                          value={item.sku}
-                                          onChange={(event) =>
-                                            alterarItemAutomatico(
-                                              pedido.id,
-                                              item.item_olist_id,
-                                              item.sku,
-                                              { sku: event.target.value, sku_editavel: true },
-                                            )
-                                          }
-                                          placeholder="Digite o SKU"
-                                          aria-label={`SKU do item sem código no pedido ${pedido.id}`}
-                                          className="mt-1 block w-44 rounded-md border border-amber-300 bg-white px-2 py-1 font-mono text-sm text-slate-900"
-                                        />
-                                      </label>
-                                    ) : (
-                                      <span className="font-mono text-sm font-medium text-slate-800">
-                                        {item.sku}
-                                      </span>
-                                    )}
-                                    <label className="flex items-center gap-2 text-xs text-slate-600">
-                                      Qtd.
-                                      <input
-                                        type="number"
-                                        min={1}
-                                        max={QUANTIDADE_ESTOQUE_MAXIMA}
-                                        step={1}
-                                        inputMode="numeric"
-                                        value={item.quantidade}
-                                        onChange={(event) =>
-                                          alterarItemAutomatico(
-                                            pedido.id,
-                                            item.item_olist_id,
-                                            item.sku,
-                                            { quantidade: event.target.value },
-                                          )
-                                        }
-                                        aria-label={`Quantidade a baixar do SKU ${item.sku} no pedido ${pedido.id}`}
-                                        className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm text-slate-900"
-                                      />
-                                    </label>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            : pedido.itens.map((item) => `${item.sku} (${item.quantidade})`).join(", ")}
                         </td>
                       </tr>
                     ))}
@@ -686,16 +588,7 @@ export default function BaixaEstoqueOlistPage() {
                     required
                     disabled={itemAutomatico && !item.sku_editavel}
                     value={item.sku}
-                    onChange={(event) =>
-                      itemAutomatico
-                        ? alterarItemAutomatico(
-                            item.pedido_olist_id,
-                            item.item_olist_id,
-                            item.sku,
-                            { sku: event.target.value, sku_editavel: true },
-                          )
-                        : alterarItem(index, { sku: event.target.value })
-                    }
+                    onChange={(event) => alterarItem(index, { sku: event.target.value })}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-600"
                   />
                 </label>
@@ -704,20 +597,9 @@ export default function BaixaEstoqueOlistPage() {
                   <input
                     required
                     min={1}
-                    max={QUANTIDADE_ESTOQUE_MAXIMA}
-                    step={1}
                     type="number"
                     value={item.quantidade}
-                    onChange={(event) =>
-                      itemAutomatico
-                        ? alterarItemAutomatico(
-                            item.pedido_olist_id,
-                            item.item_olist_id,
-                            item.sku,
-                            { quantidade: event.target.value },
-                          )
-                        : alterarItem(index, { quantidade: event.target.value })
-                    }
+                    onChange={(event) => alterarItem(index, { quantidade: event.target.value })}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
                   />
                 </label>

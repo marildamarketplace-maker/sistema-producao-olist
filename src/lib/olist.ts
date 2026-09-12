@@ -3,7 +3,6 @@ import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
 import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
-import { quantidadeEstoqueValida } from "@/lib/quantidade-estoque";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -1791,7 +1790,7 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
       itens: [...itensAgrupados.values()].map((item) => {
         const produto = produtoPorSku.get(item.sku);
 
-        if (!produto && item.sku) {
+        if (!produto) {
           produtosAusentesMap.set(item.sku, {
             sku: item.sku,
           });
@@ -1805,7 +1804,6 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
           produto_id: produto?.id ?? null,
           produto_cadastrado: Boolean(produto),
           detalhe_pendente: false,
-          sku_editavel: !item.sku,
         };
       }),
     };
@@ -1917,7 +1915,6 @@ export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, p
 }
 
 export async function confirmarBaixaEstoqueOlist(input: {
-  aplicativoId: string;
   origem: "automatica" | "manual";
   observacao?: string | null;
   periodoFimBusca?: string | null;
@@ -1941,14 +1938,6 @@ export async function confirmarBaixaEstoqueOlist(input: {
     throw new Error("Todos os itens precisam de SKU/referência.");
   }
 
-  const itemComQuantidadeInvalida = itensNormalizados.find(
-    (item) => !quantidadeEstoqueValida(item.quantidade),
-  );
-
-  if (itemComQuantidadeInvalida) {
-    throw new Error(`Quantidade inválida para ${itemComQuantidadeInvalida.sku}.`);
-  }
-
   const skus = [...new Set(skusInformados)];
 
   const produtos = await prisma.produto.findMany({
@@ -1965,7 +1954,6 @@ export async function confirmarBaixaEstoqueOlist(input: {
         ativo: true,
         metaEstoque: null,
         createdAt: new Date(),
-        aplicativoId: input.aplicativoId,
       })),
       skipDuplicates: true,
     });
@@ -2021,7 +2009,6 @@ export async function confirmarBaixaEstoqueOlist(input: {
       data: {
         origem: input.origem,
         observacao: input.observacao?.trim() || null,
-        aplicativoId: input.aplicativoId,
       },
       select: { id: true },
     });
@@ -2030,7 +2017,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
       const produto = produtoPorSku.get(item.sku);
       const quantidade = Number(item.quantidade);
 
-      if (!produto || !quantidadeEstoqueValida(quantidade)) {
+      if (!produto || Number.isNaN(quantidade) || quantidade <= 0) {
         throw new Error(`Quantidade inválida para ${item.sku}.`);
       }
 
@@ -2042,7 +2029,6 @@ export async function confirmarBaixaEstoqueOlist(input: {
           quantidade,
           origem: input.origem === "automatica" ? "BAIXA_OLIST" : "BAIXA_MANUAL",
           referenciaId: baixa.id,
-          aplicativoId: input.aplicativoId,
           observacao:
             item.observacao ||
             (item.pedidoOlistId ? `Baixa por pedido Olist ${item.pedidoOlistId}` : "Baixa manual de estoque"),
@@ -2062,7 +2048,6 @@ export async function confirmarBaixaEstoqueOlist(input: {
             observacao: item.observacao,
             origem: input.origem,
             movimentacaoId: movimentacao.id,
-            aplicativoId: input.aplicativoId,
           },
         });
       } catch (error) {
