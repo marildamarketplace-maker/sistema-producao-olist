@@ -19,6 +19,7 @@ type Produto = {
 };
 
 type Movimentacao = {
+  id: string;
   produto_id: string | null;
   sku: string;
   tipo_movimento: string;
@@ -232,13 +233,27 @@ export default function DashboardPage() {
       itensResp,
       configsResp,
     ] = await Promise.all([
-      supabase
-        .from("produtos")
-        .select("id, sku, imagem_url, meta_estoque, minimo_estoque, ativo")
-        .eq("ativo", true),
-      supabase
-        .from("movimentacoes_estoque")
-        .select("produto_id, sku, tipo_movimento, quantidade, created_at"),
+      carregarTodasPaginas<Produto, { message: string }>(async (inicio, fim) => {
+        const { data, error } = await supabase
+          .from("produtos")
+          .select("id, sku, imagem_url, meta_estoque, minimo_estoque, ativo")
+          .eq("ativo", true)
+          .order("sku", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim);
+
+        return { data: (data as Produto[] | null), error };
+      }),
+      carregarTodasPaginas<Movimentacao, { message: string }>(async (inicio, fim) => {
+        const { data, error } = await supabase
+          .from("movimentacoes_estoque")
+          .select("id, produto_id, sku, tipo_movimento, quantidade, created_at")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim);
+
+        return { data: (data as Movimentacao[] | null), error };
+      }),
       carregarTodasPaginas<VendaOlist, { message: string }>(async (inicio, fim) => {
         const { data, error } = await supabase
           .from("itens_baixa_estoque_olist")
@@ -278,8 +293,8 @@ export default function DashboardPage() {
       return;
     }
 
-    setProdutos((produtosResp.data as Produto[]) ?? []);
-    setMovimentacoes((movimentacoesResp.data as Movimentacao[]) ?? []);
+    setProdutos(produtosResp.data);
+    setMovimentacoes(movimentacoesResp.data);
     setVendasOlist(vendasResp.data);
     setSolicitacoes((solicitacoesResp.data as Solicitacao[]) ?? []);
     setSolicitacoesDevolucao(devolucoesResp.error ? [] : ((devolucoesResp.data as SolicitacaoDevolucao[]) ?? []));
