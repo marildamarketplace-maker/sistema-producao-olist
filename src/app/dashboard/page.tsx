@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
+import { carregarTodasPaginas } from "@/lib/paginacao";
 import { supabase } from "@/lib/supabase";
 import { hasAnyPermission } from "@/lib/permissions";
 
@@ -238,7 +239,16 @@ export default function DashboardPage() {
       supabase
         .from("movimentacoes_estoque")
         .select("produto_id, sku, tipo_movimento, quantidade, created_at"),
-      supabase.from("itens_baixa_estoque_olist").select("sku, quantidade, created_at"),
+      carregarTodasPaginas<VendaOlist, { message: string }>(async (inicio, fim) => {
+        const { data, error } = await supabase
+          .from("itens_baixa_estoque_olist")
+          .select("id, sku, quantidade, created_at")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim);
+
+        return { data: (data as VendaOlist[] | null), error };
+      }),
       supabase
         .from("solicitacoes_producao")
         .select("id, data_entrega, status, prioridade_producao, created_at"),
@@ -270,7 +280,7 @@ export default function DashboardPage() {
 
     setProdutos((produtosResp.data as Produto[]) ?? []);
     setMovimentacoes((movimentacoesResp.data as Movimentacao[]) ?? []);
-    setVendasOlist((vendasResp.data as VendaOlist[]) ?? []);
+    setVendasOlist(vendasResp.data);
     setSolicitacoes((solicitacoesResp.data as Solicitacao[]) ?? []);
     setSolicitacoesDevolucao(devolucoesResp.error ? [] : ((devolucoesResp.data as SolicitacaoDevolucao[]) ?? []));
     setItensSolicitacao((itensResp.data as ItemSolicitacao[]) ?? []);

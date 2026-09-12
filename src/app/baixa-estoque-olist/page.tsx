@@ -6,6 +6,7 @@ import { ChevronDown } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { carregarTodasPaginas } from "@/lib/paginacao";
 import { supabase } from "@/lib/supabase";
 
 type PedidoOlistBaixa = {
@@ -133,10 +134,16 @@ export default function BaixaEstoqueOlistPage() {
         .from("baixas_estoque_olist")
         .select("id, origem, observacao, created_at")
         .order("created_at", { ascending: false }),
-      supabase
-        .from("itens_baixa_estoque_olist")
-        .select("id, baixa_id, sku, quantidade, pedido_olist_id, item_olist_id, observacao, origem, created_at")
-        .order("created_at", { ascending: true }),
+      carregarTodasPaginas<ItemBaixaHistorico, { message: string }>(async (inicio, fim) => {
+        const { data, error } = await supabase
+          .from("itens_baixa_estoque_olist")
+          .select("id, baixa_id, sku, quantidade, pedido_olist_id, item_olist_id, observacao, origem, created_at")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim);
+
+        return { data: (data as ItemBaixaHistorico[] | null), error };
+      }),
     ]);
 
     if (baixasResp.error || itensResp.error) {
@@ -146,7 +153,7 @@ export default function BaixaEstoqueOlistPage() {
     }
 
     setHistoricoBaixas((baixasResp.data as BaixaHistorico[]) ?? []);
-    setItensHistorico((itensResp.data as ItemBaixaHistorico[]) ?? []);
+    setItensHistorico(itensResp.data);
     setLoadingHistorico(false);
   }
 
