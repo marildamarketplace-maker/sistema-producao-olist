@@ -172,6 +172,14 @@ type ItemEstoqueSuficiente = {
   minimo_estoque: number;
 };
 
+type ItemCobertoProducaoExistente = {
+  sku: string;
+  estoque_atual: number;
+  quantidade_pedidos: number;
+  quantidade_em_producao: number;
+  quantidade_disponivel: number;
+};
+
 type ItemDashboardPendente = {
   produto_id: string;
   sku: string;
@@ -181,7 +189,7 @@ type ItemDashboardPendente = {
 
 const FILTRO_DATA_BASE_OLIST = "APROVACAO_PEDIDO";
 const TIME_ZONE = "America/Sao_Paulo";
-const SITUACOES_OLIST_PADRAO = ["1", "3", "4"];
+const SITUACOES_OLIST_PADRAO = ["0", "1", "3", "4"];
 const SITUACOES_OLIST_OPCOES = [
   { value: "8", label: "8 - Dados Incompletos" },
   { value: "0", label: "0 - Aberta" },
@@ -240,8 +248,20 @@ function normalizarQuantidadeInteira(valor: string) {
   return String(Math.ceil(quantidade));
 }
 
-function quantidadeMinimaProducao(item: Pick<ItemForm, "quantidade_pedidos">) {
-  return Math.max(0, Math.ceil(Number(item.quantidade_pedidos ?? 0)));
+function quantidadeMinimaProducao(
+  item: Pick<ItemForm, "quantidade_pedidos" | "quantidade_em_producao" | "estoque_atual">,
+) {
+  const quantidadePedidos = Number(item.quantidade_pedidos ?? 0);
+  const quantidadeEmProducao = Number(item.quantidade_em_producao ?? 0);
+
+  if (quantidadeEmProducao > 0) {
+    return Math.max(
+      0,
+      Math.ceil(quantidadePedidos - Number(item.estoque_atual ?? 0) - quantidadeEmProducao),
+    );
+  }
+
+  return Math.max(0, Math.ceil(quantidadePedidos));
 }
 
 function normalizarQuantidadeProducao(item: ItemForm) {
@@ -351,6 +371,8 @@ export default function SolicitacoesProducaoPage() {
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
   const [processamentoOlistPendente, setProcessamentoOlistPendente] = useState<ProcessamentoOlistPendente | null>(null);
+  const [itensCobertosProducaoExistente, setItensCobertosProducaoExistente] = useState<ItemCobertoProducaoExistente[]>([]);
+  const [itensEstoqueSuficiente, setItensEstoqueSuficiente] = useState<ItemEstoqueSuficiente[]>([]);
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
   const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
 
@@ -862,6 +884,8 @@ export default function SolicitacoesProducaoPage() {
     setObservacaoGeral("");
     setItensForm([{ ...ITEM_INICIAL }]);
     setProcessamentoOlistPendente(null);
+    setItensCobertosProducaoExistente([]);
+    setItensEstoqueSuficiente([]);
     setPrioridadeProducao(false);
     setSolicitacaoEditandoId(null);
   }
@@ -880,6 +904,8 @@ export default function SolicitacoesProducaoPage() {
     setPrioridadeProducao(Boolean(solicitacao.prioridade_producao));
     setProcessamentoOlistPendente(null);
     setResumoImportacaoOlist(null);
+    setItensCobertosProducaoExistente([]);
+    setItensEstoqueSuficiente([]);
     setErrorMessage(null);
     setItensForm(
       itensSolicitacao.map((item) => ({
@@ -1066,6 +1092,8 @@ export default function SolicitacoesProducaoPage() {
     setErrorMessage(null);
     setResumoImportacaoOlist(null);
     setProcessamentoOlistPendente(null);
+    setItensCobertosProducaoExistente([]);
+    setItensEstoqueSuficiente([]);
     if (!editandoSolicitacao) setPrioridadeProducao(false);
     const resp = await axios.post(
       "/api/olist/gerar-solicitacao",
@@ -1098,15 +1126,28 @@ export default function SolicitacoesProducaoPage() {
       return;
     }
     const itensPreparados = (Array.isArray(json.itens) ? json.itens : []) as ItemPreparadoOlist[];
+    const itensCobertos = (
+      Array.isArray(json.itens_cobertos_producao_existente)
+        ? json.itens_cobertos_producao_existente
+        : []
+    ) as ItemCobertoProducaoExistente[];
+    const itensComEstoque = (
+      Array.isArray(json.itens_estoque_suficiente)
+        ? json.itens_estoque_suficiente
+        : []
+    ) as ItemEstoqueSuficiente[];
 
-    if (itensPreparados.length === 0) {
+    setItensCobertosProducaoExistente(itensCobertos);
+    setItensEstoqueSuficiente(itensComEstoque);
+
+    if (itensPreparados.length === 0 && itensCobertos.length === 0 && itensComEstoque.length === 0) {
       setErrorMessage("A Olist retornou pedidos, mas nenhum item foi preparado para producao.");
       setIntegrandoOlist(false);
       return;
     }
 
-    const produtosAtualizados = await carregarDados();
-    if (!editandoSolicitacao) {
+    const produtosAtualizados = itensPreparados.length > 0 ? await carregarDados() : produtos;
+    if (!editandoSolicitacao && itensPreparados.length > 0) {
       setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
       setObservacaoGeral("MV:");
       setPrioridadeProducao(Boolean(json.prioridade_producao));
@@ -1131,16 +1172,18 @@ export default function SolicitacoesProducaoPage() {
         });
       }),
     );
-    setItensForm((itensAtuais) =>
-      editandoSolicitacao
-        ? [...itensAtuais, ...itensComProdutoFornecido]
-        : itensComProdutoFornecido,
-    );
-    setProcessamentoOlistPendente({
-      periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
-      periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
-      itens: (Array.isArray(json.rastreio_olist) ? json.rastreio_olist : []) as RastreioOlist[],
-    });
+    if (itensComProdutoFornecido.length > 0) {
+      setItensForm((itensAtuais) =>
+        editandoSolicitacao
+          ? [...itensAtuais, ...itensComProdutoFornecido]
+          : itensComProdutoFornecido,
+      );
+      setProcessamentoOlistPendente({
+        periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
+        periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
+        itens: (Array.isArray(json.rastreio_olist) ? json.rastreio_olist : []) as RastreioOlist[],
+      });
+    }
     setResumoImportacaoOlist({
       pedidos_encontrados: Number(json.pedidos_encontrados ?? 0),
       pedidos_adicionados: Number(json.pedidos_adicionados ?? 0),
@@ -1185,7 +1228,7 @@ export default function SolicitacoesProducaoPage() {
     const itemAbaixoPedido = itensNormalizados.find((item) => item.quantidade < quantidadeMinimaProducao(item));
 
     if (itemAbaixoPedido) {
-      setErrorMessage(`A quantidade de produção de ${itemAbaixoPedido.produto_busca} deve ser pelo menos a quantidade vendida (${quantidadeMinimaProducao(itemAbaixoPedido)}).`);
+      setErrorMessage(`A quantidade de produção de ${itemAbaixoPedido.produto_busca} deve cobrir ao menos a quantidade ainda não atendida (${quantidadeMinimaProducao(itemAbaixoPedido)}).`);
       setSaving(false);
       return;
     }
@@ -1570,13 +1613,33 @@ export default function SolicitacoesProducaoPage() {
             <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
               <p><strong>Pedidos encontrados:</strong> {resumoImportacaoOlist.pedidos_encontrados}</p>
               <p><strong>Pedidos adicionados:</strong> {resumoImportacaoOlist.pedidos_adicionados}</p>
-              <p><strong>Itens preenchidos:</strong> {resumoImportacaoOlist.total_itens}</p>
+              <p><strong>Itens para nova solicitação:</strong> {resumoImportacaoOlist.total_itens}</p>
               <p><strong>Produtos cadastrados:</strong> {resumoImportacaoOlist.produtos_cadastrados}</p>
               {resumoImportacaoOlist.pedidos_ignorados > 0 ? (
                 <p className="mt-1 text-slate-600">Motivo: {resumoImportacaoOlist.motivo_pedidos_ignorados}</p>
               ) : (
                 <p><strong>Todos os pedidos encontrados foram considerados.</strong></p>
               )}
+            </div>
+          )}
+          {(itensCobertosProducaoExistente.length > 0 || itensEstoqueSuficiente.length > 0) && (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <p className="font-semibold">Itens que não precisam de nova solicitação</p>
+              <p className="mt-1 text-emerald-800">
+                Estes itens não foram adicionados ao formulário de nova solicitação.
+              </p>
+              <ul className="mt-2 space-y-1">
+                {itensCobertosProducaoExistente.map((item) => (
+                  <li key={item.sku}>
+                    <strong>{item.sku}</strong>: estoque {item.estoque_atual} + solicitado {item.quantidade_em_producao} = {item.quantidade_disponivel}; demanda {item.quantidade_pedidos}.
+                  </li>
+                ))}
+                {itensEstoqueSuficiente.map((item) => (
+                  <li key={`estoque-${item.sku}`}>
+                    <strong>{item.sku}</strong>: tem {item.estoque_atual} em estoque; demanda {item.quantidade_pedidos}; saldo após os pedidos {item.estoque_apos_pedidos}.
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

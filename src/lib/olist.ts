@@ -3,6 +3,7 @@ import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
 import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
+import { calcularNecessidadeProducaoOlist } from "@/lib/necessidade-producao-olist";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -83,6 +84,14 @@ type ItemEstoqueSuficiente = {
   quantidade_pedidos: number;
   estoque_apos_pedidos: number;
   minimo_estoque: number;
+};
+
+type ItemCobertoProducaoExistente = {
+  sku: string;
+  estoque_atual: number;
+  quantidade_pedidos: number;
+  quantidade_em_producao: number;
+  quantidade_disponivel: number;
 };
 
 export class NecessidadeProducaoError extends Error {
@@ -309,10 +318,6 @@ async function getOlistComRetry(
   }
 
   throw new Error("Não foi possível concluir a consulta à Olist.");
-}
-
-function arredondarParaPar(valor: number) {
-  return valor % 2 === 0 ? valor : valor + 1;
 }
 
 function logIntegracaoOlist(input: {
@@ -1531,6 +1536,7 @@ function montarItensSolicitacao(
   estoqueRows: EstoqueAtualRow[],
   metaGeral: number,
   minimoGeral: number,
+  quantidadeEmProducaoPorSku: ReadonlyMap<string, number>,
 ) {
   const estoqueMap = new Map(
     estoqueRows.map((e) => [e.sku, Number(e.estoque_atual ?? 0)]),
@@ -1538,6 +1544,7 @@ function montarItensSolicitacao(
 
   const itens: ItemSolicitacao[] = [];
   const estoqueSuficiente: ItemEstoqueSuficiente[] = [];
+  const itensCobertosProducaoExistente: ItemCobertoProducaoExistente[] = [];
   let prioridadeProducao = false;
 
   for (const produto of produtos) {
@@ -1552,81 +1559,85 @@ function montarItensSolicitacao(
 
     const metaEstoque = produto.meta_estoque ?? metaGeral;
     const minimoEstoque = produto.minimo_estoque ?? minimoGeral;
-    const estoqueAposPedidos = estoqueAtual - quantidadePedidosIntegracao;
+    const quantidadeEmProducao = quantidadeEmProducaoPorSku.get(produto.sku) ?? 0;
+    const necessidade = calcularNecessidadeProducaoOlist({
+      estoqueAtual,
+      quantidadePedidos: quantidadePedidosIntegracao,
+      quantidadeEmProducao,
+      metaEstoque,
+      minimoEstoque,
+    });
 
-    const prioridadeItem = estoqueAtual < quantidadePedidosIntegracao;
-
-    if (prioridadeItem) {
-      prioridadeProducao = true;
+    if (necessidade.tipo === "COBERTO_POR_PRODUCAO_EXISTENTE") {
+      itensCobertosProducaoExistente.push({
+        sku: produto.sku,
+        estoque_atual: estoqueAtual,
+        quantidade_pedidos: quantidadePedidosIntegracao,
+        quantidade_em_producao: quantidadeEmProducao,
+        quantidade_disponivel: necessidade.quantidadeDisponivel,
+      });
+      continue;
     }
 
-    if (estoqueAposPedidos >= minimoEstoque) {
+    if (necessidade.tipo === "ESTOQUE_SUFICIENTE") {
       estoqueSuficiente.push({
         sku: produto.sku,
         estoque_atual: estoqueAtual,
         quantidade_pedidos: quantidadePedidosIntegracao,
-        estoque_apos_pedidos: estoqueAposPedidos,
+        estoque_apos_pedidos: necessidade.estoqueProjetado,
         minimo_estoque: minimoEstoque,
       });
       continue;
     }
 
-    const quantidadeMinimaPedido = Math.ceil(quantidadePedidosIntegracao);
-    const quantidadeAProduzir = arredondarParaPar(
-      Math.max(0, metaEstoque - estoqueAposPedidos, quantidadeMinimaPedido),
-    );
+    if (necessidade.prioridade) {
+      prioridadeProducao = true;
+    }
 
     itens.push({
       produto_id: produto.id,
       sku: produto.sku,
       imagem_url: produto.imagem_url ?? demanda.imagem_url,
-      quantidade_solicitada: quantidadeAProduzir,
-      prioridade_producao: prioridadeItem,
+      quantidade_solicitada: necessidade.quantidadeSolicitada,
+      prioridade_producao: necessidade.prioridade,
+      existe_em_producao: quantidadeEmProducao > 0,
+      quantidade_em_producao: quantidadeEmProducao,
       quantidade_pedidos: quantidadePedidosIntegracao,
       estoque_atual: estoqueAtual,
     });
   }
 
-  return { itens, prioridadeProducao, estoqueSuficiente };
+  return { itens, prioridadeProducao, estoqueSuficiente, itensCobertosProducaoExistente };
 }
 
+async function buscarQuantidadesEmProducao(skus: string[], aplicativoId: string) {
+  if (skus.length === 0) return new Map<string, number>();
 
-async function marcarItensJaSolicitadosEmProducao(itens: ItemSolicitacao[]) {
-  if (itens.length === 0) return itens;
-
-  const skus = [...new Set(itens.map((item) => item.sku))];
   const solicitacoesEmProducao = await prisma.solicitacaoProducao.findMany({
-    where: { status: "em_producao" },
+    where: { status: "em_producao", aplicativoId },
     select: { id: true },
   });
   const solicitacoesIds = solicitacoesEmProducao.map((solicitacao) => solicitacao.id);
 
-  if (solicitacoesIds.length === 0) return itens;
+  if (solicitacoesIds.length === 0) return new Map<string, number>();
 
   const itensEmProducao = await prisma.itemSolicitacaoProducao.groupBy({
     by: ["sku"],
     where: {
       solicitacaoId: { in: solicitacoesIds },
       sku: { in: skus },
+      aplicativoId,
     },
     _sum: {
       quantidadeSolicitada: true,
     },
   });
-  const quantidadePorSku = new Map(
+  return new Map(
     itensEmProducao.map((item) => [item.sku, Number(item._sum.quantidadeSolicitada ?? 0)]),
   );
+}
 
-  return itens.map((item) => {
-    const quantidadeEmProducao = quantidadePorSku.get(item.sku) ?? 0;
-
-    return {
-      ...item,
-      existe_em_producao: quantidadeEmProducao > 0,
-      quantidade_em_producao: quantidadeEmProducao,
-    };
-  });
-}/* =========================================================
+/* =========================================================
  * PERSISTÊNCIA
  * ======================================================= */
 
@@ -2161,19 +2172,27 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
   const dadosInternos = await buscarDadosInternos(resultadoAgregacao.skus);
 
-  const { itens, prioridadeProducao, estoqueSuficiente } = montarItensSolicitacao(
+  const quantidadeEmProducaoPorSku = await buscarQuantidadesEmProducao(
+    resultadoAgregacao.skus,
+    input.aplicativoId,
+  );
+
+  const { itens, prioridadeProducao, estoqueSuficiente, itensCobertosProducaoExistente } = montarItensSolicitacao(
     resultadoAgregacao.agregados,
     dadosInternos.produtos,
     dadosInternos.estoqueRows,
     dadosInternos.metaGeral,
     dadosInternos.minimoGeral,
+    quantidadeEmProducaoPorSku,
   );
 
-  if (itens.length === 0) {
+  if (
+    itens.length === 0
+    && itensCobertosProducaoExistente.length === 0
+    && estoqueSuficiente.length === 0
+  ) {
     throw new NecessidadeProducaoError(estoqueSuficiente);
   }
-
-  const itensComStatusProducao = await marcarItensJaSolicitadosEmProducao(itens);
 
   return {
     data_entrega: input.dataLimite,
@@ -2182,8 +2201,10 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
     periodo_fim: processamentoEm,
     observacao_geral: "MV:",
     prioridade_producao: prioridadeProducao,
-    itens: itensComStatusProducao,
-    total_itens: itensComStatusProducao.length,
+    itens,
+    itens_cobertos_producao_existente: itensCobertosProducaoExistente,
+    itens_estoque_suficiente: estoqueSuficiente,
+    total_itens: itens.length,
     itens_ja_processados: 0,
     pedidos_encontrados: pedidosEncontrados,
     pedidos_adicionados: resultadoAgregacao.pedidosAdicionados,
