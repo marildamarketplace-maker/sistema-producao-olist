@@ -1,8 +1,8 @@
 ﻿"use client";
 
-import { Fragment, FormEvent, useCallback, useEffect, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { ChevronDown, Download, Pencil, Printer, Send, XCircle } from "lucide-react";
+import { ChevronDown, Download, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -339,6 +339,7 @@ function ordenarSolicitacoes(a: Solicitacao, b: Solicitacao) {
 
 export default function SolicitacoesProducaoPage() {
   const { session, usuario } = useAuth();
+  const formularioManualRef = useRef<HTMLElement>(null);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [tiposProduto, setTiposProduto] = useState<TipoProdutoOpcao[]>([]);
   const [tamanhos, setTamanhos] = useState<TamanhoOpcao[]>([]);
@@ -375,6 +376,12 @@ export default function SolicitacoesProducaoPage() {
   const [itensEstoqueSuficiente, setItensEstoqueSuficiente] = useState<ItemEstoqueSuficiente[]>([]);
   const [prioridadeProducao, setPrioridadeProducao] = useState(false);
   const podeSolicitarProducao = Boolean(usuario?.podeSolicitarProducao);
+
+  function rolarParaFormularioManual() {
+    window.requestAnimationFrame(() => {
+      formularioManualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   const carregarDados = useCallback(async () => {
     setLoading(true);
@@ -917,7 +924,7 @@ export default function SolicitacoesProducaoPage() {
         observacao: item.observacao ?? "",
       })),
     );
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    rolarParaFormularioManual();
   }
 
   async function cancelarSolicitacao(solicitacao: Solicitacao) {
@@ -1183,6 +1190,7 @@ export default function SolicitacoesProducaoPage() {
         periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
         itens: (Array.isArray(json.rastreio_olist) ? json.rastreio_olist : []) as RastreioOlist[],
       });
+      rolarParaFormularioManual();
     }
     setResumoImportacaoOlist({
       pedidos_encontrados: Number(json.pedidos_encontrados ?? 0),
@@ -1569,7 +1577,7 @@ export default function SolicitacoesProducaoPage() {
 
   return (
     <AccessGuard permissions={["podeSolicitarProducao", "podeVisualizarProducao"]}>
-      <div className="space-y-8">
+      <div className="space-y-5 sm:space-y-8">
       <PageHeader
         title="Solicitações de Produção"
         description="Crie novas solicitações e acompanhe as solicitações já abertas."
@@ -1583,7 +1591,7 @@ export default function SolicitacoesProducaoPage() {
 
 
       {podeSolicitarProducao && (
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Gerar solicitação via Olist</h3>
         <div className="flex flex-col gap-3 md:max-w-md">
           <label className="text-sm text-slate-700">
@@ -1592,21 +1600,21 @@ export default function SolicitacoesProducaoPage() {
           </label>
           <div className="text-sm text-slate-700">
             <span className="font-medium">Situações consultadas</span>
-            <div className="mt-2 grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+            <div className="mt-2 grid grid-cols-1 gap-1 rounded-md border border-slate-200 bg-slate-50 p-2 sm:grid-cols-2 sm:gap-2 sm:p-3">
               {SITUACOES_OLIST_OPCOES.map((situacao) => (
-                <label key={situacao.value} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-slate-100">
+                <label key={situacao.value} className="flex min-h-10 items-center gap-3 rounded-md px-2 py-2 text-sm text-slate-700 hover:bg-slate-100">
                   <input
                     type="checkbox"
                     checked={situacoesOlistSelecionadas.includes(situacao.value)}
                     onChange={() => alternarSituacaoOlist(situacao.value)}
-                    className="h-4 w-4 rounded border-slate-300"
+                    className="h-5 w-5 rounded border-slate-300"
                   />
                   {situacao.label}
                 </label>
               ))}
             </div>
           </div>
-          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist || situacoesOlistSelecionadas.length === 0} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          <button type="button" onClick={gerarViaOlist} disabled={integrandoOlist || situacoesOlistSelecionadas.length === 0} className="min-h-11 w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">
             {integrandoOlist ? "Integrando..." : "Gerar solicitação automaticamente"}
           </button>
           {resumoImportacaoOlist && (
@@ -1647,77 +1655,108 @@ export default function SolicitacoesProducaoPage() {
       )}
 
       {podeSolicitarProducao && (
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          {solicitacaoEditandoId ? "Editar solicitação" : "Nova solicitação manual"}
-        </h3>
+      <section ref={formularioManualRef} className="scroll-mt-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {solicitacaoEditandoId ? "Editar solicitação" : "Nova solicitação manual"}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Informe a entrega e adicione os produtos que entrarão em produção.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+            {itensForm.length} {itensForm.length === 1 ? "item" : "itens"}
+          </span>
+        </div>
 
-        <form className="space-y-4" onSubmit={handleSalvar}>
+        <form className="space-y-5" onSubmit={handleSalvar} aria-busy={saving}>
           {prioridadeProducao && (
             <div className="rounded-md border-2 border-red-600 bg-red-50 px-4 py-3 text-sm font-black uppercase tracking-wide text-red-700">
               PRIORIDADE
             </div>
           )}
 
-          <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
             <input
               type="checkbox"
               checked={prioridadeProducao}
               onChange={(event) => setPrioridadeProducao(event.target.checked)}
+              className="h-5 w-5 rounded border-slate-300"
             />
-            Marcar solicitação como PRIORIDADE
+            <span>
+              <span className="block">Marcar como prioridade</span>
+              <span className="mt-0.5 block text-xs font-normal text-slate-500">Destaca esta solicitação para a equipe de produção.</span>
+            </span>
           </label>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className="text-sm text-slate-700">
-              Data de entrega
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium text-slate-700">
+              Data de entrega <span className="text-red-600">*</span>
               <input
                 required
                 type="date"
                 value={dataEntrega}
                 onChange={(event) => setDataEntrega(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                className="mt-1.5 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
               />
             </label>
 
-            <label className="text-sm text-slate-700">
+            <label className="text-sm font-medium text-slate-700">
               Observação geral
               <input
                 value={observacaoGeral}
                 onChange={(event) => setObservacaoGeral(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="Ex.: lote, prazo ou orientação geral"
+                className="mt-1.5 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
               />
             </label>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             {itensForm.map((item, index) => (
-              <div key={index} className="grid grid-cols-1 gap-3 rounded-md border border-slate-200 p-3 md:grid-cols-5">
+              <article key={index} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Produto</p>
+                    <h4 className="mt-0.5 font-semibold text-slate-900">Item {index + 1}</h4>
+                  </div>
+                  {itensForm.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removerItem(index)}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                      aria-label={`Remover item ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Remover</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
                 {item.prioridade_producao && (
-                  <div className="md:col-span-5">
-                    <span className="inline-flex rounded bg-red-600 px-2 py-1 text-xs font-black uppercase tracking-wide text-white">
+                    <span className="inline-flex rounded-md bg-red-600 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-white">
                       PRIORIDADE
                     </span>
-                  </div>
                 )}
                 {item.quantidade_pedidos !== undefined && (
-                  <div className="md:col-span-5">
-                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold uppercase tracking-wide text-slate-700">
+                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-slate-700">
                       <span>Pedidos: {item.quantidade_pedidos}</span>
                       <span>Estoque: {item.estoque_atual ?? 0}</span>
                     </span>
-                  </div>
                 )}
                 {item.existe_em_producao && (
-                  <div className="md:col-span-5">
-                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
+                    <span className="inline-flex flex-wrap gap-x-2 gap-y-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
                       <span>ATENÇÃO: existe item em produção</span>
                       <span>Solicitado: {item.quantidade_em_producao ?? 0}</span>
                     </span>
-                  </div>
                 )}
-                <label className="relative text-sm text-slate-700 md:col-span-2">
-                  Produto
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                <label className="relative text-sm font-medium text-slate-700 sm:col-span-2 lg:col-span-2">
+                  SKU do produto <span className="text-red-600">*</span>
                   <input
                     required
                     value={item.produto_busca}
@@ -1726,11 +1765,12 @@ export default function SolicitacoesProducaoPage() {
                     onBlur={() => {
                       window.setTimeout(() => setProdutoBuscaAberta(null), 120);
                     }}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                    autoComplete="off"
+                    className="mt-1.5 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
                     placeholder="Digite o SKU para pesquisar"
                   />
                   {produtoBuscaAberta === index && (
-                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                    <div className="absolute z-30 mt-1 max-h-[45vh] w-full overscroll-contain overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
                       {produtosFiltrados(item.produto_busca).length > 0 ? (
                         produtosFiltrados(item.produto_busca).map((produto) => (
                           <button
@@ -1738,7 +1778,7 @@ export default function SolicitacoesProducaoPage() {
                             type="button"
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => void selecionarProduto(index, produto)}
-                            className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                            className="block min-h-12 w-full border-b border-slate-100 px-3 py-3 text-left text-sm text-slate-700 last:border-0 hover:bg-slate-100"
                           >
                             {produto.sku}
                           </button>
@@ -1752,8 +1792,8 @@ export default function SolicitacoesProducaoPage() {
                   )}
                 </label>
 
-                <label className="text-sm text-slate-700">
-                  Quantidade
+                <label className="text-sm font-medium text-slate-700">
+                  Quantidade <span className="text-red-600">*</span>
                   <input
                     required
                     type="number"
@@ -1762,74 +1802,72 @@ export default function SolicitacoesProducaoPage() {
                     value={item.quantidade_solicitada}
                     onChange={(event) => alterarItem(index, { quantidade_solicitada: event.target.value })}
                     onBlur={() => normalizarQuantidadeItem(index)}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                    inputMode="numeric"
+                    className="mt-1.5 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
                   />
                 </label>
 
-                <div className="flex items-center gap-3 text-sm text-slate-700">
-                  <Switch
-                    checked={item.corte_laser}
-                    onCheckedChange={(corte_laser) => alterarItem(index, { corte_laser })}
-                    label="Corte a laser"
-                  />
-                  <span>Corte a laser</span>
+                <div className="text-sm font-medium text-slate-700">
+                  Acabamento
+                  <div className="mt-1.5 flex min-h-11 items-center gap-3 rounded-md border border-slate-300 px-3 py-2">
+                    <Switch
+                      checked={item.corte_laser}
+                      onCheckedChange={(corte_laser) => alterarItem(index, { corte_laser })}
+                      label={`Corte a laser no item ${index + 1}`}
+                    />
+                    <span className="font-normal">Corte a laser</span>
+                  </div>
                 </div>
 
-                <label className="text-sm text-slate-700">
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2 lg:col-span-1">
                   Observação
                   <textarea
                     value={ocultarMarcadoresObservacaoProdutoFornecido(item.observacao)}
                     onChange={(event) => alterarItem(index, { observacao: event.target.value })}
-                    className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
+                    placeholder="Orientação específica deste item"
+                    className="mt-1.5 min-h-24 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
                   />
                 </label>
-
-                <div className="md:col-span-5 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => removerItem(index)}
-                    className="rounded-md border border-slate-300 px-3 py-1 text-xs text-slate-700"
-                  >
-                    Remover item
-                  </button>
                 </div>
-              </div>
+              </article>
             ))}
 
             <button
               type="button"
               onClick={adicionarItem}
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-400 px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-slate-600 hover:bg-slate-50 sm:w-auto"
             >
-              + Adicionar item
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Adicionar outro item
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {saving ? "Salvando..." : solicitacaoEditandoId ? "Atualizar solicitação" : "Salvar solicitação"}
-            </button>
+          <div className="sticky bottom-0 z-20 -mx-4 flex flex-col gap-2 border-t border-slate-200 bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-8px_20px_-16px_rgba(15,23,42,0.45)] backdrop-blur sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
             {solicitacaoEditandoId && (
               <button
                 type="button"
                 onClick={limparFormulario}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                disabled={saving}
+                className="min-h-11 w-full rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 sm:w-auto"
               >
                 Cancelar edição
               </button>
             )}
+            <button
+              type="submit"
+              disabled={saving}
+              className="min-h-11 w-full rounded-md bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+            >
+              {saving ? "Salvando..." : solicitacaoEditandoId ? "Atualizar solicitação" : "Salvar solicitação"}
+            </button>
           </div>
         </form>
 
-        {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
+        {errorMessage && <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage}</p>}
       </section>
       )}
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-slate-900">Solicitações em produção</h3>
           {!loading && (
@@ -1848,7 +1886,7 @@ export default function SolicitacoesProducaoPage() {
         )}
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações cadastradas</h3>
 
         {loading ? (
