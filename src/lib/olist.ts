@@ -4,6 +4,12 @@ import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
 import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
 import { calcularNecessidadeProducaoOlist } from "@/lib/necessidade-producao-olist";
+import {
+  type DemandaProdutoOlist,
+  expandirDemandasKitsOlist,
+  extrairComponentesSkuKitOlist,
+  skuEhKitOlist,
+} from "@/lib/componentes-kit-olist";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -1373,14 +1379,7 @@ async function buscarPedidosComBaixaJaRegistrada(pedidos: OlistOrder[]) {
 }
 
 function agregarItensNovos(pedidos: OlistOrder[]) {
-  const agregados = new Map<
-    string,
-    {
-      sku: string;
-      imagem_url: string | null;
-      quantidade_pedidos: number;
-    }
-  >();
+  const agregados = new Map<string, DemandaProdutoOlist>();
 
   const itensNovosProcessados: Array<{
     pedido_olist_id: string;
@@ -1441,8 +1440,42 @@ function agregarItensNovos(pedidos: OlistOrder[]) {
     agregados,
     itensNovosProcessados,
     pedidosAdicionados,
-    skus: [...agregados.keys()],
   };
+}
+
+async function expandirKitsEmComponentes(
+  agregados: ReadonlyMap<string, DemandaProdutoOlist>,
+  aplicativoId: string,
+) {
+  const variantes = [
+    ...new Set(
+      [...agregados.values()]
+        .filter((demanda) => skuEhKitOlist(demanda.sku))
+        .flatMap((demanda) => extrairComponentesSkuKitOlist(demanda.sku))
+        .map((componente) => componente.variante),
+    ),
+  ];
+
+  if (variantes.length === 0) return new Map(agregados);
+
+  const candidatos = await prisma.produto.findMany({
+    where: {
+      aplicativoId,
+      ativo: true,
+      NOT: {
+        sku: { startsWith: "KIT", mode: "insensitive" },
+      },
+      OR: variantes.map((variante) => ({
+        sku: { contains: variante, mode: "insensitive" },
+      })),
+    },
+    select: { sku: true },
+  });
+
+  return expandirDemandasKitsOlist({
+    demandas: agregados,
+    skusCandidatos: candidatos.map((produto) => produto.sku),
+  });
 }
 
 /* =========================================================
@@ -1524,14 +1557,7 @@ async function buscarDadosInternos(skus: string[]) {
 }
 
 function montarItensSolicitacao(
-  agregados: Map<
-    string,
-    {
-      sku: string;
-      imagem_url: string | null;
-      quantidade_pedidos: number;
-    }
-  >,
+  agregados: Map<string, DemandaProdutoOlist>,
   produtos: ProdutoRow[],
   estoqueRows: EstoqueAtualRow[],
   metaGeral: number,
@@ -2088,14 +2114,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
 }
 
 async function cadastrarProdutosOlistNaoCadastrados(
-  agregados: Map<
-    string,
-    {
-      sku: string;
-      imagem_url: string | null;
-      quantidade_pedidos: number;
-    }
-  >,
+  agregados: Map<string, DemandaProdutoOlist>,
 ) {
   const skus = [...agregados.keys()];
 
@@ -2166,19 +2185,25 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
 
   const resultadoAgregacao = agregarItensNovos(pedidos);
 
-  const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(
-    resultadoAgregacao.agregados,
+  const agregadosSemKits = new Map(
+    [...resultadoAgregacao.agregados].filter(([, demanda]) => !skuEhKitOlist(demanda.sku)),
   );
+  const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(agregadosSemKits);
+  const agregadosParaProducao = await expandirKitsEmComponentes(
+    resultadoAgregacao.agregados,
+    input.aplicativoId,
+  );
+  const skusParaProducao = [...agregadosParaProducao.keys()];
 
-  const dadosInternos = await buscarDadosInternos(resultadoAgregacao.skus);
+  const dadosInternos = await buscarDadosInternos(skusParaProducao);
 
   const quantidadeEmProducaoPorSku = await buscarQuantidadesEmProducao(
-    resultadoAgregacao.skus,
+    skusParaProducao,
     input.aplicativoId,
   );
 
   const { itens, prioridadeProducao, estoqueSuficiente, itensCobertosProducaoExistente } = montarItensSolicitacao(
-    resultadoAgregacao.agregados,
+    agregadosParaProducao,
     dadosInternos.produtos,
     dadosInternos.estoqueRows,
     dadosInternos.metaGeral,

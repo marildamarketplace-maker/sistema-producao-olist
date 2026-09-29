@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { NecessidadeProducaoError, gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { ComponenteKitOlistError } from "@/lib/componentes-kit-olist";
 
 export async function POST(req: NextRequest) {
   try {
@@ -42,6 +43,9 @@ export async function POST(req: NextRequest) {
         },
         { status: 422 },
       );
+    }
+    if (error instanceof ComponenteKitOlistError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado" }, { status: 500 });
   }
