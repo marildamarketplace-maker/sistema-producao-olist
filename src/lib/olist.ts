@@ -91,7 +91,6 @@ type ItemEstoqueSuficiente = {
   estoque_atual: number;
   quantidade_pedidos: number;
   estoque_apos_pedidos: number;
-  minimo_estoque: number;
   pedido_olist_ids: string[];
 };
 
@@ -100,7 +99,7 @@ type ItemCobertoProducaoExistente = {
   estoque_atual: number;
   quantidade_pedidos: number;
   quantidade_em_producao: number;
-  quantidade_disponivel: number;
+  estoque_apos_pedidos: number;
   pedido_olist_ids: string[];
 };
 
@@ -1610,7 +1609,7 @@ function montarItensSolicitacao(
         estoque_atual: estoqueAtual,
         quantidade_pedidos: quantidadePedidosIntegracao,
         quantidade_em_producao: quantidadeEmProducao,
-        quantidade_disponivel: necessidade.quantidadeDisponivel,
+        estoque_apos_pedidos: necessidade.estoqueProjetado,
         pedido_olist_ids: demanda.pedido_olist_ids,
       });
       continue;
@@ -1622,7 +1621,6 @@ function montarItensSolicitacao(
         estoque_atual: estoqueAtual,
         quantidade_pedidos: quantidadePedidosIntegracao,
         estoque_apos_pedidos: necessidade.estoqueProjetado,
-        minimo_estoque: minimoEstoque,
         pedido_olist_ids: demanda.pedido_olist_ids,
       });
       continue;

@@ -173,7 +173,6 @@ type ItemEstoqueSuficiente = {
   estoque_atual: number;
   quantidade_pedidos: number;
   estoque_apos_pedidos: number;
-  minimo_estoque: number;
   pedido_olist_ids: string[];
 };
 
@@ -182,7 +181,7 @@ type ItemCobertoProducaoExistente = {
   estoque_atual: number;
   quantidade_pedidos: number;
   quantidade_em_producao: number;
-  quantidade_disponivel: number;
+  estoque_apos_pedidos: number;
   pedido_olist_ids: string[];
 };
 
@@ -1695,10 +1694,10 @@ export default function SolicitacoesProducaoPage() {
                       </span>
                     </div>
                     <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div><dt className="text-xs text-slate-500">Demanda</dt><dd className="font-semibold text-slate-900">{item.quantidade_pedidos}</dd></div>
                       <div><dt className="text-xs text-slate-500">Estoque atual</dt><dd className="font-semibold text-slate-900">{item.estoque_atual}</dd></div>
                       <div><dt className="text-xs text-slate-500">Em produção</dt><dd className="font-semibold text-slate-900">{item.quantidade_em_producao}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Disponível</dt><dd className="font-semibold text-slate-900">{item.quantidade_disponivel}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Demanda</dt><dd className="font-semibold text-slate-900">{item.quantidade_pedidos}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Estoque após pedidos</dt><dd className="font-semibold text-slate-900">{item.estoque_apos_pedidos}</dd></div>
                     </dl>
                     <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
                   </article>
@@ -1711,11 +1710,10 @@ export default function SolicitacoesProducaoPage() {
                         Estoque suficiente
                       </span>
                     </div>
-                    <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <div><dt className="text-xs text-slate-500">Estoque atual</dt><dd className="font-semibold text-slate-900">{item.estoque_atual}</dd></div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                       <div><dt className="text-xs text-slate-500">Demanda</dt><dd className="font-semibold text-slate-900">{item.quantidade_pedidos}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Saldo após pedidos</dt><dd className="font-semibold text-slate-900">{item.estoque_apos_pedidos}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Estoque mínimo</dt><dd className="font-semibold text-slate-900">{item.minimo_estoque}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Estoque atual</dt><dd className="font-semibold text-slate-900">{item.estoque_atual}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Estoque após pedidos</dt><dd className="font-semibold text-slate-900">{item.estoque_apos_pedidos}</dd></div>
                     </dl>
                     <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
                   </article>
