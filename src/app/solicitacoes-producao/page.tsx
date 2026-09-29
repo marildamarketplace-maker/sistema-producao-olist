@@ -1630,6 +1630,7 @@ export default function SolicitacoesProducaoPage() {
       {podeSolicitarProducao && (
       <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Gerar solicitação via Olist</h3>
+        <div className="space-y-4">
         <div className="flex flex-col gap-3 md:max-w-md">
           <label className="text-sm text-slate-700">
             Tipo de data
@@ -1667,13 +1668,24 @@ export default function SolicitacoesProducaoPage() {
               )}
             </div>
           )}
+        </div>
           {(itensCobertosProducaoExistente.length > 0 || itensEstoqueSuficiente.length > 0) && (
-            <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 sm:p-4">
-              <p className="font-semibold">Itens que não precisam de nova solicitação</p>
-              <p className="mt-1 text-emerald-800">
-                Estes itens não foram adicionados ao formulário de nova solicitação.
-              </p>
-              <div className="mt-3 space-y-3">
+            <details className="group w-full overflow-hidden rounded-lg border border-emerald-300 bg-emerald-50 text-sm text-emerald-900">
+              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 sm:px-4 [&::-webkit-details-marker]:hidden">
+                <span>
+                  <span className="block font-semibold">Itens que não precisam de nova solicitação</span>
+                  <span className="mt-0.5 block text-xs font-normal text-emerald-800 sm:text-sm">
+                    {itensCobertosProducaoExistente.length} cobertos por produção e {itensEstoqueSuficiente.length} com estoque suficiente.
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-emerald-800 shadow-sm">
+                    {itensCobertosProducaoExistente.length + itensEstoqueSuficiente.length}
+                  </span>
+                  <ChevronDown className="h-5 w-5 transition-transform group-open:rotate-180" aria-hidden="true" />
+                </span>
+              </summary>
+              <div className="grid gap-3 border-t border-emerald-200 p-3 sm:p-4 lg:grid-cols-2 2xl:grid-cols-3">
                 {itensCobertosProducaoExistente.map((item) => (
                   <article key={item.sku} className="rounded-lg border border-emerald-200 bg-white p-3 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1709,7 +1721,7 @@ export default function SolicitacoesProducaoPage() {
                   </article>
                 ))}
               </div>
-            </div>
+            </details>
           )}
         </div>
       </section>
