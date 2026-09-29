@@ -2,6 +2,8 @@ export type DemandaProdutoOlist = {
   sku: string;
   imagem_url: string | null;
   quantidade_pedidos: number;
+  pedido_olist_ids: string[];
+  skus_olist_origem: string[];
 };
 
 export type ComponenteSkuKitOlist = {
@@ -116,6 +118,12 @@ function somarDemanda(
 ) {
   const atual = demandas.get(demanda.sku);
   const quantidade = (atual?.quantidade_pedidos ?? 0) + demanda.quantidade_pedidos;
+  const pedidoOlistIds = [
+    ...new Set([...(atual?.pedido_olist_ids ?? []), ...demanda.pedido_olist_ids]),
+  ];
+  const skusOlistOrigem = [
+    ...new Set([...(atual?.skus_olist_origem ?? []), ...demanda.skus_olist_origem]),
+  ];
 
   if (!Number.isSafeInteger(quantidade) || quantidade <= 0) {
     throw new ComponenteKitOlistError(
@@ -127,6 +135,8 @@ function somarDemanda(
     sku: demanda.sku,
     imagem_url: atual?.imagem_url ?? demanda.imagem_url,
     quantidade_pedidos: quantidade,
+    pedido_olist_ids: pedidoOlistIds,
+    skus_olist_origem: skusOlistOrigem,
   });
 }
 
@@ -162,6 +172,8 @@ export function expandirDemandasKitsOlist(input: {
         sku: skuComponente,
         imagem_url: null,
         quantidade_pedidos: quantidadePedidos,
+        pedido_olist_ids: demanda.pedido_olist_ids,
+        skus_olist_origem: demanda.skus_olist_origem,
       });
     }
   }

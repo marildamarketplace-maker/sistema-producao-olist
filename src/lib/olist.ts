@@ -82,6 +82,8 @@ type ItemSolicitacao = {
   quantidade_em_producao?: number;
   quantidade_pedidos?: number;
   estoque_atual?: number;
+  pedido_olist_ids?: string[];
+  skus_olist_origem?: string[];
 };
 
 type ItemEstoqueSuficiente = {
@@ -90,6 +92,7 @@ type ItemEstoqueSuficiente = {
   quantidade_pedidos: number;
   estoque_apos_pedidos: number;
   minimo_estoque: number;
+  pedido_olist_ids: string[];
 };
 
 type ItemCobertoProducaoExistente = {
@@ -98,6 +101,7 @@ type ItemCobertoProducaoExistente = {
   quantidade_pedidos: number;
   quantidade_em_producao: number;
   quantidade_disponivel: number;
+  pedido_olist_ids: string[];
 };
 
 export class NecessidadeProducaoError extends Error {
@@ -1398,6 +1402,7 @@ function agregarItensNovos(pedidos: OlistOrder[]) {
 
     for (const item of pedido.itens ?? []) {
       const sku = String(item.produto.sku).trim();
+      const pedidoOlistId = String(pedido.id).trim();
 
       if (!sku) {
         throw new Error(`Pedido Olist ${pedido.id} contém item sem SKU.`);
@@ -1416,9 +1421,14 @@ function agregarItensNovos(pedidos: OlistOrder[]) {
         sku,
         imagem_url: null,
         quantidade_pedidos: 0,
+        pedido_olist_ids: [],
+        skus_olist_origem: [sku],
       };
 
       atual.quantidade_pedidos += quantidade;
+      if (!atual.pedido_olist_ids.includes(pedidoOlistId)) {
+        atual.pedido_olist_ids.push(pedidoOlistId);
+      }
 
       agregados.set(sku, atual);
 
@@ -1601,6 +1611,7 @@ function montarItensSolicitacao(
         quantidade_pedidos: quantidadePedidosIntegracao,
         quantidade_em_producao: quantidadeEmProducao,
         quantidade_disponivel: necessidade.quantidadeDisponivel,
+        pedido_olist_ids: demanda.pedido_olist_ids,
       });
       continue;
     }
@@ -1612,6 +1623,7 @@ function montarItensSolicitacao(
         quantidade_pedidos: quantidadePedidosIntegracao,
         estoque_apos_pedidos: necessidade.estoqueProjetado,
         minimo_estoque: minimoEstoque,
+        pedido_olist_ids: demanda.pedido_olist_ids,
       });
       continue;
     }
@@ -1630,6 +1642,8 @@ function montarItensSolicitacao(
       quantidade_em_producao: quantidadeEmProducao,
       quantidade_pedidos: quantidadePedidosIntegracao,
       estoque_atual: estoqueAtual,
+      pedido_olist_ids: demanda.pedido_olist_ids,
+      skus_olist_origem: demanda.skus_olist_origem,
     });
   }
 

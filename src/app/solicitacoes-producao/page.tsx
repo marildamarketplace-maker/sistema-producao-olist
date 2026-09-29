@@ -2,7 +2,7 @@
 
 import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { ChevronDown, Download, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -131,6 +131,8 @@ type ItemForm = {
   quantidade_em_producao?: number;
   quantidade_pedidos?: number;
   estoque_atual?: number;
+  pedido_olist_ids?: string[];
+  skus_olist_origem?: string[];
 };
 
 type ItemPreparadoOlist = {
@@ -141,6 +143,8 @@ type ItemPreparadoOlist = {
   quantidade_em_producao?: number;
   quantidade_pedidos?: number;
   estoque_atual?: number;
+  pedido_olist_ids?: string[];
+  skus_olist_origem?: string[];
 };
 
 type RastreioOlist = {
@@ -170,6 +174,7 @@ type ItemEstoqueSuficiente = {
   quantidade_pedidos: number;
   estoque_apos_pedidos: number;
   minimo_estoque: number;
+  pedido_olist_ids: string[];
 };
 
 type ItemCobertoProducaoExistente = {
@@ -178,6 +183,7 @@ type ItemCobertoProducaoExistente = {
   quantidade_pedidos: number;
   quantidade_em_producao: number;
   quantidade_disponivel: number;
+  pedido_olist_ids: string[];
 };
 
 type ItemDashboardPendente = {
@@ -327,6 +333,29 @@ const ORDEM_STATUS_SOLICITACAO: Record<string, number> = {
   concluida: 1,
   cancelada: 2,
 };
+
+function LinksPedidosOlist({ pedidoIds }: { pedidoIds?: string[] }) {
+  if (!pedidoIds?.length) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+      <span className="font-semibold">Pedidos Olist:</span>
+      {pedidoIds.map((pedidoId) => (
+        <a
+          key={pedidoId}
+          href={`https://erp.olist.com/vendas#edit/${encodeURIComponent(pedidoId)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-blue-300 bg-white px-2.5 py-1 font-semibold text-blue-700 underline-offset-2 hover:bg-blue-100 hover:underline"
+          title={`Abrir pedido Olist ${pedidoId} em nova aba`}
+        >
+          {pedidoId}
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
+      ))}
+    </div>
+  );
+}
 
 function ordenarSolicitacoes(a: Solicitacao, b: Solicitacao) {
   const ordemA = ORDEM_STATUS_SOLICITACAO[a.status] ?? 99;
@@ -1176,6 +1205,12 @@ export default function SolicitacoesProducaoPage() {
           quantidade_em_producao: Number(item.quantidade_em_producao ?? 0),
           quantidade_pedidos: Number(item.quantidade_pedidos ?? 0),
           estoque_atual: Number(item.estoque_atual ?? 0),
+          pedido_olist_ids: Array.isArray(item.pedido_olist_ids)
+            ? [...new Set(item.pedido_olist_ids.map(String).map((id) => id.trim()).filter(Boolean))]
+            : [],
+          skus_olist_origem: Array.isArray(item.skus_olist_origem)
+            ? [...new Set(item.skus_olist_origem.map(String).map((sku) => sku.trim()).filter(Boolean))]
+            : [],
         });
       }),
     );
@@ -1360,9 +1395,11 @@ export default function SolicitacoesProducaoPage() {
         return;
       }
 
-      const skusSalvos = new Set(itensPayload.map((item) => item.sku));
+      const skusOlistOrigemSalvos = new Set(
+        grupo.itens.flatMap((item) => item.skus_olist_origem ?? []),
+      );
       const itensOlistSalvos =
-        processamentoOlist?.itens.filter((item) => skusSalvos.has(item.sku)) ?? [];
+        processamentoOlist?.itens.filter((item) => skusOlistOrigemSalvos.has(item.sku)) ?? [];
 
       if (processamentoOlist && itensOlistSalvos.length) {
         const registroResp = await axios.post(
@@ -1631,23 +1668,47 @@ export default function SolicitacoesProducaoPage() {
             </div>
           )}
           {(itensCobertosProducaoExistente.length > 0 || itensEstoqueSuficiente.length > 0) && (
-            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 sm:p-4">
               <p className="font-semibold">Itens que não precisam de nova solicitação</p>
               <p className="mt-1 text-emerald-800">
                 Estes itens não foram adicionados ao formulário de nova solicitação.
               </p>
-              <ul className="mt-2 space-y-1">
+              <div className="mt-3 space-y-3">
                 {itensCobertosProducaoExistente.map((item) => (
-                  <li key={item.sku}>
-                    <strong>{item.sku}</strong>: estoque {item.estoque_atual} + solicitado {item.quantidade_em_producao} = {item.quantidade_disponivel}; demanda {item.quantidade_pedidos}.
-                  </li>
+                  <article key={item.sku} className="rounded-lg border border-emerald-200 bg-white p-3 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <strong className="break-all text-slate-900">{item.sku}</strong>
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
+                        Coberto por produção
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div><dt className="text-xs text-slate-500">Estoque atual</dt><dd className="font-semibold text-slate-900">{item.estoque_atual}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Em produção</dt><dd className="font-semibold text-slate-900">{item.quantidade_em_producao}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Disponível</dt><dd className="font-semibold text-slate-900">{item.quantidade_disponivel}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Demanda</dt><dd className="font-semibold text-slate-900">{item.quantidade_pedidos}</dd></div>
+                    </dl>
+                    <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
+                  </article>
                 ))}
                 {itensEstoqueSuficiente.map((item) => (
-                  <li key={`estoque-${item.sku}`}>
-                    <strong>{item.sku}</strong>: tem {item.estoque_atual} em estoque; demanda {item.quantidade_pedidos}; saldo após os pedidos {item.estoque_apos_pedidos}.
-                  </li>
+                  <article key={`estoque-${item.sku}`} className="rounded-lg border border-emerald-200 bg-white p-3 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <strong className="break-all text-slate-900">{item.sku}</strong>
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
+                        Estoque suficiente
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div><dt className="text-xs text-slate-500">Estoque atual</dt><dd className="font-semibold text-slate-900">{item.estoque_atual}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Demanda</dt><dd className="font-semibold text-slate-900">{item.quantidade_pedidos}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Saldo após pedidos</dt><dd className="font-semibold text-slate-900">{item.estoque_apos_pedidos}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Estoque mínimo</dt><dd className="font-semibold text-slate-900">{item.minimo_estoque}</dd></div>
+                    </dl>
+                    <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
+                  </article>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </div>
@@ -1753,6 +1814,8 @@ export default function SolicitacoesProducaoPage() {
                     </span>
                 )}
                 </div>
+
+                <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
 
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <label className="relative text-sm font-medium text-slate-700 sm:col-span-2 lg:col-span-2">
