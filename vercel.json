@@ -8,7 +8,7 @@
     },
     {
       "path": "/api/cron/processar-notifications",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/baixa-estoque-olist",
