@@ -3,7 +3,7 @@ import test from "node:test";
 import { NotificationStatus, NotificationType, type Notification } from "@prisma/client";
 import { processarNotificationsPendentes } from "../src/services/notificationService";
 
-function criarNotification(id: string): Notification {
+function criarNotification(id: string, tentativas = 1): Notification {
   return {
     id,
     tipo: NotificationType.WHATSAPP,
@@ -12,7 +12,7 @@ function criarNotification(id: string): Notification {
     mensagem: "Seu pedido foi aprovado.",
     data: new Date(),
     status: NotificationStatus.PENDENTE,
-    tentativas: 1,
+    tentativas,
     ultimoErro: null,
     processandoEm: new Date(),
     workerId: "00000000-0000-0000-0000-000000000001",
@@ -47,8 +47,8 @@ test("processa notifications pendentes e conclui os envios bem-sucedidos", async
   assert.deepEqual(concluidas.sort(), ["1", "2"]);
 });
 
-test("isola falhas e continua processando o restante do lote", async () => {
-  const falhas: Array<{ id: string; erro: string }> = [];
+test("reagenda as duas primeiras falhas e continua processando o restante do lote", async () => {
+  const falhas: Array<{ id: string; erro: string; status: string }> = [];
   const concluidas: string[] = [];
   const errosRegistrados: string[] = [];
   const resultado = await processarNotificationsPendentes(
@@ -63,8 +63,8 @@ test("isola falhas e continua processando o restante do lote", async () => {
         concluidas.push(id);
         return true;
       },
-      falhar: async (id, _workerId, erro) => {
-        falhas.push({ id, erro });
+      falhar: async (id, _workerId, erro, status) => {
+        falhas.push({ id, erro, status });
         return true;
       },
       executores: {
@@ -77,8 +77,38 @@ test("isola falhas e continua processando o restante do lote", async () => {
 
   assert.deepEqual(resultado, { encontradas: 2, sucessos: 1, erros: 1 });
   assert.deepEqual(concluidas, ["sucesso"]);
-  assert.deepEqual(falhas, [{ id: "falha", erro: "provedor indisponível" }]);
+  assert.deepEqual(falhas, [
+    { id: "falha", erro: "provedor indisponível", status: "PENDENTE" },
+  ]);
   assert.deepEqual(errosRegistrados, ["falha:provedor indisponível"]);
+});
+
+test("marca a notification como erro somente na terceira tentativa", async () => {
+  const statusFalhas: string[] = [];
+
+  await processarNotificationsPendentes(
+    {},
+    {
+      criarWorkerId: () => "00000000-0000-0000-0000-000000000001",
+      assumirPendentes: async () => [
+        criarNotification("primeira", 1),
+        criarNotification("segunda", 2),
+        criarNotification("terceira", 3),
+      ],
+      concluir: async () => true,
+      falhar: async (_id, _workerId, _erro, status) => {
+        statusFalhas.push(status);
+        return true;
+      },
+      executores: {
+        [NotificationType.WHATSAPP]: async () => {
+          throw new Error("falha de envio");
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(statusFalhas, ["PENDENTE", "PENDENTE", "ERRO"]);
 });
 
 test("não relata sucesso quando o lock é perdido durante a conclusão", async () => {

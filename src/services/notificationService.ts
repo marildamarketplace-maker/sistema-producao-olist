@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { NotificationPendente } from "@/repositories/notificationRepository";
+import {
+  NotificationStatusAposFalha,
+  obterStatusNotificationAposFalha,
+} from "@/services/notification/notificationRetryPolicy";
 
 const LIMITE_PADRAO = 50;
 const CONCORRENCIA_PADRAO = 5;
@@ -16,7 +20,12 @@ export type NotificationProcessorDependencies = {
     destinatarios?: string[];
   }) => Promise<NotificationPendente[]>;
   concluir: (id: string, workerId: string) => Promise<boolean>;
-  falhar: (id: string, workerId: string, erro: string) => Promise<boolean>;
+  falhar: (
+    id: string,
+    workerId: string,
+    erro: string,
+    status: NotificationStatusAposFalha,
+  ) => Promise<boolean>;
   executores: Record<NotificationType, NotificationExecutor>;
   criarWorkerId: () => string;
   registrarErro?: (error: unknown, notification: NotificationPendente) => Promise<void>;
@@ -91,7 +100,12 @@ export async function processarNotificationsPendentes(
       } catch (error) {
         const mensagem = error instanceof Error ? error.message : "Erro inesperado ao processar notification.";
         await deps.registrarErro?.(error, notification);
-        await deps.falhar(notification.id, workerId, mensagem);
+        await deps.falhar(
+          notification.id,
+          workerId,
+          mensagem,
+          obterStatusNotificationAposFalha(notification.tentativas),
+        );
         resultado.erros += 1;
       }
     }

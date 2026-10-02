@@ -5,6 +5,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { NotificationStatusAposFalha } from "@/services/notification/notificationRetryPolicy";
 
 const LIMITE_MAXIMO_LOTE = 100;
 
@@ -89,7 +90,12 @@ export async function concluirNotification(id: string, workerId: string) {
   return resultado.count === 1;
 }
 
-export async function falharNotification(id: string, workerId: string, erro: string) {
+export async function falharNotification(
+  id: string,
+  workerId: string,
+  erro: string,
+  status: NotificationStatusAposFalha,
+) {
   const resultado = await prisma.notification.updateMany({
     where: {
       id,
@@ -97,7 +103,7 @@ export async function falharNotification(id: string, workerId: string, erro: str
       status: NotificationStatus.PENDENTE,
     },
     data: {
-      status: NotificationStatus.ERRO,
+      status,
       processandoEm: null,
       workerId: null,
       ultimoErro: erro.slice(0, 2_000),

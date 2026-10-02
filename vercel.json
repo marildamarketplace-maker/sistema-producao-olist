@@ -12,7 +12,7 @@
     },
     {
       "path": "/api/cron/baixa-estoque-olist",
-      "schedule": "* * * * *"
+      "schedule": "50 2 * * *"
     }
   ]
 }
