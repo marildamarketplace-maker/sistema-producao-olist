@@ -1,0 +1,2 @@
+ALTER TABLE "aplicativo"
+ADD COLUMN "jobs" TEXT NOT NULL DEFAULT '';

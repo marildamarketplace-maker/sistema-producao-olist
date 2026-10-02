@@ -10,6 +10,11 @@ import {
   extrairComponentesSkuKitOlist,
   skuEhKitOlist,
 } from "@/lib/componentes-kit-olist";
+import {
+  aplicarFiltroDataPedidosOlist,
+  obterDataAtualizacaoPadrao,
+  type FiltroDataPedidosOlist,
+} from "@/lib/olist-filtro-data";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -260,10 +265,6 @@ export type FiltrosListagemVendedoresOlist = {
 /* =========================================================
  * HELPERS
  * ======================================================= */
-
-function inputDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
 
 function normalizarBaseUrl(url: string) {
   return url.endsWith("/") ? url : `${url}/`;
@@ -1047,8 +1048,7 @@ export async function listarArvoreCategoriasOlist(aplicativoId: string): Promise
 async function listarPedidosOlist(
   token: string,
   aplicativoId: string,
-  periodoInicio: Date | null,
-  periodoFim: Date | null,
+  filtroData: FiltroDataPedidosOlist,
   situacao: string,
 ) {
   const limite = 100;
@@ -1060,10 +1060,7 @@ async function listarPedidosOlist(
   while (true) {
     const url = new URL("pedidos", normalizarBaseUrl(olistConfig.apiBaseUrl));
 
-    if (periodoInicio && periodoFim) {
-      url.searchParams.set("dataInicial", inputDate(periodoInicio));
-      url.searchParams.set("dataFinal", inputDate(periodoFim));
-    }
+    aplicarFiltroDataPedidosOlist(url, filtroData);
 
     url.searchParams.set("situacao", situacao);
 
@@ -1312,8 +1309,7 @@ export async function buscarPedidosOlistPorDataLimite(
     const pedidosPorSituacao = await listarPedidosOlist(
       token,
       aplicativoId,
-      periodoInicio,
-      periodoFim,
+      { tipo: "criacao", periodoInicio, periodoFim },
       situacao,
     );
 
@@ -1767,17 +1763,11 @@ export async function registrarPedidosOlistProcessados(input: {
 }
 
 export async function obterPeriodoBuscaBaixaEstoque() {
-  const controle = await prisma.controleBuscaOlist.findUnique({
-    where: { chave: CONTROLE_BUSCA_BAIXA_ESTOQUE },
-    select: { ultimaBuscaEm: true },
-  });
-  const periodoInicio = controle?.ultimaBuscaEm
-    ? new Date(controle.ultimaBuscaEm.getTime() - 24 * 60 * 60 * 1000)
-    : new Date("2026-01-01T00:00:00-03:00");
+  const periodoFim = new Date();
 
   return {
-    periodoInicio,
-    periodoFim: new Date(),
+    periodoInicio: obterDataAtualizacaoPadrao(periodoFim),
+    periodoFim,
   };
 }
 
@@ -1794,6 +1784,16 @@ async function atualizarUltimaBuscaBaixaEstoque(data: Date) {
       updatedAt: new Date(),
     },
   });
+}
+
+export async function concluirBuscaBaixaEstoqueOlist(periodoFimBusca: string) {
+  const periodoFim = new Date(periodoFimBusca);
+
+  if (Number.isNaN(periodoFim.getTime())) {
+    throw new Error("Período final inválido para concluir a busca Olist.");
+  }
+
+  await atualizarUltimaBuscaBaixaEstoque(periodoFim);
 }
 
 async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
@@ -1865,10 +1865,10 @@ async function prepararPedidosBaixaEstoque(detalhes: OlistOrder[]) {
 }
 
 export async function buscarPedidosParaBaixaEstoqueOlist(aplicativoId: string, input?: {
-  periodoInicio?: string | null;
+  dataAtualizacao?: string | null;
 }) {
   const periodoPadrao = await obterPeriodoBuscaBaixaEstoque();
-  const periodoInicioInformado = input?.periodoInicio ? new Date(input.periodoInicio) : null;
+  const periodoInicioInformado = input?.dataAtualizacao ? new Date(input.dataAtualizacao) : null;
   const periodoInicio =
     periodoInicioInformado && !Number.isNaN(periodoInicioInformado.getTime())
       ? periodoInicioInformado
@@ -1881,8 +1881,7 @@ export async function buscarPedidosParaBaixaEstoqueOlist(aplicativoId: string, i
     const pedidosPorSituacao = await listarPedidosOlist(
       token,
       aplicativoId,
-      periodoInicio,
-      periodoFim,
+      { tipo: "atualizacao", desde: periodoInicio },
       situacao,
     );
 
@@ -1938,6 +1937,7 @@ export async function buscarPedidosParaBaixaEstoqueOlist(aplicativoId: string, i
   }));
 
   return {
+    data_atualizacao: periodoInicio.toISOString().slice(0, 10),
     periodo_inicio: periodoInicio.toISOString(),
     periodo_fim: periodoFim.toISOString(),
     pedidos_encontrados: pedidosUnicos.length,
@@ -2115,11 +2115,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
   }, { maxWait: 10000, timeout: 30000 });
 
   if (input.origem === "automatica" && input.periodoFimBusca) {
-    const periodoFimBusca = new Date(input.periodoFimBusca);
-
-    if (!Number.isNaN(periodoFimBusca.getTime())) {
-      await atualizarUltimaBuscaBaixaEstoque(periodoFimBusca);
-    }
+    await concluirBuscaBaixaEstoqueOlist(input.periodoFimBusca);
   }
 
   return resultado;

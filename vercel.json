@@ -5,6 +5,14 @@
     {
       "path": "/api/cron/renovar-tokens-olist",
       "schedule": "5 3 * * *"
+    },
+    {
+      "path": "/api/cron/processar-notifications",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/baixa-estoque-olist",
+      "schedule": "* * * * *"
     }
   ]
 }

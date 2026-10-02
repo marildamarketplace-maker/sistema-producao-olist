@@ -31,7 +31,7 @@ type ItemBaixaForm = {
 };
 
 type ResultadoBusca = {
-  periodo_inicio: string;
+  data_atualizacao: string;
   periodo_fim: string;
   pedidos_encontrados: number;
   pedidos_ignorados: number;
@@ -42,7 +42,7 @@ type ResultadoBusca = {
 };
 
 type PeriodoBuscaPadrao = {
-  periodo_inicio: string;
+  data_atualizacao: string;
   periodo_fim: string;
 };
 
@@ -74,29 +74,16 @@ const ITEM_INICIAL: ItemBaixaForm = {
   produto_cadastrado: true,
 };
 
-function formatarDateTimeLocal(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0");
+function dataAtualizacaoValida(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
 
-  return [
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    `${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  ].join("T");
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-function isoParaDateTimeLocal(iso: string) {
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return formatarDateTimeLocal(date);
-}
-
-function dateTimeLocalParaIso(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return null;
-
-  return date.toISOString();
+function formatarDataBr(value: string) {
+  const [ano, mes, dia] = value.split("-");
+  return ano && mes && dia ? `${dia}/${mes}/${ano}` : value;
 }
 
 export default function BaixaEstoqueOlistPage() {
@@ -116,7 +103,7 @@ export default function BaixaEstoqueOlistPage() {
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [periodoInicioBusca, setPeriodoInicioBusca] = useState("");
+  const [dataAtualizacaoBusca, setDataAtualizacaoBusca] = useState("");
   const podeSolicitarBaixa = Boolean(usuario?.podeSolicitarBaixa);
 
   const itensPorBaixa = useMemo(() => {
@@ -170,7 +157,7 @@ export default function BaixaEstoqueOlistPage() {
       if (resp.status < 200 || resp.status >= 300) return;
 
       const data = resp.data as PeriodoBuscaPadrao;
-      setPeriodoInicioBusca(isoParaDateTimeLocal(data.periodo_inicio));
+      setDataAtualizacaoBusca(data.data_atualizacao);
     }
 
     void carregarPeriodoBuscaPadrao();
@@ -190,9 +177,7 @@ export default function BaixaEstoqueOlistPage() {
     setMessage(null);
     setErrorMessage(null);
 
-    const periodoInicio = periodoInicioBusca ? dateTimeLocalParaIso(periodoInicioBusca) : null;
-
-    if (periodoInicioBusca && !periodoInicio) {
+    if (dataAtualizacaoBusca && !dataAtualizacaoValida(dataAtualizacaoBusca)) {
       setErrorMessage("Informe uma data válida para a busca automática.");
       setBuscando(false);
       return;
@@ -200,7 +185,7 @@ export default function BaixaEstoqueOlistPage() {
 
     const resp = await axios.post(
       "/api/olist/baixa-estoque/buscar",
-      { periodo_inicio: periodoInicio },
+      { data_atualizacao: dataAtualizacaoBusca || null },
       { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
     );
 
@@ -212,7 +197,7 @@ export default function BaixaEstoqueOlistPage() {
 
     const data = resp.data as ResultadoBusca;
     setResultadoBusca(data);
-    setPeriodoInicioBusca(isoParaDateTimeLocal(data.periodo_inicio));
+    setDataAtualizacaoBusca(data.data_atualizacao);
     setPedidosSelecionados([]);
     setItensForm([{ ...ITEM_INICIAL }]);
     setModoAtual("automatica");
@@ -451,11 +436,11 @@ export default function BaixaEstoqueOlistPage() {
           </div>
           <div className="flex flex-col gap-3 md:flex-row md:items-end">
             <label className="text-sm text-slate-700">
-              Buscar desde
+              Buscar atualizados desde
               <input
-                type="datetime-local"
-                value={periodoInicioBusca}
-                onChange={(event) => setPeriodoInicioBusca(event.target.value)}
+                type="date"
+                value={dataAtualizacaoBusca}
+                onChange={(event) => setDataAtualizacaoBusca(event.target.value)}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 md:w-56"
               />
             </label>
@@ -473,7 +458,8 @@ export default function BaixaEstoqueOlistPage() {
         {resultadoBusca && (
           <div className="mt-4 space-y-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-              <p>Periodo: {new Date(resultadoBusca.periodo_inicio).toLocaleString("pt-BR")} ate {new Date(resultadoBusca.periodo_fim).toLocaleString("pt-BR")}</p>
+              <p>Atualizados desde: {formatarDataBr(resultadoBusca.data_atualizacao)}</p>
+              <p>Busca executada em: {new Date(resultadoBusca.periodo_fim).toLocaleString("pt-BR")}</p>
               <p>Pedidos encontrados: {resultadoBusca.pedidos_encontrados}</p>
               <p>Pedidos ignorados por baixa anterior: {resultadoBusca.pedidos_ignorados}</p>
               {(resultadoBusca.pedidos_detalhe_pendente ?? 0) > 0 && (

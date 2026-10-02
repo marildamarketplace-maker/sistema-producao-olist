@@ -10,6 +10,8 @@ datasource db {
 model Aplicativo {
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
+  jobs                      String                       @default("")
+  whatsapp                  String                       @default("5537988031061") @db.VarChar(15)
   olistClientId             String?                      @map("olist_client_id")
   olistClientSecret         String?                      @map("olist_client_secret")
   createdAt                 DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -722,6 +724,26 @@ model EstampaCatalogoIa {
   @@map("estampas")
 }
 
+model Notification {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo          NotificationType
+  to            String             @db.VarChar(30)
+  titulo        String
+  mensagem      String
+  data          DateTime           @default(now()) @db.Timestamptz(6)
+  status        NotificationStatus @default(PENDENTE)
+  tentativas    Int                @default(0)
+  ultimoErro    String?            @map("ultimo_erro")
+  processandoEm DateTime?          @map("processando_em") @db.Timestamptz(6)
+  workerId      String?            @map("worker_id") @db.Uuid
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, data], map: "idx_notification_status_data")
+  @@index([processandoEm], map: "idx_notification_processando_em")
+  @@map("notification")
+}
+
 model Variante {
   id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   codigo        String
@@ -887,4 +909,14 @@ enum StatusEstampaAiBatch {
   FAILED
   CANCELLED
   EXPIRED
+}
+
+enum NotificationType {
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDENTE
+  ERRO
+  SUCESSO
 }

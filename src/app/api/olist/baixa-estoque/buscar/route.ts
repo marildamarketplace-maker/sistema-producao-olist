@@ -7,6 +7,7 @@ export async function GET() {
     const periodo = await obterPeriodoBuscaBaixaEstoque();
 
     return NextResponse.json({
+      data_atualizacao: periodo.periodoInicio.toISOString().slice(0, 10),
       periodo_inicio: periodo.periodoInicio.toISOString(),
       periodo_fim: periodo.periodoFim.toISOString(),
     });
@@ -23,8 +24,14 @@ export async function POST(req: NextRequest) {
   try {
     const usuario = await getUsuarioAutenticado(req);
     const body = await req.json().catch(() => ({}));
+    const dataAtualizacao =
+      typeof body?.data_atualizacao === "string"
+        ? body.data_atualizacao
+        : typeof body?.periodo_inicio === "string"
+          ? body.periodo_inicio
+          : null;
     const result = await buscarPedidosParaBaixaEstoqueOlist(usuario.aplicativoId, {
-      periodoInicio: typeof body?.periodo_inicio === "string" ? body.periodo_inicio : null,
+      dataAtualizacao,
     });
 
     return NextResponse.json(result);

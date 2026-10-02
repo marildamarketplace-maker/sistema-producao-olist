@@ -263,7 +263,12 @@ O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/cal
 ### OAuth de autenticação (v3)
 - `GET /api/olist/login`: inicia OAuth2 (authorization code).
 - `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
-- `GET /api/cron/renovar-tokens-olist`: diariamente às 03:05 UTC, renova integrações conectadas cujo token expire nas próximas 25 horas. A rota exige `Authorization: Bearer <CRON_SECRET>`.
+- A coluna `aplicativo.jobs` controla quais jobs podem atuar em cada aplicação. Informe as chaves separadas por vírgula, por exemplo: `BAIXA_ESTOQUE,NOTIFICAR,RENOVAR_TOKENS`. Espaços e diferenças entre maiúsculas/minúsculas são normalizados; a comparação da chave é exata. Valor vazio desabilita todos os jobs para a aplicação.
+- `GET /api/cron/renovar-tokens-olist`: diariamente às 03:05 UTC, renova somente integrações conectadas com `RENOVAR_TOKENS` cujo token expire nas próximas 25 horas. A rota exige `Authorization: Bearer <CRON_SECRET>`.
+- `GET /api/cron/baixa-estoque-olist`: diariamente às 02:50 UTC (23:50 em `America/Sao_Paulo`), executa a mesma busca da tela de baixa Olist para cada aplicação conectada com `BAIXA_ESTOQUE`, usando somente `dataAtualizacao`, com janela móvel padrão dos últimos 7 dias, e confirma automaticamente todos os pedidos com detalhes disponíveis. A rota exige `Authorization: Bearer <CRON_SECRET>`.
+- `GET /api/cron/processar-notifications`: processa somente notificações destinadas ao WhatsApp de aplicações com `NOTIFICAR`.
+- `OLIST_BAIXA_AUTOMATICA_APLICATIVO_ID` pode restringir a baixa automática a uma aplicação específica; a chave `BAIXA_ESTOQUE` continua obrigatória.
+- `WHATSAPP_ERROR_NOTIFICATION_NUMBER=5537988031061`: destinatário server-side de todas as notificações de erro registradas pelo sistema.
 - Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
 
 ### Cobrança diária de confirmação de produção via WhatsApp
@@ -273,8 +278,7 @@ O cron da Vercel chama `GET /api/cron/cobrar-confirmacao-producao` diariamente �
 Variáveis obrigatórias:
 
 - `CRON_SECRET`: segredo usado pela Vercel no header `Authorization: Bearer ...`.
-- `ZAPI_INSTANCE_ID`: ID da instância Z-API.
-- `ZAPI_TOKEN`: token da instância Z-API.
+- `ZAPI_INSTANCE_API`: URL completa da API da instância Z-API, sem o sufixo `/send-text`.
 - `ZAPI_CLIENT_TOKEN`: token de segurança da conta Z-API.
 - `WHATSAPP_CONFIRMACAO_PRODUCAO_NUMEROS`: um ou mais números separados por vírgula, no formato DDI + DDD + número, somente dígitos.
 - `APP_URL`: URL pública do sistema, usada no link para a tela de confirmação (opcional na Vercel).

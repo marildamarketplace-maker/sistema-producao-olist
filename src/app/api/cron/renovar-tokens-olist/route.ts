@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
 import { getValidOlistAccessToken } from "@/lib/olist";
 import { prisma } from "@/lib/prisma";
 
@@ -35,21 +36,28 @@ export async function GET(request: NextRequest) {
       },
       select: {
         aplicativoId: true,
+        aplicativo: { select: { jobs: true } },
       },
       orderBy: {
         expiresAt: "asc",
       },
     });
+    const integracoesHabilitadas = integracoes.filter((integracao) =>
+      aplicativoTemJob(
+        integracao.aplicativo.jobs,
+        CHAVES_JOB.RENOVAR_TOKENS,
+      ),
+    );
 
     let proximoIndice = 0;
     const renovados: string[] = [];
     const erros: Array<{ aplicativoId: string; erro: string }> = [];
 
     async function processarProximaIntegracao() {
-      while (proximoIndice < integracoes.length) {
+      while (proximoIndice < integracoesHabilitadas.length) {
         const indice = proximoIndice;
         proximoIndice += 1;
-        const integracao = integracoes[indice];
+        const integracao = integracoesHabilitadas[indice];
 
         try {
           await getValidOlistAccessToken(integracao.aplicativoId, {
@@ -70,7 +78,7 @@ export async function GET(request: NextRequest) {
 
     const quantidadeWorkers = Math.min(
       CONCORRENCIA_MAXIMA,
-      integracoes.length,
+      integracoesHabilitadas.length,
     );
     await Promise.all(
       Array.from(
@@ -80,14 +88,14 @@ export async function GET(request: NextRequest) {
     );
 
     console.info("[olist-api] Job de renovação de tokens concluído.", {
-      elegiveis: integracoes.length,
+      elegiveis: integracoesHabilitadas.length,
       renovados: renovados.length,
       erros: erros.length,
     });
 
     return NextResponse.json({
       ok: erros.length === 0,
-      elegiveis: integracoes.length,
+      elegiveis: integracoesHabilitadas.length,
       renovados: renovados.length,
       erros: erros.length,
       falhas: erros,
