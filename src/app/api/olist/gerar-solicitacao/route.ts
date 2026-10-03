@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { NecessidadeProducaoError, gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
+import { NenhumItemElegivelOlistError } from "@/lib/olist-errors";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { ComponenteKitOlistError } from "@/lib/componentes-kit-olist";
 
@@ -43,6 +44,9 @@ export async function POST(req: NextRequest) {
         },
         { status: 422 },
       );
+    }
+    if (error instanceof NenhumItemElegivelOlistError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
     }
     if (error instanceof ComponenteKitOlistError) {
       return NextResponse.json({ error: error.message }, { status: 422 });

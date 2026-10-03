@@ -5,7 +5,8 @@ import { Sidebar } from "@/components/sidebar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPageWithoutShell = pathname === "/login";
+  const isPageWithoutShell = pathname === "/login"
+    || pathname === "/confirmar-entrega-producao";
 
   if (isPageWithoutShell) {
     return <>{children}</>;

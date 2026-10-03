@@ -70,7 +70,7 @@ type UsuarioAplicativoFallbackResponse = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const publicPaths = new Set(["/", "/login"]);
+const publicPaths = new Set(["/", "/login", "/confirmar-entrega-producao"]);
 
 function isPublicPath(pathname: string) {
   return publicPaths.has(pathname);

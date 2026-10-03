@@ -263,22 +263,25 @@ O callback OAuth da Olist usa automaticamente o dominio atual em `/api/olist/cal
 ### OAuth de autenticação (v3)
 - `GET /api/olist/login`: inicia OAuth2 (authorization code).
 - `GET /api/olist/callback`: recebe `code`, troca por `access_token`/`refresh_token`.
-- A coluna `aplicativo.jobs` controla quais jobs podem atuar em cada aplicação. Informe as chaves separadas por vírgula, por exemplo: `BAIXA_ESTOQUE,NOTIFICAR,RENOVAR_TOKENS`. Espaços e diferenças entre maiúsculas/minúsculas são normalizados; a comparação da chave é exata. Valor vazio desabilita todos os jobs para a aplicação.
+- A coluna `aplicativo.jobs` controla quais jobs podem atuar em cada aplicação. Informe as chaves separadas por vírgula, por exemplo: `BAIXA_ESTOQUE,NOTIFICAR,RENOVAR_TOKENS,VALIDADOR_ESTOQUE,CONFIRMACAO_ENTREGA_PRODUCAO`. Espaços e diferenças entre maiúsculas/minúsculas são normalizados; a comparação da chave é exata. Valor vazio desabilita todos os jobs para a aplicação.
 - `GET /api/cron/renovar-tokens-olist`: diariamente às 03:05 UTC, renova somente integrações conectadas com `RENOVAR_TOKENS` cujo token expire nas próximas 25 horas. A rota exige `Authorization: Bearer <CRON_SECRET>`.
 - `GET /api/cron/baixa-estoque-olist`: diariamente às 02:50 UTC (23:50 em `America/Sao_Paulo`), executa a mesma busca da tela de baixa Olist para cada aplicação conectada com `BAIXA_ESTOQUE`, usando somente `dataAtualizacao`, com janela móvel padrão dos últimos 7 dias, e confirma automaticamente todos os pedidos com detalhes disponíveis. A rota exige `Authorization: Bearer <CRON_SECRET>`.
-- `GET /api/cron/processar-notifications`: processa somente notificações destinadas ao WhatsApp de aplicações com `NOTIFICAR`.
+- `GET /api/cron/processar-notifications`: processa qualquer notificação pendente destinada ao WhatsApp de aplicações com `NOTIFICAR`, independentemente do job que a criou.
+- `GET /api/cron/validador-estoque`: executa diariamente às 08:00, 13:00 e 22:00 em `America/Sao_Paulo` (11:00, 16:00 e 01:00 UTC) para aplicações conectadas com `VALIDADOR_ESTOQUE`. Consulta as situações 0, 3, 4 e 1 usando o mesmo cálculo da tela “Gerar solicitação automaticamente”; se houver itens para “Nova solicitação”, enfileira um alerta no WhatsApp do aplicativo. Qualquer falha de processamento também é enfileirada como alerta. A chave `NOTIFICAR` deve estar habilitada no aplicativo para o worker consumir e enviar essas notificações. A rota exige `Authorization: Bearer <CRON_SECRET>`.
 - `OLIST_BAIXA_AUTOMATICA_APLICATIVO_ID` pode restringir a baixa automática a uma aplicação específica; a chave `BAIXA_ESTOQUE` continua obrigatória.
 - `WHATSAPP_ERROR_NOTIFICATION_NUMBER=5537988031061`: destinatário server-side de todas as notificações de erro registradas pelo sistema.
 - Se qualquer endpoint OAuth/API retornar HTML, o sistema falha com: `Endpoint incorreto: a Olist retornou HTML em vez de JSON. Verifique a URL da API.`
 
 ### Cobrança diária de confirmação de produção via WhatsApp
 
-O cron da Vercel chama `GET /api/cron/cobrar-confirmacao-producao` diariamente às 20:00 UTC, equivalente a 17:00 em `America/Sao_Paulo`. A mensagem é enviada somente quando existem solicitações com status `em_producao`.
+O cron da Vercel chama `GET /api/cron/cobrar-confirmacao-producao` diariamente às 19:00 UTC, equivalente a 16:00 em `America/Sao_Paulo`. Para cada aplicação com a chave `CONFIRMACAO_ENTREGA_PRODUCAO`, o job enfileira uma mensagem para `aplicativo.whatsapp` somente quando existem solicitações com status `em_producao` criadas há mais de 48 horas. A mensagem inclui um link público assinado, válido por sete dias, para `/confirmar-entrega-producao`. O token fica no fragmento do link, é removido da barra após a abertura e segue para a API somente pelo header `Authorization`, evitando exposição em logs e referrers. Nessa tela é possível revisar e editar as quantidades antes de confirmar com uma das senhas autorizadas. Falhas por aplicação também são enfileiradas para o WhatsApp; falhas gerais usam o destinatário de erros do sistema.
 
 Variáveis obrigatórias:
 
 - `CRON_SECRET`: segredo usado pela Vercel no header `Authorization: Bearer ...`.
 - `ZAPI_INSTANCE_API`: URL completa da API da instância Z-API, sem o sufixo `/send-text`.
 - `ZAPI_CLIENT_TOKEN`: token de segurança da conta Z-API.
-- `WHATSAPP_CONFIRMACAO_PRODUCAO_NUMEROS`: um ou mais números separados por vírgula, no formato DDI + DDD + número, somente dígitos.
+- `CONFIRMACAO_PRODUCAO_PUBLIC_SECRET`: segredo aleatório de pelo menos 32 caracteres usado exclusivamente para assinar os links públicos. Não use `CRON_SECRET` nem exponha a variável com prefixo `NEXT_PUBLIC_`.
 - `APP_URL`: URL pública do sistema, usada no link para a tela de confirmação (opcional na Vercel).
+
+A API pública valida a assinatura e a expiração do link, restringe todas as consultas ao aplicativo do token, limita tentativas incorretas de senha e executa a confirmação dentro da mesma transação serializável usada pela tela autenticada. As senhas nunca são enviadas no link nem persistidas no banco.

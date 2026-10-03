@@ -15,6 +15,7 @@ import {
   obterDataAtualizacaoPadrao,
   type FiltroDataPedidosOlist,
 } from "@/lib/olist-filtro-data";
+import { NenhumItemElegivelOlistError } from "@/lib/olist-errors";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -36,7 +37,7 @@ type OpcoesTokenOlist = {
  * TYPES
  * ======================================================= */
 
-type FiltroDataBase = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
+export type FiltroDataBaseOlist = "APROVACAO_PEDIDO" | "CRIACAO_PEDIDO";
 
 class ErroRenovacaoOAuthOlist extends Error {
   constructor(
@@ -77,7 +78,7 @@ type EstoqueAtualRow = {
   estoque_atual: number | null;
 };
 
-type ItemSolicitacao = {
+export type ItemSolicitacaoOlist = {
   produto_id: string;
   sku: string;
   imagem_url: string | null;
@@ -91,7 +92,7 @@ type ItemSolicitacao = {
   skus_olist_origem?: string[];
 };
 
-type ItemEstoqueSuficiente = {
+export type ItemEstoqueSuficienteOlist = {
   sku: string;
   estoque_atual: number;
   quantidade_pedidos: number;
@@ -99,7 +100,7 @@ type ItemEstoqueSuficiente = {
   pedido_olist_ids: string[];
 };
 
-type ItemCobertoProducaoExistente = {
+export type ItemCobertoProducaoExistenteOlist = {
   sku: string;
   estoque_atual: number;
   quantidade_pedidos: number;
@@ -108,10 +109,41 @@ type ItemCobertoProducaoExistente = {
   pedido_olist_ids: string[];
 };
 
-export class NecessidadeProducaoError extends Error {
-  estoqueSuficiente: ItemEstoqueSuficiente[];
+export type GerarSolicitacaoPorPedidosOlistInput = {
+  aplicativoId: string;
+  dataLimite: string;
+  filtroDataBase: FiltroDataBaseOlist;
+  situacoes?: string[];
+};
 
-  constructor(estoqueSuficiente: ItemEstoqueSuficiente[]) {
+export type ResultadoGerarSolicitacaoPorPedidosOlist = {
+  data_entrega: string;
+  filtro_data_base: FiltroDataBaseOlist;
+  periodo_inicio: string;
+  periodo_fim: string;
+  observacao_geral: string;
+  prioridade_producao: boolean;
+  itens: ItemSolicitacaoOlist[];
+  itens_cobertos_producao_existente: ItemCobertoProducaoExistenteOlist[];
+  itens_estoque_suficiente: ItemEstoqueSuficienteOlist[];
+  total_itens: number;
+  itens_ja_processados: number;
+  pedidos_encontrados: number;
+  pedidos_adicionados: number;
+  pedidos_ignorados: number;
+  produtos_cadastrados: number;
+  rastreio_olist: Array<{
+    pedido_olist_id: string;
+    item_olist_id: string;
+    sku: string;
+  }>;
+  motivo_pedidos_ignorados: string;
+};
+
+export class NecessidadeProducaoError extends Error {
+  estoqueSuficiente: ItemEstoqueSuficienteOlist[];
+
+  constructor(estoqueSuficiente: ItemEstoqueSuficienteOlist[]) {
     super("Não há necessidade de produção.");
     this.name = "NecessidadeProducaoError";
     this.estoqueSuficiente = estoqueSuficiente;
@@ -1487,12 +1519,13 @@ async function expandirKitsEmComponentes(
  * DADOS INTERNOS
  * ======================================================= */
 
-async function buscarEstoqueAtual(skus: string[]) {
+async function buscarEstoqueAtual(skus: string[], aplicativoId: string) {
   if (skus.length === 0) return [];
 
   const movimentacoes = await prisma.movimentacaoEstoque.groupBy({
     by: ["sku", "tipoMovimento"],
     where: {
+      aplicativoId,
       sku: { in: skus },
     },
     _sum: {
@@ -1516,10 +1549,11 @@ async function buscarEstoqueAtual(skus: string[]) {
   }));
 }
 
-async function buscarDadosInternos(skus: string[]) {
+async function buscarDadosInternos(skus: string[], aplicativoId: string) {
   const [produtos, estoqueRows, cfgRows] = await Promise.all([
     prisma.produto.findMany({
       where: {
+        aplicativoId,
         sku: { in: skus },
       },
       select: {
@@ -1532,10 +1566,11 @@ async function buscarDadosInternos(skus: string[]) {
       },
     }),
 
-    buscarEstoqueAtual(skus),
+    buscarEstoqueAtual(skus, aplicativoId),
 
     prisma.configuracaoSistema.findMany({
       where: {
+        aplicativoId,
         chave: { in: ["META_GERAL_ESTOQUE", "MINIMO_GERAL_ESTOQUE"] },
       },
       select: { chave: true, valor: true },
@@ -1573,9 +1608,9 @@ function montarItensSolicitacao(
     estoqueRows.map((e) => [e.sku, Number(e.estoque_atual ?? 0)]),
   );
 
-  const itens: ItemSolicitacao[] = [];
-  const estoqueSuficiente: ItemEstoqueSuficiente[] = [];
-  const itensCobertosProducaoExistente: ItemCobertoProducaoExistente[] = [];
+  const itens: ItemSolicitacaoOlist[] = [];
+  const estoqueSuficiente: ItemEstoqueSuficienteOlist[] = [];
+  const itensCobertosProducaoExistente: ItemCobertoProducaoExistenteOlist[] = [];
   let prioridadeProducao = false;
 
   for (const produto of produtos) {
@@ -2123,6 +2158,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
 
 async function cadastrarProdutosOlistNaoCadastrados(
   agregados: Map<string, DemandaProdutoOlist>,
+  aplicativoId: string,
 ) {
   const skus = [...agregados.keys()];
 
@@ -2130,6 +2166,7 @@ async function cadastrarProdutosOlistNaoCadastrados(
 
   const produtosExistentes = await prisma.produto.findMany({
     where: {
+      aplicativoId,
       sku: { in: skus },
     },
     select: { sku: true },
@@ -2145,6 +2182,7 @@ async function cadastrarProdutosOlistNaoCadastrados(
       const item = agregados.get(sku);
 
       return {
+        aplicativoId,
         sku,
         imagemUrl: item?.imagem_url ?? null,
         ativo: true,
@@ -2166,12 +2204,9 @@ async function cadastrarProdutosOlistNaoCadastrados(
  * PRINCIPAL
  * ======================================================= */
 
-export async function gerarSolicitacaoPorPedidosOlist(input: {
-  aplicativoId: string;
-  dataLimite: string;
-  filtroDataBase: FiltroDataBase;
-  situacoes?: string[];
-}) {
+export async function gerarSolicitacaoPorPedidosOlist(
+  input: GerarSolicitacaoPorPedidosOlistInput,
+): Promise<ResultadoGerarSolicitacaoPorPedidosOlist> {
   const situacoes = normalizarSituacoes(input.situacoes);
   const processamentoEm = new Date().toISOString();
 
@@ -2188,7 +2223,7 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   const paresPedidoItem = extrairParesPedidoItem(pedidos);
 
   if (paresPedidoItem.length === 0) {
-    throw new Error("Nenhum item elegível encontrado nos pedidos da Olist.");
+    throw new NenhumItemElegivelOlistError();
   }
 
   const resultadoAgregacao = agregarItensNovos(pedidos);
@@ -2196,14 +2231,20 @@ export async function gerarSolicitacaoPorPedidosOlist(input: {
   const agregadosSemKits = new Map(
     [...resultadoAgregacao.agregados].filter(([, demanda]) => !skuEhKitOlist(demanda.sku)),
   );
-  const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(agregadosSemKits);
+  const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(
+    agregadosSemKits,
+    input.aplicativoId,
+  );
   const agregadosParaProducao = await expandirKitsEmComponentes(
     resultadoAgregacao.agregados,
     input.aplicativoId,
   );
   const skusParaProducao = [...agregadosParaProducao.keys()];
 
-  const dadosInternos = await buscarDadosInternos(skusParaProducao);
+  const dadosInternos = await buscarDadosInternos(
+    skusParaProducao,
+    input.aplicativoId,
+  );
 
   const quantidadeEmProducaoPorSku = await buscarQuantidadesEmProducao(
     skusParaProducao,

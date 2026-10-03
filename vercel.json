@@ -13,6 +13,14 @@
     {
       "path": "/api/cron/baixa-estoque-olist",
       "schedule": "50 2 * * *"
+    },
+    {
+      "path": "/api/cron/validador-estoque",
+      "schedule": "0 1,11,16 * * *"
+    },
+    {
+      "path": "/api/cron/cobrar-confirmacao-producao",
+      "schedule": "0 19 * * *"
     }
   ]
 }

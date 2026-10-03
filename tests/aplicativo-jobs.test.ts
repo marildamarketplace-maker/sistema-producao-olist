@@ -7,11 +7,16 @@ import {
 } from "../src/lib/aplicativo-jobs";
 
 test("identifica chaves de job separadas por vírgula", () => {
-  const jobs = "BAIXA_ESTOQUE, NOTIFICAR,RENOVAR_TOKENS";
+  const jobs = "BAIXA_ESTOQUE, NOTIFICAR,RENOVAR_TOKENS,VALIDADOR_ESTOQUE,CONFIRMACAO_ENTREGA_PRODUCAO";
 
   assert.equal(aplicativoTemJob(jobs, CHAVES_JOB.BAIXA_ESTOQUE), true);
   assert.equal(aplicativoTemJob(jobs, CHAVES_JOB.NOTIFICAR), true);
   assert.equal(aplicativoTemJob(jobs, CHAVES_JOB.RENOVAR_TOKENS), true);
+  assert.equal(aplicativoTemJob(jobs, CHAVES_JOB.VALIDADOR_ESTOQUE), true);
+  assert.equal(
+    aplicativoTemJob(jobs, CHAVES_JOB.CONFIRMACAO_ENTREGA_PRODUCAO),
+    true,
+  );
 });
 
 test("normaliza espaços e caixa sem aceitar correspondência parcial", () => {
@@ -28,4 +33,9 @@ test("normaliza espaços e caixa sem aceitar correspondência parcial", () => {
 test("não habilita jobs quando a configuração está vazia", () => {
   assert.equal(aplicativoTemJob("", CHAVES_JOB.BAIXA_ESTOQUE), false);
   assert.equal(aplicativoTemJob(null, CHAVES_JOB.NOTIFICAR), false);
+  assert.equal(aplicativoTemJob(null, CHAVES_JOB.VALIDADOR_ESTOQUE), false);
+  assert.equal(
+    aplicativoTemJob(null, CHAVES_JOB.CONFIRMACAO_ENTREGA_PRODUCAO),
+    false,
+  );
 });

@@ -40,6 +40,7 @@ export function criarResumoNotificationBaixaEstoqueOlist(
       `Executada em: ${formatarDataHora(executadoEm)}`,
       `Período consultado: ${formatarDataHora(resultado.periodo_inicio)} até ${formatarDataHora(resultado.periodo_fim)}`,
       `Sucessos: ${resultado.pedidos_confirmados} pedido(s) e ${resultado.itens_baixados} item(ns) baixado(s)`,
+      "Erros: 0",
       `Pendentes: ${resultado.pedidos_pendentes} pedido(s)`,
       `Ignorados: ${resultado.pedidos_ignorados} pedido(s)`,
       `Encontrados: ${resultado.pedidos_encontrados} pedido(s)`,
@@ -65,6 +66,7 @@ export function criarErroNotificationBaixaEstoqueOlist(input: {
       "",
       `Data do erro: ${formatarDataHora(input.ocorridoEm ?? new Date())}`,
       `Aplicativo: ${input.aplicativoId ?? "não identificado"}`,
+      "Erros: 1",
       `Detalhe: ${mensagemErro.slice(0, 1_000)}`,
     ].join("\n"),
   };
