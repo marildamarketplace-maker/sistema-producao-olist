@@ -121,7 +121,11 @@ export async function GET(request: NextRequest) {
     const payload = validarTokenPublicoConfirmacaoProducao(token);
     const aplicativo = await validarAplicativoHabilitado(payload.aplicativoId);
     const solicitacoes = await prisma.solicitacaoProducao.findMany({
-      where: { aplicativoId: aplicativo.id, status: "em_producao" },
+      where: {
+        id: payload.solicitacaoId,
+        aplicativoId: aplicativo.id,
+        status: "em_producao",
+      },
       select: {
         id: true,
         dataEntrega: true,
@@ -246,10 +250,13 @@ export async function POST(request: NextRequest) {
       ? body.solicitacaoId.trim()
       : "";
     if (!solicitacaoId) return resposta({ error: "Informe a solicitação." }, 400);
+    if (solicitacaoId !== payload.solicitacaoId) {
+      return resposta({ error: "Link inválido para esta solicitação." }, 403);
+    }
     const itensConfirmacao = normalizarItensConfirmacaoProducao(body.itens);
     await confirmarEntregaProducao({
       aplicativoId: payload.aplicativoId,
-      solicitacaoId,
+      solicitacaoId: payload.solicitacaoId,
       itens: itensConfirmacao,
     });
 

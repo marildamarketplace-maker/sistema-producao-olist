@@ -4,7 +4,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-const VERSAO_TOKEN = 1;
+const VERSAO_TOKEN = 2;
 const VALIDADE_TOKEN_SEGUNDOS = 7 * 24 * 60 * 60;
 const HASHES_SENHAS_VALIDAS = [
   "072fee9f0154344c7c550b69f9b9203723772e8ed2ed5dcff46c0af87567361e",
@@ -14,6 +14,7 @@ const HASHES_SENHAS_VALIDAS = [
 type TokenPayload = {
   v: number;
   aplicativoId: string;
+  solicitacaoId: string;
   exp: number;
 };
 
@@ -42,12 +43,14 @@ function assinaturaValida(recebida: string, esperada: string) {
 
 export function criarTokenPublicoConfirmacaoProducao(input: {
   aplicativoId: string;
+  solicitacaoId: string;
   agora?: Date;
 }) {
   const agora = input.agora ?? new Date();
   const payload: TokenPayload = {
     v: VERSAO_TOKEN,
     aplicativoId: input.aplicativoId,
+    solicitacaoId: input.solicitacaoId,
     exp: Math.floor(agora.getTime() / 1_000) + VALIDADE_TOKEN_SEGUNDOS,
   };
   const payloadCodificado = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -78,6 +81,8 @@ export function validarTokenPublicoConfirmacaoProducao(
     payload.v !== VERSAO_TOKEN
     || typeof payload.aplicativoId !== "string"
     || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(payload.aplicativoId)
+    || typeof payload.solicitacaoId !== "string"
+    || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(payload.solicitacaoId)
     || !Number.isSafeInteger(payload.exp)
   ) {
     throw new Error("Link de confirmação inválido.");

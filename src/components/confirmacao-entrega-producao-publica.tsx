@@ -1,7 +1,7 @@
 "use client";
 
 import Image, { type ImageLoaderProps } from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -141,17 +141,6 @@ export function ConfirmacaoEntregaProducaoPublica() {
     if (token !== null) void carregar();
   }, [carregar, token]);
 
-  const totalUnidades = useMemo(
-    () => solicitacoes.reduce(
-      (total, solicitacao) => total + solicitacao.itens.reduce(
-        (subtotal, item) => subtotal + item.quantidadeSolicitada,
-        0,
-      ),
-      0,
-    ),
-    [solicitacoes],
-  );
-
   function atualizarQuantidade(itemId: string, valor: string) {
     if (valor === "" || /^\d{0,10}$/.test(valor)) {
       setQuantidades((atual) => ({ ...atual, [itemId]: valor }));
@@ -257,10 +246,6 @@ export function ConfirmacaoEntregaProducaoPublica() {
               <h1 className="text-xl font-bold">Confirmar entrega</h1>
             </div>
           </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <Resumo valor={solicitacoes.length} label="produções" />
-            <Resumo valor={totalUnidades} label="unidades solicitadas" />
-          </div>
         </div>
       </header>
 
@@ -281,8 +266,8 @@ export function ConfirmacaoEntregaProducaoPublica() {
         {solicitacoes.length === 0 ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
             <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" aria-hidden="true" />
-            <h2 className="mt-4 text-lg font-bold">Tudo confirmado</h2>
-            <p className="mt-1 text-sm text-slate-600">Não existem entregas aguardando confirmação.</p>
+            <h2 className="mt-4 text-lg font-bold">Entrega sem pendência</h2>
+            <p className="mt-1 text-sm text-slate-600">Esta solicitação não está mais aguardando confirmação.</p>
           </div>
         ) : solicitacoes.map((solicitacao) => {
           const recolhida = Boolean(recolhidas[solicitacao.id]);
@@ -307,9 +292,12 @@ export function ConfirmacaoEntregaProducaoPublica() {
                   }))}
                   aria-expanded={!recolhida}
                 >
-                  <span>
-                    <span className="flex items-center gap-2 text-base font-bold">
-                      <CalendarDays className="h-5 w-5 text-slate-500" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block whitespace-pre-line break-words text-base font-bold">
+                      {solicitacao.observacaoGeral?.trim() || "Pedido de produção"}
+                    </span>
+                    <span className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+                      <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
                       Entrega {formatarData(solicitacao.dataEntrega)}
                     </span>
                     <span className="mt-1 block text-sm text-slate-500">
@@ -327,9 +315,6 @@ export function ConfirmacaoEntregaProducaoPublica() {
                       <p><strong>Criada:</strong> {formatarDataHora(solicitacao.createdAt)}</p>
                       {solicitacao.pedidosOlist.length > 0 && (
                         <p className="mt-1 break-words"><strong>Pedido Olist:</strong> {solicitacao.pedidosOlist.join(", ")}</p>
-                      )}
-                      {solicitacao.observacaoGeral && (
-                        <p className="mt-1"><strong>Observação:</strong> {solicitacao.observacaoGeral}</p>
                       )}
                     </div>
 
@@ -476,15 +461,6 @@ export function ConfirmacaoEntregaProducaoPublica() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function Resumo({ valor, label }: { valor: number; label: string }) {
-  return (
-    <div className="rounded-2xl bg-white/10 px-4 py-3">
-      <p className="text-2xl font-black tabular-nums">{valor}</p>
-      <p className="text-xs text-slate-300">{label}</p>
     </div>
   );
 }

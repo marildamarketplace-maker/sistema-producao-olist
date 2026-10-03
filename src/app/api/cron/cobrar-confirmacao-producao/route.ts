@@ -21,13 +21,13 @@ function verificarAutorizacao(request: NextRequest) {
   );
 }
 
-function obterUrlConfirmacao(aplicativoId: string, agora: Date) {
+function obterUrlConfirmacao(aplicativoId: string, solicitacaoId: string, agora: Date) {
   const definida = process.env.APP_URL?.trim();
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   const baseUrl = definida?.replace(/\/$/, "")
     ?? (vercel ? `https://${vercel}` : null);
   if (!baseUrl) return null;
-  const token = criarTokenPublicoConfirmacaoProducao({ aplicativoId, agora });
+  const token = criarTokenPublicoConfirmacaoProducao({ aplicativoId, solicitacaoId, agora });
   return `${baseUrl}/confirmar-entrega-producao#token=${encodeURIComponent(token)}`;
 }
 
@@ -125,12 +125,11 @@ export async function GET(request: NextRequest) {
           continue;
         }
 
-        const urlConfirmacao = obterUrlConfirmacao(aplicativo.id, agora);
         for (const producao of producoes) {
           const alerta = criarAlertaConfirmacaoEntregaProducao({
             producao,
             agora,
-            urlConfirmacao,
+            urlConfirmacao: obterUrlConfirmacao(aplicativo.id, producao.id, agora),
           });
           await criarNotification({ to: aplicativo.whatsapp, ...alerta });
         }

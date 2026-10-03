@@ -45,7 +45,7 @@ export function criarAlertaConfirmacaoEntregaProducao(input: {
   return {
     titulo: "Confirmação de entrega de produção pendente",
     mensagem: [
-      producao.prioridadeProducao ? "🚨 *PRODUÇÃO PRIORITÁRIA*" : "",
+      ...(producao.prioridadeProducao ? ["🚨 *PRODUÇÃO PRIORITÁRIA*"] : []),
       "Esta entrega de produção está sem confirmação há mais de 2 dias.",
       "",
       `Entrega: *${formatadorData.format(producao.dataEntrega)}*`,
@@ -54,7 +54,7 @@ export function criarAlertaConfirmacaoEntregaProducao(input: {
       "",
       "Confirme a entrega da produção o quanto antes.",
       ...(input.urlConfirmacao ? [input.urlConfirmacao] : []),
-    ].filter((linha, indice, linhas) => linha !== "" || linhas[indice - 1] !== "").join("\n"),
+    ].join("\n"),
   };
 }
 
