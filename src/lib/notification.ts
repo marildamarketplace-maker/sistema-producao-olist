@@ -23,11 +23,22 @@ function validarTexto(valor: string, campo: "titulo" | "mensagem") {
 }
 
 function normalizarNumeroWhatsapp(to: string) {
+  if (!/^[+\d\s().-]+$/.test(to)) {
+    throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
+  }
   const numero = to.replace(/\D/g, "");
   if (numero.length < 10 || numero.length > 15) {
     throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
   }
   return numero;
+}
+
+export function normalizarDestinatariosWhatsapp(valor: string): string[] {
+  const numeros = valor.split(",").map((numero) => numero.trim()).filter(Boolean);
+  if (numeros.length === 0) {
+    throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
+  }
+  return [...new Set(numeros.map(normalizarNumeroWhatsapp))];
 }
 
 export function prepararDadosNotification(
@@ -59,6 +70,18 @@ async function persistirNotification(
 export async function criarNotification(
   input: CriarNotificationInput,
   persistir: PersistirNotification = persistirNotification,
-): Promise<Notification> {
-  return persistir(prepararDadosNotification(input));
+): Promise<Notification[]> {
+  const destinatarios = (input.tipo ?? "WHATSAPP") === "WHATSAPP"
+    ? normalizarDestinatariosWhatsapp(input.to)
+    : [input.to];
+  const dados = destinatarios.map((to) => prepararDadosNotification({ ...input, to }));
+  const resultados = await Promise.allSettled(dados.map(persistir));
+  const falhas = resultados.filter((resultado) => resultado.status === "rejected");
+  if (falhas.length > 0) {
+    throw new AggregateError(
+      falhas.map((falha) => falha.reason),
+      `Falha ao registrar ${falhas.length} de ${destinatarios.length} notificações.`,
+    );
+  }
+  return resultados.flatMap((resultado) => resultado.status === "fulfilled" ? [resultado.value] : []);
 }

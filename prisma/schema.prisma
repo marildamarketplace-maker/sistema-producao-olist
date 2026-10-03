@@ -11,7 +11,7 @@ model Aplicativo {
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
   jobs                      String                       @default("")
-  whatsapp                  String                       @default("5537988031061") @db.VarChar(15)
+  whatsapp                  String                       @default("5537988031061") @db.Text
   olistClientId             String?                      @map("olist_client_id")
   olistClientSecret         String?                      @map("olist_client_secret")
   createdAt                 DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)

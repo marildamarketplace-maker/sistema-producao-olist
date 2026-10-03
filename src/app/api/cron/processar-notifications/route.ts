@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
 import { obterMensagemErro, registrarErro } from "@/lib/error-handler";
 import { prisma } from "@/lib/prisma";
+import { normalizarDestinatariosWhatsapp } from "@/lib/notification";
 import { processarNotificationsPendentes } from "@/services/notificationService";
 
 export const dynamic = "force-dynamic";
@@ -24,19 +25,24 @@ export async function GET(request: NextRequest) {
     const aplicativos = await prisma.aplicativo.findMany({
       select: { jobs: true, whatsapp: true },
     });
+    const habilitados = aplicativos.filter((aplicativo) =>
+      aplicativoTemJob(aplicativo.jobs, CHAVES_JOB.NOTIFICAR),
+    );
+    const numerosErros = process.env.WHATSAPP_ERROR_NOTIFICATION_NUMBER?.trim();
     const destinatarios = [
       ...new Set(
-        aplicativos
-          .filter((aplicativo) =>
-            aplicativoTemJob(aplicativo.jobs, CHAVES_JOB.NOTIFICAR),
-          )
-          .map((aplicativo) => aplicativo.whatsapp),
+        [
+          ...habilitados.flatMap((aplicativo) =>
+            normalizarDestinatariosWhatsapp(aplicativo.whatsapp),
+          ),
+          ...(numerosErros ? normalizarDestinatariosWhatsapp(numerosErros) : []),
+        ],
       ),
     ];
     const resultado = await processarNotificationsPendentes({ destinatarios });
     return NextResponse.json({
       ok: resultado.erros === 0,
-      aplicativosHabilitados: destinatarios.length,
+      aplicativosHabilitados: habilitados.length,
       ...resultado,
     });
   } catch (error) {
