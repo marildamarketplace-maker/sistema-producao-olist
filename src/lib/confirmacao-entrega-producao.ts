@@ -1,5 +1,4 @@
 const DOIS_DIAS_MS = 2 * 24 * 60 * 60 * 1_000;
-const LIMITE_DETALHES_MENSAGEM = 15;
 
 export type ProducaoPendenteConfirmacao = {
   id: string;
@@ -33,52 +32,29 @@ export function obterLimiteConfirmacao(atual = new Date()) {
 }
 
 export function criarAlertaConfirmacaoEntregaProducao(input: {
-  producoes: ProducaoPendenteConfirmacao[];
+  producao: ProducaoPendenteConfirmacao;
   agora?: Date;
   urlConfirmacao?: string | null;
 }): ConteudoWhatsapp {
   const agora = input.agora ?? new Date();
-  const totalItens = input.producoes.reduce(
-    (total, producao) => total + producao.quantidadeItens,
-    0,
+  const { producao } = input;
+  const dias = Math.floor(
+    (agora.getTime() - producao.createdAt.getTime()) / (24 * 60 * 60 * 1_000),
   );
-  const totalUnidades = input.producoes.reduce(
-    (total, producao) => total + producao.quantidadeUnidades,
-    0,
-  );
-  const prioritarias = input.producoes.filter(
-    (producao) => producao.prioridadeProducao,
-  ).length;
-  const detalhes = input.producoes
-    .slice(0, LIMITE_DETALHES_MENSAGEM)
-    .map((producao, indice) => {
-      const dias = Math.floor(
-        (agora.getTime() - producao.createdAt.getTime()) / (24 * 60 * 60 * 1_000),
-      );
-      return [
-        `${indice + 1}.`,
-        producao.prioridadeProducao ? "🚨 PRIORIDADE ·" : "",
-        `Entrega ${formatadorData.format(producao.dataEntrega)} ·`,
-        `criada há ${dias} dias ·`,
-        `${producao.quantidadeItens} item(ns) ·`,
-        `${producao.quantidadeUnidades} un.`,
-      ].filter(Boolean).join(" ");
-    });
 
   return {
     titulo: "Confirmação de entrega de produção pendente",
     mensagem: [
-      `Existem *${input.producoes.length} produções* sem confirmação há mais de 2 dias${prioritarias > 0 ? `, sendo *${prioritarias} prioritárias*` : ""}.`,
-      `Total pendente: *${totalItens} itens / ${totalUnidades} unidades*.`,
+      producao.prioridadeProducao ? "🚨 *PRODUÇÃO PRIORITÁRIA*" : "",
+      "Esta entrega de produção está sem confirmação há mais de 2 dias.",
       "",
-      ...detalhes,
-      ...(input.producoes.length > detalhes.length
-        ? ["", `E mais ${input.producoes.length - detalhes.length} produções.`]
-        : []),
+      `Entrega: *${formatadorData.format(producao.dataEntrega)}*`,
+      `Criada há: *${dias} dias*`,
+      `Total: *${producao.quantidadeItens} item(ns) / ${producao.quantidadeUnidades} unidades*`,
       "",
       "Confirme a entrega da produção o quanto antes.",
       ...(input.urlConfirmacao ? [input.urlConfirmacao] : []),
-    ].join("\n"),
+    ].filter((linha, indice, linhas) => linha !== "" || linhas[indice - 1] !== "").join("\n"),
   };
 }
 

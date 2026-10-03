@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
     const resultados: Array<{
       aplicativoId: string;
       pendentes: number;
-      notificado: boolean;
+      notificacoes: number;
     }> = [];
     const falhas: Array<{ aplicativoId: string; erro: string }> = [];
 
@@ -120,21 +120,24 @@ export async function GET(request: NextRequest) {
           resultados.push({
             aplicativoId: aplicativo.id,
             pendentes: 0,
-            notificado: false,
+            notificacoes: 0,
           });
           continue;
         }
 
-        const alerta = criarAlertaConfirmacaoEntregaProducao({
-          producoes,
-          agora,
-          urlConfirmacao: obterUrlConfirmacao(aplicativo.id, agora),
-        });
-        await criarNotification({ to: aplicativo.whatsapp, ...alerta });
+        const urlConfirmacao = obterUrlConfirmacao(aplicativo.id, agora);
+        for (const producao of producoes) {
+          const alerta = criarAlertaConfirmacaoEntregaProducao({
+            producao,
+            agora,
+            urlConfirmacao,
+          });
+          await criarNotification({ to: aplicativo.whatsapp, ...alerta });
+        }
         resultados.push({
           aplicativoId: aplicativo.id,
           pendentes: producoes.length,
-          notificado: true,
+          notificacoes: producoes.length,
         });
       } catch (error) {
         const alertaErro = criarAlertaErroConfirmacaoEntregaProducao({
@@ -164,7 +167,10 @@ export async function GET(request: NextRequest) {
     console.info("[confirmacao-entrega-producao] Job concluído.", {
       elegiveis: aplicativos.length,
       processados: resultados.length,
-      notificados: resultados.filter((resultado) => resultado.notificado).length,
+      notificados: resultados.reduce(
+        (total, resultado) => total + resultado.notificacoes,
+        0,
+      ),
       falhas: falhas.length,
     });
 
@@ -173,7 +179,10 @@ export async function GET(request: NextRequest) {
         ok: falhas.length === 0,
         elegiveis: aplicativos.length,
         processados: resultados.length,
-        notificados: resultados.filter((resultado) => resultado.notificado).length,
+        notificados: resultados.reduce(
+          (total, resultado) => total + resultado.notificacoes,
+          0,
+        ),
         resultados,
         falhas,
       },
