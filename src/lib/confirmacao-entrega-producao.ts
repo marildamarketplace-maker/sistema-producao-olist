@@ -1,4 +1,4 @@
-const DOIS_DIAS_MS = 2 * 24 * 60 * 60 * 1_000;
+const PRAZO_CONFIRMACAO_MS = 24 * 60 * 60 * 1_000;
 
 export type ProducaoPendenteConfirmacao = {
   id: string;
@@ -28,7 +28,7 @@ const formatadorDataHora = new Intl.DateTimeFormat("pt-BR", {
 
 export function obterLimiteConfirmacao(atual = new Date()) {
   if (Number.isNaN(atual.getTime())) throw new Error("Data atual inválida.");
-  return new Date(atual.getTime() - DOIS_DIAS_MS);
+  return new Date(atual.getTime() - PRAZO_CONFIRMACAO_MS);
 }
 
 export function criarAlertaConfirmacaoEntregaProducao(input: {
@@ -46,10 +46,10 @@ export function criarAlertaConfirmacaoEntregaProducao(input: {
     titulo: "Confirmação de entrega de produção pendente",
     mensagem: [
       ...(producao.prioridadeProducao ? ["🚨 *PRODUÇÃO PRIORITÁRIA*"] : []),
-      "Esta entrega de produção está sem confirmação há mais de 2 dias.",
+      "Esta entrega de produção está sem confirmação há mais de 24 horas.",
       "",
       `Entrega: *${formatadorData.format(producao.dataEntrega)}*`,
-      `Criada há: *${dias} dias*`,
+      `Criada há: *${dias} ${dias === 1 ? "dia" : "dias"}*`,
       `Total: *${producao.quantidadeItens} item(ns) / ${producao.quantidadeUnidades} unidades*`,
       "",
       "Confirme a entrega da produção o quanto antes.",

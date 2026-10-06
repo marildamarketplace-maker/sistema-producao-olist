@@ -6,10 +6,10 @@ import {
   obterLimiteConfirmacao,
 } from "../src/lib/confirmacao-entrega-producao";
 
-test("calcula o limite estrito de 48 horas para cobrar confirmação", () => {
+test("calcula o limite estrito de 24 horas para cobrar confirmação", () => {
   assert.equal(
     obterLimiteConfirmacao(new Date("2026-10-03T19:00:00.000Z")).toISOString(),
-    "2026-10-01T19:00:00.000Z",
+    "2026-10-02T19:00:00.000Z",
   );
 });
 
@@ -28,6 +28,7 @@ test("monta um alerta para uma confirmação atrasada", () => {
   });
 
   assert.equal(alerta.titulo, "Confirmação de entrega de produção pendente");
+  assert.match(alerta.mensagem, /mais de 24 horas/);
   assert.match(alerta.mensagem, /PRODUÇÃO PRIORITÁRIA/);
   assert.match(alerta.mensagem, /Entrega: \*06\/10\/2026\*/);
   assert.match(alerta.mensagem, /Criada há: \*3 dias\*/);
