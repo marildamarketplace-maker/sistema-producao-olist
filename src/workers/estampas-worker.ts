@@ -92,7 +92,7 @@ function contextoErro(error: unknown, job: EstampaJob) {
   return JSON.stringify(detalhes);
 }
 
-async function processarJob(
+export async function processarJob(
   job: EstampaJob,
   options: Pick<
     OpcoesEstampasWorker,
@@ -139,7 +139,7 @@ async function processarJob(
         contentHash: verificacao.contentHash,
         concluido,
       });
-      return;
+      return concluido ? "ignorado" as const : "lock_perdido" as const;
     }
 
     const resultado = await options.processar(estampa, job);
@@ -161,6 +161,7 @@ async function processarJob(
         duracaoMs: Date.now() - iniciadoEm,
       });
     }
+    return concluido ? "concluido" as const : "lock_perdido" as const;
   } catch (error) {
     const erro = contextoErro(error, job);
     const retriable = erroPermiteRetry(error);
@@ -178,6 +179,7 @@ async function processarJob(
       retryInMs:
         status === "PENDING" && retriable ? calcularBackoffRetryMs(job.tentativas) : null,
     });
+    return "falha" as const;
   } finally {
     clearInterval(heartbeat);
   }

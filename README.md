@@ -1,8 +1,35 @@
+## Processamento de estampas pelo cron da Vercel
+
+`GET /api/cron/processar-estampas` roda a cada 5 minutos em produção, autenticado
+com `Authorization: Bearer <CRON_SECRET>`. Usa a API OpenAI real; não executa
+Codex CLI nem modo stub. Configure na Vercel `CRON_SECRET`, `OPENAI_API_KEY`,
+`POSTGRES_PRISMA_URL`, `IMAGE_ANALYSIS_PROVIDER=openai` e os hosts permitidos dos
+previews (`ESTAMPA_PREVIEW_ALLOWED_HOSTS`). Modelos e fallback seguem `AI_*`.
+
+Cada chamada recupera locks abandonados, detecta pendências e processa até
+`ESTAMPA_CRON_MAX_JOBS=50`, com concorrência padrão 2. A função tem `maxDuration=300`
+e orçamento de 280 segundos, reservando tempo para preview, tentativas da IA,
+fallback e persistência antes de assumir novos jobs. Sai imediatamente quando a
+fila acaba, sem polling. Locks, heartbeat, hashes e retry existentes são preservados;
+falhas individuais aparecem nos contadores da resposta. Uma interrupção abrupta
+permite recuperar o job após expirar o lock (15 minutos por padrão).
+
+A detecção tem orçamento de 20 segundos e interrompe a paginação quando não sobra
+tempo para uma rodada; a próxima
+chamada volta a consultar as pendências. O cron é global para o catálogo, assim como
+o worker anterior. Os limites de timeouts são validados antes de tocar na fila.
+
+Após publicar e validar o cron em produção, desative o agendamento/processo externo
+do worker antigo para evitar consumo adicional de IA. O comando abaixo permanece
+para diagnóstico local. Não há alteração de schema. Cron a cada 5 minutos requer
+plano Vercel compatível com frequência subdiária (Pro/Enterprise).
+
 # ERP Shop (Olist + Supabase)
 
 ## Worker de estampas
 
-O consumidor de jobs `AI_ANALYSIS` roda como um processo Node separado do servidor Next.js:
+Em produção, o consumidor de jobs `AI_ANALYSIS` é o cron descrito acima.
+Para diagnóstico ou processamento local, o consumidor também pode rodar como processo Node:
 
 ```bash
 npm run worker:estampas
@@ -66,7 +93,7 @@ Configurações opcionais:
 - `ESTAMPA_WORKER_LOCK_TIMEOUT_MS`: tempo para considerar abandonado um lock sem heartbeat; padrão `900000` (15 minutos).
 - `ESTAMPA_DETECTOR_INTERVAL_MS`: intervalo entre varreduras de estampas `PENDING`; padrão `60000` (1 minuto).
 
-Em produção, execute esse comando em um serviço de processo contínuo separado da aplicação web. Encerrar com `SIGINT` ou `SIGTERM` interrompe novas aquisições e aguarda o lote atual terminar. Jobs interrompidos abruptamente são recuperados por outra instância após o timeout do lock.
+No modo local, encerrar com `SIGINT` ou `SIGTERM` interrompe novas aquisições e aguarda o lote atual terminar. Jobs interrompidos abruptamente são recuperados por outra instância ou pelo cron após o timeout do lock.
 
 Durante o processamento, cada job renova `locked_at` a cada terço do timeout configurado. A recuperação considera travado apenas um job `PROCESSING` cujo `locked_at` — ou `started_at` quando o lock não estiver preenchido — tenha expirado. O job volta para `PENDING` se ainda possuir tentativas; caso contrário, termina em `FAILED`. A seleção e a recuperação usam locks do PostgreSQL com `SKIP LOCKED`, permitindo que várias instâncias executem a manutenção sem recuperar o mesmo job duas vezes.
 

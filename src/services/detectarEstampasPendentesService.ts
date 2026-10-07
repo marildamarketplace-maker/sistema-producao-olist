@@ -18,6 +18,7 @@ export type ResultadoDeteccaoEstampasPendentes = {
 
 export type OpcoesDeteccaoEstampasPendentes = {
   tamanhoLote?: number;
+  deveContinuar?: () => boolean;
 };
 
 function temPreviewValido(estampa: EstampaCatalogo) {
@@ -51,7 +52,7 @@ export async function detectarEstampasPendentes(
   };
   let afterId: string | undefined;
 
-  while (true) {
+  while (options.deveContinuar?.() !== false) {
     const estampas = await listarEstampasParaVerificarAnalise({
       limite: tamanhoLote,
       afterId,

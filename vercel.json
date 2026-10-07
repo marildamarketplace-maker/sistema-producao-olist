@@ -21,6 +21,10 @@
     {
       "path": "/api/cron/cobrar-confirmacao-producao",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/processar-estampas",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
