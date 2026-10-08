@@ -8,7 +8,7 @@ import { ErroEntradaPiloto } from "./diagnosticoPilotoEstampas";
 
 const checkpointSchema = z.object({
   id: z.string(), imageHash: z.string(), promptHash: z.string(), schemaHash: z.string(), promptVersion: z.string(),
-  configuracao: z.object({ model: z.string(), detail: z.enum(["low", "high", "auto"]), provider: z.enum(["openai", "gemini", "anthropic"]).optional(), thinkingLevel: z.enum(["low", "medium", "high"]).optional() }),
+  configuracao: z.object({ model: z.string(), detail: z.enum(["low", "high", "auto"]), provider: z.enum(["openai", "gemini", "anthropic", "codex-local"]).optional(), thinkingLevel: z.enum(["low", "medium", "high"]).optional(), reasoningEffort: z.enum(["medium", "high"]).optional() }),
   maxOutputTokens: z.number().int().positive(), ok: z.boolean(), latencyMs: z.number(), custoEstimadoUsd: z.number().nullable(),
 }).passthrough();
 

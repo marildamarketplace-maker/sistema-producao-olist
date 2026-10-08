@@ -1,3 +1,4 @@
+import { validarPreferenciasPesquisa, CRITERIOS_FLEXIVEIS_ESTAMPAS } from "@/domain/preferencias-pesquisa-estampas";
 import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, type FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import {
   CONTEUDOS_IMAGEM_ESTAMPA,
@@ -58,6 +59,8 @@ export type FiltrosPesquisaEstampasUrl = {
   linguagemVisual: string;
   aplicacaoSugerida: string;
   modoCores: "TODAS" | "QUALQUER";
+  correspondenciaMinima: number;
+  preferencias: string[];
   consulta: string;
   codigo: string;
   variante: string;
@@ -94,6 +97,8 @@ export const FILTROS_VAZIOS_PESQUISA_ESTAMPAS: FiltrosPesquisaEstampasUrl = {
   linguagemVisual: "",
   aplicacaoSugerida: "",
   modoCores: "TODAS",
+  correspondenciaMinima: 1,
+  preferencias: ["consulta"],
   consulta: "",
   codigo: "",
   variante: "",
@@ -151,6 +156,8 @@ export function lerEstadoUrlPesquisaEstampas(
     linguagemVisual: normalizarFiltroDesign("linguagemVisual", parametros.get("linguagemVisual")),
     aplicacaoSugerida: normalizarFiltroDesign("aplicacaoSugerida", parametros.get("aplicacaoSugerida")),
     modoCores: opcaoParametro(parametros.get("modoCores"), ["TODAS", "QUALQUER"] as const) || "TODAS",
+    preferencias: parametros.get("preferencias") === null ? ["consulta"] : [...new Set((parametros.get("preferencias") ?? "").split(",").filter((campo) => Object.hasOwn(CRITERIOS_FLEXIVEIS_ESTAMPAS, campo)))],
+    correspondenciaMinima: inteiroPositivoParametro(parametros.get("correspondenciaMinima"), 1, 100),
     consulta,
     codigo: textoParametro(parametros.get("codigo")),
     variante: textoParametro(parametros.get("variante")),
@@ -185,7 +192,7 @@ export function lerEstadoUrlPesquisaEstampas(
     ordenacao: opcaoParametro(
       parametros.get("ordenacao"),
       ORDENACOES_URL_PESQUISA_ESTAMPAS,
-    ) || (consulta ? "RELEVANCIA" : "RECENTES"),
+    ) || (consulta || filtros.preferencias.some((campo) => campo !== "consulta" && (Array.isArray(filtros[campo as keyof typeof filtros]) ? (filtros[campo as keyof typeof filtros] as string[]).length > 0 : Boolean(filtros[campo as keyof typeof filtros]))) ? "RELEVANCIA" : "RECENTES"),
   };
 }
 
@@ -199,6 +206,8 @@ export function criarQueryPesquisaEstampas(
     pagina: String(inteiroPositivoParametro(String(pagina), 1, 1_000_000)),
     porPagina: String(inteiroPositivoParametro(String(porPagina), 24, 60)),
     ordenacao,
+    preferencias: validarPreferenciasPesquisa(filtros.preferencias).join(","),
+    correspondenciaMinima: String(inteiroPositivoParametro(String(filtros.correspondenciaMinima), 1, 100)),
   });
   const campos: Array<[string, string]> = [
     ...FILTROS_DESIGN_PESQUISA.map(({ campo }): [string, string] => [campo, filtros[campo]]),
@@ -234,7 +243,7 @@ export function criarQueryPesquisaEstampas(
 export function copiarFiltrosPesquisaEstampas(
   filtros: FiltrosPesquisaEstampasUrl,
 ): FiltrosPesquisaEstampasUrl {
-  return { ...filtros, cores: [...filtros.cores] };
+  return { ...filtros, cores: [...filtros.cores], preferencias: [...filtros.preferencias] };
 }
 
 function textoParametro(valor: string | null) {

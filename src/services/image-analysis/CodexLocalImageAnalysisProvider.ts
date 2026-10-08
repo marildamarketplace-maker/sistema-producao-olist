@@ -20,6 +20,7 @@ export type CodexLocalImageAnalysisProviderOptions = {
   model: string;
   executable?: string;
   timeoutMs?: number;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 };
 
 export class CodexLocalImageAnalysisProvider implements ImageAnalysisProvider {
@@ -27,9 +28,11 @@ export class CodexLocalImageAnalysisProvider implements ImageAnalysisProvider {
   readonly model: string;
   private readonly executable: string;
   private readonly timeoutMs: number;
+  private readonly reasoningEffort: string;
 
   constructor(options: CodexLocalImageAnalysisProviderOptions) {
     this.model = options.model.trim();
+    this.reasoningEffort = options.reasoningEffort ?? "medium";
     this.executable = options.executable?.trim() || process.env.CODEX_CLI_PATH?.trim() || "codex";
     this.timeoutMs = options.timeoutMs ?? Number(process.env.CODEX_CLI_TIMEOUT_MS?.trim() || 180_000);
     if (!this.model || !Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0 || this.timeoutMs > 2_147_483_647) {
@@ -80,6 +83,7 @@ export class CodexLocalImageAnalysisProvider implements ImageAnalysisProvider {
           "--sandbox", "read-only", "--json", "--color", "never",
           "-c", 'approval_policy="never"',
           "-c", 'forced_login_method="chatgpt"',
+          "-c", `model_reasoning_effort="${this.reasoningEffort}"`,
           "-c", 'web_search="disabled"',
           "-c", "features.shell_tool=false",
           "-c", "features.unified_exec=false",

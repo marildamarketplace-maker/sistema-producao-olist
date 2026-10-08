@@ -88,11 +88,18 @@ test("CLI recebe imagem/schema reais, prompt por stdin e retorna contrato valida
   assert.ok(!snapshot.args.includes(input.prompt));
   assert.ok(snapshot.args.includes("read-only"));
   assert.ok(snapshot.args.includes('forced_login_method="chatgpt"'));
+  assert.ok(snapshot.args.includes('model_reasoning_effort="medium"'));
   assert.ok(snapshot.args.includes("features.shell_tool=false"));
   assert.ok(!snapshot.envKeys.includes("OPENAI_API_KEY"));
   assert.ok(!snapshot.envKeys.includes("POSTGRES_PRISMA_URL"));
   assert.equal(snapshot.fileMode, 0o600);
   await assert.rejects(access(snapshot.cwd));
+});
+
+test("piloto pode fixar reasoning high no subprocesso Codex", async t => {
+  const f = await fixture(t);
+  await new CodexLocalImageAnalysisProvider({ model: "gpt-6.1-sol", executable: f.executable, reasoningEffort: "high" }).analyzeImage(input);
+  assert.ok((await f.snapshots())[0].args.includes('model_reasoning_effort="high"'));
 });
 
 test("jobs concorrentes têm diretórios exclusivos e limpam todos os temporários", async (t) => {

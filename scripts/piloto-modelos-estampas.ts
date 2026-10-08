@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { executarPilotoModelosEstampa, CONFIGURACOES_PILOTO, CONFIGURACOES_PILOTO_ANTHROPIC, obterConfiguracoesPilotoGemini, type RegistroPiloto } from "@/services/pilotoModelosEstampaService";
+import { executarPilotoModelosEstampa, CONFIGURACOES_PILOTO, CONFIGURACOES_PILOTO_ANTHROPIC, CONFIGURACOES_PILOTO_CODEX, obterConfiguracoesPilotoGemini, type RegistroPiloto } from "@/services/pilotoModelosEstampaService";
+import { CodexLocalImageAnalysisProvider } from "@/services/image-analysis/CodexLocalImageAnalysisProvider";
 import { obterConfiguracaoAnthropic } from "@/config/anthropic";
 import { obterConfiguracaoGemini } from "@/config/gemini";
 import { validarUrlPreviewEstampa } from "@/services/carregarPreviewEstampaService";
@@ -15,14 +16,15 @@ import { gravarPilotoUnificado, gravarArquivoAtomicoPiloto, unificarArquivosPilo
 async function main() {
   const entrada = process.argv.slice(2);
   const seletores = entrada.filter(arg => arg.startsWith("--provider="));
-  if (seletores.length > 1 || seletores.some(arg => !["--provider=gemini", "--provider=openai", "--provider=anthropic", "--provider=all"].includes(arg))) throw new ErroEntradaPiloto("Provider inválido; use all, openai, gemini ou anthropic.");
+  if (seletores.length > 1 || seletores.some(arg => !["--provider=gemini", "--provider=openai", "--provider=anthropic", "--provider=all", "--provider=codex-local"].includes(arg))) throw new ErroEntradaPiloto("Provider inválido; use all, openai, gemini, anthropic ou codex-local.");
   const modo = seletores[0]?.split("=")[1] ?? "all";
   const usarOpenAI = modo === "all" || modo === "openai";
   const usarGemini = modo === "all" || modo === "gemini";
   const usarAnthropic = modo === "all" || modo === "anthropic";
+  const usarCodex = modo === "codex-local";
   const args = entrada.filter(arg => !arg.startsWith("--provider="));
   if (args.includes("--help") || !args.length) {
-    console.info("Uso: npm run piloto:estampas -- amostra.json [--executar]\nPadrão: completa as 7 configurações OpenAI + Gemini + Claude. Opcional: --provider=openai ou os comandos piloto:estampas:gemini e piloto:estampas:claude.\nSem --executar apenas valida a amostra. Usa um único relatório conjunto. Preserva ok:true, retenta ok:false e executa combinações ainda sem registro, sem alterar o catálogo.");
+    console.info("Uso: npm run piloto:estampas -- amostra.json [--executar] [--provider=codex-local]\nPadrão: completa as 7 configurações OpenAI + Gemini + Claude. Codex local: GPT-6.1-Sol/high, login ChatGPT.\nSem --executar apenas valida a amostra. Usa um único relatório conjunto. Preserva ok:true, retenta ok:false e executa combinações ainda sem registro, sem alterar o catálogo.");
     return;
   }
   if (args.length > 2 || args[0]?.startsWith("--") || (args[1] && args[1] !== "--executar")) throw new ErroEntradaPiloto("Argumentos inválidos; use --help.");
@@ -39,9 +41,10 @@ async function main() {
     try { configAnthropic = obterConfiguracaoAnthropic(); }
     catch { throw new ErroEntradaPiloto("Configuração Anthropic inválida. Confira ANTHROPIC_IMAGE_ANALYSIS_TIMEOUT_MS e ANTHROPIC_MAX_OUTPUT_TOKENS."); }
   }
-  const configuracoes = [...(usarOpenAI ? CONFIGURACOES_PILOTO : []), ...(usarGemini ? obterConfiguracoesPilotoGemini() : []), ...(usarAnthropic ? CONFIGURACOES_PILOTO_ANTHROPIC : [])];
+  const configuracoes = [...(usarOpenAI ? CONFIGURACOES_PILOTO : []), ...(usarGemini ? obterConfiguracoesPilotoGemini() : []), ...(usarAnthropic ? CONFIGURACOES_PILOTO_ANTHROPIC : []), ...(usarCodex ? CONFIGURACOES_PILOTO_CODEX : [])];
   console.info({ imagens: amostra.length, combinacoesTotais: amostra.length * configuracoes.length, configuracoes });
   if (!args.includes("--executar")) return;
+  if (usarCodex) await new CodexLocalImageAnalysisProvider({ model: CONFIGURACOES_PILOTO_CODEX[0].model, reasoningEffort: "high" }).verificarDisponibilidade();
   for (const chave of [...(usarOpenAI ? ["OPENAI_API_KEY"] : []), ...(usarGemini ? ["GEMINI_API_KEY"] : []), ...(usarAnthropic ? ["ANTHROPIC_API_KEY"] : [])]) {
     if (!process.env[chave]?.trim()) throw new ErroEntradaPiloto(`${chave} não configurada no ambiente carregado.`);
   }

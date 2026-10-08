@@ -1,5 +1,9 @@
 "use client";
 
+import { CRITERIOS_FLEXIVEIS_ESTAMPAS } from "@/domain/preferencias-pesquisa-estampas";
+import type { CorrespondenciaEstampa } from "@/domain/consulta-profissional-estampas";
+import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas";
+
 import { FILTROS_DESIGN_PESQUISA } from "@/domain/pesquisa-estampas-design";
 import type { FacetasPesquisaEstampas } from "@/repositories/pesquisa-estampas-repository";
 import type { FormEvent } from "react";
@@ -155,6 +159,8 @@ export function PesquisaEstampasClient() {
     setImagemAmpliada(null);
     setResultado(null);
     setErro(null);
+    setLinkCopiado(false);
+    if (timeoutLinkCopiado.current) clearTimeout(timeoutLinkCopiado.current);
     if (temFiltroPesquisaEstampas(filtrosUrl)) {
       setFiltros(filtrosUrl);
     } else {
@@ -200,7 +206,7 @@ export function PesquisaEstampasClient() {
       setErro("Informe ao menos um filtro antes de pesquisar.");
       return;
     }
-    const proximaOrdenacao = form.consulta.trim() ? "RELEVANCIA" : "RECENTES";
+    const proximaOrdenacao = (form.consulta.trim() || temPreferenciasAtivas(form)) ? "RELEVANCIA" : "RECENTES";
     setErro(null);
     filtrosAntesDoModal.current = null;
     setFiltrosAvancadosAbertos(false);
@@ -208,7 +214,7 @@ export function PesquisaEstampasClient() {
   }
 
   function abrirFiltrosAvancados() {
-    filtrosAntesDoModal.current = { ...form, cores: [...form.cores] };
+    filtrosAntesDoModal.current = copiarFiltrosPesquisaEstampas(form);
     setFiltrosAvancadosAbertos(true);
 
   }
@@ -258,8 +264,11 @@ export function PesquisaEstampasClient() {
   }
 
   async function compartilharResultado() {
+    if (!filtros) return;
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const query = criarQueryPesquisaEstampas({ ...filtros, status: filtros.status || "COMPLETED" }, pagina, ordenacao, porPagina);
+      const link = new URL(`${pathname}?${query}`, window.location.origin);
+      await navigator.clipboard.writeText(link.toString());
       setLinkCopiado(true);
       if (timeoutLinkCopiado.current) clearTimeout(timeoutLinkCopiado.current);
       timeoutLinkCopiado.current = setTimeout(() => setLinkCopiado(false), 2000);
@@ -285,12 +294,19 @@ export function PesquisaEstampasClient() {
             <input
               value={form.consulta}
               onChange={(event) => setForm({ ...form, consulta: event.target.value })}
-              placeholder="Código, tema, cores, elementos ou palavras-chave..."
+              placeholder='Ex.: cereja amarela · "animal print" · floral -texto'
               maxLength={200}
               className="w-full rounded-md border border-slate-300 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
             />
           </div>
         </label>
+
+        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,280px)_1fr]">
+          <Campo label="Correspondência mínima">
+            <SelectCorrespondencia value={form.correspondenciaMinima} disabled={!temPreferenciasAtivas(form)} onChange={(correspondenciaMinima) => setForm({ ...form, correspondenciaMinima })} />
+          </Campo>
+          <p className="text-xs leading-relaxed text-slate-600">A busca ampliada inclui resultados parciais. Em “cereja amarela”, os dois termos atendidos representam 100%; só cereja ou só amarela representa 50%. Na ordenação por correspondência, os mais completos vêm primeiro.</p>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Campo label="Código">
@@ -329,7 +345,8 @@ export function PesquisaEstampasClient() {
             </Campo>
           ))}
         </div>
-        <p className="text-xs text-slate-500">A busca geral inclui prefixos de palavras: cereja encontra cerejas. Os filtros selecionados são combinados entre si.</p>
+        <PreferenciasPesquisa filtros={form} onChange={setForm} />
+        <p className="text-xs text-slate-500">Use aspas para uma frase e -termo para excluir. Prefixos e variações de cores são aceitos: cereja encontra cerejas; amarela também encontra amarelo. Escolha abaixo quais critérios são obrigatórios ou preferências.</p>
         {carregandoFacetas && <p role="status" className="text-xs text-slate-500">Carregando opções de filtros...</p>}
         {erroFacetas && <p role="alert" className="text-sm text-red-700">{erroFacetas} <button type="button" onClick={() => setTentativaFacetas((valor) => valor + 1)} className="underline">Tentar novamente</button></p>}
 
@@ -368,11 +385,28 @@ export function PesquisaEstampasClient() {
             if (temFiltroPesquisaEstampas(proximos)) atualizarUrl(proximos, 1, ordenacao);
             else limpar();
           }} className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 disabled:opacity-50" aria-label={`Remover ${rotulo}: ${valor}`}>
-            {rotulo}: {campo === "status" ? rotulosStatus[valor] : valor}<X className="h-3 w-3" />
+            {rotulo}: {campo === "status" ? rotulosStatus[valor] : valor} · {filtros.preferencias.includes(campo) && !(campo === "consulta" && extrairReferenciaCodigo(filtros.consulta)) ? "Preferência" : "Obrigatório"}<X className="h-3 w-3" />
           </button>
         ))}
       </div>}
       {carregando && <p role="status" className="text-sm text-slate-600">Pesquisando estampas...</p>}
+
+      {resultado?.cobertura && filtros && (
+        <section className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4" aria-label="Como a consulta foi atendida">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Preferências atendidas: {resultado.cobertura.termos.join(" + ")}</h2>
+              <p className="mt-1 text-sm text-slate-700">{resultado.cobertura.completas} resultado(s) com 100% · {resultado.cobertura.parciais} com correspondência parcial</p>
+            </div>
+            <label className="text-sm text-slate-700">Mostrar resultados que atendam
+              <div className="mt-1"><SelectCorrespondencia value={filtros.correspondenciaMinima} disabled={carregando} onChange={(correspondenciaMinima) => atualizarUrl({ ...filtros, correspondenciaMinima }, 1, ordenacao)} /></div>
+            </label>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-600">O percentual considera apenas preferências: cada filtro selecionado vale um critério; na pesquisa geral, cada termo ou frase vale um critério. Um grupo de cores vale um critério, seguindo “todas” ou “qualquer”. Não é confiança da IA. Critérios obrigatórios, códigos e exclusões sempre são respeitados. Mesmo em 100%, termos podem descrever elementos diferentes da imagem.</p>
+          {resultado.cobertura.excluidos.length > 0 && <p className="text-xs text-slate-600">Excluídos: {resultado.cobertura.excluidos.join(" · ")}</p>}
+          {ordenacao !== "RELEVANCIA" && <p className="text-xs text-slate-600">A lista segue a ordenação escolhida. Selecione “Correspondência e relevância” para priorizar os maiores percentuais.</p>}
+        </section>
+      )}
 
       {resultado && <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-600">{carregando ? "Pesquisando..." : `${resultado.total} resultado(s) encontrado(s)`}</p>
@@ -398,7 +432,7 @@ export function PesquisaEstampasClient() {
               }}
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
             >
-              <option value="RELEVANCIA">Relevância</option>
+              <option value="RELEVANCIA">Correspondência e relevância</option>
               <option value="RECENTES">Mais recentes</option>
               <option value="CODIGO_ASC">Código crescente</option>
               <option value="CODIGO_DESC">Código decrescente</option>
@@ -426,7 +460,10 @@ export function PesquisaEstampasClient() {
       )}
 
       {!carregando && resultado?.estampas.length === 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Nenhuma estampa encontrada com os filtros informados.</section>
+        <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+          <p>Nenhuma estampa encontrada com os filtros informados.</p>
+          {filtros && resultado?.cobertura && filtros.correspondenciaMinima > 1 && <button type="button" onClick={() => atualizarUrl({ ...filtros, correspondenciaMinima: 1 }, 1, "RELEVANCIA")} className="rounded-md border border-slate-300 px-4 py-2 font-medium text-slate-700">Ampliar para pelo menos uma preferência</button>}
+        </section>
       )}
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
@@ -511,9 +548,12 @@ function FiltrosAvancadosModal({
 
         <div className="space-y-5 p-6">
           <Campo label="Pesquisa geral">
-            <input value={filtros.consulta} onChange={(event) => onChange({ ...filtros, consulta: event.target.value })} placeholder="Código, tema, cores, elementos ou palavras-chave..." maxLength={200} className={inputClass} />
+            <input value={filtros.consulta} onChange={(event) => onChange({ ...filtros, consulta: event.target.value })} placeholder='Ex.: cereja amarela · "animal print" · floral -texto' maxLength={200} className={inputClass} />
           </Campo>
 
+          <Campo label="Correspondência mínima da pesquisa geral">
+            <SelectCorrespondencia value={filtros.correspondenciaMinima} disabled={!temPreferenciasAtivas(filtros)} onChange={(correspondenciaMinima) => onChange({ ...filtros, correspondenciaMinima })} />
+          </Campo>
           <h3 className="text-sm font-semibold text-slate-900">Identificação e apresentação</h3>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Campo label="Código">
@@ -597,6 +637,7 @@ function FiltrosAvancadosModal({
           <p className="text-xs text-slate-500">Aplicações são sugestões de reaproveitamento. Distribuição corrida não comprova rapport técnico; linguagem vetorial descreve aparência.</p>
 
           <SeletorCores filtros={filtros} cores={facetas.cores} onChange={onChange} />
+          <PreferenciasPesquisa filtros={filtros} onChange={onChange} />
 
         </div>
 
@@ -623,6 +664,7 @@ function EstampaCard({
 }) {
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      {estampa.correspondencia && <CorrespondenciaPesquisa correspondencia={estampa.correspondencia} />}
       {estampa.previewUrl ? (
         <button
           type="button"
@@ -704,6 +746,7 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
           <div><h2 className="text-xl font-semibold text-slate-900">{codigoCompleto(estampa)}</h2><p className="mt-1 text-sm text-slate-500">{estampa.titulo || "Sem título"}</p></div>
           <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </div>
+        {estampa.correspondencia && <div className="mt-4"><CorrespondenciaPesquisa correspondencia={estampa.correspondencia} /></div>}
         <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
           <Preview estampa={estampa} className="aspect-square w-full rounded-lg" />
           <dl className="grid content-start gap-4 text-sm sm:grid-cols-2">
@@ -866,4 +909,57 @@ function SeletorCores({ filtros, cores, onChange }: { filtros: Filtros; cores: s
     </div>
     {opcoes.length === 0 && <p className="text-xs text-slate-500">Nenhuma cor disponível para essa busca.</p>}
   </fieldset>;
+}
+
+
+function SelectCorrespondencia({ value, onChange, disabled = false }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
+  return <select value={value} onChange={(event) => onChange(Number(event.target.value))} disabled={disabled} className={`${inputClass} disabled:opacity-50`}>
+    {[...new Set([1, 50, 75, 100, value])].sort((a, b) => a - b).map((minima) => <option key={minima} value={minima}>
+      {minima === 1 ? "Pelo menos uma preferência (busca ampliada)" : minima === 100 ? "100% · todas as preferências" : `Pelo menos ${minima}% das preferências`}
+    </option>)}
+  </select>;
+}
+
+function CorrespondenciaPesquisa({ correspondencia }: { correspondencia: CorrespondenciaEstampa }) {
+  const completa = correspondencia.percentual === 100;
+  const total = correspondencia.termosEncontrados.length + correspondencia.termosAusentes.length;
+  const percentual = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(correspondencia.percentual);
+  return <section className={`space-y-2 border-b p-3 ${completa ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`} aria-label="Correspondência com a busca">
+    <div className="flex items-center justify-between gap-2">
+      <strong className={`text-sm ${completa ? "text-emerald-800" : "text-amber-800"}`}>{percentual}% das preferências</strong>
+      <span className="text-xs text-slate-600">{correspondencia.termosEncontrados.length}/{total} critérios</span>
+    </div>
+    <div role="progressbar" aria-label="Critérios da consulta atendidos" aria-valuenow={correspondencia.percentual} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-white">
+      <div className={`h-full ${completa ? "bg-emerald-500" : "bg-amber-500"}`} style={{ width: `${correspondencia.percentual}%` }} />
+    </div>
+    <p className="text-xs text-slate-700"><span className="font-medium">Encontrados:</span> {correspondencia.termosEncontrados.join(" · ")}</p>
+    {correspondencia.termosAusentes.length > 0 && <p className="text-xs text-slate-600"><span className="font-medium">Não encontrados:</span> {correspondencia.termosAusentes.join(" · ")}</p>}
+  </section>;
+}
+
+
+function temPreferenciasAtivas(filtros: Filtros) {
+  return filtros.preferencias.some((campo) => {
+    if (campo === "consulta" && extrairReferenciaCodigo(filtros.consulta)) return false;
+    const valor = filtros[campo as keyof Filtros];
+    return Array.isArray(valor) ? valor.length > 0 : typeof valor === "string" && Boolean(valor.trim());
+  });
+}
+
+function PreferenciasPesquisa({ filtros, onChange }: { filtros: Filtros; onChange: (filtros: Filtros) => void }) {
+  const selecionados = Object.entries(CRITERIOS_FLEXIVEIS_ESTAMPAS).filter(([campo]) => {
+    const valor = filtros[campo as keyof Filtros];
+    return Array.isArray(valor) ? valor.length > 0 : typeof valor === "string" && Boolean(valor.trim());
+  });
+  return <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4" aria-label="Critérios obrigatórios e preferências">
+    <h3 className="text-sm font-semibold text-slate-900">Obrigatórios ou preferências?</h3>
+    <p className="text-xs text-slate-600">Obrigatórios precisam ser atendidos. Preferências ampliam as alternativas e entram no percentual. Código, variante, status e exclusões são sempre obrigatórios, inclusive códigos digitados na pesquisa geral.</p>
+    {selecionados.length === 0 ? <p className="text-xs text-slate-500">Preencha critérios para escolher como combiná-los.</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {selecionados.map(([campo, rotulo]) => <label key={campo} className="text-xs text-slate-700">{rotulo}
+        <select className={`${inputClass} mt-1`} disabled={campo === "consulta" && Boolean(extrairReferenciaCodigo(filtros.consulta))} value={campo === "consulta" && extrairReferenciaCodigo(filtros.consulta) ? "OBRIGATORIO" : filtros.preferencias.includes(campo) ? "PREFERENCIA" : "OBRIGATORIO"} onChange={(event) => onChange({ ...filtros, preferencias: event.target.value === "PREFERENCIA" ? [...new Set([...filtros.preferencias, campo])] : filtros.preferencias.filter((item) => item !== campo) })}>
+          <option value="OBRIGATORIO">Obrigatório</option><option value="PREFERENCIA">Preferência · entra no percentual</option>
+        </select>
+      </label>)}
+    </div>}
+  </section>;
 }

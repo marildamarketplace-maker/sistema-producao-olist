@@ -1,3 +1,4 @@
+import { CRITERIOS_FLEXIVEIS_ESTAMPAS, validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
 import type { FacetasDesignPesquisa, FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import { filtrosDesignEstampasSql, confiancaAplicacaoSql } from "@/repositories/filtros-design-estampas-sql";
 import { Prisma } from "@prisma/client";
@@ -10,8 +11,8 @@ import {
   type TipoImagemEstampa,
 } from "@/domain/estampa-apresentacao";
 import { prisma } from "@/lib/prisma";
-import { expandirConsultaComVocabularioTextil } from "@/domain/estampa-taxonomia-textil";
-import { consultaEstampasSql } from "@/repositories/consulta-estampas-sql";
+import { correspondenciaEstampasSql } from "@/repositories/correspondencia-estampas-sql";
+import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas";
 
 export const ORDENACOES_PESQUISA_ESTAMPAS = [
   "RELEVANCIA",
@@ -36,6 +37,8 @@ export type StatusPesquisaEstampas =
 export type FiltrosPesquisaEstampas = FiltrosDesignPesquisa & {
   modoCores?: "TODAS" | "QUALQUER";
   consulta?: string;
+  preferencias?: string[];
+  correspondenciaMinima?: number;
   codigo?: string;
   variante?: string;
   tema?: string;
@@ -91,6 +94,9 @@ export type EstampaPesquisaRow = {
   createdAt: Date;
   relevancia: number;
   atributosDesign: unknown;
+  percentualCorrespondencia: number | null;
+  termosEncontrados: string[];
+  termosAusentes: string[];
 };
 
 export type FacetasPesquisaEstampas = FacetasDesignPesquisa & {
@@ -110,112 +116,35 @@ export type FacetasPesquisaEstampas = FacetasDesignPesquisa & {
 
 export async function pesquisarCatalogoEstampas(
   filtros: FiltrosPesquisaEstampas,
-): Promise<{ estampas: EstampaPesquisaRow[]; total: number }> {
+): Promise<{ estampas: EstampaPesquisaRow[]; total: number; completas: number; parciais: number; criterios: string[]; excluidos: string[] }> {
   const consulta = normalizarTexto(filtros.consulta);
-  const consultaTextilExpandida = expandirConsultaComVocabularioTextil(consulta);
+  const preferencias = validarPreferenciasPesquisa(filtros.preferencias);
+  const obrigatorios = { ...filtros };
+  const adicionais: Array<{ termo: string; teste: Prisma.Sql }> = [];
+  for (const campo of preferencias) {
+    if (campo === "consulta") continue;
+    const valor = filtros[campo];
+    if (!valor || (Array.isArray(valor) && !valor.length)) continue;
+    const condicoes = condicoesFiltrosEstampas({ [campo]: valor, modoCores: filtros.modoCores, somenteAtivas: false });
+    if (condicoes.length) adicionais.push({ termo: `${CRITERIOS_FLEXIVEIS_ESTAMPAS[campo]}: ${Array.isArray(valor) ? valor.join(filtros.modoCores === "QUALQUER" ? " ou " : " + ") : valor}`, teste: Prisma.sql`COALESCE((${Prisma.join(condicoes, " AND ")}), FALSE)` });
+    delete obrigatorios[campo];
+  }
+  const correspondencia = correspondenciaEstampasSql(consulta, adicionais, preferencias.includes("consulta"));
+  const possuiPreferencias = correspondencia.criterios.length > 0;
   const codigoConsulta = extrairCodigoConsulta(consulta);
   const codigoVarianteConsulta = extrairCodigoVarianteConsulta(consulta);
-  const termos = consultaEstampasSql(consultaTextilExpandida);
+  const termos = correspondencia.termos;
+  const lateral = possuiPreferencias
+    ? Prisma.sql`CROSS JOIN LATERAL (SELECT ${correspondencia.percentual} AS percentual) AS aderencia`
+    : Prisma.empty;
+  const percentual = possuiPreferencias ? Prisma.sql`aderencia.percentual` : Prisma.sql`NULL::DOUBLE PRECISION`;
 
-  const condicoes: Prisma.Sql[] = filtrosDesignEstampasSql(filtros);
-  if (filtros.somenteAtivas !== false) {
-    condicoes.push(Prisma.sql`e.is_active = TRUE`);
-  }
-  if (filtros.status) {
-    condicoes.push(Prisma.sql`e.processing_status = ${filtros.status}`);
-  }
-  if (filtros.tipoImagem) {
-    condicoes.push(Prisma.sql`e.tipo_imagem = ${filtros.tipoImagem}`);
-  }
-  if (filtros.suporteAplicacao) {
-    condicoes.push(Prisma.sql`e.suporte_aplicacao = ${filtros.suporteAplicacao}`);
-  }
-  if (filtros.conteudoImagem) {
-    condicoes.push(
-      Prisma.sql`e.conteudos_imagem @> ARRAY[${filtros.conteudoImagem}]::TEXT[]`,
-    );
-  }
-  if (normalizarTexto(filtros.codigo)) {
-    condicoes.push(
-      Prisma.sql`lower(e.codigo) = lower(${normalizarTexto(filtros.codigo)})`,
-    );
-  }
-  if (normalizarTexto(filtros.variante)) {
-    condicoes.push(
-      Prisma.sql`lower(COALESCE(e.variante, '')) = lower(${normalizarTexto(filtros.variante)})`,
-    );
-  }
-  if (normalizarTexto(filtros.tema)) {
-    condicoes.push(
-      Prisma.sql`lower(COALESCE(e.tema, '')) = lower(${normalizarTexto(filtros.tema)})`,
-    );
-  }
-  const cores = normalizarLista(filtros.cores);
-  if (cores.length > 0) {
-    condicoes.push(
-      filtros.modoCores === "QUALQUER"
-        ? Prisma.sql`e.cores && ARRAY[${Prisma.join(cores)}]::TEXT[]`
-        : Prisma.sql`e.cores @> ARRAY[${Prisma.join(cores)}]::TEXT[]`,
-    );
-  }
-  adicionarFiltroArrayParcial(
-    condicoes,
-    "palavras_chave",
-    normalizarTexto(filtros.palavraChave),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "elementos_visuais",
-    normalizarTexto(filtros.elementoVisual),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "categorias",
-    normalizarTexto(filtros.categoria),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "ocasioes",
-    normalizarTexto(filtros.ocasiao),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "publicos_sugeridos",
-    normalizarTexto(filtros.publicoSugerido),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "contextos_uso",
-    normalizarTexto(filtros.contextoUso),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "afinidades_visuais",
-    normalizarTexto(filtros.afinidadeVisual),
-  );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "padroes_texteis",
-    normalizarTexto(filtros.padraoTextil),
-  );
+  const condicoes = condicoesFiltrosEstampas(obrigatorios);
 
-  if (consulta) {
-    const correspondencias: Prisma.Sql[] = [
-      Prisma.sql`e.search_vector @@ ${termos}`,
-    ];
-    if (codigoVarianteConsulta) {
-      correspondencias.push(Prisma.sql`(
-        lower(e.codigo) = lower(${codigoVarianteConsulta.codigo})
-        AND lower(COALESCE(e.variante, '')) = lower(${codigoVarianteConsulta.variante})
-      )`);
-    } else if (codigoConsulta) {
-      correspondencias.push(
-        Prisma.sql`lower(e.codigo) = lower(${codigoConsulta})`,
-      );
-    }
-    condicoes.push(
-      Prisma.sql`(${Prisma.join(correspondencias, " OR ")})`,
-    );
+  condicoes.push(...correspondencia.obrigatorios, ...correspondencia.exclusoes);
+  if (possuiPreferencias) {
+    condicoes.push(correspondencia.candidatos);
+    condicoes.push(Prisma.sql`aderencia.percentual >= ${filtros.correspondenciaMinima ?? 1}`);
   }
 
   const where = condicoes.length > 0
@@ -232,10 +161,10 @@ export async function pesquisarCatalogoEstampas(
           THEN 500 ELSE 0 END
         + CASE WHEN lower(extensions.unaccent(COALESCE(e.titulo, ''))) = lower(extensions.unaccent(${consulta})) THEN 100 ELSE 0 END
         + CASE WHEN lower(extensions.unaccent(COALESCE(e.titulo, ''))) LIKE '%' || lower(extensions.unaccent(${consulta})) || '%' THEN 50 ELSE 0 END
-        + ts_rank_cd(e.search_vector, ${termos}, 32) * 25
+        + COALESCE(ts_rank_cd(e.search_vector, ${termos}, 32), 0) * 25
       )::DOUBLE PRECISION`
     : Prisma.sql`0::DOUBLE PRECISION`;
-  const orderBy = criarOrdenacao(filtros.ordenacao, Boolean(consulta));
+  const orderBy = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta));
 
   const [estampas, totalRows] = await prisma.$transaction([
     prisma.$queryRaw<EstampaPesquisaRow[]>`
@@ -277,21 +206,32 @@ export async function pesquisarCatalogoEstampas(
         e.processing_status AS "processingStatus",
         e.processed_at AS "processedAt",
         e.created_at AS "createdAt",
-        ${relevancia} AS relevancia
+        ${relevancia} AS relevancia,
+        ${percentual} AS "percentualCorrespondencia",
+        ${correspondencia.encontrados} AS "termosEncontrados",
+        ${correspondencia.ausentes} AS "termosAusentes"
       FROM estampas AS e
+      ${lateral}
       ${where}
       ${orderBy}
       LIMIT ${filtros.limite}
       OFFSET ${filtros.offset}
     `,
-    prisma.$queryRaw<Array<{ total: bigint }>>`
-      SELECT COUNT(*)::BIGINT AS total
+    prisma.$queryRaw<Array<{ total: bigint; completas: bigint; parciais: bigint }>>`
+      SELECT COUNT(*)::BIGINT AS total,
+        COUNT(*) FILTER (WHERE ${percentual} = 100)::BIGINT AS completas,
+        COUNT(*) FILTER (WHERE ${percentual} < 100)::BIGINT AS parciais
       FROM estampas AS e
+      ${lateral}
       ${where}
     `,
   ]);
 
-  return { estampas, total: Number(totalRows[0]?.total ?? 0) };
+  return {
+    criterios: correspondencia.criterios, excluidos: correspondencia.plano.excluidos.map(({ termo }) => termo),
+    estampas, total: Number(totalRows[0]?.total ?? 0),
+    completas: Number(totalRows[0]?.completas ?? 0), parciais: Number(totalRows[0]?.parciais ?? 0),
+  };
 }
 
 export async function listarFacetasPesquisaEstampas(status?: StatusPesquisaEstampas): Promise<FacetasPesquisaEstampas> {
@@ -374,7 +314,7 @@ export async function listarFacetasPesquisaEstampas(status?: StatusPesquisaEstam
   return facetas;
 }
 
-function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: boolean) {
+function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: boolean, pesquisaTextual = false) {
   if (ordenacao === "CODIGO_ASC") {
     return Prisma.sql`ORDER BY lower(e.codigo) ASC, lower(COALESCE(e.variante, '')) ASC, e.id ASC`;
   }
@@ -382,8 +322,9 @@ function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: bo
     return Prisma.sql`ORDER BY lower(e.codigo) DESC, lower(COALESCE(e.variante, '')) DESC, e.id DESC`;
   }
   if (ordenacao === "RELEVANCIA" && possuiConsulta) {
-    return Prisma.sql`ORDER BY relevancia DESC, e.updated_at DESC, e.id DESC`;
+    return Prisma.sql`ORDER BY aderencia.percentual DESC, relevancia DESC, e.updated_at DESC, e.id DESC`;
   }
+  if (ordenacao === "RELEVANCIA" && pesquisaTextual) return Prisma.sql`ORDER BY relevancia DESC, e.updated_at DESC, e.id DESC`;
   return Prisma.sql`ORDER BY e.created_at DESC, e.id DESC`;
 }
 
@@ -429,10 +370,96 @@ function normalizarLista(valores: string[] | undefined) {
 }
 
 function extrairCodigoConsulta(consulta: string) {
-  return /^[0-9][\p{L}\p{N}.]*$/u.test(consulta) ? consulta : null;
+  return extrairReferenciaCodigo(consulta)?.codigo ?? null;
 }
 
 function extrairCodigoVarianteConsulta(consulta: string) {
-  const match = consulta.match(/^([0-9][\p{L}\p{N}.]*)[\s/-]+([\p{L}\p{N}]+)$/u);
-  return match ? { codigo: match[1], variante: match[2] } : null;
+  const referencia = extrairReferenciaCodigo(consulta);
+  return referencia?.variante ? { codigo: referencia.codigo, variante: referencia.variante } : null;
+}
+
+function condicoesFiltrosEstampas(filtros: Partial<FiltrosPesquisaEstampas>): Prisma.Sql[] {
+  const condicoes: Prisma.Sql[] = filtrosDesignEstampasSql(filtros);
+  if (filtros.somenteAtivas !== false) {
+    condicoes.push(Prisma.sql`e.is_active = TRUE`);
+  }
+  if (filtros.status) {
+    condicoes.push(Prisma.sql`e.processing_status = ${filtros.status}`);
+  }
+  if (filtros.tipoImagem) {
+    condicoes.push(Prisma.sql`e.tipo_imagem = ${filtros.tipoImagem}`);
+  }
+  if (filtros.suporteAplicacao) {
+    condicoes.push(Prisma.sql`e.suporte_aplicacao = ${filtros.suporteAplicacao}`);
+  }
+  if (filtros.conteudoImagem) {
+    condicoes.push(
+      Prisma.sql`e.conteudos_imagem @> ARRAY[${filtros.conteudoImagem}]::TEXT[]`,
+    );
+  }
+  if (normalizarTexto(filtros.codigo)) {
+    condicoes.push(
+      Prisma.sql`lower(e.codigo) = lower(${normalizarTexto(filtros.codigo)})`,
+    );
+  }
+  if (normalizarTexto(filtros.variante)) {
+    condicoes.push(
+      Prisma.sql`lower(COALESCE(e.variante, '')) = lower(${normalizarTexto(filtros.variante)})`,
+    );
+  }
+  if (normalizarTexto(filtros.tema)) {
+    condicoes.push(
+      Prisma.sql`lower(COALESCE(e.tema, '')) = lower(${normalizarTexto(filtros.tema)})`,
+    );
+  }
+  const cores = normalizarLista(filtros.cores);
+  if (cores.length > 0) {
+    condicoes.push(
+      filtros.modoCores === "QUALQUER"
+        ? Prisma.sql`e.cores && ARRAY[${Prisma.join(cores)}]::TEXT[]`
+        : Prisma.sql`e.cores @> ARRAY[${Prisma.join(cores)}]::TEXT[]`,
+    );
+  }
+  adicionarFiltroArrayParcial(
+    condicoes,
+    "palavras_chave",
+    normalizarTexto(filtros.palavraChave),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "elementos_visuais",
+    normalizarTexto(filtros.elementoVisual),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "categorias",
+    normalizarTexto(filtros.categoria),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "ocasioes",
+    normalizarTexto(filtros.ocasiao),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "publicos_sugeridos",
+    normalizarTexto(filtros.publicoSugerido),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "contextos_uso",
+    normalizarTexto(filtros.contextoUso),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "afinidades_visuais",
+    normalizarTexto(filtros.afinidadeVisual),
+  );
+  adicionarFiltroArrayExato(
+    condicoes,
+    "padroes_texteis",
+    normalizarTexto(filtros.padraoTextil),
+  );
+
+  return condicoes;
 }

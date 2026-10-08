@@ -155,3 +155,22 @@ test("API aceita os query params compartilhados e valida paginação, filtros e 
   assert.match(consultas[0].sql, /e.cores && ARRAY/);
   assert.ok(consultas[0].values.includes("romântico"));
 });
+
+test("API restaura correspondência mínima do link e rejeita limites inválidos", async () => {
+  const { GET } = await import("../src/app/api/estampas/pesquisa/route");
+  const { NextRequest } = await import("next/server");
+  consultas.length = 0;
+  const headers = { Authorization: "Bearer token-ficticio" };
+  const response = await GET(new NextRequest("http://localhost/api/estampas/pesquisa?q=cereja%20amarela&correspondenciaMinima=100&porPagina=48", { headers }));
+  assert.equal(response.status, 200);
+  const dados = await response.json();
+  assert.deepEqual(dados.cobertura.termos, ["cereja", "amarela"]);
+  assert.equal(dados.cobertura.minima, 100);
+  assert.equal(dados.porPagina, 48);
+  assert.match(consultas[0].sql, /aderencia.percentual >=/);
+  assert.ok(consultas[0].values.includes(100));
+  consultas.length = 0;
+  const invalida = await GET(new NextRequest("http://localhost/api/estampas/pesquisa?q=cereja&correspondenciaMinima=101", { headers }));
+  assert.equal(invalida.status, 400);
+  assert.equal(consultas.length, 0);
+});

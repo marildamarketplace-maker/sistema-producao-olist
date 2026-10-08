@@ -1,3 +1,5 @@
+import { validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
+import { planejarConsultaEstampas, type CorrespondenciaEstampa } from "@/domain/consulta-profissional-estampas";
 import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, normalizarDesignPesquisa, type FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import {
   listarFacetasPesquisaEstampas,
@@ -21,6 +23,8 @@ import { temFiltroPesquisaEstampas } from "@/services/filtrosPesquisaEstampas";
 export type EntradaPesquisaEstampasCatalogo = FiltrosDesignPesquisa & {
   modoCores?: string;
   consulta?: string;
+  preferencias?: string[];
+  correspondenciaMinima?: number;
   codigo?: string;
   variante?: string;
   tema?: string;
@@ -74,12 +78,14 @@ export type EstampaPesquisaCatalogo = {
   processedAt: string | null;
   createdAt: string;
   relevancia: number;
+  correspondencia: CorrespondenciaEstampa | null;
   design: ReturnType<typeof normalizarDesignPesquisa>;
 };
 
 export type ResultadoPesquisaEstampasCatalogo = {
   estampas: EstampaPesquisaCatalogo[];
   total: number;
+  cobertura: { termos: string[]; excluidos: string[]; minima: number; completas: number; parciais: number } | null;
   pagina: number;
   porPagina: number;
   totalPaginas: number;
@@ -97,6 +103,9 @@ export async function pesquisarEstampasCatalogo(
   }
   const modoCores = validarOpcao(entrada.modoCores, ["TODAS", "QUALQUER"] as const, "Modo de cores inválido.") ?? "TODAS";
   const consulta = texto(entrada.consulta, "consulta", 200);
+  planejarConsultaEstampas(consulta);
+  const preferencias = validarPreferenciasPesquisa(entrada.preferencias);
+  const correspondenciaMinima = inteiro(entrada.correspondenciaMinima ?? 1, "correspondenciaMinima", 1, 100);
   const codigo = texto(entrada.codigo, "codigo", 80);
   const variante = texto(entrada.variante, "variante", 40);
   const tema = texto(entrada.tema, "tema", 120);
@@ -150,11 +159,13 @@ export async function pesquisarEstampasCatalogo(
   const pagina = inteiro(entrada.pagina ?? 1, "pagina", 1, 1_000_000);
   const porPagina = inteiro(entrada.porPagina ?? 24, "porPagina", 1, 60);
   const ordenacao = validarOrdenacao(
-    entrada.ordenacao ?? (consulta ? "RELEVANCIA" : "RECENTES"),
+    entrada.ordenacao ?? (consulta || preferencias.some((campo) => campo !== "consulta" && entrada[campo]) ? "RELEVANCIA" : "RECENTES"),
   );
   const resultado = await pesquisarCatalogoEstampas({
     ...design,
     modoCores,
+    correspondenciaMinima,
+    preferencias,
     consulta,
     codigo,
     variante,
@@ -178,9 +189,13 @@ export async function pesquisarEstampasCatalogo(
     somenteAtivas: true,
   });
   return {
-    estampas: resultado.estampas.map(({ atributosDesign, ...estampa }) => ({
+    estampas: resultado.estampas.map(({ atributosDesign, percentualCorrespondencia, termosEncontrados, termosAusentes, ...estampa }) => ({
       ...estampa,
       design: normalizarDesignPesquisa(atributosDesign),
+      correspondencia: resultado.criterios.length ? {
+        percentual: Number(percentualCorrespondencia ?? 0),
+        termosEncontrados: termosEncontrados ?? [], termosAusentes: termosAusentes ?? [],
+      } : null,
       segmentacaoBusca: normalizarSegmentacaoDetalhada(estampa.segmentacaoBusca),
       classificacaoTextil: normalizarClassificacaoTextil(estampa.classificacaoTextil),
       id: estampa.id.toString(),
@@ -190,6 +205,10 @@ export async function pesquisarEstampasCatalogo(
       relevancia: Number(estampa.relevancia),
     })),
     total: resultado.total,
+    cobertura: resultado.criterios.length ? {
+      termos: resultado.criterios, excluidos: resultado.excluidos,
+      minima: correspondenciaMinima, completas: resultado.completas, parciais: resultado.parciais,
+    } : null,
     pagina,
     porPagina,
     totalPaginas: Math.ceil(resultado.total / porPagina),

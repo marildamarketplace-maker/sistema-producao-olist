@@ -5,13 +5,14 @@ import type { ConfiguracaoPiloto, RegistroPiloto } from "./pilotoModelosEstampaS
 import { lerCheckpointsPiloto, lerArquivoCheckpointsPiloto } from "./checkpointPilotoEstampas";
 
 export const DIRETORIO_PILOTO_UNIFICADO = "arquivo-pilotos/piloto-estampas";
-export type TentativaPiloto = { hash: string; ok: boolean; erro?: string; custoEstimadoUsd: number | null; latencyMs: number; diagnostico?: RegistroPiloto["diagnostico"] };
+export type TentativaPiloto = { hash: string; ok: boolean; erro?: string; custoEstimadoUsd: number | null; latencyMs: number; diagnostico?: RegistroPiloto["diagnostico"]; usage?: NonNullable<RegistroPiloto["resultado"]>["usage"] };
 export type RegistroPilotoUnificado = RegistroPiloto & { historicoTentativas?: TentativaPiloto[] };
 
 // O sucesso vale para a imagem/configuração, mesmo após ajustes de prompt,
 // schema e limite de saída. Uma imagem diferente continua sendo outra análise.
 export function chaveCombinacaoPiloto(r: Pick<RegistroPiloto, "id" | "imageHash" | "configuracao">) {
-  return JSON.stringify([r.id, r.imageHash, r.configuracao.provider ?? "openai", r.configuracao.model, r.configuracao.detail, r.configuracao.thinkingLevel ?? null]);
+  const base = [r.id, r.imageHash, r.configuracao.provider ?? "openai", r.configuracao.model, r.configuracao.detail, r.configuracao.thinkingLevel ?? null];
+  return JSON.stringify(r.configuracao.provider === "codex-local" ? [...base, r.configuracao.reasoningEffort ?? null] : base);
 }
 
 export function consolidarRegistrosPiloto(registros: readonly RegistroPilotoUnificado[]) {
@@ -21,7 +22,7 @@ export function consolidarRegistrosPiloto(registros: readonly RegistroPilotoUnif
     const anterior = mapa.get(chave);
     const tentativas = new Map((anterior?.historicoTentativas ?? []).map(t => [t.hash, t]));
     const { historicoTentativas, ...base } = registro;
-    const novas = historicoTentativas?.length ? historicoTentativas : [{ hash: createHash("sha256").update(JSON.stringify(base)).digest("hex"), ok: registro.ok, erro: registro.erro, custoEstimadoUsd: registro.custoEstimadoUsd, latencyMs: registro.latencyMs, diagnostico: registro.diagnostico }];
+    const novas = historicoTentativas?.length ? historicoTentativas : [{ hash: createHash("sha256").update(JSON.stringify(base)).digest("hex"), ok: registro.ok, erro: registro.erro, custoEstimadoUsd: registro.custoEstimadoUsd, latencyMs: registro.latencyMs, diagnostico: registro.diagnostico, usage: registro.resultado?.usage ?? registro.diagnostico?.usage }];
     for (const tentativa of novas) tentativas.set(tentativa.hash, tentativa);
     // Nunca substituir uma resposta bem-sucedida por uma falha posterior.
     mapa.set(chave, { ...(anterior?.ok ? anterior : registro), historicoTentativas: [...tentativas.values()] });
@@ -33,12 +34,18 @@ export function resumirPiloto(registros: readonly RegistroPilotoUnificado[]) {
   const configs = new Map<string, ConfiguracaoPiloto>();
   for (const r of registros) configs.set(JSON.stringify(r.configuracao), r.configuracao);
   return [...configs.values()].map(config => {
-    const itens = registros.filter(r => (r.configuracao.provider ?? "openai") === (config.provider ?? "openai") && r.configuracao.model === config.model && r.configuracao.detail === config.detail && r.configuracao.thinkingLevel === config.thinkingLevel);
-    const tentativas = itens.flatMap<Pick<TentativaPiloto, "custoEstimadoUsd" | "latencyMs">>(r => r.historicoTentativas ?? [r]);
+    const itens = registros.filter(r => (r.configuracao.provider ?? "openai") === (config.provider ?? "openai") && r.configuracao.model === config.model && r.configuracao.detail === config.detail && r.configuracao.thinkingLevel === config.thinkingLevel && r.configuracao.reasoningEffort === config.reasoningEffort);
+    const tentativas = itens.flatMap(r => r.historicoTentativas ?? [{ ...r, usage: r.resultado?.usage ?? r.diagnostico?.usage }]);
+    const tokens = (campo: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens") => {
+      const conhecidos = tentativas.map(t => t.usage?.[campo]).filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0);
+      const total = conhecidos.reduce((a, b) => a + b, 0);
+      return { totalConhecido: conhecidos.length ? total : null, mediaPorChamadaConhecida: conhecidos.length ? total / conhecidos.length : null, chamadasSemInformacao: tentativas.length - conhecidos.length };
+    };
     return { ...config, combinacoes: itens.length, chamadas: tentativas.length, respostasValidas: itens.filter(r => r.ok).length,
       aprovadasPelasRegras: itens.filter(r => r.qualidade && !r.qualidade.precisaRevisao).length, erros: itens.filter(r => !r.ok).length,
       latenciaMediaMs: tentativas.length ? tentativas.reduce((n, t) => n + t.latencyMs, 0) / tentativas.length : null,
       custoConhecidoUsd: tentativas.reduce((n, t) => n + (t.custoEstimadoUsd ?? 0), 0), chamadasSemCustoConhecido: tentativas.filter(t => t.custoEstimadoUsd === null).length,
+      tokens: { entrada: tokens("inputTokens"), saida: tokens("outputTokens"), total: tokens("totalTokens"), entradaCache: tokens("cachedInputTokens") },
       precisaoVisual: "PENDENTE_REVISAO_HUMANA" };
   });
 }

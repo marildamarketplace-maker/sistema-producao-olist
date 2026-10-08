@@ -6,6 +6,8 @@
     "piloto:estampas": "node --import tsx scripts/piloto-modelos-estampas.ts",
     "piloto:estampas:gemini": "node --import tsx scripts/piloto-modelos-estampas.ts --provider=gemini",
     "piloto:estampas:claude": "node --import tsx scripts/piloto-modelos-estampas.ts --provider=anthropic",
+    "piloto:estampas:codex": "node --import tsx scripts/piloto-modelos-estampas.ts --provider=codex-local",
+    "piloto:estampas:local": "node --import tsx scripts/piloto-estampas-local.ts",
     "dev": "next dev",
     "build": "next build",
     "postinstall": "prisma generate",

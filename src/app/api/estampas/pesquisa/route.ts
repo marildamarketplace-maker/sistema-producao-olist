@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(await pesquisarEstampasCatalogo({
       ...Object.fromEntries(FILTROS_DESIGN_PESQUISA.map(({ campo }) => [campo, params.get(campo) ?? undefined])),
       modoCores: params.get("modoCores") ?? undefined,
+      preferencias: params.has("preferencias") ? (params.get("preferencias") ?? "").split(",").filter(Boolean) : undefined,
+      correspondenciaMinima: numero(params.get("correspondenciaMinima"), 1),
       consulta: params.get("q") ?? undefined,
       codigo: params.get("codigo") ?? undefined,
       variante: params.get("variante") ?? undefined,

@@ -8,6 +8,7 @@ import { carregarPreviewEstampa } from "@/services/carregarPreviewEstampaService
 import { calcularCustoEstimadoAnaliseIa, obterPrecosModeloAnaliseIa } from "@/services/metricasCustoAnaliseIa";
 import type { ImageAnalysisDetail, ImageAnalysisProvider, ImageAnalysisResult } from "@/services/image-analysis/ImageAnalysisProvider";
 import { OpenAIImageAnalysisProvider } from "@/services/image-analysis/OpenAIImageAnalysisProvider";
+import { CodexLocalImageAnalysisProvider } from "@/services/image-analysis/CodexLocalImageAnalysisProvider";
 import { GeminiImageAnalysisProvider } from "@/services/image-analysis/GeminiImageAnalysisProvider";
 import { AnthropicImageAnalysisProvider, MOTIVOS_ERRO_HTTP_ANTHROPIC } from "@/services/image-analysis/AnthropicImageAnalysisProvider";
 import { criarPromptAnthropic, MODO_SAIDA_ANTHROPIC } from "@/services/image-analysis/anthropicAnaliseRequest";
@@ -24,7 +25,12 @@ export const CONFIGURACOES_PILOTO = [
   { model: "gpt-5.4-mini", detail: "high" },
 ] as const;
 export type ImagemPiloto = { id: string; preview_url: string };
-export type ConfiguracaoPiloto = { provider?: "openai" | "gemini" | "anthropic"; model: string; detail: ImageAnalysisDetail; thinkingLevel?: GeminiThinkingLevel };
+export type ConfiguracaoPiloto = { provider?: "openai" | "gemini" | "anthropic" | "codex-local"; model: string; detail: ImageAnalysisDetail; thinkingLevel?: GeminiThinkingLevel; reasoningEffort?: "medium" | "high" };
+export const CONFIGURACOES_PILOTO_CODEX: readonly ConfiguracaoPiloto[] = [
+  { provider: "codex-local", model: "gpt-6.1-sol", detail: "auto", reasoningEffort: "high" },
+  { provider: "codex-local", model: "gpt-6-astra", detail: "auto", reasoningEffort: "high" },
+  { provider: "codex-local", model: "gpt-6-luna", detail: "auto", reasoningEffort: "medium" },
+];
 export const CONFIGURACOES_PILOTO_ANTHROPIC: readonly ConfiguracaoPiloto[] = [
   { provider: "anthropic", model: "claude-haiku-5-5", detail: "auto" },
   { provider: "anthropic", model: "claude-sonnet-5-5", detail: "auto" },
@@ -38,7 +44,7 @@ type DependenciasPiloto = {
   criarProvider?: (model: string, detail: ImageAnalysisDetail, configuracao: ConfiguracaoPiloto) => ImageAnalysisProvider;
   configuracoes?: readonly ConfiguracaoPiloto[];
   maxOutputTokens?: number;
-  maxOutputTokensPorProvider?: Partial<Record<"openai" | "gemini" | "anthropic", number>>;
+  maxOutputTokensPorProvider?: Partial<Record<NonNullable<ConfiguracaoPiloto["provider"]>, number>>;
   anteriores?: readonly RegistroPiloto[];
   reutilizar?: (resultado: RegistroPiloto) => Promise<void>;
   providerIndisponivel?: (provider: string) => void;
@@ -52,6 +58,7 @@ export async function executarPilotoModelosEstampa(imagens: readonly ImagemPilot
   const limite = (configuracao: ConfiguracaoPiloto) => dependencias.maxOutputTokensPorProvider?.[configuracao.provider ?? "openai"] ?? dependencias.maxOutputTokens ?? AI_MAX_OUTPUT_TOKENS;
   const criarProvider = dependencias.criarProvider ?? ((model, imageDetail, configuracao) => configuracao.provider === "gemini"
     ? new GeminiImageAnalysisProvider({ model, imageDetail, thinkingLevel: configuracao.thinkingLevel, maxOutputTokens: limite(configuracao) })
+    : configuracao.provider === "codex-local" ? new CodexLocalImageAnalysisProvider({ model, reasoningEffort: configuracao.reasoningEffort })
     : configuracao.provider === "anthropic" ? new AnthropicImageAnalysisProvider({ model, maxOutputTokens: limite(configuracao) }) : new OpenAIImageAnalysisProvider({ model, imageDetail }));
   const anteriores = new Map(consolidarRegistrosPiloto(dependencias.anteriores ?? []).map(item => [chaveCombinacaoPiloto(item), item]));
   const providersIndisponiveis = new Set<string>();
@@ -81,14 +88,14 @@ export async function executarPilotoModelosEstampa(imagens: readonly ImagemPilot
         const usoCompleto = resultado.usage.inputTokens !== null && resultado.usage.outputTokens !== null;
         registro = { ...comum, tentativaId: randomUUID(), ok: true, latencyMs: Date.now() - inicio, resultado,
           qualidade: avaliarQualidadeMetadados(resultado.data),
-          custoEstimadoUsd: precos && usoCompleto ? calcularCustoEstimadoAnaliseIa(resultado.usage, precos).estimatedCostUsd : null,
+          custoEstimadoUsd: configuracao.provider !== "codex-local" && precos && usoCompleto ? calcularCustoEstimadoAnaliseIa(resultado.usage, precos).estimatedCostUsd : null,
           revisaoHumana: { precisaoVisual: null, utilidadePesquisa: null, observacao: null } };
       } catch (error) {
         const diagnostico = diagnosticarErroPiloto(error);
         const uso = diagnostico.usage;
         const precos = obterPrecosModeloAnaliseIa(configuracao.model, undefined, uso?.inputTokens);
         registro = { ...comum, tentativaId: randomUUID(), ok: false, latencyMs: Date.now() - inicio, erro: error instanceof ImageAnalysisProviderError ? error.code : "UNEXPECTED_ERROR", diagnostico,
-          custoEstimadoUsd: precos && uso && uso.inputTokens !== null && uso.outputTokens !== null ? calcularCustoEstimadoAnaliseIa(uso, precos).estimatedCostUsd : null };
+          custoEstimadoUsd: configuracao.provider !== "codex-local" && precos && uso && uso.inputTokens !== null && uso.outputTokens !== null ? calcularCustoEstimadoAnaliseIa(uso, precos).estimatedCostUsd : null };
       }
       // Falha na gravação encerra o piloto: não gastar chamadas sem evidência salva.
       await registrar(registro);
