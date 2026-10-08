@@ -24,7 +24,7 @@
     },
     {
       "path": "/api/cron/processar-estampas",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/1 * * * *"
     }
   ]
 }

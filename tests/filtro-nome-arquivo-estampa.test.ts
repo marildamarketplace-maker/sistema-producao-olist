@@ -10,7 +10,7 @@ import { filtroNomeArquivoEstampaSql } from "../src/repositories/filtro-nome-arq
 const termos = TERMOS_IGNORADOS_NOME_ARQUIVO_ESTAMPA;
 
 test("ignora nomes sem variante válida e variantes de caixa de MOCKUP", () => {
-  for (const nome of ["MV23704-B-.jpg", "MV27901-.JPG", "MV23704-.jpg", "MV27761 MOCKUP.jpg", "MV27760 MOCKUP.jpg", "MV27761 mockup.png", "MV27761 MockUp.webp", "MV27761.A.jpg"]) {
+  for (const nome of ["MV23704-B-.jpg", "MV27901-.JPG", "MV23704-.jpg", "MV27761 MOCKUP.jpg", "MV27760 MOCKUP.jpg", "MV27977- MOCLKUP.jpg", "MV27977- moclkup.JPG", "MV27761 mockup.png", "MV27761 MockUp.webp", "MV27761.A.jpg"]) {
     assert.equal(nomeArquivoEstampaDeveSerIgnorado(nome, termos), true, nome);
   }
 });

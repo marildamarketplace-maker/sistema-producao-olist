@@ -1,4 +1,4 @@
-export const TERMOS_IGNORADOS_NOME_ARQUIVO_ESTAMPA = ["-", ".", "MOCKUP"] as const;
+export const TERMOS_IGNORADOS_NOME_ARQUIVO_ESTAMPA = ["-", ".", "MOCKUP", "MOCLKUP"] as const;
 
 export function normalizarTermosIgnoradosNomeArquivo(termos: readonly string[]): string[] {
   return [...new Set(termos.map(termo => termo.trim().toUpperCase()).filter(Boolean))];
