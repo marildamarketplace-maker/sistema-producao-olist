@@ -92,6 +92,7 @@ function listaJson(valor: JsonValue | undefined) {
 function dadosPesquisa(e: EstampaCatalogo): DadosTextoPesquisa {
   const resposta = objetoJson(objetoJson(e.ai_metadata).response ?? null);
   return { codigo: e.codigo, variante: e.variante, titulo: e.titulo, descricao: e.descricao, tema: e.tema,
+    composicaoVisual: resposta.composicaoVisual, linguagemVisual: resposta.linguagemVisual,
     subtemas: e.subtemas ?? listaJson(resposta.subtemas), palavrasChave: e.palavras_chave, cores: e.cores,
     coresPrincipais: listaJson(resposta.coresPrincipais), coresSecundarias: listaJson(resposta.coresSecundarias),
     elementosVisuais: e.elementos_visuais, ocasioes: e.ocasioes, categorias: e.categorias,

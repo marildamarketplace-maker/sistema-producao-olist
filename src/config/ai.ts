@@ -1,8 +1,13 @@
 export const AI_PRIMARY_MODEL =
-  process.env.AI_PRIMARY_MODEL?.trim() || "gpt-4o-mini";
+  process.env.AI_PRIMARY_MODEL?.trim() || "claude-haiku-5-5";
 
 export const AI_FALLBACK_MODEL =
   process.env.AI_FALLBACK_MODEL?.trim() || "gpt-5.4-mini";
+
+// Batch continua na OpenAI quando o primário síncrono é Claude.
+export const AI_OPENAI_PRIMARY_MODEL = AI_PRIMARY_MODEL.startsWith("claude-")
+  ? AI_FALLBACK_MODEL
+  : AI_PRIMARY_MODEL;
 
 export const AI_PRIMARY_IMAGE_DETAIL = detalheImagem(
   process.env.AI_PRIMARY_IMAGE_DETAIL,
@@ -48,9 +53,9 @@ export const AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS = inteiroEntre(
 
 export const AI_MAX_OUTPUT_TOKENS = inteiroEntre(
   process.env.AI_MAX_OUTPUT_TOKENS,
-  700,
+  1_600,
   300,
-  1_200,
+  3_000,
   "AI_MAX_OUTPUT_TOKENS",
 );
 
@@ -64,7 +69,7 @@ export const AI_BATCH_MAX_JOBS = inteiroEntre(
   "AI_BATCH_MAX_JOBS",
 );
 
-export const AI_ANALYSIS_PROMPT_VERSION = "estampa-visual-v6-compacto";
+export const AI_ANALYSIS_PROMPT_VERSION = "estampa-visual-v8-atributos-design";
 
 function numeroEntreZeroEUm(value: string | undefined, fallback: number, name: string) {
   if (!value?.trim()) return fallback;

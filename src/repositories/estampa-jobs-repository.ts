@@ -1,3 +1,4 @@
+import { filtroNomeArquivoEstampaSql } from "./filtro-nome-arquivo-estampa-sql";
 import {
   Prisma,
   StatusJobEstampa,
@@ -45,6 +46,7 @@ export type EstampaJobPainelRow = {
   tentativas: number;
   maxTentativas: number;
   ultimoErro: string | null;
+  modeloUtilizado: string | null;
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
@@ -107,6 +109,7 @@ export async function criarEstampaJob(
       ON CONFLICT (estampa_id, tipo) DO UPDATE
       SET status = 'PENDING'::"StatusJobEstampa",
           tentativas = 0,
+          modelo_utilizado = NULL,
           max_tentativas = EXCLUDED.max_tentativas,
           ultimo_erro = NULL,
           next_attempt_at = CURRENT_TIMESTAMP,
@@ -163,6 +166,7 @@ export async function criarJobReprocessamentoManual(
       ON CONFLICT (estampa_id, tipo) DO UPDATE
       SET status = 'PENDING'::"StatusJobEstampa",
           tentativas = 0,
+          modelo_utilizado = NULL,
           ultimo_erro = NULL,
           next_attempt_at = CURRENT_TIMESTAMP,
           manual_requested = TRUE,
@@ -251,6 +255,7 @@ export async function listarEstampaJobsPainel(
         job.tentativas,
         job.max_tentativas AS "maxTentativas",
         job.ultimo_erro AS "ultimoErro",
+        job.modelo_utilizado AS "modeloUtilizado",
         job.created_at AS "createdAt",
         job.started_at AS "startedAt",
         job.finished_at AS "finishedAt",
@@ -354,6 +359,7 @@ export async function criarEstampaJobsEmLote(
       ON CONFLICT (estampa_id, tipo) DO UPDATE
       SET status = 'PENDING'::"StatusJobEstampa",
           tentativas = 0,
+          modelo_utilizado = NULL,
           ultimo_erro = NULL,
           next_attempt_at = CURRENT_TIMESTAMP,
           manual_requested = FALSE,
@@ -410,7 +416,10 @@ export async function excluirEstampaJob(id: string): Promise<EstampaJob> {
   });
 }
 
-export async function assumirProximoJobAiAnalysis(workerId: string): Promise<EstampaJob | null> {
+export async function assumirProximoJobAiAnalysis(
+  workerId: string,
+  termosIgnoradosNomeArquivo: readonly string[] = [],
+): Promise<EstampaJob | null> {
   const worker = validarId(workerId, "workerId");
   const jobs = await prisma.$queryRaw<EstampaJob[]>`
     WITH proximo_job AS (
@@ -420,6 +429,7 @@ export async function assumirProximoJobAiAnalysis(workerId: string): Promise<Est
         AND tipo = 'AI_ANALYSIS'::"TipoJobEstampa"
         AND tentativas < max_tentativas
         AND next_attempt_at <= CURRENT_TIMESTAMP
+        ${filtroNomeArquivoEstampaSql(termosIgnoradosNomeArquivo)}
       ORDER BY next_attempt_at ASC, created_at ASC, id ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
@@ -455,6 +465,7 @@ export async function assumirProximoJobAiAnalysis(workerId: string): Promise<Est
       job.tentativas,
       job.max_tentativas AS "maxTentativas",
       job.ultimo_erro AS "ultimoErro",
+      job.modelo_utilizado AS "modeloUtilizado",
       job.next_attempt_at AS "nextAttemptAt",
       job.manual_requested AS "manualRequested",
       job.manual_requested_at AS "manualRequestedAt",
@@ -476,6 +487,7 @@ export async function concluirEstampaJob(
   workerId: string,
   estampaId: string | bigint,
   aiProcessedHash: string,
+  modeloUtilizado: string | null = null,
 ): Promise<boolean> {
   const jobId = validarId(id, "id");
   const worker = validarId(workerId, "workerId");
@@ -493,6 +505,7 @@ export async function concluirEstampaJob(
       },
       data: {
         status: StatusJobEstampa.COMPLETED,
+        modeloUtilizado,
         finishedAt: new Date(),
         lockedAt: null,
         workerId: null,

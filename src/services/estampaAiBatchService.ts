@@ -1,3 +1,5 @@
+import { interpretarRespostaOpenAI, obterUsoOpenAI, type OpenAIResponsesPayload } from "@/services/image-analysis/openAIAnaliseResponse";
+import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 import { StatusEstampaAiBatch } from "@prisma/client";
 import { AI_BATCH_ENABLED, AI_BATCH_MAX_JOBS } from "@/config/ai";
 import {
@@ -14,9 +16,9 @@ import { atualizarEstampa, buscarEstampaPorId } from "@/repositories/catalogo-es
 import {
   AI_ANALYSIS_PROMPT_VERSION,
   AI_MIN_CONFIDENCE,
-  AI_PRIMARY_MODEL,
+  AI_OPENAI_PRIMARY_MODEL,
 } from "@/config/ai";
-import { validarAnaliseVisualEstampa } from "@/schemas/analiseVisualEstampaSchema";
+import { analiseVisualEstampaStructuredOutput } from "@/schemas/analiseVisualEstampaSchema";
 import type { ImageAnalysisResult } from "@/services/image-analysis/ImageAnalysisProvider";
 import { criarAtualizacaoResultadoAnaliseIa } from "@/services/mapearResultadoAnaliseIaEstampa";
 import { OpenAIBatchClient, type OpenAIBatch } from "@/services/image-analysis/OpenAIBatchClient";
@@ -90,18 +92,7 @@ type LinhaResultadoBatch = {
   response?: {
     status_code?: number;
     request_id?: string;
-    body?: {
-      id?: string;
-      model?: string;
-      output_text?: string;
-      output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
-      usage?: {
-        input_tokens?: number;
-        output_tokens?: number;
-        total_tokens?: number;
-        input_tokens_details?: { cached_tokens?: number };
-      };
-    };
+    body?: OpenAIResponsesPayload;
   };
   error?: unknown;
 };
@@ -127,12 +118,11 @@ export async function processarArquivoResultadoBatch(batchId: string, conteudo: 
     if (!job) continue; // replay idempotente: item já concluído ou desconhecido
     try {
       if (linha.error || (linha.response?.status_code ?? 500) >= 400) {
-        throw new Error(`Provider rejeitou item: ${JSON.stringify(linha.error ?? linha.response)}`);
+        throw new Error(`Provider rejeitou item Batch (HTTP ${linha.response?.status_code ?? "desconhecido"}).`);
       }
       const body = linha.response?.body;
-      const texto = extrairTextoBatch(body);
-      if (!body || !texto) throw new Error("Resultado Batch sem saída estruturada.");
-      const analise = validarAnaliseVisualEstampa(JSON.parse(texto));
+      if (!body) throw new Error("Resultado Batch sem resposta.");
+      const analise = interpretarRespostaOpenAI(body, analiseVisualEstampaStructuredOutput);
       if (
         analise.confianca < AI_MIN_CONFIDENCE ||
         analise.confiancaTipoImagem < AI_MIN_CONFIDENCE
@@ -146,22 +136,17 @@ export async function processarArquivoResultadoBatch(batchId: string, conteudo: 
       }
       const resultado: ImageAnalysisResult<typeof analise> = {
         provider: "openai",
-        model: body.model || AI_PRIMARY_MODEL,
+        model: body.model || AI_OPENAI_PRIMARY_MODEL,
         analyzedAt: new Date().toISOString(),
-        promptVersion: AI_ANALYSIS_PROMPT_VERSION,
+        promptVersion: /:prompt:([^:]+)/u.exec(customId)?.[1] ?? AI_ANALYSIS_PROMPT_VERSION,
         fallbackUsed: false,
         fallbackReason: null,
-        primaryModel: AI_PRIMARY_MODEL,
+        primaryModel: AI_OPENAI_PRIMARY_MODEL,
         primaryAttempts: 1,
-        imageDetail: "low",
+        imageDetail: detalheCustomId(customId),
         data: analise,
         requestId: body.id || linha.response?.request_id || null,
-        usage: {
-          inputTokens: body.usage?.input_tokens ?? null,
-          outputTokens: body.usage?.output_tokens ?? null,
-          totalTokens: body.usage?.total_tokens ?? null,
-          cachedInputTokens: body.usage?.input_tokens_details?.cached_tokens ?? null,
-        },
+        usage: obterUsoOpenAI(body),
       };
       const atualizacao = criarAtualizacaoResultadoAnaliseIa(resultado, {
         manualRequested: job.manualRequested,
@@ -181,24 +166,16 @@ export async function processarArquivoResultadoBatch(batchId: string, conteudo: 
       await falharJobBatch(
         job.id,
         batchId,
-        error instanceof Error ? error.message : "Falha ao importar resultado Batch.",
+        error instanceof ImageAnalysisProviderError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : "Falha ao importar resultado Batch.",
       );
     }
   }
   return { concluidos, falhas };
 }
 
-function extrairTextoBatch(
-  body: NonNullable<LinhaResultadoBatch["response"]>["body"],
-) {
-  if (body?.output_text?.trim()) return body.output_text.trim();
-  return (body?.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter((item) => item.type === "output_text" && typeof item.text === "string")
-    .map((item) => item.text?.trim())
-    .filter((item): item is string => Boolean(item))
-    .join("\n")
-    .trim();
+function detalheCustomId(customId: string): "low" | "high" | "auto" {
+  const detalhe = /:detail:(low|high|auto)$/u.exec(customId)?.[1];
+  return detalhe === "high" || detalhe === "auto" ? detalhe : "low";
 }
 
 function extrairHashCustomId(customId: string) {

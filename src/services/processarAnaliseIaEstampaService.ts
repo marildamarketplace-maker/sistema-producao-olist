@@ -9,6 +9,7 @@ import { criarAtualizacaoResultadoAnaliseIa } from "@/services/mapearResultadoAn
 
 export type ResultadoProcessamentoAnaliseIaEstampa = {
   aiProcessedHash: string;
+  modeloUtilizado?: string;
 };
 
 export type ProcessadorAnaliseIaEstampa = (
@@ -16,10 +17,11 @@ export type ProcessadorAnaliseIaEstampa = (
   job: EstampaJob,
 ) => Promise<ResultadoProcessamentoAnaliseIaEstampa>;
 
-export const processarAnaliseIaEstampa: ProcessadorAnaliseIaEstampa = async (
-  estampa,
-  job,
-) => {
+export async function processarAnaliseIaEstampa(
+  estampa: EstampaCatalogo,
+  job: EstampaJob,
+  analisar: typeof analisarVisualEstampa = analisarVisualEstampa,
+) {
   const contentHash = normalizarHashConteudo(estampa.content_hash);
   if (!contentHash) {
     throw new Error(`Estampa ${estampa.id} não possui content_hash válido.`);
@@ -29,7 +31,7 @@ export const processarAnaliseIaEstampa: ProcessadorAnaliseIaEstampa = async (
     jobId: job.id,
     estampaId: estampa.id,
   });
-  const resultado = await analisarVisualEstampa(estampa);
+  const resultado = await analisar(estampa);
   console.info("[estampas-worker] Resposta da IA validada; persistindo metadados.", {
     jobId: job.id,
     estampaId: estampa.id,
@@ -62,8 +64,8 @@ export const processarAnaliseIaEstampa: ProcessadorAnaliseIaEstampa = async (
     promptVersion: resultado.promptVersion,
   });
 
-  return { aiProcessedHash: contentHash };
-};
+  return { aiProcessedHash: contentHash, modeloUtilizado: resultado.model };
+}
 
 export const processarAnaliseIaEstampaStub: ProcessadorAnaliseIaEstampa = async (
   estampa,

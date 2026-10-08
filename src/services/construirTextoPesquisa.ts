@@ -1,4 +1,8 @@
+import { composicaoVisualSchema, linguagemVisualSchema } from "@/schemas/atributosDesignEstampaSchema";
+
 export type DadosTextoPesquisa = {
+  composicaoVisual?: unknown;
+  linguagemVisual?: unknown;
   codigo?: string | null;
   variante?: string | null;
   titulo?: string | null;
@@ -41,6 +45,12 @@ function paraLista(valor: string[] | string | null | undefined): string[] {
 }
 
 export function construirTextoPesquisa(dados: DadosTextoPesquisa): string {
+  const composicao = composicaoVisualSchema.safeParse(dados.composicaoVisual);
+  const linguagem = linguagemVisualSchema.safeParse(dados.linguagemVisual);
+  const termosDesign = [
+    ...(composicao.success ? Object.values(composicao.data).flatMap(atributo => atributo.estado === "IDENTIFICADO" && atributo.evidencias.length ? atributo.valores : []) : []),
+    ...(linguagem.success && linguagem.data.estado === "IDENTIFICADO" && linguagem.data.evidencias.length ? linguagem.data.valores : []),
+  ];
   const termosTaxonomia = expandirTermosPesquisaTaxonomia([
     ...paraLista(dados.padroesTexteis),
     ...paraLista(dados.cores),
@@ -48,6 +58,7 @@ export function construirTextoPesquisa(dados: DadosTextoPesquisa): string {
     ...paraLista(dados.coresSecundarias),
   ]);
   const candidatos = [
+    ...termosDesign,
     dados.codigo,
     dados.variante,
     dados.titulo,

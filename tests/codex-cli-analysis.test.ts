@@ -148,7 +148,7 @@ test("configuração e executável inválidos falham sem chamada à API", async 
   await assert.rejects(provider.analyzeImage({ ...input, image: { ...input.image, buffer: Buffer.alloc(0) } }), erro("CONFIGURATION_ERROR"));
 });
 
-test("factory usa modelos próprios e nunca instancia API no modo Codex", () => {
+test("factory usa modelos próprios e nunca instancia API no modo Codex", async () => {
   const original = { ...process.env };
   try {
     delete process.env.OPENAI_API_KEY;
@@ -165,7 +165,9 @@ test("factory usa modelos próprios e nunca instancia API no modo Codex", () => 
     assert.throws(() => criarImageAnalysisProvider(), /deve ser diferente/);
     process.env.IMAGE_ANALYSIS_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "test";
-    assert.ok(criarImageAnalysisProvider() instanceof OpenAIImageAnalysisProvider);
+    const { AI_PRIMARY_MODEL } = await import("../src/config/ai");
+    assert.equal(criarImageAnalysisProvider().name, AI_PRIMARY_MODEL.startsWith("claude-") ? "anthropic" : "openai");
+    assert.ok(criarImageAnalysisProvider("fallback") instanceof OpenAIImageAnalysisProvider);
   } finally {
     for (const key of Object.keys(process.env)) if (!(key in original)) delete process.env[key];
     Object.assign(process.env, original);

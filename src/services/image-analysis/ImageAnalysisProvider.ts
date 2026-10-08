@@ -16,6 +16,7 @@ export type ImageAnalysisInput<T> = {
 };
 
 export type ImageAnalysisResult<T> = {
+  attempts?: ImageAnalysisAttempt[];
   provider: string;
   model: string;
   analyzedAt: string;
@@ -33,6 +34,12 @@ export type ImageAnalysisResult<T> = {
     totalTokens: number | null;
     cachedInputTokens?: number | null;
   };
+};
+
+export type ImageAnalysisAttempt = {
+  provider: string; model: string; durationMs: number; requestId: string | null;
+  usage: ImageAnalysisResult<unknown>["usage"] | null;
+  outcome: "SUCCESS" | "ERROR"; errorCode: string | null;
 };
 
 export interface ImageAnalysisProvider {

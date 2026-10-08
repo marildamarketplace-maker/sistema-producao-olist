@@ -303,6 +303,16 @@ model Produto {
   @@map("produtos")
 }
 
+model ConfiguracaoJob {
+  chave     String   @id
+  pausado   Boolean  @default(true)
+  termosIgnoradosNomeArquivo String[] @default([]) @map("termos_ignorados_nome_arquivo")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("configuracoes_jobs")
+}
+
 model ConfiguracaoSistema {
   id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   chave        String      @unique
@@ -618,6 +628,7 @@ model EstampaJob {
   tentativas        Int              @default(0)
   maxTentativas     Int              @default(3) @map("max_tentativas")
   ultimoErro        String?          @map("ultimo_erro")
+  modeloUtilizado   String?          @map("modelo_utilizado")
   nextAttemptAt     DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
   manualRequested   Boolean          @default(false) @map("manual_requested")
   manualRequestedAt DateTime?        @map("manual_requested_at") @db.Timestamptz(6)

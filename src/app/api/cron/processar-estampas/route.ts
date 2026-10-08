@@ -21,14 +21,20 @@ export async function GET(request: NextRequest) {
   }
   const inicio = Date.now();
   try {
+    // Consulta apenas após autenticação; pausado dispensa configuração dos providers.
+    const { processarEstampasEstaPausado, obterTermosIgnoradosNomeArquivoEstampas } = await import("@/repositories/configuracao-jobs-repository");
+    if (await processarEstampasEstaPausado()) {
+      return NextResponse.json({ ok: true, pausado: true, motivoParada: "pausado" });
+    }
     if ((process.env.IMAGE_ANALYSIS_PROVIDER?.trim().toLowerCase() || "openai") !== "openai") {
       throw new Error("O cron de estampas exige IMAGE_ANALYSIS_PROVIDER=openai.");
     }
     if (!process.env.OPENAI_API_KEY?.trim()) throw new Error("OPENAI_API_KEY não configurada.");
     const timeoutIa = inteiroEnv("OPENAI_IMAGE_ANALYSIS_TIMEOUT_MS", 60_000, 120_000);
+    const timeoutAnthropic = inteiroEnv("ANTHROPIC_IMAGE_ANALYSIS_TIMEOUT_MS", 90_000, 300_000);
     const timeoutPreview = inteiroEnv("ESTAMPA_PREVIEW_TIMEOUT_MS", 15_000, 60_000);
     const tentativas = inteiroEnv("AI_PRIMARY_INVALID_RESPONSE_ATTEMPTS", 1, 3);
-    const reservaJobMs = timeoutPreview + (tentativas + 1) * timeoutIa + 20_000;
+    const reservaJobMs = timeoutPreview + tentativas * timeoutAnthropic + timeoutIa + 20_000;
     if (reservaJobMs >= 280_000) throw new Error("Timeouts de análise excedem o orçamento do cron.");
     const concorrencia = inteiroEnv("ESTAMPA_WORKER_CONCURRENCY", 2, 8);
     const maxJobs = inteiroEnv("ESTAMPA_CRON_MAX_JOBS", 50, 200);
@@ -41,11 +47,21 @@ export async function GET(request: NextRequest) {
     const { assumirProximoJobAiAnalysis, recuperarJobsAiAnalysisAbandonados } = await import("@/repositories/estampa-jobs-repository");
     const { processarJob } = await import("@/workers/estampas-worker");
     const { processarAnaliseIaEstampa } = await import("@/services/processarAnaliseIaEstampaService");
+    const { analisarVisualEstampa } = await import("@/services/analisarVisualEstampaService");
+    const { criarProvidersEstampasCron } = await import("@/services/image-analysis/criarProvidersEstampasCron");
+    const providers = criarProvidersEstampasCron();
+    const termosIgnoradosNomeArquivo = await obterTermosIgnoradosNomeArquivoEstampas();
     const resultado = await executarEstampasCron({ prazoMs: inicio + 280_000, reservaJobMs, maxJobs, concorrencia }, {
-      detectar: deveContinuar => detectarEstampasPendentes({ deveContinuar }),
+      estaPausado: processarEstampasEstaPausado,
+      detectar: deveContinuar => detectarEstampasPendentes({ deveContinuar, termosIgnoradosNomeArquivo }),
       recuperar: () => recuperarJobsAiAnalysisAbandonados(lockTimeoutMs),
-      assumir: () => assumirProximoJobAiAnalysis(workerId),
-      processar: job => processarJob(job, { workerId, lockTimeoutMs, processar: processarAnaliseIaEstampa }),
+      assumir: () => assumirProximoJobAiAnalysis(workerId, termosIgnoradosNomeArquivo),
+      processar: job => processarJob(job, {
+        workerId, lockTimeoutMs,
+        processar: (estampa, job) => processarAnaliseIaEstampa(
+          estampa, job, e => analisarVisualEstampa(e, providers.primary, providers.fallback),
+        ),
+      }),
     });
     console.info("[estampas-cron] Execução concluída.", { workerId, ...resultado });
     return NextResponse.json({ ok: resultado.falhas === 0 && resultado.locksPerdidos === 0, ...resultado });

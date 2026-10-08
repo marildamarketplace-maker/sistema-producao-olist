@@ -5,6 +5,7 @@ import type {
 import type { AnaliseVisualEstampa } from "@/schemas/analiseVisualEstampaSchema";
 import type { ImageAnalysisResult } from "@/services/image-analysis/ImageAnalysisProvider";
 import { normalizarTaxonomiasAnalise } from "@/services/normalizarTaxonomiaEstampa";
+import { avaliarQualidadeMetadados } from "@/services/avaliarQualidadeMetadados";
 import {
   AI_MIN_SEGMENTATION_CONFIDENCE,
   AI_MIN_TEXTILE_PATTERN_CONFIDENCE,
@@ -37,6 +38,13 @@ export function criarAtualizacaoResultadoAnaliseIa(
   const metricasCusto = precosModelo
     ? calcularCustoEstimadoAnaliseIa(resultado.usage, precosModelo)
     : null;
+  const attempts = (resultado.attempts ?? []).map(tentativa => {
+    const precos = tentativa.provider === "openai" ? obterPrecosModeloAnaliseIa(tentativa.model) : null;
+    const uso = tentativa.usage;
+    const custo = precos && uso && uso.inputTokens !== null && uso.outputTokens !== null
+      ? calcularCustoEstimadoAnaliseIa(uso, precos).estimatedCostUsd : null;
+    return { ...tentativa, estimated_cost_usd: custo };
+  });
   const aiMetadata: JsonValue = {
     provider: resultado.provider,
     model: resultado.model,
@@ -53,6 +61,12 @@ export function criarAtualizacaoResultadoAnaliseIa(
     manual_requested_at: manual.manualRequestedAt?.toISOString() ?? null,
     manual_requested_by: manual.manualRequestedBy ?? null,
     request_id: resultado.requestId,
+    attempts: attempts as unknown as JsonValue,
+    attempts_summary: {
+      total_duration_ms: attempts.reduce((total, tentativa) => total + tentativa.durationMs, 0),
+      known_cost_usd: attempts.reduce((total, tentativa) => total + (tentativa.estimated_cost_usd ?? 0), 0),
+      cost_complete: attempts.length > 0 && attempts.every(tentativa => tentativa.estimated_cost_usd !== null),
+    },
     usage: {
       input_tokens: resultado.usage.inputTokens,
       output_tokens: resultado.usage.outputTokens,
@@ -62,6 +76,7 @@ export function criarAtualizacaoResultadoAnaliseIa(
       estimated_cost_usd: metricasCusto?.estimatedCostUsd ?? null,
     },
     response: analise as unknown as JsonValue,
+    metadata_quality: avaliarQualidadeMetadados(analise) as unknown as JsonValue,
   };
 
   return {
@@ -97,7 +112,7 @@ export function materializarClassificacaoTextil(
   confiancaMinima: number,
 ) {
   const aceitos = analise.classificacaoTextil.padroesTexteis.filter(
-    (item) => item.confianca >= confiancaMinima,
+    (item) => item.confianca >= confiancaMinima && item.evidencias.length > 0,
   );
   return {
     padroes: aceitos.map((item) => item.termo),
@@ -112,8 +127,8 @@ export function materializarSegmentacaoBusca(
   analise: AnaliseVisualEstampa,
   confiancaMinima: number,
 ) {
-  const aceitas = <T extends { termo: string; confianca: number }>(itens: T[]) =>
-    itens.filter((item) => item.confianca >= confiancaMinima);
+  const aceitas = <T extends { termo: string; confianca: number; evidencias: string[] }>(itens: T[]) =>
+    itens.filter((item) => item.confianca >= confiancaMinima && item.evidencias.length > 0);
   const publicos = aceitas(analise.segmentacaoBusca.publicosSugeridos);
   const contextos = aceitas(analise.segmentacaoBusca.contextosUso);
   const afinidades = aceitas(analise.segmentacaoBusca.afinidadesVisuais);

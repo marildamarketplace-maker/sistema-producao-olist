@@ -22,9 +22,20 @@ export const PRECOS_GPT_5_4_MINI: PrecosModeloAnaliseIa = {
   outputPorMilhaoUsd: 4.5,
 };
 
-export function obterPrecosModeloAnaliseIa(model: string) {
+export function obterPrecosModeloAnaliseIa(model: string, analyzedAt = new Date().toISOString(), inputTokens?: number | null) {
+  if (model === "claude-haiku-5-5" || model.startsWith("claude-haiku-5-5-")) {
+    const longa = (inputTokens ?? 0) > 100000;
+    return { inputPorMilhaoUsd: longa ? 0.5 : 0.1, inputCachePorMilhaoUsd: longa ? 0.05 : 0.01, outputPorMilhaoUsd: longa ? 2.5 : 0.5 };
+  }
+  if (model === "claude-sonnet-5-5" || model.startsWith("claude-sonnet-5-5-")) return { inputPorMilhaoUsd: 2, inputCachePorMilhaoUsd: 0.2, outputPorMilhaoUsd: 10 };
   if (model.startsWith("gpt-4o-mini")) return PRECOS_GPT_4O_MINI;
   if (model.startsWith("gpt-5.4-mini")) return PRECOS_GPT_5_4_MINI;
+  // https://ai.google.dev/gemini-api/docs/pricing — Standard, inclui pensamento.
+  if (model === "gemini-3.5-flash-lite" || model.startsWith("gemini-3.5-flash-lite-")) return { inputPorMilhaoUsd: 0.30, inputCachePorMilhaoUsd: 0.03, outputPorMilhaoUsd: 2.50 };
+  if (model === "gemini-3.8-flash" || model.startsWith("gemini-3.8-flash-")) {
+    const promocao = new Date(analyzedAt).getTime() < Date.parse("2027-01-01T00:00:00Z");
+    return { inputPorMilhaoUsd: promocao ? 0.75 : 1.50, inputCachePorMilhaoUsd: promocao ? 0.075 : 0.15, outputPorMilhaoUsd: promocao ? 3.75 : 7.50 };
+  }
   return null;
 }
 

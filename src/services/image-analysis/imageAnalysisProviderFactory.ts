@@ -1,5 +1,6 @@
 import { AI_PRIMARY_MODEL, AI_FALLBACK_MODEL, AI_PRIMARY_IMAGE_DETAIL, AI_FALLBACK_IMAGE_DETAIL } from "@/config/ai";
 import { obterNomeImageAnalysisProvider } from "@/config/imageAnalysisProvider";
+import { AnthropicImageAnalysisProvider } from "./AnthropicImageAnalysisProvider";
 import type { ImageAnalysisProvider } from "@/services/image-analysis/ImageAnalysisProvider";
 import { CodexLocalImageAnalysisProvider } from "@/services/image-analysis/CodexLocalImageAnalysisProvider";
 import { OpenAIImageAnalysisProvider } from "@/services/image-analysis/OpenAIImageAnalysisProvider";
@@ -14,6 +15,10 @@ export function criarImageAnalysisProvider(
       throw new Error("CODEX_CLI_FALLBACK_MODEL deve ser diferente de CODEX_CLI_PRIMARY_MODEL.");
     }
     return new CodexLocalImageAnalysisProvider({ model: etapa === "primary" ? primaryModel : fallbackModel });
+  }
+  if (etapa === "primary" && AI_PRIMARY_MODEL.startsWith("claude-")) {
+    return { name: "anthropic", model: AI_PRIMARY_MODEL,
+      analyzeImage: input => new AnthropicImageAnalysisProvider({ model: AI_PRIMARY_MODEL }).analyzeImage(input) };
   }
   return new OpenAIImageAnalysisProvider({
     model: etapa === "primary" ? AI_PRIMARY_MODEL : AI_FALLBACK_MODEL,

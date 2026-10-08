@@ -151,6 +151,7 @@ export async function processarJob(
       options.workerId,
       job.estampaId,
       resultado.aiProcessedHash,
+      resultado.modeloUtilizado ?? null,
     );
     if (!concluido) {
       console.warn("[estampas-worker] Job perdeu o lock antes da conclusão.", { jobId: job.id });

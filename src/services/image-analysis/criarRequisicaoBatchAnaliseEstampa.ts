@@ -1,4 +1,5 @@
-import { AI_ANALYSIS_PROMPT_VERSION, AI_MAX_OUTPUT_TOKENS, AI_PRIMARY_MODEL } from "@/config/ai";
+import { AI_ANALYSIS_PROMPT_VERSION, AI_PRIMARY_IMAGE_DETAIL, AI_OPENAI_PRIMARY_MODEL } from "@/config/ai";
+import { criarRequisicaoOpenAIAnalise } from "./openAIAnaliseRequest";
 import { analiseVisualEstampaStructuredOutput } from "@/schemas/analiseVisualEstampaSchema";
 import { PROMPT_ANALISE_VISUAL_ESTAMPA } from "@/services/analisarVisualEstampaService";
 import { validarUrlPreviewEstampa } from "@/services/carregarPreviewEstampaService";
@@ -11,7 +12,7 @@ export function criarCustomIdBatchEstampa(input: {
   if (!/^\d+$/u.test(input.estampaId) || !contentHash) {
     throw new Error("Identificadores inválidos para o item do batch.");
   }
-  return `estampa:${input.estampaId}:hash:${contentHash}:prompt:${AI_ANALYSIS_PROMPT_VERSION}`;
+  return `estampa:${input.estampaId}:hash:${contentHash}:prompt:${AI_ANALYSIS_PROMPT_VERSION}:detail:${AI_PRIMARY_IMAGE_DETAIL}`;
 }
 
 export function criarLinhaBatchAnaliseEstampa(input: {
@@ -23,24 +24,8 @@ export function criarLinhaBatchAnaliseEstampa(input: {
     custom_id: input.customId,
     method: "POST",
     url: "/v1/responses",
-    body: {
-      model: AI_PRIMARY_MODEL,
-      store: false,
-      max_output_tokens: AI_MAX_OUTPUT_TOKENS,
-      prompt_cache_key: AI_ANALYSIS_PROMPT_VERSION,
-      text: {
-        format: {
-          type: "json_schema",
-          name: analiseVisualEstampaStructuredOutput.name,
-          strict: true,
-          schema: analiseVisualEstampaStructuredOutput.jsonSchema,
-        },
-      },
-      input: [
-        { role: "developer", content: [{ type: "input_text", text: PROMPT_ANALISE_VISUAL_ESTAMPA }] },
-        { role: "user", content: [{ type: "input_image", detail: "low", image_url: previewUrl }] },
-      ],
-    },
+    body: criarRequisicaoOpenAIAnalise({ model: AI_OPENAI_PRIMARY_MODEL, imageDetail: AI_PRIMARY_IMAGE_DETAIL,
+      imageUrl: previewUrl, prompt: PROMPT_ANALISE_VISUAL_ESTAMPA, promptVersion: AI_ANALYSIS_PROMPT_VERSION, output: analiseVisualEstampaStructuredOutput }),
   };
 }
 

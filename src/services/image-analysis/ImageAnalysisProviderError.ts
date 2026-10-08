@@ -6,6 +6,10 @@ export type CodigoErroImageAnalysis =
   | "PROVIDER_ERROR"
   | "TIMEOUT"
   | "INVALID_RESPONSE"
+  | "INVALID_JSON"
+  | "OUTPUT_TRUNCATED"
+  | "REFUSAL"
+  | "INCOMPLETE_RESPONSE"
   | "INVALID_STRUCTURED_OUTPUT";
 
 export class ImageAnalysisProviderError extends Error {

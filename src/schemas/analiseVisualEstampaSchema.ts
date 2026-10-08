@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CATEGORIAS_DESIGN, ESTILOS_DESIGN } from "@/domain/estampa-atributos-design";
+import { composicaoVisualSchema, linguagemVisualSchema, aplicacoesSugeridasSchema, validarEstadoAtributo } from "@/schemas/atributosDesignEstampaSchema";
 import {
   CONTEUDO_POR_SUPORTE_APLICACAO,
   CONTEUDOS_IMAGEM_ESTAMPA,
@@ -210,6 +212,9 @@ const classificacaoTextilSchema = z
 export const analiseVisualEstampaSchema = z
   .object({
     titulo: texto("titulo", 3, 100),
+    composicaoVisual: composicaoVisualSchema.nullable().optional(),
+    linguagemVisual: linguagemVisualSchema.nullable().optional(),
+    aplicacoesSugeridas: aplicacoesSugeridasSchema.nullable().optional(),
     descricao: descricaoVisualSchema,
     tema: temaSchema,
     subtemas: subtemasSchema,
@@ -236,6 +241,26 @@ export const analiseVisualEstampaSchema = z
   })
   .strict()
   .superRefine((analise, context) => {
+    const novoContrato = analise.composicaoVisual !== undefined || analise.linguagemVisual !== undefined || analise.aplicacoesSugeridas !== undefined;
+    if (novoContrato) {
+      for (const campo of ["composicaoVisual", "linguagemVisual", "aplicacoesSugeridas"] as const) {
+        if (!analise[campo]) context.addIssue({ code: "custom", path: [campo], message: "Novo contrato exige avaliação explícita do atributo." });
+      }
+      for (const [indice, categoria] of analise.categorias.entries()) {
+        if (!(CATEGORIAS_DESIGN as readonly string[]).includes(categoria)) context.addIssue({ code: "custom", path: ["categorias", indice], message: "Categoria fora do vocabulário controlado." });
+      }
+      if (!(ESTILOS_DESIGN as readonly string[]).includes(analise.estilo)) context.addIssue({ code: "custom", path: ["estilo"], message: "Estilo deve descrever estética do vocabulário controlado." });
+      if (analise.composicaoVisual) for (const [campo, atributo] of Object.entries(analise.composicaoVisual)) validarEstadoAtributo(atributo, context, ["composicaoVisual", campo]);
+      if (analise.linguagemVisual) validarEstadoAtributo(analise.linguagemVisual, context, ["linguagemVisual"]);
+      if (analise.aplicacoesSugeridas) {
+        const aplicacoes = analise.aplicacoesSugeridas;
+        validarEstadoAtributo({ ...aplicacoes, valores: aplicacoes.sugestoes.map(item => item.termo), evidencias: aplicacoes.sugestoes.flatMap(item => item.evidencias) }, context, ["aplicacoesSugeridas"]);
+      }
+      const grupos = { ...analise.segmentacaoBusca, ...analise.classificacaoTextil, aplicacoes: analise.aplicacoesSugeridas?.sugestoes ?? [] };
+      for (const [grupo, itens] of Object.entries(grupos)) itens.forEach((item, indice) => {
+        if (!item.evidencias.length) context.addIssue({ code: "custom", path: [grupo, indice, "evidencias"], message: "Classificação exige evidência visual." });
+      });
+    }
     const conteudos = new Set(analise.conteudosImagem);
     const aplicacao = analise.aplicacaoVisual;
 
@@ -403,6 +428,19 @@ export function validarAnaliseVisualEstampa(value: unknown): AnaliseVisualEstamp
 
 export const analiseVisualEstampaStructuredOutput = {
   name: "analise_visual_estampa",
-  jsonSchema: z.toJSONSchema(analiseVisualEstampaSchema),
+  jsonSchema: criarSchemaCatalogacao(),
   parse: validarAnaliseVisualEstampa,
 };
+
+function criarSchemaCatalogacao() {
+  const schema = z.toJSONSchema(analiseVisualEstampaSchema);
+  schema.required = Object.keys(schema.properties ?? {});
+  if (schema.properties) {
+    schema.properties.categorias = { type: "array", minItems: 1, maxItems: 5, items: { type: "string", enum: [...CATEGORIAS_DESIGN] } };
+    schema.properties.estilo = { type: "string", enum: [...ESTILOS_DESIGN] };
+    schema.properties.composicaoVisual = z.toJSONSchema(composicaoVisualSchema);
+    schema.properties.linguagemVisual = z.toJSONSchema(linguagemVisualSchema);
+    schema.properties.aplicacoesSugeridas = z.toJSONSchema(aplicacoesSugeridasSchema);
+  }
+  return schema;
+}

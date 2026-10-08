@@ -1,3 +1,4 @@
+import { nomeArquivoEstampaDeveSerIgnorado } from "@/domain/filtro-nome-arquivo-estampa";
 import {
   listarEstampasParaVerificarAnalise,
   type EstampaCatalogo,
@@ -18,6 +19,7 @@ export type ResultadoDeteccaoEstampasPendentes = {
 
 export type OpcoesDeteccaoEstampasPendentes = {
   tamanhoLote?: number;
+  termosIgnoradosNomeArquivo?: readonly string[];
   deveContinuar?: () => boolean;
 };
 
@@ -60,7 +62,12 @@ export async function detectarEstampasPendentes(
     if (estampas.length === 0) break;
 
     resultado.encontradas += estampas.length;
-    const candidatas = estampas.filter(estampaElegivel);
+    const candidatas = estampas.filter(estampa =>
+      !nomeArquivoEstampaDeveSerIgnorado(
+        estampa.original_filename?.trim() || estampa.original_relative_path?.trim() || estampa.storage_key,
+        options.termosIgnoradosNomeArquivo ?? [],
+      ) && estampaElegivel(estampa),
+    );
     const idsCandidatas = candidatas.map((estampa) => BigInt(String(estampa.id)));
     const criacao = await criarEstampaJobsEmLote(
       idsCandidatas,

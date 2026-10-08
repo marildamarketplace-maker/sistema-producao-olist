@@ -1,3 +1,5 @@
+import { criarRequisicaoOpenAIAnalise } from "./openAIAnaliseRequest";
+import { interpretarRespostaOpenAI, obterUsoOpenAI, type OpenAIResponsesPayload } from "./openAIAnaliseResponse";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 export { ImageAnalysisProviderError, type CodigoErroImageAnalysis } from "@/services/image-analysis/ImageAnalysisProviderError";
 import type {
@@ -6,34 +8,10 @@ import type {
   ImageAnalysisProvider,
   ImageAnalysisResult,
 } from "@/services/image-analysis/ImageAnalysisProvider";
-import { AI_MAX_OUTPUT_TOKENS, AI_PRIMARY_MODEL } from "@/config/ai";
+import { AI_OPENAI_PRIMARY_MODEL, AI_PRIMARY_IMAGE_DETAIL } from "@/config/ai";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_TIMEOUT_MS = 60_000;
-
-type OpenAIResponsesPayload = {
-  id?: string;
-  model?: string;
-  output_text?: string;
-  output?: Array<{
-    type?: string;
-    content?: Array<{ type?: string; text?: string }>;
-  }>;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    total_tokens?: number;
-    input_tokens_details?: {
-      cached_tokens?: number;
-    };
-  };
-  error?: {
-    message?: string;
-    code?: string;
-    type?: string;
-  };
-  incomplete_details?: unknown;
-};
 
 export type OpenAIImageAnalysisProviderOptions = {
   apiKey?: string;
@@ -55,10 +33,10 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
 
   constructor(options: OpenAIImageAnalysisProviderOptions = {}) {
     this.apiKey = options.apiKey?.trim() || process.env.OPENAI_API_KEY?.trim() || "";
-    this.model = options.model?.trim() || AI_PRIMARY_MODEL;
+    this.model = options.model?.trim() || AI_OPENAI_PRIMARY_MODEL;
     this.timeoutMs = options.timeoutMs ?? numeroEnv("OPENAI_IMAGE_ANALYSIS_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
     this.endpoint = options.endpoint?.trim() || OPENAI_RESPONSES_URL;
-    this.imageDetail = options.imageDetail ?? "auto";
+    this.imageDetail = options.imageDetail ?? AI_PRIMARY_IMAGE_DETAIL;
     this.fetchImpl = options.fetchImpl ?? fetch;
 
     if (!this.apiKey) {
@@ -105,77 +83,12 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: this.model,
-          store: false,
-          max_output_tokens: AI_MAX_OUTPUT_TOKENS,
-          prompt_cache_key: input.promptVersion.trim(),
-          text: {
-            format: {
-              type: "json_schema",
-              name: input.output.name,
-              strict: true,
-              schema: input.output.jsonSchema,
-            },
-          },
-          input: [
-            {
-              role: "developer",
-              content: [
-                { type: "input_text", text: input.prompt.trim() },
-              ],
-            },
-            {
-              role: "user",
-              content: [
-                {
-                  type: "input_image",
-                  detail: this.imageDetail,
-                  image_url: `data:${input.image.mimeType};base64,${input.image.buffer.toString("base64")}`,
-                },
-              ],
-            },
-          ],
-        }),
+        body: JSON.stringify(criarRequisicaoOpenAIAnalise({ model: this.model, imageDetail: this.imageDetail, imageUrl: `data:${input.image.mimeType};base64,${input.image.buffer.toString("base64")}`, prompt: input.prompt, promptVersion: input.promptVersion, output: input.output })),
       });
       const payload = await lerPayload(response);
 
       if (!response.ok) throw erroHttpOpenAI(response.status, payload);
-      const text = extrairTexto(payload);
-      if (!text) {
-        throw new ImageAnalysisProviderError("A OpenAI não retornou texto de análise.", {
-          code: "INVALID_RESPONSE",
-          provider: this.name,
-          status: response.status,
-          details: { requestId: payload.id, incompleteDetails: payload.incomplete_details },
-        });
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch (error) {
-        throw new ImageAnalysisProviderError("A OpenAI retornou JSON inválido.", {
-          code: "INVALID_STRUCTURED_OUTPUT",
-          provider: this.name,
-          status: response.status,
-          retriable: true,
-          details: { requestId: payload.id },
-          cause: error,
-        });
-      }
-      let data: T;
-      try {
-        data = input.output.parse(parsed);
-      } catch (error) {
-        throw new ImageAnalysisProviderError("A resposta da OpenAI não passou na validação do schema.", {
-          code: "INVALID_STRUCTURED_OUTPUT",
-          provider: this.name,
-          status: response.status,
-          retriable: true,
-          details: { requestId: payload.id },
-          cause: error,
-        });
-      }
+      const data = interpretarRespostaOpenAI(payload, input.output);
 
       return {
         provider: this.name,
@@ -189,13 +102,7 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
         imageDetail: this.imageDetail,
         data,
         requestId: payload.id ?? null,
-        usage: {
-          inputTokens: payload.usage?.input_tokens ?? null,
-          outputTokens: payload.usage?.output_tokens ?? null,
-          totalTokens: payload.usage?.total_tokens ?? null,
-          cachedInputTokens:
-            payload.usage?.input_tokens_details?.cached_tokens ?? null,
-        },
+        usage: obterUsoOpenAI(payload),
       };
     } catch (error) {
       if (error instanceof ImageAnalysisProviderError) throw error;
@@ -231,17 +138,6 @@ async function lerPayload(response: Response): Promise<OpenAIResponsesPayload> {
       cause: error,
     });
   }
-}
-
-function extrairTexto(payload: OpenAIResponsesPayload) {
-  if (payload.output_text?.trim()) return payload.output_text.trim();
-  return (payload.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter((item) => item.type === "output_text" && typeof item.text === "string")
-    .map((item) => item.text?.trim())
-    .filter((text): text is string => Boolean(text))
-    .join("\n")
-    .trim();
 }
 
 function erroHttpOpenAI(status: number, payload: OpenAIResponsesPayload) {

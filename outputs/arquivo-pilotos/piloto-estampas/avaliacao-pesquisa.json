@@ -1,0 +1,282 @@
+{
+  "data_corte": "2026-10-08T13:07:18-03:00",
+  "fonte": "resultados.jsonl",
+  "sha256_snapshot": "7f934fe0d03c2537b0b1bfa13d5978957d2176e27bf02dfd53d5ee1979d66e6b",
+  "linhas_lidas": 1471,
+  "sucessos_brutos": 808,
+  "sucessos_unicos": 658,
+  "copias_sucesso_desconsideradas": 150,
+  "imagens_comuns": 61,
+  "metricas": [
+    {
+      "provider": "openai",
+      "modelo": "gpt-4o-mini",
+      "detalhe": "low",
+      "thinkingLevel": null,
+      "todos": {
+        "n": 155,
+        "aprovados_regra": 139,
+        "media_palavras_chave": 4.638709677419355,
+        "com_classificacao_textil": 136,
+        "custo_medio_usd_chamada_bem_sucedida": 0.001074455806451613,
+        "n_custos_conhecidos": 155,
+        "latencia_mediana_segundos": 6.431,
+        "problemas": {
+          "PADRAO_TEXTIL_INCOMPATIVEL": 2,
+          "PADRAO_TEXTIL_AUSENTE": 10,
+          "PALAVRA_CHAVE_GENERICA": 4
+        },
+        "tipos_imagem": {
+          "ESTAMPA": 148,
+          "APLICACAO_PRODUTO": 5,
+          "LAYOUT": 2
+        }
+      },
+      "pareados": {
+        "n": 61,
+        "aprovados_regra": 53,
+        "media_palavras_chave": 4.655737704918033,
+        "com_classificacao_textil": 51,
+        "custo_medio_usd_chamada_bem_sucedida": 0.0010776024590163935,
+        "n_custos_conhecidos": 61,
+        "latencia_mediana_segundos": 6.532,
+        "problemas": {
+          "PADRAO_TEXTIL_AUSENTE": 7,
+          "PALAVRA_CHAVE_GENERICA": 1
+        },
+        "tipos_imagem": {
+          "ESTAMPA": 59,
+          "LAYOUT": 1,
+          "APLICACAO_PRODUTO": 1
+        }
+      }
+    },
+    {
+      "provider": "openai",
+      "modelo": "gpt-4o-mini",
+      "detalhe": "high",
+      "thinkingLevel": null,
+      "todos": {
+        "n": 158,
+        "aprovados_regra": 147,
+        "media_palavras_chave": 4.7215189873417724,
+        "com_classificacao_textil": 146,
+        "custo_medio_usd_chamada_bem_sucedida": 0.0034243462025316455,
+        "n_custos_conhecidos": 158,
+        "latencia_mediana_segundos": 6.762,
+        "problemas": {
+          "PALAVRA_CHAVE_GENERICA": 5,
+          "PADRAO_TEXTIL_AUSENTE": 6,
+          "PADRAO_TEXTIL_INCOMPATIVEL": 1
+        },
+        "tipos_imagem": {
+          "ESTAMPA": 144,
+          "LAYOUT": 6,
+          "APLICACAO_PRODUTO": 8
+        }
+      },
+      "pareados": {
+        "n": 61,
+        "aprovados_regra": 55,
+        "media_palavras_chave": 4.622950819672131,
+        "com_classificacao_textil": 56,
+        "custo_medio_usd_chamada_bem_sucedida": 0.003424836885245902,
+        "n_custos_conhecidos": 61,
+        "latencia_mediana_segundos": 7.014,
+        "problemas": {
+          "PALAVRA_CHAVE_GENERICA": 5,
+          "PADRAO_TEXTIL_AUSENTE": 2
+        },
+        "tipos_imagem": {
+          "ESTAMPA": 57,
+          "LAYOUT": 3,
+          "APLICACAO_PRODUTO": 1
+        }
+      }
+    },
+    {
+      "provider": "openai",
+      "modelo": "gpt-5.4-mini",
+      "detalhe": "high",
+      "thinkingLevel": null,
+      "todos": {
+        "n": 189,
+        "aprovados_regra": 179,
+        "media_palavras_chave": 8.587301587301587,
+        "com_classificacao_textil": 176,
+        "custo_medio_usd_chamada_bem_sucedida": 0.004810662698412699,
+        "n_custos_conhecidos": 189,
+        "latencia_mediana_segundos": 5.448,
+        "problemas": {
+          "PADRAO_TEXTIL_AUSENTE": 10
+        },
+        "tipos_imagem": {
+          "LAYOUT": 56,
+          "ESTAMPA": 120,
+          "APLICACAO_PRODUTO": 13
+        }
+      },
+      "pareados": {
+        "n": 61,
+        "aprovados_regra": 58,
+        "media_palavras_chave": 8.737704918032787,
+        "com_classificacao_textil": 58,
+        "custo_medio_usd_chamada_bem_sucedida": 0.004803061475409836,
+        "n_custos_conhecidos": 61,
+        "latencia_mediana_segundos": 4.816,
+        "problemas": {
+          "PADRAO_TEXTIL_AUSENTE": 3
+        },
+        "tipos_imagem": {
+          "LAYOUT": 19,
+          "ESTAMPA": 41,
+          "APLICACAO_PRODUTO": 1
+        }
+      }
+    },
+    {
+      "provider": "anthropic",
+      "modelo": "claude-haiku-5-5",
+      "detalhe": "auto",
+      "thinkingLevel": null,
+      "todos": {
+        "n": 79,
+        "aprovados_regra": 75,
+        "media_palavras_chave": 8.341772151898734,
+        "com_classificacao_textil": 66,
+        "custo_medio_usd_chamada_bem_sucedida": 0.0023687075949367087,
+        "n_custos_conhecidos": 79,
+        "latencia_mediana_segundos": 13.533,
+        "problemas": {
+          "PADRAO_TEXTIL_AUSENTE": 4
+        },
+        "tipos_imagem": {
+          "ESTAMPA": 40,
+          "LAYOUT": 34,
+          "APLICACAO_PRODUTO": 5
+        }
+      },
+      "pareados": {
+        "n": 61,
+        "aprovados_regra": 61,
+        "media_palavras_chave": 8.442622950819672,
+        "com_classificacao_textil": 55,
+        "custo_medio_usd_chamada_bem_sucedida": 0.002351022950819672,
+        "n_custos_conhecidos": 61,
+        "latencia_mediana_segundos": 13.438,
+        "problemas": {},
+        "tipos_imagem": {
+          "LAYOUT": 25,
+          "ESTAMPA": 35,
+          "APLICACAO_PRODUTO": 1
+        }
+      }
+    },
+    {
+      "provider": "anthropic",
+      "modelo": "claude-sonnet-5-5",
+      "detalhe": "auto",
+      "thinkingLevel": null,
+      "todos": {
+        "n": 77,
+        "aprovados_regra": 77,
+        "media_palavras_chave": 10.337662337662337,
+        "com_classificacao_textil": 71,
+        "custo_medio_usd_chamada_bem_sucedida": 0.029962,
+        "n_custos_conhecidos": 77,
+        "latencia_mediana_segundos": 8.774,
+        "problemas": {},
+        "tipos_imagem": {
+          "LAYOUT": 39,
+          "ESTAMPA": 35,
+          "APLICACAO_PRODUTO": 3
+        }
+      },
+      "pareados": {
+        "n": 61,
+        "aprovados_regra": 61,
+        "media_palavras_chave": 10.60655737704918,
+        "com_classificacao_textil": 58,
+        "custo_medio_usd_chamada_bem_sucedida": 0.029862426229508198,
+        "n_custos_conhecidos": 61,
+        "latencia_mediana_segundos": 8.796,
+        "problemas": {},
+        "tipos_imagem": {
+          "LAYOUT": 30,
+          "ESTAMPA": 31
+        }
+      }
+    }
+  ],
+  "divergencias_pareadas": {
+    "apresentacao": 33,
+    "distribuicao": 26,
+    "linguagem": 36,
+    "densidade": 46
+  },
+  "criterio_deduplicacao": "Primeiro ok:true por id + imageHash + provider + model + detail + thinkingLevel. Falhas e historicoTentativas nao entram na comparacao de conteudo.",
+  "ids_pareados": [
+    "MV22344-D-.jpg",
+    "MV22344-D.jpg",
+    "MV23019 150x150 Logo AA.jpg",
+    "MV23020 150x150 Logo AA..jpg",
+    "MV27065-E 60x60..jpg",
+    "MV27065-E 60x60.jpg",
+    "MV27065-F 60x60..jpg",
+    "MV27065-F 60x60.jpg",
+    "MV27065-G..jpg",
+    "MV27065-G.jpg",
+    "MV27065-H..jpg",
+    "MV27065-H.jpg",
+    "MV27065-J..jpg",
+    "MV27065-i..jpg",
+    "MV27065-i.jpg",
+    "MV27181-N.jpg",
+    "MV27447-D-.JPG",
+    "MV27599-E..jpg",
+    "MV27611-E 154x114..jpg",
+    "MV27789 TAM G 62x66..jpg",
+    "MV27792.jpg",
+    "MV27867-B..jpg",
+    "MV27867-B.jpg",
+    "MV27867-C..jpg",
+    "MV27867-C.jpg",
+    "MV27867-D..jpg",
+    "MV27867-D.jpg",
+    "MV27868-B Poá 0,5cm.jpg",
+    "MV27868-C Poá 0,5cm..jpg",
+    "MV27868-C Poá 0,5cm.jpg",
+    "MV27868-D Poá 0,5cm..jpg",
+    "MV27868-D Poá 0,5cm.jpg",
+    "MV27921-.JPG",
+    "MV27969-.JPG",
+    "MV27976-.JPG",
+    "MV27976.jpg",
+    "MV27977-.JPG",
+    "MV27977-b.jpg",
+    "MV27977.jpg",
+    "MV27998-.JPG",
+    "MV27999-b mockuop.jpg",
+    "MV28000.jpg",
+    "MV28009 70x70..jpg",
+    "MV28009 70x70.jpg",
+    "MV28010.jpg",
+    "MV28013..jpg",
+    "MV28013.jpg",
+    "MV28015.jpg",
+    "MV28017 145x145..jpg",
+    "MV28017 145x145.jpg",
+    "MV28018-B..jpg",
+    "MV28018-B.jpg",
+    "MV28018..jpg",
+    "MV28018.jpg",
+    "MV28019 145x145..jpg",
+    "MV28019 145x145.jpg",
+    "MV28019-B 90x90..jpg",
+    "MV28019-B 90x90.jpg",
+    "MV28020 145x145.jpg",
+    "MV28020-B 90x90.jpg",
+    "lenço_vermelho.png"
+  ],
+  "limite": "Nao houve confronto com imagens nem julgamento humano de relevancia de buscas. Custos referem-se apenas a chamadas bem-sucedidas; nao incluem falhas, retries ou custo operacional completo."
+}
