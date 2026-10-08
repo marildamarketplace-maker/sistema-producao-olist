@@ -24,7 +24,7 @@ async function main() {
   const usarCodex = modo === "codex-local";
   const args = entrada.filter(arg => !arg.startsWith("--provider="));
   if (args.includes("--help") || !args.length) {
-    console.info("Uso: npm run piloto:estampas -- amostra.json [--executar] [--provider=codex-local]\nPadrão: completa as 7 configurações OpenAI + Gemini + Claude. Codex local: GPT-6.1-Sol/high, login ChatGPT.\nSem --executar apenas valida a amostra. Usa um único relatório conjunto. Preserva ok:true, retenta ok:false e executa combinações ainda sem registro, sem alterar o catálogo.");
+    console.info("Uso: npm run piloto:estampas -- amostra.json [--executar] [--provider=codex-local]\nPadrão: completa as 7 configurações OpenAI + Gemini + Claude. Codex local: Sol/high, Astra/high e Luna/medium, login ChatGPT.\nSem --executar apenas valida a amostra. Usa um único relatório conjunto. Preserva ok:true, retenta ok:false e executa combinações ainda sem registro, sem alterar o catálogo.");
     return;
   }
   if (args.length > 2 || args[0]?.startsWith("--") || (args[1] && args[1] !== "--executar")) throw new ErroEntradaPiloto("Argumentos inválidos; use --help.");

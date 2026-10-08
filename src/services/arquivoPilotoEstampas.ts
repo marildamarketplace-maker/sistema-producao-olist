@@ -35,7 +35,7 @@ export function resumirPiloto(registros: readonly RegistroPilotoUnificado[]) {
   for (const r of registros) configs.set(JSON.stringify(r.configuracao), r.configuracao);
   return [...configs.values()].map(config => {
     const itens = registros.filter(r => (r.configuracao.provider ?? "openai") === (config.provider ?? "openai") && r.configuracao.model === config.model && r.configuracao.detail === config.detail && r.configuracao.thinkingLevel === config.thinkingLevel && r.configuracao.reasoningEffort === config.reasoningEffort);
-    const tentativas = itens.flatMap(r => r.historicoTentativas ?? [{ ...r, usage: r.resultado?.usage ?? r.diagnostico?.usage }]);
+    const tentativas = itens.flatMap<Pick<TentativaPiloto, "usage" | "custoEstimadoUsd" | "latencyMs">>(r => r.historicoTentativas ?? [{ ...r, usage: r.resultado?.usage ?? r.diagnostico?.usage }]);
     const tokens = (campo: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens") => {
       const conhecidos = tentativas.map(t => t.usage?.[campo]).filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0);
       const total = conhecidos.reduce((a, b) => a + b, 0);
