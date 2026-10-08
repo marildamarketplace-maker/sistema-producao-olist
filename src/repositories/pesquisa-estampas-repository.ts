@@ -9,6 +9,7 @@ import {
 } from "@/domain/estampa-apresentacao";
 import { prisma } from "@/lib/prisma";
 import { expandirConsultaComVocabularioTextil } from "@/domain/estampa-taxonomia-textil";
+import { consultaEstampasSql } from "@/repositories/consulta-estampas-sql";
 
 export const ORDENACOES_PESQUISA_ESTAMPAS = [
   "RELEVANCIA",
@@ -110,9 +111,7 @@ export async function pesquisarCatalogoEstampas(
   const consultaTextilExpandida = expandirConsultaComVocabularioTextil(consulta);
   const codigoConsulta = extrairCodigoConsulta(consulta);
   const codigoVarianteConsulta = extrairCodigoVarianteConsulta(consulta);
-  const termos = consulta
-    ? Prisma.sql`websearch_to_tsquery('simple', extensions.unaccent(${consultaTextilExpandida}))`
-    : Prisma.sql`NULL::tsquery`;
+  const termos = consultaEstampasSql(consultaTextilExpandida);
 
   const condicoes: Prisma.Sql[] = [];
   if (filtros.somenteAtivas !== false) {
