@@ -12,12 +12,9 @@ export function nomeArquivoEstampaDeveSerIgnorado(
   if (!nomeArquivo?.trim()) return false;
   const nome = nomeArquivo.trim().replaceAll("\\", "/").split("/").at(-1) ?? "";
   const semExtensao = nome.replace(/\.[^.]*$/u, "").toUpperCase();
-  // Variante no final (-A, -F), seguida apenas por pontos, continua válida.
-  const temVarianteValida = /-[A-Z0-9]+[.]*$/u.test(semExtensao);
   // Hífen separa variantes válidas. Só o hífen final é excluído.
   return normalizarTermosIgnoradosNomeArquivo(termos).some(termo =>
     termo === "-" ? semExtensao.endsWith("-")
-      : termo === "." ? semExtensao.includes(".") && !temVarianteValida
       : semExtensao.includes(termo),
   );
 }

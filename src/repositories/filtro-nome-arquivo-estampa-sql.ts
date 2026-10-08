@@ -21,8 +21,6 @@ export function filtroNomeArquivoEstampaSql(termos: readonly string[]) {
     ) AS nome
     WHERE estampa_filtro.id = estampa_jobs.estampa_id
       AND CASE WHEN termo.valor = '-' THEN right(nome.sem_extensao, 1) = '-'
-          WHEN termo.valor = '.' THEN strpos(nome.sem_extensao, '.') > 0
-            AND nome.sem_extensao !~ '-[A-Z0-9]+[.]*$'
           ELSE strpos(nome.sem_extensao, termo.valor) > 0 END
   )`;
 }

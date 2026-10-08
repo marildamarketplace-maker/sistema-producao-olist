@@ -10,18 +10,18 @@ import { filtroNomeArquivoEstampaSql } from "../src/repositories/filtro-nome-arq
 const termos = TERMOS_IGNORADOS_NOME_ARQUIVO_ESTAMPA;
 
 test("ignora nomes sem variante válida e variantes de caixa de MOCKUP", () => {
-  for (const nome of ["MV23704-B-.jpg", "MV27901-.JPG", "MV23704-.jpg", "MV27761 MOCKUP.jpg", "MV27760 MOCKUP.jpg", "MV27977- MOCLKUP.jpg", "MV27977- moclkup.JPG", "MV27761 mockup.png", "MV27761 MockUp.webp", "MV27761.A.jpg"]) {
+  for (const nome of ["MV23704-B-.jpg", "MV27901-.JPG", "MV23704-.jpg", "MV27761 MOCKUP.jpg", "MV27760 MOCKUP.jpg", "MV27867-D..jpg", "MV28018-B..jpg", "MV27920-F..jpg", "MV27761-E..jpg", "MV27920-f...JPG", "MV27977- MOCLKUP.jpg", "MV27977- moclkup.JPG", "MV27761 mockup.png", "MV27761 MockUp.webp", "MV27761.A.jpg"]) {
     assert.equal(nomeArquivoEstampaDeveSerIgnorado(nome, termos), true, nome);
   }
 });
 
 test("ponto da extensão e termos no diretório não excluem nome válido", () => {
-  for (const nome of ["MV27920-C.jpg", "MV27920-F..jpg", "MV27761-E..jpg", "MV27920-f...JPG", "MV28026-D.jpg", "MV28026-d.JPG", "MV28026-A.jpg", "MV28026-E.jpg", "MV23704.jpg", "MV23704.JPG", "MV23704.webp", "MV23704.png", "MV23704", "/mockup/pasta-com.ponto/MV23704.jpg", "C:\\MOCKUP\\pasta-com.ponto\\MV23704.JPG"]) {
+  for (const nome of ["MV27920-C.jpg", "MV28026-D.jpg", "MV28026-d.JPG", "MV28026-A.jpg", "MV28026-E.jpg", "MV23704.jpg", "MV23704.JPG", "MV23704.webp", "MV23704.png", "MV23704", "/mockup/pasta-com.ponto/MV23704.jpg", "C:\\MOCKUP\\pasta-com.ponto\\MV23704.JPG"]) {
     assert.equal(nomeArquivoEstampaDeveSerIgnorado(nome, termos), false, nome);
   }
   assert.equal(nomeArquivoEstampaDeveSerIgnorado("pasta/MV23704-.jpg", termos), true);
   assert.equal(nomeArquivoEstampaDeveSerIgnorado("MV28026-D-.jpg", termos), true);
-  assert.equal(nomeArquivoEstampaDeveSerIgnorado("MV28026-D..jpg", termos), false);
+  assert.equal(nomeArquivoEstampaDeveSerIgnorado("MV28026-D..jpg", termos), true);
   assert.equal(nomeArquivoEstampaDeveSerIgnorado("MV27920..jpg", termos), true);
   assert.equal(nomeArquivoEstampaDeveSerIgnorado("MV28026-D MOCKUP.jpg", termos), true);
 });
@@ -30,7 +30,7 @@ test("variantes após hífen aceitam letras e números, inclusive D70", () => {
   for (const variante of ["A", "B", "D70", "d70", "AB12", "70"]) {
     for (const pontos of ["", ".", ".."]) {
       const nome = `MV27920-${variante}${pontos}.jpg`;
-      assert.equal(nomeArquivoEstampaDeveSerIgnorado(nome, termos), false, nome);
+      assert.equal(nomeArquivoEstampaDeveSerIgnorado(nome, termos), pontos !== "", nome);
     }
   }
   for (const nome of ["MV27920-D70-.jpg", "MV27920-D70 MOCKUP.jpg", "MV27920-.jpg"]) {
