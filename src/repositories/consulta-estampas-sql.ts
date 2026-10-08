@@ -6,8 +6,8 @@ export function consultaEstampasSql(consulta: string): Prisma.Sql {
   if (!consulta) return Prisma.sql`NULL::tsquery`;
   return Prisma.sql`to_tsquery('simple', regexp_replace(
     websearch_to_tsquery('simple', extensions.unaccent(${consulta}))::text,
-    ${"('(?:[^'\\\\]|\\\\.|'')*')"},
-    ${"\\1:*"},
+    ${String.raw`('(?:[^'\\]|\\.|'')*')`},
+    ${String.raw`\1:*`},
     'g'
   ))`;
 }

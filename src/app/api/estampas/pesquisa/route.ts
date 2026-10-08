@@ -1,3 +1,4 @@
+import { FILTROS_DESIGN_PESQUISA } from "@/domain/pesquisa-estampas-design";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -10,11 +11,13 @@ export async function GET(request: NextRequest) {
   try {
     await autorizarPesquisa(request);
     if (request.nextUrl.searchParams.get("facetas") === "1") {
-      return NextResponse.json({ facetas: await obterFacetasPesquisaEstampas() });
+      return NextResponse.json({ facetas: await obterFacetasPesquisaEstampas(request.nextUrl.searchParams.get("status") || "COMPLETED") });
     }
 
     const params = request.nextUrl.searchParams;
     return NextResponse.json(await pesquisarEstampasCatalogo({
+      ...Object.fromEntries(FILTROS_DESIGN_PESQUISA.map(({ campo }) => [campo, params.get(campo) ?? undefined])),
+      modoCores: params.get("modoCores") ?? undefined,
       consulta: params.get("q") ?? undefined,
       codigo: params.get("codigo") ?? undefined,
       variante: params.get("variante") ?? undefined,

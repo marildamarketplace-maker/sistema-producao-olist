@@ -1,3 +1,4 @@
+import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, type FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import {
   CONTEUDOS_IMAGEM_ESTAMPA,
   SUPORTES_APLICACAO_ESTAMPA,
@@ -28,7 +29,8 @@ export type StatusFiltroPesquisaEstampas =
 export type OrdenacaoUrlPesquisaEstampas =
   (typeof ORDENACOES_URL_PESQUISA_ESTAMPAS)[number];
 
-export type FiltrosPesquisaEstampasPreenchidos = {
+export type FiltrosPesquisaEstampasPreenchidos = FiltrosDesignPesquisa & {
+  modoCores?: string;
   consulta?: string;
   codigo?: string;
   variante?: string;
@@ -49,6 +51,13 @@ export type FiltrosPesquisaEstampasPreenchidos = {
 };
 
 export type FiltrosPesquisaEstampasUrl = {
+  estilo: string;
+  distribuicao: string;
+  orientacao: string;
+  densidade: string;
+  linguagemVisual: string;
+  aplicacaoSugerida: string;
+  modoCores: "TODAS" | "QUALQUER";
   consulta: string;
   codigo: string;
   variante: string;
@@ -71,12 +80,20 @@ export type FiltrosPesquisaEstampasUrl = {
 export type EstadoUrlPesquisaEstampas = {
   filtros: FiltrosPesquisaEstampasUrl;
   pagina: number;
+  porPagina: number;
   ordenacao: OrdenacaoUrlPesquisaEstampas;
 };
 
 type LeitorParametros = Pick<URLSearchParams, "get" | "getAll">;
 
 export const FILTROS_VAZIOS_PESQUISA_ESTAMPAS: FiltrosPesquisaEstampasUrl = {
+  estilo: "",
+  distribuicao: "",
+  orientacao: "",
+  densidade: "",
+  linguagemVisual: "",
+  aplicacaoSugerida: "",
+  modoCores: "TODAS",
   consulta: "",
   codigo: "",
   variante: "",
@@ -101,7 +118,8 @@ export function temFiltroPesquisaEstampas(
 ) {
   const status = filtros.status?.trim().toUpperCase();
   return Boolean(
-    filtros.consulta?.trim()
+    FILTROS_DESIGN_PESQUISA.some(({ campo }) => filtros[campo]?.trim())
+    || filtros.consulta?.trim()
     || filtros.codigo?.trim()
     || filtros.variante?.trim()
     || filtros.tema?.trim()
@@ -126,6 +144,13 @@ export function lerEstadoUrlPesquisaEstampas(
 ): EstadoUrlPesquisaEstampas {
   const consulta = textoParametro(parametros.get("q"));
   const filtros: FiltrosPesquisaEstampasUrl = {
+    estilo: normalizarFiltroDesign("estilo", parametros.get("estilo")),
+    distribuicao: normalizarFiltroDesign("distribuicao", parametros.get("distribuicao")),
+    orientacao: normalizarFiltroDesign("orientacao", parametros.get("orientacao")),
+    densidade: normalizarFiltroDesign("densidade", parametros.get("densidade")),
+    linguagemVisual: normalizarFiltroDesign("linguagemVisual", parametros.get("linguagemVisual")),
+    aplicacaoSugerida: normalizarFiltroDesign("aplicacaoSugerida", parametros.get("aplicacaoSugerida")),
+    modoCores: opcaoParametro(parametros.get("modoCores"), ["TODAS", "QUALQUER"] as const) || "TODAS",
     consulta,
     codigo: textoParametro(parametros.get("codigo")),
     variante: textoParametro(parametros.get("variante")),
@@ -155,7 +180,8 @@ export function lerEstadoUrlPesquisaEstampas(
   };
   return {
     filtros,
-    pagina: inteiroPositivoParametro(parametros.get("pagina"), 1),
+    pagina: inteiroPositivoParametro(parametros.get("pagina"), 1, 1_000_000),
+    porPagina: inteiroPositivoParametro(parametros.get("porPagina"), 24, 60),
     ordenacao: opcaoParametro(
       parametros.get("ordenacao"),
       ORDENACOES_URL_PESQUISA_ESTAMPAS,
@@ -167,13 +193,16 @@ export function criarQueryPesquisaEstampas(
   filtros: FiltrosPesquisaEstampasUrl,
   pagina: number,
   ordenacao: OrdenacaoUrlPesquisaEstampas,
+  porPagina = 24,
 ) {
   const parametros = new URLSearchParams({
-    pagina: String(Math.max(1, Math.trunc(pagina))),
-    porPagina: "24",
+    pagina: String(inteiroPositivoParametro(String(pagina), 1, 1_000_000)),
+    porPagina: String(inteiroPositivoParametro(String(porPagina), 24, 60)),
     ordenacao,
   });
   const campos: Array<[string, string]> = [
+    ...FILTROS_DESIGN_PESQUISA.map(({ campo }): [string, string] => [campo, filtros[campo]]),
+    ["modoCores", filtros.modoCores],
     ["q", filtros.consulta],
     ["codigo", filtros.codigo],
     ["variante", filtros.variante],
@@ -195,7 +224,7 @@ export function criarQueryPesquisaEstampas(
     const normalizado = valor.trim();
     if (normalizado) parametros.set(nome, normalizado);
   }
-  for (const cor of filtros.cores) {
+  for (const cor of new Set(filtros.cores.map(textoParametro))) {
     const normalizada = cor.trim();
     if (normalizada) parametros.append("cor", normalizada);
   }
@@ -212,9 +241,9 @@ function textoParametro(valor: string | null) {
   return valor?.trim().replace(/\s+/gu, " ") ?? "";
 }
 
-function inteiroPositivoParametro(valor: string | null, fallback: number) {
+function inteiroPositivoParametro(valor: string | null, fallback: number, maximo: number) {
   const numero = Number(valor);
-  return Number.isInteger(numero) && numero > 0 ? numero : fallback;
+  return Number.isInteger(numero) && numero > 0 && numero <= maximo ? numero : fallback;
 }
 
 function opcaoParametro<const T extends readonly string[]>(

@@ -14,6 +14,7 @@ test("consulta e transformação de prefixos são parametrizadas", () => {
   assert.doesNotMatch(consulta.sql, /DROP TABLE/);
   assert.match(consulta.sql, /websearch_to_tsquery/);
   assert.match(consulta.sql, /extensions.unaccent/);
+  assert.equal(consulta.values[2], String.raw`\1:*`);
   const regex = new RegExp(consulta.values[1] as string, "g");
   const transformar = (texto: string) => texto.replace(regex, "$1:*");
   assert.equal(transformar("'cereja' & 'vermelha'"), "'cereja':* & 'vermelha':*");

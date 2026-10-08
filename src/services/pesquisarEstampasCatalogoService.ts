@@ -1,3 +1,4 @@
+import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, normalizarDesignPesquisa, type FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import {
   listarFacetasPesquisaEstampas,
   ORDENACOES_PESQUISA_ESTAMPAS,
@@ -17,7 +18,8 @@ import {
 } from "@/domain/estampa-apresentacao";
 import { temFiltroPesquisaEstampas } from "@/services/filtrosPesquisaEstampas";
 
-export type EntradaPesquisaEstampasCatalogo = {
+export type EntradaPesquisaEstampasCatalogo = FiltrosDesignPesquisa & {
+  modoCores?: string;
   consulta?: string;
   codigo?: string;
   variante?: string;
@@ -72,6 +74,7 @@ export type EstampaPesquisaCatalogo = {
   processedAt: string | null;
   createdAt: string;
   relevancia: number;
+  design: ReturnType<typeof normalizarDesignPesquisa>;
 };
 
 export type ResultadoPesquisaEstampasCatalogo = {
@@ -86,6 +89,13 @@ export type ResultadoPesquisaEstampasCatalogo = {
 export async function pesquisarEstampasCatalogo(
   entrada: EntradaPesquisaEstampasCatalogo,
 ): Promise<ResultadoPesquisaEstampasCatalogo> {
+  const design: FiltrosDesignPesquisa = {};
+  for (const { campo } of FILTROS_DESIGN_PESQUISA) {
+    const valor = texto(entrada[campo], campo, 80);
+    if (valor && !normalizarFiltroDesign(campo, valor)) throw new Error(`Filtro de design inválido: ${campo}.`);
+    design[campo] = normalizarFiltroDesign(campo, valor);
+  }
+  const modoCores = validarOpcao(entrada.modoCores, ["TODAS", "QUALQUER"] as const, "Modo de cores inválido.") ?? "TODAS";
   const consulta = texto(entrada.consulta, "consulta", 200);
   const codigo = texto(entrada.codigo, "codigo", 80);
   const variante = texto(entrada.variante, "variante", 40);
@@ -114,8 +124,9 @@ export async function pesquisarEstampasCatalogo(
     CONTEUDOS_IMAGEM_ESTAMPA,
     "Conteúdo de imagem inválido.",
   );
-  const status = validarStatus(entrada.status ?? "TODOS");
+  const status = validarStatus(entrada.status || "COMPLETED");
   if (!temFiltroPesquisaEstampas({
+    ...design,
     consulta,
     codigo,
     variante,
@@ -132,7 +143,7 @@ export async function pesquisarEstampasCatalogo(
     tipoImagem,
     suporteAplicacao,
     conteudoImagem,
-    status,
+    status: entrada.status,
   })) {
     throw new Error("Informe ao menos um filtro antes de pesquisar.");
   }
@@ -142,6 +153,8 @@ export async function pesquisarEstampasCatalogo(
     entrada.ordenacao ?? (consulta ? "RELEVANCIA" : "RECENTES"),
   );
   const resultado = await pesquisarCatalogoEstampas({
+    ...design,
+    modoCores,
     consulta,
     codigo,
     variante,
@@ -165,8 +178,9 @@ export async function pesquisarEstampasCatalogo(
     somenteAtivas: true,
   });
   return {
-    estampas: resultado.estampas.map((estampa) => ({
+    estampas: resultado.estampas.map(({ atributosDesign, ...estampa }) => ({
       ...estampa,
+      design: normalizarDesignPesquisa(atributosDesign),
       segmentacaoBusca: normalizarSegmentacaoDetalhada(estampa.segmentacaoBusca),
       classificacaoTextil: normalizarClassificacaoTextil(estampa.classificacaoTextil),
       id: estampa.id.toString(),
@@ -241,8 +255,8 @@ function objetoDesconhecido(valor: unknown): Record<string, unknown> {
     : {};
 }
 
-export async function obterFacetasPesquisaEstampas(): Promise<FacetasPesquisaEstampas> {
-  return listarFacetasPesquisaEstampas();
+export async function obterFacetasPesquisaEstampas(status = "COMPLETED"): Promise<FacetasPesquisaEstampas> {
+  return listarFacetasPesquisaEstampas(validarStatus(status));
 }
 
 function validarStatus(valor: string): StatusPesquisaEstampas | undefined {
