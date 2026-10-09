@@ -65,15 +65,6 @@ const FACETAS_VAZIAS: Facetas = {
   suportesAplicacao: [...SUPORTES_APLICACAO_ESTAMPA],
 };
 
-const statusClasses: Record<Filtros["status"], string> = {
-  "": "bg-slate-100 text-slate-700",
-  TODOS: "bg-slate-100 text-slate-700",
-  PENDING: "bg-amber-50 text-amber-800",
-  PROCESSING: "bg-blue-50 text-blue-700",
-  COMPLETED: "bg-emerald-50 text-emerald-700",
-  FAILED: "bg-red-50 text-red-700",
-};
-
 export function PesquisaEstampasClient() {
   const { session } = useAuth();
   const router = useRouter();
@@ -628,7 +619,7 @@ function EstampaCard({
 }) {
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      {estampa.correspondencia && <CorrespondenciaPesquisa correspondencia={estampa.correspondencia} />}
+      <div className="relative">
       {estampa.previewUrl ? (
         <button
           type="button"
@@ -641,20 +632,17 @@ function EstampaCard({
       ) : (
         <Preview estampa={estampa} className="aspect-square w-full" />
       )}
-      <div className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div><p className="font-semibold text-slate-900">{codigoCompleto(estampa)}</p><h2 className="mt-1 line-clamp-2 text-sm text-slate-700">{estampa.titulo || "Sem título"}</h2></div>
-          <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${statusClasses[estampa.processingStatus]}`}>{estampa.processingStatus}</span>
-        </div>
-        <InfoCompacta label="Tema" valores={estampa.tema ? [estampa.tema] : []} />
-        <InfoCompacta label="Apresentação" valores={[ROTULOS_TIPO_IMAGEM_ESTAMPA[estampa.tipoImagem]]} />
-        <InfoCompacta label="Cores" valores={estampa.cores.slice(0, 4)} />
-        <InfoCompacta label="Palavras-chave" valores={estampa.palavrasChave.slice(0, 4)} />
-        <InfoCompacta label="Padrão têxtil" valores={estampa.padroesTexteis.slice(0, 3)} />
-        <InfoCompacta label="Estilo" valores={estampa.estilo ? [estampa.estilo] : []} />
-        <InfoCompacta label="Distribuição" valores={estampa.design.distribuicoes} />
-        <InfoCompacta label="Linguagem" valores={estampa.design.linguagensVisuais} />
-        <button type="button" onClick={onDetalhes} className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" /> Ver detalhes</button>
+      {estampa.correspondencia && <span
+        aria-label={`${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(estampa.correspondencia.percentual)}% das preferências atendidas`}
+        title="Percentual das preferências atendidas"
+        className="pointer-events-none absolute right-3 top-3 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white shadow-sm"
+      >
+        {new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(estampa.correspondencia.percentual)}%
+      </span>}
+      </div>
+      <div className="space-y-3 p-3">
+        <h2 className="break-words text-sm font-semibold text-slate-900">{codigoCompleto(estampa)}</h2>
+        <button type="button" onClick={onDetalhes} aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" aria-hidden="true" /> Ver detalhes</button>
       </div>
     </article>
   );
@@ -711,7 +699,6 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
         <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
           <Preview estampa={estampa} className="aspect-square w-full rounded-lg" />
           <dl className="grid content-start gap-4 text-sm sm:grid-cols-2">
-            <Detalhe label="Status" valores={[estampa.processingStatus]} />
             <Detalhe label="Tipo de imagem" valores={[ROTULOS_TIPO_IMAGEM_ESTAMPA[estampa.tipoImagem]]} />
             <Detalhe label="Suporte da aplicação" valores={[ROTULOS_SUPORTE_APLICACAO_ESTAMPA[estampa.suporteAplicacao]]} />
             <Detalhe label="Conteúdos presentes" valores={estampa.conteudosImagem.map((conteudo) => ROTULOS_CONTEUDO_IMAGEM_ESTAMPA[conteudo])} />
@@ -801,11 +788,6 @@ function SelectRotulado<T extends string>({ value, onChange, options, labels, pl
   return <select value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}><option value="">{placeholder}</option>{[...new Set([...(value && value in labels ? [value as T] : []), ...options])].map((option) => <option key={option} value={option}>{labels[option]}</option>)}</select>;
 }
 
-function InfoCompacta({ label, valores }: { label: string; valores: string[] }) {
-  if (valores.length === 0) return null;
-  return <p className="line-clamp-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">{label}:</span> {valores.join(" · ")}</p>;
-}
-
 function Detalhe({ label, valores, className = "" }: { label: string; valores: string[]; className?: string }) {
   return <div className={className}><dt className="text-xs font-semibold uppercase text-slate-500">{label}</dt><dd className="mt-1 text-slate-800">{valores.length > 0 ? valores.join(" · ") : "—"}</dd></div>;
 }
@@ -833,7 +815,7 @@ function contarFiltrosAvancados(filtros: Filtros) {
 }
 
 function codigoCompleto(estampa: Pick<EstampaPesquisaCatalogo, "codigo" | "variante">) {
-  return [estampa.codigo, estampa.variante].filter(Boolean).join("-");
+  return `${estampa.codigo}-${estampa.variante?.trim() || "SEM-VARIANTE"}`;
 }
 
 const inputClass = "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base sm:text-sm text-slate-800 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200";
