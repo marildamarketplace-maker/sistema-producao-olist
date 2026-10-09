@@ -625,23 +625,31 @@ function EstampaCard({
           type="button"
           onClick={onAmpliarImagem}
           aria-label={`Ampliar imagem da estampa ${codigoCompleto(estampa)}`}
-          className="group block w-full cursor-zoom-in overflow-hidden bg-slate-100 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500"
+          className="group block w-full cursor-zoom-in overflow-hidden bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500"
         >
-          <Preview estampa={estampa} className="aspect-square w-full transition-transform duration-200 group-hover:scale-[1.02]" />
+          <Preview fundo="bg-white" estampa={estampa} className="aspect-square w-full transition-transform duration-200 group-hover:scale-[1.02]" />
         </button>
       ) : (
-        <Preview estampa={estampa} className="aspect-square w-full" />
+        <Preview fundo="bg-white" estampa={estampa} className="aspect-square w-full" />
       )}
+      <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2">
+        <h2 className="min-w-0 break-words rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-900 shadow-sm">{codigoCompleto(estampa)}</h2>
       {estampa.correspondencia && <span
         aria-label={`${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(estampa.correspondencia.percentual)}% das preferências atendidas`}
         title="Percentual das preferências atendidas"
-        className="pointer-events-none absolute right-3 top-3 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white shadow-sm"
+        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold shadow-sm ${
+          estampa.correspondencia.percentual === 100
+            ? "bg-emerald-700 text-white"
+            : estampa.correspondencia.percentual >= 50
+              ? "bg-amber-800 text-white"
+              : "bg-red-800 text-white"
+        }`}
       >
-        {new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(estampa.correspondencia.percentual)}%
+        {new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(estampa.correspondencia.percentual)}% das preferências
       </span>}
       </div>
-      <div className="space-y-3 p-3">
-        <h2 className="break-words text-sm font-semibold text-slate-900">{codigoCompleto(estampa)}</h2>
+      </div>
+      <div className="p-3">
         <button type="button" onClick={onDetalhes} aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" aria-hidden="true" /> Ver detalhes</button>
       </div>
     </article>
@@ -768,12 +776,12 @@ function SegmentacaoDetalhada({ estampa }: { estampa: EstampaPesquisaCatalogo })
   );
 }
 
-function Preview({ estampa, className }: { estampa: EstampaPesquisaCatalogo; className: string }) {
+function Preview({ estampa, className, fundo = "bg-slate-100" }: { estampa: EstampaPesquisaCatalogo; className: string; fundo?: "bg-white" | "bg-slate-100" }) {
   return estampa.previewUrl
     // A URL é dinâmica e vem do catálogo privado autorizado para este usuário.
     // eslint-disable-next-line @next/next/no-img-element
-    ? <img src={estampa.previewUrl} alt={`Preview da estampa ${codigoCompleto(estampa)}`} loading="lazy" className={`${className} bg-slate-100 object-contain`} />
-    : <div className={`${className} flex items-center justify-center bg-slate-100 text-sm text-slate-500`}>Sem preview</div>;
+    ? <img src={estampa.previewUrl} alt={`Preview da estampa ${codigoCompleto(estampa)}`} loading="lazy" className={`${className} ${fundo} object-contain`} />
+    : <div className={`${className} ${fundo} flex items-center justify-center text-sm text-slate-500`}>Sem preview</div>;
 }
 
 function Campo({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
