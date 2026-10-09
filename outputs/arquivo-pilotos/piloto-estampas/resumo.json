@@ -255,34 +255,34 @@
     "detail": "auto",
     "provider": "codex-local",
     "reasoningEffort": "medium",
-    "combinacoes": 3,
-    "chamadas": 3,
-    "respostasValidas": 3,
-    "aprovadasPelasRegras": 3,
-    "erros": 0,
-    "latenciaMediaMs": 14997.333333333334,
+    "combinacoes": 20,
+    "chamadas": 20,
+    "respostasValidas": 7,
+    "aprovadasPelasRegras": 7,
+    "erros": 13,
+    "latenciaMediaMs": 6263.4,
     "custoConhecidoUsd": 0,
-    "chamadasSemCustoConhecido": 3,
+    "chamadasSemCustoConhecido": 20,
     "tokens": {
       "entrada": {
-        "totalConhecido": 61354,
-        "mediaPorChamadaConhecida": 20451.333333333332,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 120449,
+        "mediaPorChamadaConhecida": 17207,
+        "chamadasSemInformacao": 13
       },
       "saida": {
-        "totalConhecido": 3357,
-        "mediaPorChamadaConhecida": 1119,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 6566,
+        "mediaPorChamadaConhecida": 938,
+        "chamadasSemInformacao": 13
       },
       "total": {
-        "totalConhecido": 64711,
-        "mediaPorChamadaConhecida": 21570.333333333332,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 127015,
+        "mediaPorChamadaConhecida": 18145,
+        "chamadasSemInformacao": 13
       },
       "entradaCache": {
-        "totalConhecido": 14336,
-        "mediaPorChamadaConhecida": 4778.666666666667,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 25344,
+        "mediaPorChamadaConhecida": 3620.5714285714284,
+        "chamadasSemInformacao": 13
       }
     },
     "precisaoVisual": "PENDENTE_REVISAO_HUMANA"
@@ -292,34 +292,34 @@
     "detail": "auto",
     "provider": "codex-local",
     "reasoningEffort": "high",
-    "combinacoes": 1,
-    "chamadas": 1,
-    "respostasValidas": 1,
-    "aprovadasPelasRegras": 1,
-    "erros": 0,
-    "latenciaMediaMs": 44266,
+    "combinacoes": 19,
+    "chamadas": 19,
+    "respostasValidas": 6,
+    "aprovadasPelasRegras": 6,
+    "erros": 13,
+    "latenciaMediaMs": 26225.57894736842,
     "custoConhecidoUsd": 0,
-    "chamadasSemCustoConhecido": 1,
+    "chamadasSemCustoConhecido": 19,
     "tokens": {
       "entrada": {
-        "totalConhecido": 16007,
-        "mediaPorChamadaConhecida": 16007,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 94430,
+        "mediaPorChamadaConhecida": 15738.333333333334,
+        "chamadasSemInformacao": 13
       },
       "saida": {
-        "totalConhecido": 1392,
-        "mediaPorChamadaConhecida": 1392,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 8244,
+        "mediaPorChamadaConhecida": 1374,
+        "chamadasSemInformacao": 13
       },
       "total": {
-        "totalConhecido": 17399,
-        "mediaPorChamadaConhecida": 17399,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 102674,
+        "mediaPorChamadaConhecida": 17112.333333333332,
+        "chamadasSemInformacao": 13
       },
       "entradaCache": {
         "totalConhecido": 0,
         "mediaPorChamadaConhecida": 0,
-        "chamadasSemInformacao": 0
+        "chamadasSemInformacao": 13
       }
     },
     "precisaoVisual": "PENDENTE_REVISAO_HUMANA"
@@ -329,34 +329,34 @@
     "detail": "auto",
     "provider": "codex-local",
     "reasoningEffort": "high",
-    "combinacoes": 2,
-    "chamadas": 2,
-    "respostasValidas": 2,
-    "aprovadasPelasRegras": 2,
-    "erros": 0,
-    "latenciaMediaMs": 70348,
+    "combinacoes": 19,
+    "chamadas": 19,
+    "respostasValidas": 6,
+    "aprovadasPelasRegras": 6,
+    "erros": 13,
+    "latenciaMediaMs": 50580.52631578947,
     "custoConhecidoUsd": 0,
-    "chamadasSemCustoConhecido": 2,
+    "chamadasSemCustoConhecido": 19,
     "tokens": {
       "entrada": {
-        "totalConhecido": 32139,
-        "mediaPorChamadaConhecida": 16069.5,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 94005,
+        "mediaPorChamadaConhecida": 15667.5,
+        "chamadasSemInformacao": 13
       },
       "saida": {
-        "totalConhecido": 4194,
-        "mediaPorChamadaConhecida": 2097,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 11032,
+        "mediaPorChamadaConhecida": 1838.6666666666667,
+        "chamadasSemInformacao": 13
       },
       "total": {
-        "totalConhecido": 36333,
-        "mediaPorChamadaConhecida": 18166.5,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 105037,
+        "mediaPorChamadaConhecida": 17506.166666666668,
+        "chamadasSemInformacao": 13
       },
       "entradaCache": {
         "totalConhecido": 0,
         "mediaPorChamadaConhecida": 0,
-        "chamadasSemInformacao": 0
+        "chamadasSemInformacao": 13
       }
     },
     "precisaoVisual": "PENDENTE_REVISAO_HUMANA"
@@ -366,34 +366,34 @@
     "model": "gpt-6.1-sol",
     "detail": "auto",
     "reasoningEffort": "high",
-    "combinacoes": 2,
-    "chamadas": 2,
-    "respostasValidas": 2,
-    "aprovadasPelasRegras": 2,
-    "erros": 0,
-    "latenciaMediaMs": 70348,
+    "combinacoes": 19,
+    "chamadas": 19,
+    "respostasValidas": 6,
+    "aprovadasPelasRegras": 6,
+    "erros": 13,
+    "latenciaMediaMs": 50580.52631578947,
     "custoConhecidoUsd": 0,
-    "chamadasSemCustoConhecido": 2,
+    "chamadasSemCustoConhecido": 19,
     "tokens": {
       "entrada": {
-        "totalConhecido": 32139,
-        "mediaPorChamadaConhecida": 16069.5,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 94005,
+        "mediaPorChamadaConhecida": 15667.5,
+        "chamadasSemInformacao": 13
       },
       "saida": {
-        "totalConhecido": 4194,
-        "mediaPorChamadaConhecida": 2097,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 11032,
+        "mediaPorChamadaConhecida": 1838.6666666666667,
+        "chamadasSemInformacao": 13
       },
       "total": {
-        "totalConhecido": 36333,
-        "mediaPorChamadaConhecida": 18166.5,
-        "chamadasSemInformacao": 0
+        "totalConhecido": 105037,
+        "mediaPorChamadaConhecida": 17506.166666666668,
+        "chamadasSemInformacao": 13
       },
       "entradaCache": {
         "totalConhecido": 0,
         "mediaPorChamadaConhecida": 0,
-        "chamadasSemInformacao": 0
+        "chamadasSemInformacao": 13
       }
     },
     "precisaoVisual": "PENDENTE_REVISAO_HUMANA"

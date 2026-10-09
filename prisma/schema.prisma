@@ -169,6 +169,7 @@ model Usuario {
   podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
   podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
   podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
+  acessosPaginas                       AcessoPaginaUsuario[]
   fornecedoresComoVendedor             Fornecedor[]
   ocorrenciasTarefasMidiaConcluidas    OcorrenciaTarefaMidia[] @relation("UsuarioConclusaoTarefaMidia")
   tarefasMidiaResponsavel              TarefaMidia[]           @relation("ResponsavelTarefaMidia")
@@ -932,4 +933,15 @@ enum NotificationStatus {
   PENDENTE
   ERRO
   SUCESSO
+}
+
+model AcessoPaginaUsuario {
+  usuarioId    String   @map("usuario_id") @db.Uuid
+  pagina       String   @db.VarChar(160)
+  acessos      Int      @default(1)
+  ultimoAcesso DateTime @default(now()) @map("ultimo_acesso") @db.Timestamptz(6)
+  usuario      Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, pagina])
+  @@map("acesso_pagina_usuario")
 }

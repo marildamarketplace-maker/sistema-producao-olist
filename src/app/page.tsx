@@ -1,3 +1,4 @@
+import { AcessosRapidos } from "@/components/acessos-rapidos";
 import { ArrowRight, Quote, Sparkles, Target } from "lucide-react";
 
 const frases = [
@@ -18,6 +19,7 @@ const frases = [
 export default function HomePage() {
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col justify-center py-4 sm:py-8">
+      <AcessosRapidos />
       <section className="relative overflow-hidden rounded-3xl bg-slate-900 px-6 py-10 text-white shadow-xl sm:px-10 sm:py-14 lg:px-14">
         <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-indigo-400/20 blur-3xl" />
         <div className="absolute -bottom-28 left-1/3 h-64 w-64 rounded-full bg-sky-400/10 blur-3xl" />

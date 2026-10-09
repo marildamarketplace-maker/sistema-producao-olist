@@ -313,3 +313,34 @@ Variáveis obrigatórias:
 - `APP_URL`: URL pública do sistema, usada no link para a tela de confirmação (opcional na Vercel).
 
 A API pública valida a assinatura e a expiração do link, restringe todas as consultas ao aplicativo do token, limita tentativas incorretas de senha e executa a confirmação dentro da mesma transação serializável usada pela tela autenticada. As senhas nunca são enviadas no link nem persistidas no banco.
+
+
+### Ranking pessoal de páginas
+
+A migration Prisma `20261009150000_acesso_pagina_usuario` cria a tabela de contadores
+por usuário e caminho (`usuario_id`, `pagina`, `acessos`, `ultimo_acesso`). Aplicar
+pelo fluxo de migrations do projeto antes de disponibilizar a funcionalidade.
+O schema já está atualizado; gerar o Prisma Client durante o build/postinstall.
+
+O shell registra cada entrada numa tela administrativa permitida, incluindo
+recarregamentos e retornos à mesma tela após visitar outra. Alterações de filtros,
+query strings, prefetch e renovação do token não geram novos acessos. Login,
+início, confirmação pública e aliases com redirect ficam fora da contagem.
+Os contadores começam na implantação; não há reconstrução retroativa.
+
+`GET /api/acessos-paginas` devolve o ranking do usuário autenticado e
+`POST /api/acessos-paginas` recebe somente `{ "pagina": "/estoque" }`.
+Ambos exigem Bearer válido e cadastro ativo; permissões são verificadas no servidor.
+A tabela tem RLS e acesso revogado para `anon` e `authenticated`:
+as operações passam pela API com conexão Prisma do servidor.
+O incremento usa um único INSERT ON CONFLICT para preservar acessos concorrentes.
+Falhas de telemetria não bloqueiam navegação e não são repetidas automaticamente,
+pois uma resposta perdida poderia provocar contagem duplicada. Os números são
+contadores de navegação, não uma trilha de auditoria ou métrica antifraude.
+
+Na página inicial, todas as telas permitidas aparecem em ordem decrescente de
+acessos; empates seguem grupo e título. Sem histórico, os atalhos ficam disponíveis
+com zero acessos. Em falha, os links continuam disponíveis e há tentativa manual.
+Critérios de aceite: atalhos legíveis e acionáveis por teclado no desktop
+(1280–1440px), e por toque no mobile (360–390px), sem overflow, nos dois temas.
+Validação visual autenticada e testes em dispositivo real ainda são necessários.

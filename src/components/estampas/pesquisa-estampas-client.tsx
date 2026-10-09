@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { PageHeader } from "@/components/page-header";
 import {
   CONTEUDOS_IMAGEM_ESTAMPA,
@@ -199,6 +200,11 @@ export function PesquisaEstampasClient() {
   }
 
   function aplicarPesquisa() {
+    if (!temFiltroPesquisaEstampas(form) && filtrosAvancadosAbertos) {
+      filtrosAntesDoModal.current = null;
+      limpar();
+      return;
+    }
     if (!temFiltroPesquisaEstampas(form)) {
       setFiltros(null);
       setResultado(null);
@@ -286,7 +292,7 @@ export function PesquisaEstampasClient() {
         description="Encontre estampas por motivos, cores, estilo e composição. Combine critérios e compartilhe a pesquisa por link."
       />
 
-      <form onSubmit={pesquisar} className="space-y-5 rounded-lg border border-slate-200 bg-white p-5">
+      <form onSubmit={pesquisar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:space-y-5 sm:p-5">
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Pesquisa geral</span>
           <div className="relative mt-1">
@@ -296,68 +302,71 @@ export function PesquisaEstampasClient() {
               onChange={(event) => setForm({ ...form, consulta: event.target.value })}
               placeholder='Ex.: cereja amarela · "animal print" · floral -texto'
               maxLength={200}
-              className="w-full rounded-md border border-slate-300 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              enterKeyHint="search"
+              className="w-full rounded-md border border-slate-300 py-2.5 pl-10 pr-3 text-base sm:text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
             />
           </div>
         </label>
 
-        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,280px)_1fr]">
-          <Campo label="Correspondência mínima">
-            <SelectCorrespondencia value={form.correspondenciaMinima} disabled={!temPreferenciasAtivas(form)} onChange={(correspondenciaMinima) => setForm({ ...form, correspondenciaMinima })} />
-          </Campo>
-          <p className="text-xs leading-relaxed text-slate-600">A busca ampliada inclui resultados parciais. Em “cereja amarela”, os dois termos atendidos representam 100%; só cereja ou só amarela representa 50%. Na ordenação por correspondência, os mais completos vêm primeiro.</p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <Campo label="Código">
-            <input value={form.codigo} onChange={(event) => setForm({ ...form, codigo: event.target.value })} placeholder="6844" className={inputClass} />
-          </Campo>
-          <Campo label="Variante">
-            <input value={form.variante} onChange={(event) => setForm({ ...form, variante: event.target.value })} placeholder="A" className={inputClass} />
-          </Campo>
-          <Campo label="Status">
-            <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as Filtros["status"] })} className={inputClass}>
-              <option value="">Concluídas (padrão)</option>
-              {Object.entries(rotulosStatus).map(([status, rotulo]) => <option key={status} value={status}>{rotulo}</option>)}
-            </select>
-          </Campo>
-          <Campo label="Tipo de imagem">
-            <SelectRotulado
-              value={form.tipoImagem}
-              onChange={(tipoImagem) => setForm({ ...form, tipoImagem: tipoImagem as Filtros["tipoImagem"] })}
-              options={facetas.tiposImagem}
-              labels={ROTULOS_TIPO_IMAGEM_ESTAMPA}
-              placeholder="Todos os tipos"
-            />
-          </Campo>
-          <Campo label="Padrão têxtil">
-            <Select value={form.padraoTextil} onChange={(padraoTextil) => setForm({ ...form, padraoTextil })} options={facetas.padroesTexteis} placeholder="Todos os padrões" />
-          </Campo>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Campo label="Categoria do motivo">
-            <Select value={form.categoria} onChange={(categoria) => setForm({ ...form, categoria })} options={facetas.categorias} placeholder="Todas as categorias" />
-          </Campo>
-          {FILTROS_DESIGN_PESQUISA.filter(({ campo }) => ["estilo", "distribuicao", "linguagemVisual"].includes(campo)).map(({ campo, faceta, rotulo }) => (
-            <Campo key={campo} label={rotulo}>
-              <Select value={form[campo]} onChange={(valor) => setForm({ ...form, [campo]: valor })} options={facetas[faceta]} placeholder="Todas as opções" />
+        <div className="hidden space-y-5 sm:block">
+          <div className="grid items-start gap-4 md:grid-cols-[minmax(0,280px)_1fr]">
+            <Campo label="Correspondência mínima">
+              <SelectCorrespondencia value={form.correspondenciaMinima} disabled={!temPreferenciasAtivas(form)} onChange={(correspondenciaMinima) => setForm({ ...form, correspondenciaMinima })} />
             </Campo>
-          ))}
+            <p className="text-xs leading-relaxed text-slate-600">A busca ampliada inclui resultados parciais. Em “cereja amarela”, os dois termos atendidos representam 100%; só cereja ou só amarela representa 50%. Na ordenação por correspondência, os mais completos vêm primeiro.</p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <Campo label="Código">
+              <input value={form.codigo} onChange={(event) => setForm({ ...form, codigo: event.target.value })} placeholder="6844" className={inputClass} />
+            </Campo>
+            <Campo label="Variante">
+              <input value={form.variante} onChange={(event) => setForm({ ...form, variante: event.target.value })} placeholder="A" className={inputClass} />
+            </Campo>
+            <Campo label="Status">
+              <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as Filtros["status"] })} className={inputClass}>
+                <option value="">Concluídas (padrão)</option>
+                {Object.entries(rotulosStatus).map(([status, rotulo]) => <option key={status} value={status}>{rotulo}</option>)}
+              </select>
+            </Campo>
+            <Campo label="Tipo de imagem">
+              <SelectRotulado
+                value={form.tipoImagem}
+                onChange={(tipoImagem) => setForm({ ...form, tipoImagem: tipoImagem as Filtros["tipoImagem"] })}
+                options={facetas.tiposImagem}
+                labels={ROTULOS_TIPO_IMAGEM_ESTAMPA}
+                placeholder="Todos os tipos"
+              />
+            </Campo>
+            <Campo label="Padrão têxtil">
+              <Select value={form.padraoTextil} onChange={(padraoTextil) => setForm({ ...form, padraoTextil })} options={facetas.padroesTexteis} placeholder="Todos os padrões" />
+            </Campo>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Campo label="Categoria do motivo">
+              <Select value={form.categoria} onChange={(categoria) => setForm({ ...form, categoria })} options={facetas.categorias} placeholder="Todas as categorias" />
+            </Campo>
+            {FILTROS_DESIGN_PESQUISA.filter(({ campo }) => ["estilo", "distribuicao", "linguagemVisual"].includes(campo)).map(({ campo, faceta, rotulo }) => (
+              <Campo key={campo} label={rotulo}>
+                <Select value={form[campo]} onChange={(valor) => setForm({ ...form, [campo]: valor })} options={facetas[faceta]} placeholder="Todas as opções" />
+              </Campo>
+            ))}
+          </div>
+          <PreferenciasPesquisa filtros={form} onChange={setForm} />
+          <p className="text-xs text-slate-500">Use aspas para uma frase e -termo para excluir. Prefixos e variações de cores são aceitos: cereja encontra cerejas; amarela também encontra amarelo. Escolha abaixo quais critérios são obrigatórios ou preferências.</p>
         </div>
-        <PreferenciasPesquisa filtros={form} onChange={setForm} />
-        <p className="text-xs text-slate-500">Use aspas para uma frase e -termo para excluir. Prefixos e variações de cores são aceitos: cereja encontra cerejas; amarela também encontra amarelo. Escolha abaixo quais critérios são obrigatórios ou preferências.</p>
         {carregandoFacetas && <p role="status" className="text-xs text-slate-500">Carregando opções de filtros...</p>}
         {erroFacetas && <p role="alert" className="text-sm text-red-700">{erroFacetas} <button type="button" onClick={() => setTentativaFacetas((valor) => valor + 1)} className="underline">Tentar novamente</button></p>}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <button type="button" onClick={abrirFiltrosAvancados} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-            <SlidersHorizontal className="h-4 w-4" /> Filtros avançados
+          <button type="button" aria-haspopup="dialog" aria-expanded={filtrosAvancadosAbertos} onClick={abrirFiltrosAvancados} className="inline-flex items-center gap-2 rounded-md border border-slate-300 min-h-11 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+            <SlidersHorizontal className="h-4 w-4" /><span className="sm:hidden">Avançado</span><span className="hidden sm:inline">Filtros avançados</span>
             {totalFiltrosAvancados > 0 && <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white">{totalFiltrosAvancados}</span>}
           </button>
-          <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={limpar} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Limpar filtros</button>
-          <button type="submit" className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Pesquisar</button>
+          <div className="flex flex-wrap gap-2 sm:gap-3">
+          <button type="button" onClick={limpar} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><span className="sm:hidden">Limpar</span><span className="hidden sm:inline">Limpar filtros</span></button>
+          <button type="submit" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Pesquisar</button>
           </div>
         </div>
       </form>
@@ -368,7 +377,7 @@ export function PesquisaEstampasClient() {
           facetas={facetas}
           onChange={setForm}
           onApply={aplicarPesquisa}
-          onClear={limpar}
+          onClear={() => setForm(copiarFiltrosPesquisaEstampas(FILTROS_INICIAIS))}
           onClose={cancelarFiltrosAvancados}
         />
       )}
@@ -384,7 +393,7 @@ export function PesquisaEstampasClient() {
             else Object.assign(proximos, { [campo]: "" });
             if (temFiltroPesquisaEstampas(proximos)) atualizarUrl(proximos, 1, ordenacao);
             else limpar();
-          }} className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 disabled:opacity-50" aria-label={`Remover ${rotulo}: ${valor}`}>
+          }} className="inline-flex items-center gap-2 min-h-11 sm:min-h-0 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 disabled:opacity-50" aria-label={`Remover ${rotulo}: ${valor}`}>
             {rotulo}: {campo === "status" ? rotulosStatus[valor] : valor} · {filtros.preferencias.includes(campo) && !(campo === "consulta" && extrairReferenciaCodigo(filtros.consulta)) ? "Preferência" : "Obrigatório"}<X className="h-3 w-3" />
           </button>
         ))}
@@ -392,7 +401,7 @@ export function PesquisaEstampasClient() {
       {carregando && <p role="status" className="text-sm text-slate-600">Pesquisando estampas...</p>}
 
       {resultado?.cobertura && filtros && (
-        <section className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4" aria-label="Como a consulta foi atendida">
+        <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" aria-label="Como a consulta foi atendida">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Preferências atendidas: {resultado.cobertura.termos.join(" + ")}</h2>
@@ -536,17 +545,17 @@ function FiltrosAvancadosModal({
     };
   }, []);
   return (
-    <div ref={modal} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="titulo-filtros-avancados" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white shadow-xl">
-        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
+    <div ref={modal} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="titulo-filtros-avancados" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden sm:max-h-[90dvh] rounded-lg bg-white shadow-xl">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <div>
             <h2 id="titulo-filtros-avancados" className="text-xl font-semibold text-slate-900">Filtros avançados</h2>
             <p className="mt-1 text-sm text-slate-500">Combine os critérios disponíveis para refinar a pesquisa.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar filtros avançados" className="rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={onClose} aria-label="Fechar filtros avançados" className="min-h-11 min-w-11 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </header>
 
-        <div className="space-y-5 p-6">
+        <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-6">
           <Campo label="Pesquisa geral">
             <input value={filtros.consulta} onChange={(event) => onChange({ ...filtros, consulta: event.target.value })} placeholder='Ex.: cereja amarela · "animal print" · floral -texto' maxLength={200} className={inputClass} />
           </Campo>
@@ -641,11 +650,11 @@ function FiltrosAvancadosModal({
 
         </div>
 
-        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-6 py-4">
-          <button type="button" onClick={onClear} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Limpar todos</button>
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
-            <button type="button" onClick={onApply} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Aplicar filtros</button>
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+          <button type="button" onClick={onClear} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Limpar todos</button>
+          <div className="flex gap-2 sm:gap-3">
+            <button type="button" onClick={onClose} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
+            <button type="button" onClick={onApply} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Aplicar filtros</button>
           </div>
         </footer>
       </section>
@@ -697,16 +706,12 @@ function EstampaCard({
 }
 
 function ImagemAmpliadaModal({ estampa, onClose }: { estampa: EstampaPesquisaCatalogo; onClose: () => void }) {
-  useEffect(() => {
-    function fecharComEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", fecharComEscape);
-    return () => window.removeEventListener("keydown", fecharComEscape);
-  }, [onClose]);
+  const modal = useModalFocus(onClose);
 
   return (
     <div
+      ref={modal}
+      tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
       role="dialog"
       aria-modal="true"
@@ -722,7 +727,7 @@ function ImagemAmpliadaModal({ estampa, onClose }: { estampa: EstampaPesquisaCat
             <h2 className="truncate font-semibold text-slate-900">{codigoCompleto(estampa)}</h2>
             <p className="truncate text-sm text-slate-500">{estampa.titulo || "Sem título"}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar imagem ampliada" className="shrink-0 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={onClose} aria-label="Fechar imagem ampliada" className="min-h-11 min-w-11 shrink-0 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </header>
         <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 p-3">
           {/* A URL é dinâmica e vem do catálogo privado autorizado para este usuário. */}
@@ -739,12 +744,13 @@ function ImagemAmpliadaModal({ estampa, onClose }: { estampa: EstampaPesquisaCat
 }
 
 function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalogo; onClose: () => void }) {
+  const modal = useModalFocus(onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label={`Detalhes da estampa ${codigoCompleto(estampa)}`}>
+    <div ref={modal} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label={`Detalhes da estampa ${codigoCompleto(estampa)}`}>
       <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div><h2 className="text-xl font-semibold text-slate-900">{codigoCompleto(estampa)}</h2><p className="mt-1 text-sm text-slate-500">{estampa.titulo || "Sem título"}</p></div>
-          <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={onClose} aria-label="Fechar" className="min-h-11 min-w-11 shrink-0 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </div>
         {estampa.correspondencia && <div className="mt-4"><CorrespondenciaPesquisa correspondencia={estampa.correspondencia} /></div>}
         <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
@@ -852,6 +858,9 @@ function Detalhe({ label, valores, className = "" }: { label: string; valores: s
 function contarFiltrosAvancados(filtros: Filtros) {
   return [
     ...FILTROS_DESIGN_PESQUISA.map(({ campo }) => filtros[campo]),
+    filtros.codigo,
+    filtros.variante,
+    filtros.status,
     filtros.tema,
     filtros.palavraChave,
     filtros.elementoVisual,
@@ -864,14 +873,15 @@ function contarFiltrosAvancados(filtros: Filtros) {
     filtros.tipoImagem,
     filtros.conteudoImagem,
     filtros.suporteAplicacao,
-  ].filter((valor) => valor.trim()).length + filtros.cores.length;
+  ].filter((valor) => valor.trim()).length + filtros.cores.length
+    + Number(filtros.correspondenciaMinima !== FILTROS_INICIAIS.correspondenciaMinima);
 }
 
 function codigoCompleto(estampa: Pick<EstampaPesquisaCatalogo, "codigo" | "variante">) {
   return [estampa.codigo, estampa.variante].filter(Boolean).join("-");
 }
 
-const inputClass = "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200";
+const inputClass = "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base sm:text-sm text-slate-800 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200";
 
 
 const rotulosStatus: Record<string, string> = { COMPLETED: "Concluídas", PENDING: "Pendentes", PROCESSING: "Em processamento", FAILED: "Com falha", TODOS: "Todos os status" };
@@ -903,7 +913,7 @@ function SeletorCores({ filtros, cores, onChange }: { filtros: Filtros; cores: s
       </select></Campo>
     </div>
     <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
-      {opcoes.map((cor) => <label key={cor} className="flex items-center gap-2 text-sm text-slate-700">
+      {opcoes.map((cor) => <label key={cor} className="flex min-h-11 sm:min-h-0 items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" checked={filtros.cores.includes(cor)} disabled={!filtros.cores.includes(cor) && filtros.cores.length >= 10} onChange={(event) => onChange({ ...filtros, cores: event.target.checked ? [...filtros.cores, cor] : filtros.cores.filter((valor) => valor !== cor) })} />{cor}
       </label>)}
     </div>

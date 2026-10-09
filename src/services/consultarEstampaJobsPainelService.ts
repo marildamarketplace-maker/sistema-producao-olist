@@ -18,6 +18,7 @@ export type EstampaJobPainel = {
   iniciadoEm: string | null;
   finalizadoEm: string | null;
   processamentoManual: boolean;
+  modeloUtilizado: string | null;
   analise: {
     modelo: string | null;
     provider: string | null;
@@ -37,7 +38,7 @@ export async function consultarEstampaJobsPainel(input: {
   return { ...resultado, jobs: resultado.jobs.map(paraJobPainel) };
 }
 
-function paraJobPainel(job: EstampaJobPainelRow): EstampaJobPainel {
+export function paraJobPainel(job: EstampaJobPainelRow): EstampaJobPainel {
   const metadata = objeto(job.aiMetadata);
   const modelo = texto(metadata?.model);
   const provider = texto(metadata?.provider);
@@ -61,6 +62,7 @@ function paraJobPainel(job: EstampaJobPainelRow): EstampaJobPainel {
     iniciadoEm: job.startedAt?.toISOString() ?? null,
     finalizadoEm: job.finishedAt?.toISOString() ?? null,
     processamentoManual: job.manualRequested,
+    modeloUtilizado: job.modeloUtilizado,
     analise: possuiAnalise
       ? { modelo, provider, confianca, analisadoEm, fallbackUtilizado, resultado }
       : null,
