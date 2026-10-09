@@ -28,7 +28,7 @@ export function AcessosRapidos() {
     return () => controller.abort();
   }, [usuarioId, token, tentativa]);
   if (!usuario) return loading ? <p role="status" className="mb-6 text-sm text-slate-600">Carregando acessos rápidos...</p> : null;
-  const paginas = rankingPaginas(usuario, resultado?.usuarioId === usuario.id ? resultado.contagens : []);
+  const paginas = rankingPaginas(usuario, resultado?.usuarioId === usuario.id ? resultado.contagens : []).slice(0, 5);
   return (
     <section aria-labelledby="acessos-rapidos-titulo" className="mb-6 rounded-lg border border-slate-200 bg-white p-5 sm:p-6">
       <h2 id="acessos-rapidos-titulo" className="text-2xl font-semibold text-slate-900">Acessos rápidos</h2>

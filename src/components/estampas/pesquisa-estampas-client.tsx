@@ -308,54 +308,6 @@ export function PesquisaEstampasClient() {
           </div>
         </label>
 
-        <div className="hidden space-y-5 sm:block">
-          <div className="grid items-start gap-4 md:grid-cols-[minmax(0,280px)_1fr]">
-            <Campo label="Correspondência mínima">
-              <SelectCorrespondencia value={form.correspondenciaMinima} disabled={!temPreferenciasAtivas(form)} onChange={(correspondenciaMinima) => setForm({ ...form, correspondenciaMinima })} />
-            </Campo>
-            <p className="text-xs leading-relaxed text-slate-600">A busca ampliada inclui resultados parciais. Em “cereja amarela”, os dois termos atendidos representam 100%; só cereja ou só amarela representa 50%. Na ordenação por correspondência, os mais completos vêm primeiro.</p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <Campo label="Código">
-              <input value={form.codigo} onChange={(event) => setForm({ ...form, codigo: event.target.value })} placeholder="6844" className={inputClass} />
-            </Campo>
-            <Campo label="Variante">
-              <input value={form.variante} onChange={(event) => setForm({ ...form, variante: event.target.value })} placeholder="A" className={inputClass} />
-            </Campo>
-            <Campo label="Status">
-              <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as Filtros["status"] })} className={inputClass}>
-                <option value="">Concluídas (padrão)</option>
-                {Object.entries(rotulosStatus).map(([status, rotulo]) => <option key={status} value={status}>{rotulo}</option>)}
-              </select>
-            </Campo>
-            <Campo label="Tipo de imagem">
-              <SelectRotulado
-                value={form.tipoImagem}
-                onChange={(tipoImagem) => setForm({ ...form, tipoImagem: tipoImagem as Filtros["tipoImagem"] })}
-                options={facetas.tiposImagem}
-                labels={ROTULOS_TIPO_IMAGEM_ESTAMPA}
-                placeholder="Todos os tipos"
-              />
-            </Campo>
-            <Campo label="Padrão têxtil">
-              <Select value={form.padraoTextil} onChange={(padraoTextil) => setForm({ ...form, padraoTextil })} options={facetas.padroesTexteis} placeholder="Todos os padrões" />
-            </Campo>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Campo label="Categoria do motivo">
-              <Select value={form.categoria} onChange={(categoria) => setForm({ ...form, categoria })} options={facetas.categorias} placeholder="Todas as categorias" />
-            </Campo>
-            {FILTROS_DESIGN_PESQUISA.filter(({ campo }) => ["estilo", "distribuicao", "linguagemVisual"].includes(campo)).map(({ campo, faceta, rotulo }) => (
-              <Campo key={campo} label={rotulo}>
-                <Select value={form[campo]} onChange={(valor) => setForm({ ...form, [campo]: valor })} options={facetas[faceta]} placeholder="Todas as opções" />
-              </Campo>
-            ))}
-          </div>
-          <PreferenciasPesquisa filtros={form} onChange={setForm} />
-          <p className="text-xs text-slate-500">Use aspas para uma frase e -termo para excluir. Prefixos e variações de cores são aceitos: cereja encontra cerejas; amarela também encontra amarelo. Escolha abaixo quais critérios são obrigatórios ou preferências.</p>
-        </div>
         {carregandoFacetas && <p role="status" className="text-xs text-slate-500">Carregando opções de filtros...</p>}
         {erroFacetas && <p role="alert" className="text-sm text-red-700">{erroFacetas} <button type="button" onClick={() => setTentativaFacetas((valor) => valor + 1)} className="underline">Tentar novamente</button></p>}
 
@@ -560,9 +512,12 @@ function FiltrosAvancadosModal({
             <input value={filtros.consulta} onChange={(event) => onChange({ ...filtros, consulta: event.target.value })} placeholder='Ex.: cereja amarela · "animal print" · floral -texto' maxLength={200} className={inputClass} />
           </Campo>
 
-          <Campo label="Correspondência mínima da pesquisa geral">
+          <p className="text-xs leading-relaxed text-slate-600">Use aspas para pesquisar uma frase e -termo para excluir. Prefixos e variações de cores são aceitos: cereja encontra cerejas; amarela também encontra amarelo.</p>
+
+          <Campo label="Correspondência mínima das preferências">
             <SelectCorrespondencia value={filtros.correspondenciaMinima} disabled={!temPreferenciasAtivas(filtros)} onChange={(correspondenciaMinima) => onChange({ ...filtros, correspondenciaMinima })} />
           </Campo>
+          <p className="text-xs leading-relaxed text-slate-600">A busca ampliada inclui resultados parciais. Em “cereja amarela”, como preferência, os dois termos atendidos representam 100%; só cereja ou só amarela representa 50%. Na ordenação por correspondência, os mais completos vêm primeiro.</p>
           <h3 className="text-sm font-semibold text-slate-900">Identificação e apresentação</h3>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Campo label="Código">

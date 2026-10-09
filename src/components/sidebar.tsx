@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, LogOut, X } from "lucide-react";
+import { Menu, LogOut, X, ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { menuItems, type MenuItem, type MenuLink } from "@/lib/navigation";
@@ -17,14 +17,6 @@ export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const nomeAplicativo = usuario?.aplicativo?.nome ?? "Aplicativo";
 
-  async function hardRefresh() {
-    if ("caches" in window) {
-      const cacheNames = await window.caches.keys();
-      await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)));
-    }
-    window.location.reload();
-  }
-
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
@@ -36,7 +28,7 @@ export function Sidebar() {
   function linkClassName(href: string, nested = false) {
     const active = isActive(href);
     const base =
-      "block rounded-md px-3 py-2 text-sm transition hover:bg-slate-100 hover:text-slate-900";
+      "block min-h-11 rounded-md px-3 py-2 text-sm transition hover:bg-slate-100 hover:text-slate-900";
     const color = active
       ? "bg-slate-900 font-medium text-white hover:bg-slate-900 hover:text-white"
       : "text-slate-700";
@@ -59,17 +51,17 @@ export function Sidebar() {
 
   const renderSidebarContent = () => (
     <>
-      <button
-        type="button"
-        onClick={() => void hardRefresh()}
-        title="Recarregar página"
-        className="mb-5 shrink-0 rounded-md pr-10 text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 md:pr-0"
+      <Link
+        href="/"
+        onClick={() => setIsOpen(false)}
+        title="Página inicial"
+        className="mb-5 min-h-11 shrink-0 rounded-md pr-10 text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 md:pr-0"
       >
         <h1 className="text-lg font-semibold text-slate-900">ERP Shop</h1>
         <p className="mt-1 text-xs text-slate-500">
           {nomeAplicativo}
         </p>
-      </button>
+      </Link>
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">
         <ul className="space-y-3 pb-3">
           {visibleMenuItems.map((item) => (
@@ -79,10 +71,15 @@ export function Sidebar() {
                   {item.label}
                 </Link>
               ) : (
-                <div>
-                  <p className="px-3 text-xs font-semibold uppercase text-slate-500">
+                <details
+                  key={pathname}
+                  open={item.items.some((subItem) => isActive(subItem.href))}
+                  className="group/menu"
+                >
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase text-slate-500 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 [&::-webkit-details-marker]:hidden">
                     {item.label}
-                  </p>
+                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open/menu:rotate-180" aria-hidden="true" />
+                  </summary>
                   <ul className="mt-1 space-y-1 border-l border-slate-200 pl-2">
                     {item.items.map((subItem) => (
                       <li key={subItem.href}>
@@ -92,7 +89,7 @@ export function Sidebar() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </details>
               )}
             </li>
           ))}
@@ -128,12 +125,12 @@ export function Sidebar() {
   return (
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
-        <button type="button" onClick={() => void hardRefresh()} title="Recarregar página" className="min-w-0 rounded-md text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
+        <Link href="/" title="Página inicial" className="min-h-11 min-w-0 rounded-md text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
           <h1 className="truncate text-base font-semibold text-slate-900">ERP Shop</h1>
           <p className="truncate text-xs text-slate-500">
             {nomeAplicativo}
           </p>
-        </button>
+        </Link>
         <button
           type="button"
           onClick={() => setIsOpen(true)}
