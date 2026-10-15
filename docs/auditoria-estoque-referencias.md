@@ -38,7 +38,10 @@ O job não chama Z-API. O processador existente `/api/cron/processar-notificatio
 agendado a cada cinco minutos, faz o envio e aplica sua política de tentativas.
 O envio depende de `NOTIFICAR` e das credenciais existentes do remetente.
 
-Relatórios longos são divididos em partes de até 3.400 caracteres, sem omitir lotes.
+O WhatsApp apresenta somente uma linha por referência com saldo consolidado, sem
+detalhamento dos lotes ou IDs. A unidade final `- MT` (ou equivalente à unidade do
+grupo) é retirada apenas do nome exibido, mantendo a unidade junto ao saldo.
+Relatórios longos são divididos em partes de até 3.400 caracteres, sem omitir referências.
 Os IDs são derivados do aplicativo, destinatário, data de São Paulo, relatório e
 índice da parte. `createMany` com `skipDuplicates` torna o enqueue atômico e impede
 que execuções concorrentes/repetidas gravem o mesmo relatório no mesmo dia.

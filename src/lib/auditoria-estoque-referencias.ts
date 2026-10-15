@@ -84,11 +84,14 @@ export function criarMensagensAuditoria(grupos: SaldoReferencia[], executadoEm: 
   const data = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(executadoEm);
   const cabecalho = `*Estoque físico negativo por referência*\n${data}\n${negativos.length} referência(s) negativa(s) de ${grupos.length} analisada(s).\nSaldo físico: produto base + todos os lotes, sem descontar reservas.\n`;
   const formatar = (saldo: string) => new Prisma.Decimal(saldo).toFixed(Math.max(2, new Prisma.Decimal(saldo).decimalPlaces())).replace(".", ",");
-  const linhas = negativos.flatMap((grupo) => [
-    `\n${grupo.produtoBase}: *${formatar(grupo.saldo)} ${grupo.unidade}*`,
-    ...[...grupo.lotes].sort((a, b) => a.id.localeCompare(b.id)).map((lote) => `• ${lote.nome} [ID ${lote.id}]: ${formatar(lote.saldo)} ${grupo.unidade}`),
-  ]);
-  // Partes completas, sem omitir referências ou lotes quando o relatório cresce.
+  const linhas = negativos.map((grupo) => {
+    // Remove apenas a unidade final correspondente; preserva o nome e a referência.
+    const separador = grupo.produtoBase.lastIndexOf(" - ");
+    const nome = separador >= 0 && grupo.produtoBase.slice(separador + 3).trim().toUpperCase() === grupo.unidade.toUpperCase()
+      ? grupo.produtoBase.slice(0, separador).trim() : grupo.produtoBase;
+    return `${nome}: *${formatar(grupo.saldo)} ${grupo.unidade}*`;
+  });
+  // Partes completas, sem omitir referências quando o relatório cresce.
   const mensagens: string[] = [];
   let atual = cabecalho;
   for (const linha of linhas) {

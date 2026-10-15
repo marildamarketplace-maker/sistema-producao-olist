@@ -22,7 +22,7 @@ test("soma base e todos os lotes do print usando saldo físico", async () => {
   const mensagens = criarMensagensAuditoria(grupos, data);
   assert.match(mensagens[0], /-266,30 MT/);
   assert.doesNotMatch(mensagens.join(""), /6607/);
-  assert.match(mensagens[0], /LOTE 7/);
+  assert.doesNotMatch(mensagens[0], /LOTE|\[ID /);
 });
 
 test("decimais não produzem falsos negativos e zero não gera alerta", async () => {
@@ -74,12 +74,13 @@ test("detecta páginas repetidas e prazo excedido", async () => {
   await assert.rejects(auditarEstoqueReferencias("app", deps, 0), /Prazo/);
 });
 
-test("mensagens grandes são divididas sem omitir lotes", () => {
-  const grupos = Array.from({ length: 120 }, (_, i) => ({ produtoBase: `Oxford Ref ${i}`, unidade: "MT", saldo: "-1", lotes: [{ id: String(i), nome: `Oxford Ref ${i} - LOTE 2`, saldo: "-1" }] }));
+test("mensagens grandes são divididas sem omitir referências", () => {
+  const grupos = Array.from({ length: 300 }, (_, i) => ({ produtoBase: `Oxford Ref ${i}`, unidade: "MT", saldo: "-1", lotes: [{ id: String(i), nome: `Oxford Ref ${i} - LOTE 2`, saldo: "-1" }] }));
   const mensagens = criarMensagensAuditoria(grupos, data);
   assert.ok(mensagens.length > 1);
   assert.ok(mensagens.every((m) => m.length <= 3_400));
-  for (let i = 0; i < 120; i++) assert.ok(mensagens.join("\n").includes(`[ID ${i}]`));
+  for (let i = 0; i < 300; i++) assert.ok(mensagens.join("\n").includes(`Oxford Ref ${i}:`));
+  assert.doesNotMatch(mensagens.join("\n"), /LOTE|\[ID /);
 });
 
 test("enqueue deduplica por aplicativo/destinatário/dia/relatório e mantém status pendente", () => {
@@ -169,4 +170,16 @@ test("diagnóstico informa etapa, ID e status sem vazar headers ou resposta", as
   });
   assert.deepEqual(diagnosticarErroAuditoria(new Error("segredo")), { codigo: "ERRO_NAO_CLASSIFICADO" });
   assert.deepEqual(diagnosticarErroAuditoria({ code: "ETIMEDOUT" }), { codigo: "TIMEOUT" });
+});
+
+test("WhatsApp exibe FOURWAY unificado com total e sem sufixo de unidade, lotes ou IDs", async () => {
+  const nome = "FOURWAY SUBLIME 3 95%POLI5%ELASTRef. 5168 1J3B4C6D2B";
+  const grupos = await auditarEstoqueReferencias("app", dependencias(
+    [`${nome} - MT`, `${nome} - MT - LOTE 2`], ["39.65", "-305.95"],
+  ));
+  const mensagem = criarMensagensAuditoria(grupos, data).join("\n");
+  assert.ok(mensagem.includes(`${nome}: *-266,30 MT*`));
+  assert.equal(mensagem.split(nome).length - 1, 1);
+  assert.doesNotMatch(mensagem, /LOTE|\[ID | - MT/);
+  assert.equal(grupos[0].lotes.length, 2);
 });
