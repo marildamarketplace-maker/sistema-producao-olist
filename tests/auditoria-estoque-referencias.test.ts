@@ -183,3 +183,11 @@ test("WhatsApp exibe FOURWAY unificado com total e sem sufixo de unidade, lotes 
   assert.doesNotMatch(mensagem, /LOTE|\[ID | - MT/);
   assert.equal(grupos[0].lotes.length, 2);
 });
+
+test("título aparece uma única vez no texto enviado ao WhatsApp", () => {
+  const mensagens = criarMensagensAuditoria([{ produtoBase: "Oxford Ref 1", unidade: "MT", saldo: "-2", lotes: [] }], data);
+  const [notification] = prepararNotificationsAuditoria({ aplicativoId: "app", whatsapp: "5511999990000", mensagens, executadoEm: data });
+  const textoEnviado = [notification.titulo, notification.mensagem].join("\n\n");
+  assert.equal(textoEnviado.split("Estoque físico negativo por referência").length - 1, 1);
+  assert.ok(notification.mensagem.startsWith("15/10/2026"));
+});

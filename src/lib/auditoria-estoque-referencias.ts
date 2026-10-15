@@ -82,7 +82,7 @@ export function criarMensagensAuditoria(grupos: SaldoReferencia[], executadoEm: 
   const negativos = grupos.filter((grupo) => new Prisma.Decimal(grupo.saldo).isNegative());
   if (!negativos.length) return [];
   const data = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(executadoEm);
-  const cabecalho = `*Estoque físico negativo por referência*\n${data}\n${negativos.length} referência(s) negativa(s) de ${grupos.length} analisada(s).\nSaldo físico: produto base + todos os lotes, sem descontar reservas.\n`;
+  const cabecalho = `${data}\n${negativos.length} referência(s) negativa(s) de ${grupos.length} analisada(s).\nSaldo físico: produto base + todos os lotes, sem descontar reservas.\n`;
   const formatar = (saldo: string) => new Prisma.Decimal(saldo).toFixed(Math.max(2, new Prisma.Decimal(saldo).decimalPlaces())).replace(".", ",");
   const linhas = negativos.map((grupo) => {
     // Remove apenas a unidade final correspondente; preserva o nome e a referência.
@@ -99,7 +99,7 @@ export function criarMensagensAuditoria(grupos: SaldoReferencia[], executadoEm: 
       const trecho = linha.slice(inicio, inicio + 2_000);
       if (atual.length + trecho.length + 1 > 3_400) {
         mensagens.push(atual);
-        atual = "*Estoque físico negativo — continuação*\n";
+        atual = "Continuação\n";
       }
       atual += `\n${trecho}`;
     }
