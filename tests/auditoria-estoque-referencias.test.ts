@@ -101,32 +101,19 @@ test("auditoria requer habilitação explícita independente do validador", () =
   assert.equal(aplicativoTemJob("auditoria_estoque_referencias,NOTIFICAR", CHAVES_JOB.AUDITORIA_ESTOQUE_REFERENCIAS), true);
 });
 
-test("regressão: busca remota nome=ref vazia não omite referências do catálogo", async () => {
-  const consultas: object[] = [];
-  const estoquesConsultados: string[] = [];
-  const deps: DependenciasAuditoria = {
-    listar: async (_app, filtros) => {
-      consultas.push(filtros);
-      // Reproduz o incidente: a API não encontra os cadastros com nome=ref.
-      const itens = "nome" in filtros ? [] : filtros.offset === 0
-        ? [{ id: 1, descricao: "Produto comum" }, { id: 2, descricao: "FOURWAY Ref. 5168 - MT" }]
-        : filtros.offset === 2
-          ? [{ id: 3, descricao: "FOURWAY Ref. 5168 - MT - LOTE 2" }]
-          : [];
-      return { itens, paginacao: { limit: 100, offset: filtros.offset, total: 3 } };
-    },
-    obterEstoque: async (_app, id) => {
-      estoquesConsultados.push(id);
-      return { id, unidade: "MT", saldo: id === "2" ? "39.65" : "-50" };
-    },
+test("pesquisa vazia não consulta catálogo nem gera mensagem", async () => {
+  let chamadas = 0;
+  const deps = dependencias([], []);
+  deps.listar = async (_app, filtros) => {
+    chamadas++;
+    assert.equal(filtros.nome, "%ref%");
+    return { itens: [], paginacao: { offset: 0, limit: 100, total: 0 } };
   };
+  deps.obterEstoque = async () => { throw new Error("Não deve consultar estoque."); };
   const grupos = await auditarEstoqueReferencias("app", deps);
-  assert.ok(consultas.every((consulta) => !("nome" in consulta)));
-  assert.deepEqual(estoquesConsultados, ["2", "3"]);
-  assert.equal(grupos[0].saldo, "-10.35");
-  const mensagens = criarMensagensAuditoria(grupos, data);
-  assert.match(mensagens[0], /-10,35 MT/);
-  assert.equal(prepararNotificationsAuditoria({ aplicativoId: "app", whatsapp: "5511999990000", mensagens, executadoEm: data })[0].status, "PENDENTE");
+  assert.equal(chamadas, 1);
+  assert.deepEqual(grupos, []);
+  assert.deepEqual(criarMensagensAuditoria(grupos, data), []);
 });
 
 test("catálogo sem referências ou com referências positivas não cria mensagem", async () => {
@@ -151,9 +138,9 @@ test("restringe todas as páginas a produtos ativos", async () => {
   deps.obterEstoque = async (_app, id) => ({ id, unidade: "MT", saldo: -1 });
   await auditarEstoqueReferencias("app", deps);
   assert.deepEqual(filtrosRecebidos, [
-    { situacao: "A", limit: 100, offset: 0 },
-    { situacao: "A", limit: 100, offset: 1 },
-    { situacao: "A", limit: 100, offset: 2 },
+    { nome: "%ref%", situacao: "A", limit: 100, offset: 0 },
+    { nome: "%ref%", situacao: "A", limit: 100, offset: 1 },
+    { nome: "%ref%", situacao: "A", limit: 100, offset: 2 },
   ]);
 });
 
@@ -190,4 +177,28 @@ test("título aparece uma única vez no texto enviado ao WhatsApp", () => {
   const textoEnviado = [notification.titulo, notification.mensagem].join("\n\n");
   assert.equal(textoEnviado.split("Estoque físico negativo por referência").length - 1, 1);
   assert.ok(notification.mensagem.startsWith("15/10/2026"));
+});
+
+test("pesquisa bem-sucedida é paginada e não consulta catálogo completo", async () => {
+  const filtrosRecebidos: Parameters<DependenciasAuditoria["listar"]>[1][] = [];
+  const deps = dependencias(["Ref 1"], [-2]);
+  const listar = deps.listar;
+  deps.listar = async (app, filtros) => { filtrosRecebidos.push(filtros); return listar(app, filtros); };
+  const grupos = await auditarEstoqueReferencias("app", deps);
+  assert.equal(grupos[0].saldo, "-2");
+  assert.equal(filtrosRecebidos.length, 2);
+  assert.ok(filtrosRecebidos.every((f) => f.nome === "%ref%" && f.situacao === "A"));
+});
+
+test("falha em página da pesquisa interrompe sem buscar todos os produtos", async () => {
+  const consultas: string[] = [];
+  const deps = dependencias([], []);
+  deps.listar = async (_app, filtros) => {
+    consultas.push(`${filtros.nome}:${filtros.offset}`);
+    if (filtros.offset > 0) throw new Error("Erro Olist 500");
+    return { itens: [{ id: 1, descricao: "Ref 1" }], paginacao: { offset: 0, limit: 100, total: 2 } };
+  };
+  deps.obterEstoque = async () => { throw new Error("Não deve consultar estoque parcial."); };
+  await assert.rejects(auditarEstoqueReferencias("app", deps), /LISTAGEM/);
+  assert.deepEqual(consultas, ["%ref%:0", "%ref%:1"]);
 });

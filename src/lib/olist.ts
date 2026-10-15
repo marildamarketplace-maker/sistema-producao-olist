@@ -15,7 +15,7 @@ import {
   obterDataAtualizacaoPadrao,
   type FiltroDataPedidosOlist,
 } from "@/lib/olist-filtro-data";
-import { NenhumItemElegivelOlistError } from "@/lib/olist-errors";
+import { LimiteRequisicoesOlistError, NenhumItemElegivelOlistError } from "@/lib/olist-errors";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -623,7 +623,7 @@ export async function obterEstoqueProdutoOlistApi(aplicativoId: string, produtoI
     }),
   );
   validarRespostaAxiosJsonOrThrow(response);
-  // Falha fechada inclusive em 429: a próxima execução refaz a leitura completa.
+  if (response.status === 429) throw new LimiteRequisicoesOlistError(esperaRetryAfter(response));
   if (response.status !== 200) throw new Error(`Erro Olist ${response.status} ao consultar estoque.`);
   return response.data;
 }
@@ -661,6 +661,9 @@ export async function listarProdutosOlistApi(
   validarRespostaAxiosJsonOrThrow(response);
 
   if (response.status < 200 || response.status >= 300) {
+    if (filtros.validarContrato && response.status === 429) {
+      throw new LimiteRequisicoesOlistError(esperaRetryAfter(response));
+    }
     if (response.status === 401) {
       throw new Error("Token inválido ou sem permissão.");
     }

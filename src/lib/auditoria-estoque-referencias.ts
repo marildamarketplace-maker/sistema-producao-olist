@@ -10,8 +10,9 @@ export type SaldoReferencia = {
   lotes: LoteReferencia[];
 };
 export type DependenciasAuditoria = {
-  listar: (aplicativoId: string, filtros: { situacao: "A"; limit: number; offset: number }) => Promise<ListagemProdutosOlist>;
+  listar: (aplicativoId: string, filtros: { nome: "%ref%"; situacao: "A"; limit: number; offset: number }) => Promise<ListagemProdutosOlist>;
   obterEstoque: (aplicativoId: string, id: string) => Promise<unknown>;
+  registrarBusca?: (estrategia: "PESQUISA_REF") => void;
 };
 
 export function lerEstoqueReferencia(payload: unknown, id: string) {
@@ -31,29 +32,33 @@ export async function auditarEstoqueReferencias(aplicativoId: string, deps: Depe
   const verificarPrazo = () => {
     if (Date.now() >= limiteEm) throw new Error("Prazo da auditoria excedido; resultado incompleto.");
   };
-  const produtos = new Map<string, { id: string; nome: string }>();
-  let offset = 0;
-  // Não confiar no total sintetizado pelo cliente quando a API omite paginação.
-  for (let pagina = 0; ; pagina++) {
-    verificarPrazo();
-    if (pagina >= 1_000) throw new Error("Limite de páginas excedido; auditoria incompleta.");
-    // A busca textual da API não reproduz a busca da tela de estoque.
-    // Percorrer o catálogo e aplicar contains localmente evita omitir referências.
-    const resposta = await deps.listar(aplicativoId, { situacao: "A", limit: 100, offset })
-      .catch((error: unknown) => { throw new ErroEtapaAuditoria({ etapa: "LISTAGEM", offset }, error); });
-    if (resposta.itens.length === 0) break;
-    let novos = 0;
-    for (const produto of resposta.itens) {
-      const id = String(produto.id ?? "");
-      const nome = produto.descricao?.trim() ?? "";
-      if (!/^\d+$/.test(id) || !nome) throw new Error("Produto Olist sem identificação ou nome.");
-      if (produtos.has(id)) throw new Error("Produto repetido na paginação; auditoria incompleta.");
-      produtos.set(id, { id, nome });
-      novos++;
+  async function carregarProdutos() {
+    const produtos = new Map<string, { id: string; nome: string }>();
+    let offset = 0;
+    // Não confiar no total sintetizado pelo cliente quando a API omite paginação.
+    for (let pagina = 0; ; pagina++) {
+      verificarPrazo();
+      if (pagina >= 1_000) throw new Error("Limite de páginas excedido; auditoria incompleta.");
+      const resposta = await deps.listar(aplicativoId, { nome: "%ref%", situacao: "A", limit: 100, offset })
+        .catch((error: unknown) => { throw new ErroEtapaAuditoria({ etapa: "LISTAGEM", offset }, error); });
+      if (resposta.itens.length === 0) break;
+      let novos = 0;
+      for (const produto of resposta.itens) {
+        const id = String(produto.id ?? "");
+        const nome = produto.descricao?.trim() ?? "";
+        if (!/^\d+$/.test(id) || !nome) throw new Error("Produto Olist sem identificação ou nome.");
+        if (produtos.has(id)) throw new Error("Produto repetido na paginação; auditoria incompleta.");
+        produtos.set(id, { id, nome });
+        novos++;
+      }
+      if (!novos) throw new Error("Paginação de produtos sem progresso.");
+      offset += resposta.itens.length;
     }
-    if (!novos) throw new Error("Paginação de produtos sem progresso.");
-    offset += resposta.itens.length;
+    return produtos;
   }
+
+  deps.registrarBusca?.("PESQUISA_REF");
+  const produtos = await carregarProdutos();
   const grupos = new Map<string, SaldoReferencia>();
   for (const { id, nome } of produtos.values()) {
     if (!/ref/i.test(nome)) continue;

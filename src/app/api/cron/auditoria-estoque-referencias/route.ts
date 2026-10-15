@@ -6,6 +6,7 @@ import { listarProdutosOlistApi, obterEstoqueProdutoOlistApi } from "@/lib/olist
 import { normalizarDestinatariosWhatsapp } from "@/lib/notification";
 import { prisma } from "@/lib/prisma";
 import { diagnosticarErroAuditoria, ErroEtapaAuditoria } from "@/lib/auditoria-estoque-erros";
+import { criarConsultorAuditoria } from "@/lib/auditoria-estoque-consultas";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -17,6 +18,13 @@ export async function GET(request: NextRequest) {
   }
   try {
     const limiteEm = Date.now() + 240_000;
+    const consultar = criarConsultorAuditoria({
+      limiteEm,
+      registrarEspera: (esperaMs, tentativa) => console.warn(
+        "[auditoria-estoque-referencias] Limite Olist; aguardando para repetir a consulta.",
+        { esperaMs, tentativa },
+      ),
+    });
     const integracoes = await prisma.integracaoOlistToken.findMany({
       where: { provider: "olist", status: "conectado" },
       select: { aplicativoId: true, aplicativo: { select: { jobs: true, whatsapp: true } } },
@@ -32,8 +40,9 @@ export async function GET(request: NextRequest) {
         }
         normalizarDestinatariosWhatsapp(aplicativo.whatsapp);
         const grupos = await auditarEstoqueReferencias(aplicativoId, {
-          listar: (id, filtros) => listarProdutosOlistApi(id, { ...filtros, validarContrato: true }),
-          obterEstoque: obterEstoqueProdutoOlistApi,
+          listar: (id, filtros) => consultar(() => listarProdutosOlistApi(id, { ...filtros, validarContrato: true })),
+          obterEstoque: (id, produtoId) => consultar(() => obterEstoqueProdutoOlistApi(id, produtoId)),
+          registrarBusca: (estrategia) => console.info("[auditoria-estoque-referencias] Estratégia de busca.", { aplicativoId, estrategia }),
         }, limiteEm);
         const executadoEm = new Date();
         const mensagens = criarMensagensAuditoria(grupos, executadoEm);

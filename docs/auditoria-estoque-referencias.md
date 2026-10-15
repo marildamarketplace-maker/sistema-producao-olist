@@ -14,9 +14,10 @@ estar conectada e ter permissão de leitura de Produtos e Estoque. Nenhuma migra
 
 ## Cálculo
 
-- Lista somente produtos ativos (`situacao=A`), sem filtro textual remoto, até página vazia.
-  Seleciona localmente descrições contendo `ref`, sem diferenciar maiúsculas e minúsculas.
-  A busca `nome=ref` da API pode retornar zero mesmo com referências visíveis no ERP.
+- Pesquisa exclusivamente `nome=%ref%` com `situacao=A`, paginando até página vazia.
+  Não há varredura alternativa do catálogo. Pesquisa vazia encerra sem mensagem;
+  falha persistente interrompe a auditoria sem usar resultados parciais.
+  Seleciona descrições contendo `ref`, sem diferenciar maiúsculas e minúsculas.
 - Consulta `GET /estoque/{idProduto}` para cada produto encontrado.
 - Usa o campo `saldo` físico da resposta; não desconta `reservado`, nem usa `disponivel`.
 - Usa o saldo total fornecido pelo Olist; não soma depósitos novamente. Depósitos
@@ -53,12 +54,18 @@ Mensagens em ERRO continuam sujeitas ao fluxo operacional existente da fila.
 ## Falhas e limites
 
 Qualquer lote inválido, ID/unidade/saldo ausente, duplicação na paginação, falha HTTP
-(inclusive 429) ou prazo excedido interrompe a auditoria daquele aplicativo sem
+(inclusive 429 persistente após as tentativas) ou prazo excedido interrompe a auditoria daquele aplicativo sem
 enfileirar totais parciais. Os demais aplicativos são tratados isoladamente.
 A resposta HTTP é 500 quando algum aplicativo falha; os logs não incluem tokens,
 telefones ou erros HTTP completos. Logs e resposta incluem diagnóstico seguro: etapa,
 offset ou ID do produto quando disponíveis, código da falha e status HTTP. Mensagens,
 headers e corpos arbitrários do provedor não são serializados.
+
+Listagem e consulta de saldos são espaçadas em pelo menos 2,1 segundos por execução.
+Em HTTP 429, a mesma consulta é repetida até três tentativas, respeitando Retry-After;
+sem esse header, espera 60 segundos. A espera não ultrapassa o orçamento disponível.
+O limite é compartilhado com outros consumidores da conta Olist; o espaçamento local
+não coordena chamadas de outros jobs ou execuções concorrentes.
 
 Há orçamento compartilhado de aproximadamente 240 segundos de consultas, abaixo dos
 300 segundos da função. Cada consulta tem timeout de 20 segundos. Catálogos grandes,
@@ -76,3 +83,20 @@ paginação, isolamento do aplicativo, payload inválido, falhas sem resultado p
 prazo, mensagens longas e identidade idempotente das notificações.
 A integração autenticada Olist, a inserção concorrente no banco e a entrega real
 por WhatsApp precisam de validação no ambiente publicado.
+
+## Pesquisa validada na API real em 15/10/2026
+
+Consultas autenticadas com curl, `situacao=A`, `limit=100`, `offset=0`:
+
+| Nome pesquisado | HTTP | Produtos |
+|---|---|---|
+| `ref`, `Ref`, `Ref.`, `*ref*` | 200 | 0 |
+| `%ref%` | 200 | 14 |
+| `5168`, `6607`, `6855` | 200 | 0 |
+| `FOURWAY` | 200 | 7 |
+| `OXFORD` | 200 | 5 |
+| `TRICOLINE` | 200 | 2 |
+
+A pesquisa `%ref%` retornou os 7 produtos FOURWAY, 5 OXFORDINE e 2 TRICOLINE
+visíveis na tela de estoque. Esse termo é usado como estratégia principal.
+O cliente monta a query com URLSearchParams (`nome=%25ref%25` na URL).
