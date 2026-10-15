@@ -14,7 +14,9 @@ estar conectada e ter permissão de leitura de Produtos e Estoque. Nenhuma migra
 
 ## Cálculo
 
-- Lista produtos com `nome=ref`, sem restringir situação, até página vazia.
+- Lista somente produtos ativos (`situacao=A`), sem filtro textual remoto, até página vazia.
+  Seleciona localmente descrições contendo `ref`, sem diferenciar maiúsculas e minúsculas.
+  A busca `nome=ref` da API pode retornar zero mesmo com referências visíveis no ERP.
 - Consulta `GET /estoque/{idProduto}` para cada produto encontrado.
 - Usa o campo `saldo` físico da resposta; não desconta `reservado`, nem usa `disponivel`.
 - Usa o saldo total fornecido pelo Olist; não soma depósitos novamente. Depósitos

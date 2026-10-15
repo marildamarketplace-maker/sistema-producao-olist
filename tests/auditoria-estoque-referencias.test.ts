@@ -99,3 +99,59 @@ test("auditoria requer habilitação explícita independente do validador", () =
   assert.equal(aplicativoTemJob("VALIDADOR_ESTOQUE,NOTIFICAR", CHAVES_JOB.AUDITORIA_ESTOQUE_REFERENCIAS), false);
   assert.equal(aplicativoTemJob("auditoria_estoque_referencias,NOTIFICAR", CHAVES_JOB.AUDITORIA_ESTOQUE_REFERENCIAS), true);
 });
+
+test("regressão: busca remota nome=ref vazia não omite referências do catálogo", async () => {
+  const consultas: object[] = [];
+  const estoquesConsultados: string[] = [];
+  const deps: DependenciasAuditoria = {
+    listar: async (_app, filtros) => {
+      consultas.push(filtros);
+      // Reproduz o incidente: a API não encontra os cadastros com nome=ref.
+      const itens = "nome" in filtros ? [] : filtros.offset === 0
+        ? [{ id: 1, descricao: "Produto comum" }, { id: 2, descricao: "FOURWAY Ref. 5168 - MT" }]
+        : filtros.offset === 2
+          ? [{ id: 3, descricao: "FOURWAY Ref. 5168 - MT - LOTE 2" }]
+          : [];
+      return { itens, paginacao: { limit: 100, offset: filtros.offset, total: 3 } };
+    },
+    obterEstoque: async (_app, id) => {
+      estoquesConsultados.push(id);
+      return { id, unidade: "MT", saldo: id === "2" ? "39.65" : "-50" };
+    },
+  };
+  const grupos = await auditarEstoqueReferencias("app", deps);
+  assert.ok(consultas.every((consulta) => !("nome" in consulta)));
+  assert.deepEqual(estoquesConsultados, ["2", "3"]);
+  assert.equal(grupos[0].saldo, "-10.35");
+  const mensagens = criarMensagensAuditoria(grupos, data);
+  assert.match(mensagens[0], /-10,35 MT/);
+  assert.equal(prepararNotificationsAuditoria({ aplicativoId: "app", whatsapp: "5511999990000", mensagens, executadoEm: data })[0].status, "PENDENTE");
+});
+
+test("catálogo sem referências ou com referências positivas não cria mensagem", async () => {
+  const deps = dependencias(["Produto comum", "Oxford REF. 6607", "Oxford REF. 6607 - LOTE 2"], [-999, 100, -20]);
+  const grupos = await auditarEstoqueReferencias("app", deps);
+  assert.equal(grupos.length, 1);
+  assert.equal(grupos[0].saldo, "80");
+  assert.deepEqual(criarMensagensAuditoria(grupos, data), []);
+  assert.deepEqual(criarMensagensAuditoria(await auditarEstoqueReferencias("app", dependencias(["Produto comum"], [-999])), data), []);
+});
+
+test("restringe todas as páginas a produtos ativos", async () => {
+  const filtrosRecebidos: Parameters<DependenciasAuditoria["listar"]>[1][] = [];
+  const deps = dependencias([], []);
+  deps.listar = async (_app, filtros) => {
+    filtrosRecebidos.push(filtros);
+    return {
+      itens: filtros.offset < 2 ? [{ id: filtros.offset + 1, descricao: "Oxford Ref 1" }] : [],
+      paginacao: { limit: 100, offset: filtros.offset, total: 2 },
+    };
+  };
+  deps.obterEstoque = async (_app, id) => ({ id, unidade: "MT", saldo: -1 });
+  await auditarEstoqueReferencias("app", deps);
+  assert.deepEqual(filtrosRecebidos, [
+    { situacao: "A", limit: 100, offset: 0 },
+    { situacao: "A", limit: 100, offset: 1 },
+    { situacao: "A", limit: 100, offset: 2 },
+  ]);
+});

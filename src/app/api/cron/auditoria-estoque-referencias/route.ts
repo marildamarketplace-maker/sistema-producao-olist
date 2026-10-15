@@ -39,7 +39,9 @@ export async function GET(request: NextRequest) {
         const dados = prepararNotificationsAuditoria({ aplicativoId, whatsapp: aplicativo.whatsapp, mensagens, executadoEm });
         const enfileiradas = dados.length
           ? (await prisma.notification.createMany({ data: dados, skipDuplicates: true })).count : 0;
-        resultados.push({ aplicativoId, ok: true, referencias: grupos.length, partes: mensagens.length, enfileiradas });
+        const resultado = { aplicativoId, ok: true, referencias: grupos.length, partes: mensagens.length, enfileiradas };
+        console.info("[auditoria-estoque-referencias] Auditoria concluída.", resultado);
+        resultados.push(resultado);
       } catch (error) {
         // Não serializar erros HTTP: podem conter headers OAuth e dados do cliente.
         console.error("[auditoria-estoque-referencias] Auditoria incompleta.", { aplicativoId });

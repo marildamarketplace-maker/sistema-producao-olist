@@ -9,7 +9,7 @@ export type SaldoReferencia = {
   lotes: LoteReferencia[];
 };
 export type DependenciasAuditoria = {
-  listar: (aplicativoId: string, filtros: { nome: string; limit: number; offset: number }) => Promise<ListagemProdutosOlist>;
+  listar: (aplicativoId: string, filtros: { situacao: "A"; limit: number; offset: number }) => Promise<ListagemProdutosOlist>;
   obterEstoque: (aplicativoId: string, id: string) => Promise<unknown>;
 };
 
@@ -36,7 +36,9 @@ export async function auditarEstoqueReferencias(aplicativoId: string, deps: Depe
   for (let pagina = 0; ; pagina++) {
     verificarPrazo();
     if (pagina >= 1_000) throw new Error("Limite de páginas excedido; auditoria incompleta.");
-    const resposta = await deps.listar(aplicativoId, { nome: "ref", limit: 100, offset });
+    // A busca textual da API não reproduz a busca da tela de estoque.
+    // Percorrer o catálogo e aplicar contains localmente evita omitir referências.
+    const resposta = await deps.listar(aplicativoId, { situacao: "A", limit: 100, offset });
     if (resposta.itens.length === 0) break;
     let novos = 0;
     for (const produto of resposta.itens) {
