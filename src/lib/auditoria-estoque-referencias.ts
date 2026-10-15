@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { ListagemProdutosOlist } from "@/lib/olist";
+import { ErroEtapaAuditoria } from "@/lib/auditoria-estoque-erros";
 
 export type LoteReferencia = { id: string; nome: string; saldo: string };
 export type SaldoReferencia = {
@@ -38,7 +39,8 @@ export async function auditarEstoqueReferencias(aplicativoId: string, deps: Depe
     if (pagina >= 1_000) throw new Error("Limite de páginas excedido; auditoria incompleta.");
     // A busca textual da API não reproduz a busca da tela de estoque.
     // Percorrer o catálogo e aplicar contains localmente evita omitir referências.
-    const resposta = await deps.listar(aplicativoId, { situacao: "A", limit: 100, offset });
+    const resposta = await deps.listar(aplicativoId, { situacao: "A", limit: 100, offset })
+      .catch((error: unknown) => { throw new ErroEtapaAuditoria({ etapa: "LISTAGEM", offset }, error); });
     if (resposta.itens.length === 0) break;
     let novos = 0;
     for (const produto of resposta.itens) {
@@ -56,7 +58,15 @@ export async function auditarEstoqueReferencias(aplicativoId: string, deps: Depe
   for (const { id, nome } of produtos.values()) {
     if (!/ref/i.test(nome)) continue;
     verificarPrazo();
-    const { saldo, unidade } = lerEstoqueReferencia(await deps.obterEstoque(aplicativoId, id), id);
+    const payload = await deps.obterEstoque(aplicativoId, id)
+      .catch((error: unknown) => { throw new ErroEtapaAuditoria({ etapa: "CONSULTA_ESTOQUE", produtoId: id }, error); });
+    let estoque;
+    try {
+      estoque = lerEstoqueReferencia(payload, id);
+    } catch (error) {
+      throw new ErroEtapaAuditoria({ etapa: "VALIDACAO_ESTOQUE", produtoId: id }, error);
+    }
+    const { saldo, unidade } = estoque;
     verificarPrazo();
     const produtoBase = nome.replace(/\s*-\s*LOTE\s+\d+\s*$/i, "").trim();
     const chave = JSON.stringify([produtoBase.replace(/\s+/g, " ").toUpperCase(), unidade]);

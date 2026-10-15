@@ -61,10 +61,10 @@ test("falha fechada em saldo inválido, identificação divergente e unidade aus
 
 test("erro em lote ou página impede retorno parcial", async () => {
   const deps = dependencias(["Ref 1", "Ref 1 - LOTE 2"], [-1, -2]);
-  deps.obterEstoque = async (_app, id) => { if (id === "2") throw new Error("429"); return { id, unidade: "MT", saldo: -1 }; };
+  deps.obterEstoque = async (_app, id) => { if (id === "2") throw new Error("Erro Olist 429 ao consultar estoque."); return { id, unidade: "MT", saldo: -1 }; };
   await assert.rejects(auditarEstoqueReferencias("app", deps), /429/);
   deps.listar = async () => { throw new Error("página indisponível"); };
-  await assert.rejects(auditarEstoqueReferencias("app", deps), /página/);
+  await assert.rejects(auditarEstoqueReferencias("app", deps), /LISTAGEM/);
 });
 
 test("detecta páginas repetidas e prazo excedido", async () => {
@@ -154,4 +154,19 @@ test("restringe todas as páginas a produtos ativos", async () => {
     { situacao: "A", limit: 100, offset: 1 },
     { situacao: "A", limit: 100, offset: 2 },
   ]);
+});
+
+test("diagnóstico informa etapa, ID e status sem vazar headers ou resposta", async () => {
+  const { ErroEtapaAuditoria, diagnosticarErroAuditoria } = await import("../src/lib/auditoria-estoque-erros");
+  const deps = dependencias(["Ref 1"], [-1]);
+  deps.obterEstoque = async () => { throw Object.assign(new Error("token-SECRETO"), { response: { status: 403, data: "dado-pessoal" }, config: { headers: { Authorization: "Bearer SEGREDO" } } }); };
+  await assert.rejects(auditarEstoqueReferencias("app", deps), (error: unknown) => {
+    assert.ok(error instanceof ErroEtapaAuditoria);
+    assert.deepEqual(error.contexto, { etapa: "CONSULTA_ESTOQUE", produtoId: "1" });
+    assert.deepEqual(error.diagnostico, { codigo: "HTTP_403", statusHttp: 403 });
+    assert.doesNotMatch(JSON.stringify(error), /SECRETO|SEGREDO|dado-pessoal/);
+    return true;
+  });
+  assert.deepEqual(diagnosticarErroAuditoria(new Error("segredo")), { codigo: "ERRO_NAO_CLASSIFICADO" });
+  assert.deepEqual(diagnosticarErroAuditoria({ code: "ETIMEDOUT" }), { codigo: "TIMEOUT" });
 });

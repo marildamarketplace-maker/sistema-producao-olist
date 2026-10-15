@@ -5,6 +5,7 @@ import { prepararNotificationsAuditoria } from "@/lib/auditoria-estoque-notifica
 import { listarProdutosOlistApi, obterEstoqueProdutoOlistApi } from "@/lib/olist";
 import { normalizarDestinatariosWhatsapp } from "@/lib/notification";
 import { prisma } from "@/lib/prisma";
+import { diagnosticarErroAuditoria, ErroEtapaAuditoria } from "@/lib/auditoria-estoque-erros";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -44,9 +45,12 @@ export async function GET(request: NextRequest) {
         resultados.push(resultado);
       } catch (error) {
         // Não serializar erros HTTP: podem conter headers OAuth e dados do cliente.
-        console.error("[auditoria-estoque-referencias] Auditoria incompleta.", { aplicativoId });
+        const diagnostico = error instanceof ErroEtapaAuditoria
+          ? { ...error.contexto, ...error.diagnostico }
+          : diagnosticarErroAuditoria(error);
+        console.error("[auditoria-estoque-referencias] Auditoria incompleta.", { aplicativoId, ...diagnostico });
         const configuracao = error instanceof Error && error.message.startsWith("Habilite NOTIFICAR");
-        resultados.push({ aplicativoId, ok: false, erro: configuracao ? error.message : "Auditoria incompleta; nenhum saldo parcial foi enfileirado. Verifique a integração, as permissões e o WhatsApp configurado." });
+        resultados.push({ aplicativoId, ok: false, diagnostico, erro: configuracao ? error.message : "Auditoria incompleta; nenhum saldo parcial foi enfileirado. Verifique a integração, as permissões e o WhatsApp configurado." });
       }
     }
     const ok = resultados.every((resultado) => resultado.ok);

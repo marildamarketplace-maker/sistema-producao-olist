@@ -53,7 +53,9 @@ Qualquer lote inválido, ID/unidade/saldo ausente, duplicação na paginação, 
 (inclusive 429) ou prazo excedido interrompe a auditoria daquele aplicativo sem
 enfileirar totais parciais. Os demais aplicativos são tratados isoladamente.
 A resposta HTTP é 500 quando algum aplicativo falha; os logs não incluem tokens,
-telefones ou erros HTTP completos. A resposta contém somente resumo e mensagem genérica.
+telefones ou erros HTTP completos. Logs e resposta incluem diagnóstico seguro: etapa,
+offset ou ID do produto quando disponíveis, código da falha e status HTTP. Mensagens,
+headers e corpos arbitrários do provedor não são serializados.
 
 Há orçamento compartilhado de aproximadamente 240 segundos de consultas, abaixo dos
 300 segundos da função. Cada consulta tem timeout de 20 segundos. Catálogos grandes,
