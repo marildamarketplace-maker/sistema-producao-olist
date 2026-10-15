@@ -183,6 +183,7 @@ type ProdutoOlistListagem = {
 };
 
 export type FiltrosListagemProdutosOlist = {
+  validarContrato?: boolean;
   nome?: string;
   codigo?: string;
   gtin?: string;
@@ -608,6 +609,25 @@ export async function obterPedidoOlistApi(aplicativoId: string, pedidoId: string
   return response.data as Record<string, unknown>;
 }
 
+/** Saldo físico total calculado pelo Olist, sem descontar reservas. */
+export async function obterEstoqueProdutoOlistApi(aplicativoId: string, produtoId: string): Promise<unknown> {
+  if (!/^\d+$/.test(produtoId)) throw new Error("ID de produto Olist inválido.");
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`estoque/${produtoId}`, normalizarBaseUrl(config.apiBaseUrl));
+  const response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) =>
+    axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 20_000,
+      validateStatus: () => true,
+    }),
+  );
+  validarRespostaAxiosJsonOrThrow(response);
+  // Falha fechada inclusive em 429: a próxima execução refaz a leitura completa.
+  if (response.status !== 200) throw new Error(`Erro Olist ${response.status} ao consultar estoque.`);
+  return response.data;
+}
+
 export async function listarProdutosOlistApi(
   aplicativoId: string,
   filtros: FiltrosListagemProdutosOlist,
@@ -628,6 +648,7 @@ export async function listarProdutosOlistApi(
     token,
     (accessToken) => axios.get(url.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
+      ...(filtros.validarContrato ? { timeout: 20_000 } : {}),
       validateStatus: () => true,
     }),
   );
@@ -646,6 +667,9 @@ export async function listarProdutosOlistApi(
     throw new Error(`Erro Olist ${response.status}`);
   }
 
+  if (filtros.validarContrato && (!response.data || !Array.isArray(response.data.itens))) {
+    throw new Error("Resposta de listagem de produtos inválida.");
+  }
   const itens = normalizarPayloadProdutos(response.data);
   const total = extrairTotalPaginacao(response.data);
   logIntegracaoOlist({

@@ -1,0 +1,274 @@
+{
+  "name": "Meury — pesquisa guiada de estampas (piloto)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "meury-0",
+      "name": "Receber WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meury-pesquisa-estampas",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "meury-pesquisa-estampas"
+    },
+    {
+      "id": "meury-1",
+      "name": "Configurar piloto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const config = {\n  \"instanceId\": \"\",\n  \"instanceApi\": \"\",\n  \"webhookSecret\": \"\",\n  \"allowedPhones\": [],\n  \"serialProcessingConfirmed\": false\n};\nreturn [{json: { ...$input.first().json, config }}];"
+      }
+    },
+    {
+      "id": "meury-2",
+      "name": "Validar evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Código puro: o gerador incorpora estas funções no nó Code do n8n.\nconst ESTILOS = ['clássico', 'contemporâneo', 'minimalista', 'romântico', 'delicado', 'retrô', 'vintage', 'rústico', 'lúdico', 'esportivo', 'tropical', 'boho', 'outro'];\nconst LINGUAGENS = ['aquarelado', 'vetorial', 'traço manual', 'fotográfico', 'textura simulada', 'colagem', 'outro'];\n\nfunction normalizarEvento(webhook, config) {\n  if (config.serialProcessingConfirmed !== true) throw new Error('Configure processamento sequencial antes de ativar o piloto.');\n  if (!config.instanceId || !config.webhookSecret || config.webhookSecret.length < 32 || !config.allowedPhones?.length) {\n    throw new Error('Configure instância, segredo de pelo menos 32 caracteres e números autorizados antes de ativar.');\n  }\n  if (!/^https:\\/\\/api\\.z-api\\.io\\/instances\\/[A-Za-z0-9_-]+\\/token\\/[A-Za-z0-9_-]+\\/?$/.test(config.instanceApi ?? '')) {\n    throw new Error('Configure a URL da instância Z-API no domínio api.z-api.io.');\n  }\n  const b = webhook.body;\n  if (webhook.query?.key !== config.webhookSecret || !b || b.instanceId !== config.instanceId) return null;\n  if (b.fromMe !== false || b.isGroup !== false || b.isNewsletter || b.isStatusReply || b.isEdit || b.waitingMessage) return null;\n  if (typeof b.phone !== 'string' || !/^\\d{10,15}$/.test(b.phone) || !config.allowedPhones.includes(b.phone)) return null;\n  if (typeof b.messageId !== 'string' || !b.messageId || b.messageId.length > 200) return null;\n  const text = b.text?.message;\n  if (typeof text !== 'string' || !text.trim() || text.length > 1000) return null;\n  return { key: `${b.instanceId}:${b.phone}`, phone: b.phone, id: b.messageId, text: text.trim().replace(/\\s+/gu, ' ') };\n}\n\nfunction criarLink(dados) {\n  // Codificação sem depender de URLSearchParams no sandbox do nó Code.\n  const pares = [['status', 'COMPLETED'], ['pagina', '1'], ['ordenacao', 'RELEVANCIA'], ['modoCores', 'TODAS']];\n  for (const campo of ['tema', 'estilo', 'linguagemVisual']) if (dados[campo]) pares.push([campo, dados[campo]]);\n  for (const cor of dados.cores ?? []) pares.push(['cor', cor]);\n  const ativos = ['tema', 'cores', 'estilo', 'linguagemVisual'].filter(c => c === 'cores' ? dados.cores?.length : dados[c]);\n  const preferencias = dados.modo === '3' ? ativos : dados.modo === '2' ? ativos.filter(c => c !== 'tema') : [];\n  pares.push(['preferencias', preferencias.join(',')], ['correspondenciaMinima', preferencias.length ? String(dados.minimo ?? 1) : '1']);\n  return 'https://sistema.meuryshop.com.br/controle-midia/estampas?' + pares.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\n}\n\nfunction pergunta(estado) {\n  const sufixo = '\\nComandos: pular, voltar, cancelar ou reiniciar.';\n  const perguntas = {\n    tema: 'Qual tema ou motivo você procura? Ex.: floral, cereja, geométrico.',\n    cores: 'Quais cores? Separe por vírgulas (até 10). Ex.: amarelo, verde. Todas as cores informadas serão exigidas quando obrigatórias.',\n    estilo: 'Qual estilo?\\n' + ESTILOS.map((v, i) => `${i + 1}. ${v}`).join('\\n'),\n    linguagemVisual: 'Qual linguagem visual?\\n' + LINGUAGENS.map((v, i) => `${i + 1}. ${v}`).join('\\n'),\n    modo: 'Como aplicar os critérios?\\n1. Todos obrigatórios\\n2. Tema obrigatório; demais como preferências\\n3. Todos como preferências',\n    minimo: 'Qual correspondência mínima das preferências? Responda de 1 a 100. Ex.: 100 exige todas; 1 aceita pelo menos uma.',\n  };\n  if (estado.etapa === 'confirmar') {\n    const d = estado.dados;\n    return `Confirme a pesquisa:\\nTema: ${d.tema || 'não informado'}\\nCores: ${d.cores?.join(', ') || 'não informadas'}\\nEstilo: ${d.estilo || 'não informado'}\\nLinguagem visual: ${d.linguagemVisual || 'não informada'}\\nModo: ${d.modo}\\nCorrespondência mínima: ${d.minimo ?? 1}% (apenas preferências)\\nResponda confirmar, voltar, reiniciar ou cancelar.`;\n  }\n  return perguntas[estado.etapa] + sufixo;\n}\n\nfunction avancarConversa(evento, anterior, agora = Date.now()) {\n  const texto = evento.text.toLocaleLowerCase('pt-BR');\n  const inicio = ['pesquisar estampas', 'pesquisar', 'reiniciar'].includes(texto);\n  let estado = anterior ? JSON.parse(JSON.stringify(anterior)) : null;\n  // Duplicatas não avançam a conversa nem disparam nova resposta.\n  if (estado?.ids?.includes(evento.id)) return null;\n  const expirado = !estado || agora - estado.atualizado > 30 * 60 * 1000;\n  if (expirado || estado.etapa === 'fim') {\n    if (!inicio) return null;\n    estado = { etapa: 'tema', dados: {}, ids: [], atualizado: agora };\n  } else if (inicio) {\n    estado = { etapa: 'tema', dados: {}, ids: estado.ids, atualizado: agora };\n  }\n  const etapas = ['tema', 'cores', 'estilo', 'linguagemVisual', 'modo', 'minimo', 'confirmar'];\n  let resposta;\n  if (inicio) resposta = 'Vamos pesquisar estampas.\\n' + pergunta(estado);\n  else if (texto === 'cancelar') { estado.etapa = 'fim'; estado.dados = {}; resposta = 'Pesquisa cancelada. Envie pesquisar estampas para começar novamente.'; }\n  else if (texto === 'voltar') {\n    estado.etapa = etapas[Math.max(0, etapas.indexOf(estado.etapa) - 1)];\n    resposta = pergunta(estado);\n  } else if (estado.etapa === 'confirmar') {\n    if (texto !== 'confirmar') resposta = pergunta(estado);\n    else {\n      const link = criarLink(estado.dados);\n      estado.etapa = 'fim';\n      estado.dados = {};\n      resposta = `Abra a pesquisa com os critérios preenchidos:\\n${link}\\nÉ necessário estar conectado ao sistema e ter permissão para visualizar estampas.`;\n    }\n  } else {\n    const etapa = estado.etapa;\n    const pular = texto === 'pular';\n    let erro = '';\n    if (['tema', 'cores', 'estilo', 'linguagemVisual'].includes(etapa)) {\n      if (pular) delete estado.dados[etapa];\n      else if (etapa === 'cores') {\n        const cores = [...new Set(texto.split(',').map(c => c.trim()).filter(Boolean))];\n        if (!cores.length || cores.length > 10 || cores.some(c => c.length > 50)) erro = 'Informe de 1 a 10 cores, com até 50 caracteres cada.';\n        else estado.dados.cores = cores;\n      } else if (etapa === 'tema') {\n        if (evento.text.length > 100) erro = 'O tema deve ter até 100 caracteres.';\n        else estado.dados.tema = texto;\n      } else {\n        const opcoes = etapa === 'estilo' ? ESTILOS : LINGUAGENS;\n        const valor = /^\\d+$/.test(texto) ? opcoes[Number(texto) - 1] : texto;\n        if (!opcoes.includes(valor)) erro = 'Escolha um número da lista ou escreva uma das opções.';\n        else estado.dados[etapa] = valor;\n      }\n    } else if (etapa === 'modo') {\n      if (!['1', '2', '3'].includes(texto)) erro = 'Escolha 1, 2 ou 3.';\n      else if (texto === '2' && !estado.dados.tema) erro = 'Para exigir tema, volte e informe um tema; ou escolha 1 ou 3.';\n      else estado.dados.modo = texto;\n    } else if (etapa === 'minimo') {\n      if (!/^\\d{1,3}$/.test(texto) || Number(texto) < 1 || Number(texto) > 100) erro = 'Informe um inteiro de 1 a 100.';\n      else estado.dados.minimo = Number(texto);\n    }\n    if (!erro && etapa === 'linguagemVisual' && !estado.dados.tema && !estado.dados.cores?.length && !estado.dados.estilo && !estado.dados.linguagemVisual) {\n      estado.etapa = 'tema'; resposta = 'Informe pelo menos um critério.\\n' + pergunta(estado);\n    } else if (erro) resposta = erro + '\\n' + pergunta(estado);\n    else {\n      estado.etapa = etapas[etapas.indexOf(etapa) + 1];\n      if (estado.etapa === 'minimo' && estado.dados.modo === '1') estado.etapa = 'confirmar';\n      resposta = pergunta(estado);\n    }\n  }\n  estado.ids = [...(estado.ids ?? []), evento.id].slice(-100);\n  estado.atualizado = agora;\n  return { key: evento.key, phone: evento.phone, state: JSON.stringify(estado), message: resposta };\n}\n\nconst entrada = $input.first().json;\nconst evento = normalizarEvento(entrada, entrada.config);\nreturn evento ? [{json: { ...evento, instanceApi: entrada.config.instanceApi }}] : [];"
+      }
+    },
+    {
+      "id": "meury-3",
+      "name": "Ler conversa",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "condition": "eq",
+              "keyValue": "={{ $('Validar evento').first().json.key }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "returnAll": false,
+        "limit": 2
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "meury-4",
+      "name": "Preparar resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Código puro: o gerador incorpora estas funções no nó Code do n8n.\nconst ESTILOS = ['clássico', 'contemporâneo', 'minimalista', 'romântico', 'delicado', 'retrô', 'vintage', 'rústico', 'lúdico', 'esportivo', 'tropical', 'boho', 'outro'];\nconst LINGUAGENS = ['aquarelado', 'vetorial', 'traço manual', 'fotográfico', 'textura simulada', 'colagem', 'outro'];\n\nfunction normalizarEvento(webhook, config) {\n  if (config.serialProcessingConfirmed !== true) throw new Error('Configure processamento sequencial antes de ativar o piloto.');\n  if (!config.instanceId || !config.webhookSecret || config.webhookSecret.length < 32 || !config.allowedPhones?.length) {\n    throw new Error('Configure instância, segredo de pelo menos 32 caracteres e números autorizados antes de ativar.');\n  }\n  if (!/^https:\\/\\/api\\.z-api\\.io\\/instances\\/[A-Za-z0-9_-]+\\/token\\/[A-Za-z0-9_-]+\\/?$/.test(config.instanceApi ?? '')) {\n    throw new Error('Configure a URL da instância Z-API no domínio api.z-api.io.');\n  }\n  const b = webhook.body;\n  if (webhook.query?.key !== config.webhookSecret || !b || b.instanceId !== config.instanceId) return null;\n  if (b.fromMe !== false || b.isGroup !== false || b.isNewsletter || b.isStatusReply || b.isEdit || b.waitingMessage) return null;\n  if (typeof b.phone !== 'string' || !/^\\d{10,15}$/.test(b.phone) || !config.allowedPhones.includes(b.phone)) return null;\n  if (typeof b.messageId !== 'string' || !b.messageId || b.messageId.length > 200) return null;\n  const text = b.text?.message;\n  if (typeof text !== 'string' || !text.trim() || text.length > 1000) return null;\n  return { key: `${b.instanceId}:${b.phone}`, phone: b.phone, id: b.messageId, text: text.trim().replace(/\\s+/gu, ' ') };\n}\n\nfunction criarLink(dados) {\n  // Codificação sem depender de URLSearchParams no sandbox do nó Code.\n  const pares = [['status', 'COMPLETED'], ['pagina', '1'], ['ordenacao', 'RELEVANCIA'], ['modoCores', 'TODAS']];\n  for (const campo of ['tema', 'estilo', 'linguagemVisual']) if (dados[campo]) pares.push([campo, dados[campo]]);\n  for (const cor of dados.cores ?? []) pares.push(['cor', cor]);\n  const ativos = ['tema', 'cores', 'estilo', 'linguagemVisual'].filter(c => c === 'cores' ? dados.cores?.length : dados[c]);\n  const preferencias = dados.modo === '3' ? ativos : dados.modo === '2' ? ativos.filter(c => c !== 'tema') : [];\n  pares.push(['preferencias', preferencias.join(',')], ['correspondenciaMinima', preferencias.length ? String(dados.minimo ?? 1) : '1']);\n  return 'https://sistema.meuryshop.com.br/controle-midia/estampas?' + pares.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\n}\n\nfunction pergunta(estado) {\n  const sufixo = '\\nComandos: pular, voltar, cancelar ou reiniciar.';\n  const perguntas = {\n    tema: 'Qual tema ou motivo você procura? Ex.: floral, cereja, geométrico.',\n    cores: 'Quais cores? Separe por vírgulas (até 10). Ex.: amarelo, verde. Todas as cores informadas serão exigidas quando obrigatórias.',\n    estilo: 'Qual estilo?\\n' + ESTILOS.map((v, i) => `${i + 1}. ${v}`).join('\\n'),\n    linguagemVisual: 'Qual linguagem visual?\\n' + LINGUAGENS.map((v, i) => `${i + 1}. ${v}`).join('\\n'),\n    modo: 'Como aplicar os critérios?\\n1. Todos obrigatórios\\n2. Tema obrigatório; demais como preferências\\n3. Todos como preferências',\n    minimo: 'Qual correspondência mínima das preferências? Responda de 1 a 100. Ex.: 100 exige todas; 1 aceita pelo menos uma.',\n  };\n  if (estado.etapa === 'confirmar') {\n    const d = estado.dados;\n    return `Confirme a pesquisa:\\nTema: ${d.tema || 'não informado'}\\nCores: ${d.cores?.join(', ') || 'não informadas'}\\nEstilo: ${d.estilo || 'não informado'}\\nLinguagem visual: ${d.linguagemVisual || 'não informada'}\\nModo: ${d.modo}\\nCorrespondência mínima: ${d.minimo ?? 1}% (apenas preferências)\\nResponda confirmar, voltar, reiniciar ou cancelar.`;\n  }\n  return perguntas[estado.etapa] + sufixo;\n}\n\nfunction avancarConversa(evento, anterior, agora = Date.now()) {\n  const texto = evento.text.toLocaleLowerCase('pt-BR');\n  const inicio = ['pesquisar estampas', 'pesquisar', 'reiniciar'].includes(texto);\n  let estado = anterior ? JSON.parse(JSON.stringify(anterior)) : null;\n  // Duplicatas não avançam a conversa nem disparam nova resposta.\n  if (estado?.ids?.includes(evento.id)) return null;\n  const expirado = !estado || agora - estado.atualizado > 30 * 60 * 1000;\n  if (expirado || estado.etapa === 'fim') {\n    if (!inicio) return null;\n    estado = { etapa: 'tema', dados: {}, ids: [], atualizado: agora };\n  } else if (inicio) {\n    estado = { etapa: 'tema', dados: {}, ids: estado.ids, atualizado: agora };\n  }\n  const etapas = ['tema', 'cores', 'estilo', 'linguagemVisual', 'modo', 'minimo', 'confirmar'];\n  let resposta;\n  if (inicio) resposta = 'Vamos pesquisar estampas.\\n' + pergunta(estado);\n  else if (texto === 'cancelar') { estado.etapa = 'fim'; estado.dados = {}; resposta = 'Pesquisa cancelada. Envie pesquisar estampas para começar novamente.'; }\n  else if (texto === 'voltar') {\n    estado.etapa = etapas[Math.max(0, etapas.indexOf(estado.etapa) - 1)];\n    resposta = pergunta(estado);\n  } else if (estado.etapa === 'confirmar') {\n    if (texto !== 'confirmar') resposta = pergunta(estado);\n    else {\n      const link = criarLink(estado.dados);\n      estado.etapa = 'fim';\n      estado.dados = {};\n      resposta = `Abra a pesquisa com os critérios preenchidos:\\n${link}\\nÉ necessário estar conectado ao sistema e ter permissão para visualizar estampas.`;\n    }\n  } else {\n    const etapa = estado.etapa;\n    const pular = texto === 'pular';\n    let erro = '';\n    if (['tema', 'cores', 'estilo', 'linguagemVisual'].includes(etapa)) {\n      if (pular) delete estado.dados[etapa];\n      else if (etapa === 'cores') {\n        const cores = [...new Set(texto.split(',').map(c => c.trim()).filter(Boolean))];\n        if (!cores.length || cores.length > 10 || cores.some(c => c.length > 50)) erro = 'Informe de 1 a 10 cores, com até 50 caracteres cada.';\n        else estado.dados.cores = cores;\n      } else if (etapa === 'tema') {\n        if (evento.text.length > 100) erro = 'O tema deve ter até 100 caracteres.';\n        else estado.dados.tema = texto;\n      } else {\n        const opcoes = etapa === 'estilo' ? ESTILOS : LINGUAGENS;\n        const valor = /^\\d+$/.test(texto) ? opcoes[Number(texto) - 1] : texto;\n        if (!opcoes.includes(valor)) erro = 'Escolha um número da lista ou escreva uma das opções.';\n        else estado.dados[etapa] = valor;\n      }\n    } else if (etapa === 'modo') {\n      if (!['1', '2', '3'].includes(texto)) erro = 'Escolha 1, 2 ou 3.';\n      else if (texto === '2' && !estado.dados.tema) erro = 'Para exigir tema, volte e informe um tema; ou escolha 1 ou 3.';\n      else estado.dados.modo = texto;\n    } else if (etapa === 'minimo') {\n      if (!/^\\d{1,3}$/.test(texto) || Number(texto) < 1 || Number(texto) > 100) erro = 'Informe um inteiro de 1 a 100.';\n      else estado.dados.minimo = Number(texto);\n    }\n    if (!erro && etapa === 'linguagemVisual' && !estado.dados.tema && !estado.dados.cores?.length && !estado.dados.estilo && !estado.dados.linguagemVisual) {\n      estado.etapa = 'tema'; resposta = 'Informe pelo menos um critério.\\n' + pergunta(estado);\n    } else if (erro) resposta = erro + '\\n' + pergunta(estado);\n    else {\n      estado.etapa = etapas[etapas.indexOf(etapa) + 1];\n      if (estado.etapa === 'minimo' && estado.dados.modo === '1') estado.etapa = 'confirmar';\n      resposta = pergunta(estado);\n    }\n  }\n  estado.ids = [...(estado.ids ?? []), evento.id].slice(-100);\n  estado.atualizado = agora;\n  return { key: evento.key, phone: evento.phone, state: JSON.stringify(estado), message: resposta };\n}\n\nconst rows = $input.all().map(i => i.json).filter(r => r.state);\nif (rows.length > 1) throw new Error('Conversas duplicadas: corrija a tabela antes de continuar.');\nconst evento = $('Validar evento').first().json;\nconst anterior = rows[0]?.state ? JSON.parse(rows[0].state) : null;\nconst resultado = avancarConversa(evento, anterior);\nreturn resultado ? [{json: resultado}] : [];"
+      }
+    },
+    {
+      "id": "meury-5",
+      "name": "Salvar conversa",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "condition": "eq",
+              "keyValue": "={{ $('Validar evento').first().json.key }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "key": "={{ $json.key }}",
+            "state": "={{ $json.state }}"
+          },
+          "schema": [
+            {
+              "id": "key",
+              "displayName": "key",
+              "type": "string",
+              "required": false,
+              "display": true
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "type": "string",
+              "required": false,
+              "display": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "meury-6",
+      "name": "Responder via Z-API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validar evento').first().json.instanceApi.replace(//$/, '') + '/send-text' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $('Preparar resposta').first().json.phone, message: $('Preparar resposta').first().json.message }) }}",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "meury-7",
+      "name": "Conferir envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (![r.zaapId, r.messageId, r.id].some(v => typeof v === 'string' && v.trim())) throw new Error('Z-API não confirmou o envio. Inspecione a execução e recupere a conversa com reiniciar.');\nreturn [{json: { envioConfirmado: true }}];"
+      }
+    }
+  ],
+  "connections": {
+    "Receber WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Configurar piloto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configurar piloto": {
+      "main": [
+        [
+          {
+            "node": "Validar evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar evento": {
+      "main": [
+        [
+          {
+            "node": "Ler conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler conversa": {
+      "main": [
+        [
+          {
+            "node": "Preparar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar resposta": {
+      "main": [
+        [
+          {
+            "node": "Salvar conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar conversa": {
+      "main": [
+        [
+          {
+            "node": "Responder via Z-API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder via Z-API": {
+      "main": [
+        [
+          {
+            "node": "Conferir envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 120
+  },
+  "pinData": {}
+}
