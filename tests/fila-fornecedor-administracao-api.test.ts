@@ -28,6 +28,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
   let filialBanco: string | null = null;
   const filtros: unknown[] = [];
   const tx = {
+    envioFornecedor: { findUnique: async () => null },
     pedidoFornecedorQueue: {
       findMany: async (args: { where: unknown; skip: number; take: number; select: unknown; orderBy: unknown }) => {
         if (falhar) throw new Error("senha-interna");
@@ -44,7 +45,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
       findFirst: async ({ where }: { where: unknown }) => {
         consultas++;
         assert.deepEqual(where, { id: pedidoId, aplicativoFornecedorId: matriz });
-        return existente ? { id: pedidoId, status: statusBanco } : null;
+        return existente ? { id: pedidoId, status: statusBanco, solicitacaoProducaoId: solicitacaoId } : null;
       },
       updateMany: async ({ where, data }: { where: { id: string; aplicativoFornecedorId: string; versao: number; status: { in: string[] } }; data: Record<string, unknown> }) => {
         if (falhar) throw new Error("senha-interna");
@@ -69,6 +70,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
       return [{ id: filialA, nome: "Filial A" }, { id: filialB, nome: "Filial B" }];
     } },
     $queryRaw: async (sql: TemplateStringsArray, filial: string, app: string) => {
+      if (sql.join("?").includes("FOR UPDATE")) return [{ id: solicitacaoId }];
       assert.match(sql.join("?"), /FOR SHARE/);
       assert.equal(app, matriz);
       return [filialA, filialB].includes(filial) ? [{ id: filial }] : [];
@@ -162,20 +164,14 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     assert.equal(gravacoes, antes + 1);
     assert.equal(versaoBanco, versao + 1);
   });
-  await t.test("confirmação muda para PROCESSAR sem chamar Olist e bloqueia nova alteração", async () => {
-    const response = await patch({ pedidoId, filialId: filialA, versao: versaoBanco, enviarOlist: true });
-    assert.equal(response.status, 200);
-    assert.equal((await response.json()).status, "PROCESSAR");
-    assert.equal(statusBanco, "PROCESSAR");
-    const antes = gravacoes;
-    assert.equal((await patch()).status, 409);
-    assert.equal(gravacoes, antes);
-    for (const status of ["CONCLUIDO", "CANCELADO"]) {
+  await t.test("salvar filial não envia nem altera para PROCESSAR; status bloqueados permanecem protegidos", async () => {
+    assert.equal((await patch({ pedidoId, filialId: filialA, versao: versaoBanco, enviarOlist: true })).status, 400);
+    for (const status of ["PROCESSAR", "CONCLUIDO", "CANCELADO"]) {
       statusBanco = status;
       assert.equal((await patch()).status, 409);
     }
     statusBanco = "FALHADO";
-    assert.equal((await patch({ pedidoId, filialId: filialB, versao: versaoBanco, enviarOlist: false })).status, 200);
+    assert.equal((await patch()).status, 200);
     assert.equal(statusBanco, "PENDENTE");
   });
   await t.test("filtros usam os cinco status e cliente não pode forjar status final", async () => {

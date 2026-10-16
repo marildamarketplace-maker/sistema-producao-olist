@@ -1,11 +1,9 @@
+import { montarPedidoFornecedor } from "@/lib/pedido-fornecedor-montagem";
 import { NextResponse } from "next/server";
-import { criarPedidoOlistApi } from "@/lib/olist";
+import { enviarFornecedor } from "@/lib/envio-fornecedor";
 import {
-  criarInfoAdicionalOlist,
-  criarObservacoesPedidoOlist,
   extrairTamanhoSku,
   extrairTipoProdutoSku,
-  type LinhaObservacaoPedidoOlist,
 } from "@/lib/olist-pedido";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -15,30 +13,6 @@ const ESTAMPA_VARIANTE_REGEX = /(?:^|-)EST\/([^\/-]+)-([^\/]+)(?:\/|$)/i;
 function extrairEstampaVariante(sku: string) {
   const match = sku.match(ESTAMPA_VARIANTE_REGEX);
   return match ? { estampa: match[1], variante: match[2] } : { estampa: "", variante: "" };
-}
-
-function formatarQuantidadeDivisao(quantidade: number) {
-  return quantidade.toFixed(2).replace(".", ",");
-}
-
-function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
-  const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
-    ? [0]
-    : nomePlano.split("/").map(Number);
-  if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
-    throw new Error("O plano de pagamento do fornecedor possui parcelas inválidas.");
-  }
-  const totalCentavos = Math.round(valorTotal * 100);
-  const baseCentavos = Math.floor(totalCentavos / dias.length);
-  const resto = totalCentavos - baseCentavos * dias.length;
-  return {
-    formaRecebimento: { id: formaPagamentoId },
-    parcelas: dias.map((dia, indice) => ({
-      dias: dia,
-      valor: (baseCentavos + (indice < resto ? 1 : 0)) / 100,
-      formaRecebimento: { id: formaPagamentoId },
-    })),
-  };
 }
 
 export async function POST(request: Request) {
@@ -60,14 +34,23 @@ export async function POST(request: Request) {
     const solicitacaoId = String(body.solicitacaoId ?? "");
     if (!fornecedorId || !solicitacaoId) throw new Error("Fornecedor e solicitação são obrigatórios.");
 
-    const fornecedor = await prisma.fornecedor.findUnique({ where: { id: fornecedorId } });
+    const fornecedor = await prisma.fornecedor.findFirst({ where: { id: fornecedorId, aplicativoId: solicitante.aplicativoId } });
     if (!fornecedor?.vendedorOlistId) throw new Error("Fornecedor sem usuário vendedor vinculado.");
     if (!fornecedor.meuClienteOlistId) throw new Error("Fornecedor sem Meu ID de cliente cadastrado.");
     if (!fornecedor.meuFormaPagamentoOlistId) throw new Error("Fornecedor sem forma de pagamento Olist cadastrada.");
     if (!fornecedor.meuPlanoPagamentoId) throw new Error("Fornecedor sem plano de pagamento cadastrado.");
 
+    const vendedor = await prisma.usuario.findUnique({
+      where: { id: String(fornecedor.vendedorOlistId) },
+      select: { ativo: true, aplicativoId: true, vendedorOlistId: true },
+    });
+    if (!vendedor?.ativo || !vendedor.vendedorOlistId) {
+      throw new Error("O usuário vendedor está inativo ou não possui ID de vendedor Olist.");
+    }
+
     const associacaoPagamento = await prisma.formaPagamentoOlistPlano.findFirst({
       where: {
+        aplicativoId: vendedor.aplicativoId,
         formaOlistId: String(fornecedor.meuFormaPagamentoOlistId),
         planoPagamentoId: fornecedor.meuPlanoPagamentoId,
         planoPagamento: { ativo: true },
@@ -76,14 +59,6 @@ export async function POST(request: Request) {
     });
     if (!associacaoPagamento) {
       throw new Error("O plano cadastrado no fornecedor não está associado à forma de pagamento selecionada.");
-    }
-
-    const vendedor = await prisma.usuario.findUnique({
-      where: { id: String(fornecedor.vendedorOlistId) },
-      select: { ativo: true, aplicativoId: true, vendedorOlistId: true },
-    });
-    if (!vendedor?.ativo || !vendedor.vendedorOlistId) {
-      throw new Error("O usuário vendedor está inativo ou não possui ID de vendedor Olist.");
     }
 
     const solicitacao = await prisma.solicitacaoProducao.findFirst({
@@ -104,139 +79,27 @@ export async function POST(request: Request) {
     if (itensSolicitacao.length === 0) throw new Error("A solicitação não possui produtos.");
 
     const associacoes = await prisma.produtoOlistProdutoFornecedor.findMany({
-      where: { produtoId: { in: itensSolicitacao.map((item) => item.produtoId) } },
+      where: { produtoId: { in: itensSolicitacao.map((item) => item.produtoId) }, produtoFornecedor: { fornecedorId, aplicativoId: solicitante.aplicativoId } },
       include: { produtoFornecedor: true },
     });
     const associacaoPorProduto = new Map(associacoes.map((item) => [item.produtoId, item]));
-    let quantidadeCorteLaser = 0;
-    const grupos = new Map<string, {
-      referencia: string;
-      nome: string;
-      preco: number;
-      quantidade: number;
-      divisoes: Map<string, {
-        estampa: string; variante: string; quantidade: number; laser: boolean; tamanho: string; tipo: string;
-      }>;
-    }>();
-
-    for (const item of itensSolicitacao) {
+    const linhas = itensSolicitacao.map((item) => {
       const associacao = associacaoPorProduto.get(item.produtoId);
-      const referencia = associacao?.produtoFornecedor.referencia?.trim();
-      if (!associacao || !referencia) throw new Error(`Produto ${item.sku} sem referência de produto fornecido.`);
-      const consumo = Number(associacao.quantidadeUsada);
-      const preco = Number(associacao.produtoFornecedor.precoUnitarioMetro);
-      const quantidade = item.quantidadeSolicitada * consumo;
-      if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Quantidade fornecida inválida para ${item.sku}.`);
-      if (!Number.isFinite(preco) || preco < 0) throw new Error(`Preço inválido no produto fornecido ${referencia}.`);
+      if (!associacao?.produtoFornecedor.referencia) throw new Error(`Produto ${item.sku} sem referência de produto fornecido.`);
       const { estampa, variante } = extrairEstampaVariante(item.sku);
-      const laser = item.tipoCorte === "LASER";
-      if (laser) quantidadeCorteLaser += quantidade;
-      const tamanho = extrairTamanhoSku(item.sku);
-      const tipo = extrairTipoProdutoSku(item.sku);
-      const chaveGrupo = `${referencia}\u0000${laser}`;
-      const grupo = grupos.get(chaveGrupo) ?? {
-        referencia,
-        nome: associacao.produtoFornecedor.nome,
-        preco,
-        quantidade: 0,
-        divisoes: new Map(),
-      };
-      grupo.quantidade += quantidade;
-      const chave = `${item.sku}\u0000${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
-      const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, laser, tamanho, tipo };
-      divisao.quantidade += item.quantidadeSolicitada;
-      grupo.divisoes.set(chave, divisao);
-      grupos.set(chaveGrupo, grupo);
-    }
-
-    const itens = [];
-    const observacoes: LinhaObservacaoPedidoOlist[] = [];
-    for (const grupo of grupos.values()) {
-      const produtoId = Number(grupo.referencia);
-      if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`ID inválido para a referência ${grupo.referencia}.`);
-      const divisoes = Array.from(grupo.divisoes.values());
-      const infoAdicional = criarInfoAdicionalOlist(
-        divisoes.map((divisao) => ({
-          ...divisao,
-          quantidade: formatarQuantidadeDivisao(divisao.quantidade),
-          unidade: divisao.laser ? "UN" : "MT",
-        })),
-        "MT",
-        { incluirTagsVazias: true },
-      );
-      for (const divisao of divisoes) {
-        observacoes.push({
-          descricao: grupo.nome,
-          quantidade: formatarQuantidadeDivisao(divisao.quantidade),
-          unidade: divisao.laser ? "UN" : "MT",
-          estampa: divisao.estampa,
-          variante: divisao.variante,
-          laser: divisao.laser,
-          tamanho: divisao.tamanho,
-          tipo: divisao.tipo,
-        });
-      }
-      itens.push({
-        produto: { id: produtoId, tipo: "P" },
-        quantidade: Number(grupo.quantidade.toFixed(2)),
-        valorUnitario: grupo.preco,
-        infoAdicional,
-      });
-    }
-
-    if (quantidadeCorteLaser > 0) {
-      const servicoCorteLaser = await prisma.produtoFornecedor.findFirst({
-        where: {
-          aplicativoId: solicitante.aplicativoId,
-          fornecedorId,
-          tipoServico: "CORTE_LASER",
-        },
-        select: {
-          referencia: true,
-          precoUnitarioMetro: true,
-        },
-      });
-      if (!servicoCorteLaser) {
-        throw new Error("Fornecedor sem produto de serviço Corte a laser cadastrado.");
-      }
-
-      const servicoId = Number(servicoCorteLaser.referencia?.trim());
-      if (!Number.isInteger(servicoId) || servicoId <= 0) {
-        throw new Error("O serviço Corte a laser deve possuir uma referência com o ID numérico da Olist.");
-      }
-
-      const precoServico = Number(servicoCorteLaser.precoUnitarioMetro);
-      if (!Number.isFinite(precoServico) || precoServico < 0) {
-        throw new Error("Preço inválido no serviço Corte a laser.");
-      }
-
-      itens.push({
-        produto: { id: servicoId, tipo: "S" },
-        quantidade: Number(quantidadeCorteLaser.toFixed(2)),
-        valorUnitario: precoServico,
-        infoAdicional: "",
-      });
-    }
-
-    const observacoesComuns = [
-      fornecedor.meuTipoVenda ? `Tipo de venda: ${fornecedor.meuTipoVenda}` : "",
-      solicitacao.observacaoGeral ? `Observação do pedido: ${solicitacao.observacaoGeral.trim()}` : "",
-    ].filter(Boolean).join("\n\n");
-
-    const pedidoGerado = {
-      idContato: fornecedor.meuClienteOlistId,
-      vendedor: { id: vendedor.vendedorOlistId },
-      situacao: 0,
-      data: new Date().toISOString().slice(0, 10),
-      observacoes: observacoesComuns,
-      observacoesInternas: criarObservacoesPedidoOlist(observacoes),
-      pagamento: criarPagamentoPedido(
-        fornecedor.meuFormaPagamentoOlistId,
-        associacaoPagamento.planoPagamento.nome,
-        itens.reduce((total, item) => total + item.quantidade * item.valorUnitario, 0),
-      ),
-      itens,
-    };
+      return { referencia: associacao.produtoFornecedor.referencia.trim(), nome: associacao.produtoFornecedor.nome,
+        preco: Number(associacao.produtoFornecedor.precoUnitarioMetro), quantidade: item.quantidadeSolicitada * Number(associacao.quantidadeUsada),
+        quantidadeSolicitada: item.quantidadeSolicitada, sku: item.sku, estampa, variante, laser: item.tipoCorte === "LASER",
+        tamanho: extrairTamanhoSku(item.sku), tipo: extrairTipoProdutoSku(item.sku) };
+    });
+    const servico = linhas.some((item) => item.laser) ? await prisma.produtoFornecedor.findFirst({
+      where: { aplicativoId: solicitante.aplicativoId, fornecedorId, tipoServico: "CORTE_LASER" },
+    }) : null;
+    const pedidoGerado = montarPedidoFornecedor(linhas, {
+      clienteId: fornecedor.meuClienteOlistId, vendedorId: vendedor.vendedorOlistId,
+      formaId: fornecedor.meuFormaPagamentoOlistId, plano: associacaoPagamento.planoPagamento.nome,
+      tipoVenda: fornecedor.meuTipoVenda, observacao: solicitacao.observacaoGeral,
+    }, servico ? { referencia: servico.referencia, preco: Number(servico.precoUnitarioMetro) } : null);
 
     if (body.acao === "preview") {
       return NextResponse.json({ pedido: pedidoGerado });
@@ -245,20 +108,9 @@ export async function POST(request: Request) {
     const pedido = body.pedidoEditado && typeof body.pedidoEditado === "object" && !Array.isArray(body.pedidoEditado)
       ? body.pedidoEditado as Record<string, unknown>
       : pedidoGerado;
-    const resultado = await criarPedidoOlistApi(vendedor.aplicativoId, pedido);
-    const pedidoOlistId = String(resultado.id ?? "").trim();
-    if (!pedidoOlistId) throw new Error("A Olist criou o pedido, mas não retornou o ID para registro.");
-
-    const registro = await prisma.pedidoFornecedorSolicitacao.create({
-      data: {
-        pedidoOlistId,
-        fornecedorId: fornecedor.id,
-        solicitacaoId: solicitacao.id,
-      },
-      select: { id: true },
-    });
-
-    return NextResponse.json({ ...resultado, registroId: registro.id });
+    const resultado = await enviarFornecedor({ solicitacaoId, fornecedorId, aplicativoId: vendedor.aplicativoId,
+      usuarioId: autenticado.id, payload: pedido });
+    return NextResponse.json(resultado);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao enviar pedido ao fornecedor." },

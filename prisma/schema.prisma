@@ -8,6 +8,10 @@ datasource db {
 }
 
 model Aplicativo {
+  enviosFornecedor EnvioFornecedor[]
+  configsFornecedorFilial ConfigFornecedorFilial[]
+  previasFornecedor PreviaFornecedor[]
+  registrosFornecedor PedidoFornecedorSolicitacao[]
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
   descricao                 String?                      @db.Text
@@ -137,6 +141,8 @@ model Midia {
 }
 
 model Usuario {
+  enviosFornecedor EnvioFornecedor[]
+  previasFornecedor PreviaFornecedor[]
   id                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoId                         String                  @map("aplicativo_id") @db.Uuid
   nome                                 String
@@ -243,6 +249,7 @@ model OcorrenciaTarefaMidia {
 }
 
 model Fornecedor {
+  configsFilial ConfigFornecedorFilial[]
   id                       String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                     String
   endereco                 String?
@@ -343,6 +350,7 @@ model ConfiguracaoSistema {
 }
 
 model SolicitacaoProducao {
+  envioFornecedor EnvioFornecedor?
   id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   dataEntrega        DateTime                      @map("data_entrega") @db.Date
   turnoId            String?                       @map("turno_id") @db.Uuid
@@ -366,10 +374,12 @@ model SolicitacaoProducao {
 }
 
 model PedidoFornecedorSolicitacao {
+  aplicativoDestinatario Aplicativo? @relation(fields: [aplicativoDestinatarioId], references: [id], onDelete: Restrict)
   id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   pedidoOlistId String              @map("pedido_olist_id")
   fornecedorId  String              @map("fornecedor_id") @db.Uuid
   solicitacaoId String              @map("solicitacao_id") @db.Uuid
+  aplicativoDestinatarioId String? @map("aplicativo_destinatario_id") @db.Uuid
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   fornecedor    Fornecedor          @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
   solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onUpdate: NoAction)
@@ -977,6 +987,8 @@ enum StatusPedidoFornecedorQueue {
 }
 
 model PedidoFornecedorQueue {
+  enviosOlist EnvioFornecedor[]
+  previasOlist PreviaFornecedor[]
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoSolicitanteId String @map("aplicativo_solicitante_id") @db.Uuid
   solicitacaoProducaoId String @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
@@ -1002,4 +1014,50 @@ model PedidoFornecedorQueue {
   @@index([aplicativoFilialId], map: "idx_pedido_fornecedor_queue_filial")
   @@index([direcionadoPorId], map: "idx_pedido_fornecedor_queue_direcionado_por")
   @@map("pedido_fornecedor_queue")
+}
+
+// Reserva única compartilhada pelos envios direto e pela fila. Histórico é append-only no serviço.
+model EnvioFornecedor {
+  solicitacao SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Restrict)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  fila PedidoFornecedorQueue? @relation(fields: [filaId], references: [id], onDelete: Restrict)
+  solicitacaoId String @id @map("solicitacao_id") @db.Uuid
+  tentativaId String @map("tentativa_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  usuarioId String @map("usuario_id") @db.Uuid
+  filaId String? @map("fila_id") @db.Uuid
+  estado String
+  iniciadoEm DateTime @map("iniciado_em") @db.Timestamptz(6)
+  chamadaEm DateTime? @map("chamada_em") @db.Timestamptz(6)
+  pedidoOlistId String? @map("pedido_olist_id")
+  diagnostico String?
+  payload Json @db.JsonB
+  historico Json @db.JsonB
+  @@map("envio_fornecedor")
+}
+model ConfigFornecedorFilial {
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  filial Aplicativo @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  fornecedorId String @map("fornecedor_id") @db.Uuid
+  filialId String @map("filial_id") @db.Uuid
+  selecoes Json @db.JsonB
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@id([fornecedorId, filialId])
+  @@map("config_fornecedor_filial")
+}
+model PreviaFornecedor {
+  fila PedidoFornecedorQueue @relation(fields: [filaId], references: [id], onDelete: Cascade)
+  filial Aplicativo @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  id String @id @default(uuid()) @db.Uuid
+  filaId String @map("fila_id") @db.Uuid
+  filialId String @map("filial_id") @db.Uuid
+  usuarioId String @map("usuario_id") @db.Uuid
+  versao Int
+  payload Json @db.JsonB
+  selecoes Json @db.JsonB
+  expiraEm DateTime @map("expira_em") @db.Timestamptz(6)
+  @@index([expiraEm])
+  @@map("previa_fornecedor")
 }

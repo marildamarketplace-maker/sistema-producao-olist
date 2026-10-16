@@ -2315,3 +2315,48 @@ export async function gerarSolicitacaoPorPedidosOlist(
     motivo_pedidos_ignorados: "Nenhum pedido é ignorado durante a busca.",
   };
 }
+
+/** Erros sem corpo de resposta: evita expor cadastros comerciais nos logs e na UI. */
+export class ErroCriacaoOlist extends Error {
+  constructor(message: string, readonly rejeitado: boolean) { super(message); }
+}
+export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Record<string, unknown>) {
+  // Nunca repetir um POST automaticamente, inclusive em 401.
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  let response;
+  try {
+    response = await axios.post(new URL("pedidos", normalizarBaseUrl(config.apiBaseUrl)).toString(), pedido, {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, timeout: 30_000, validateStatus: () => true,
+    });
+  } catch { throw new ErroCriacaoOlist("Sem confirmação da Olist. Resultado incerto.", false); }
+  if (response.status < 200 || response.status >= 300) {
+    const rejeitado = [400, 401, 403, 404, 422, 429].includes(response.status);
+    throw new ErroCriacaoOlist(`A Olist respondeu HTTP ${response.status}.${rejeitado ? " Corrija os dados ou a integração antes de tentar novamente." : " Resultado incerto."}`, rejeitado);
+  }
+  return response.data as { id?: number; numeroPedido?: string };
+}
+export async function obterCadastroFornecedorOlist(aplicativoId: string, recurso: "produtos" | "contatos" | "formas-pagamento" | "servicos", id: number) {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error("ID Olist inválido.");
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) => axios.get(
+    new URL(`${recurso}/${id}`, normalizarBaseUrl(config.apiBaseUrl)).toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20_000, validateStatus: () => true,
+    }));
+  if (response.status < 200 || response.status >= 300 || !response.data || typeof response.data !== "object" || Number(response.data.id) !== id) throw new Error("Cadastro indisponível na conta Olist da filial.");
+  return response.data as Record<string, unknown>;
+}
+
+export async function listarServicosOlistApi(aplicativoId: string, filtros: { nome?: string; limit: number; offset: number }) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL("servicos", normalizarBaseUrl(config.apiBaseUrl));
+  url.searchParams.set("limit", String(filtros.limit)); url.searchParams.set("offset", String(filtros.offset));
+  url.searchParams.set("situacao", "A"); if (filtros.nome) url.searchParams.set("nome", filtros.nome);
+  const response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) => axios.get(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20_000, validateStatus: () => true,
+  }));
+  if (response.status < 200 || response.status >= 300 || !Array.isArray(response.data?.itens)) throw new Error("Consulta de serviços indisponível na filial.");
+  return { itens: response.data.itens as Record<string, unknown>[] };
+}

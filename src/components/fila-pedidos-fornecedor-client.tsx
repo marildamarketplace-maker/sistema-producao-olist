@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { MoreHorizontal, Send } from "lucide-react";
-import { createPortal } from "react-dom";
+import { EnviarPedidoFilaOlist } from "@/components/enviar-pedido-fila-olist";
 import { filtrosStatusFila, rotulosStatusFila } from "@/lib/fila-fornecedor-contrato";
 import type { StatusFila, FilialFila, ListaFilaAdministracao, PedidoFilaAdministracao, SituacaoFila } from "@/lib/fila-fornecedor-contrato";
 
@@ -41,33 +41,6 @@ function MaisOpcoesFila({ disabled, aoEnviar }: { disabled: boolean; aoEnviar: (
         </div>
       )}
     </div>
-  );
-}
-
-function ConfirmarEnvioOlist({ filial, salvando, conflito, erro, aoFechar, aoConfirmar }: {
-  filial: string; salvando: boolean; conflito: boolean; erro: string; aoFechar: () => void; aoConfirmar: () => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const erroRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    const anterior = document.activeElement;
-    const elemento = dialog.current;
-    elemento?.showModal();
-    return () => { elemento?.close(); if (anterior instanceof HTMLElement) anterior.focus(); };
-  }, []);
-  useEffect(() => { if (erro) erroRef.current?.focus(); }, [erro]);
-  return createPortal(
-    <dialog ref={dialog} aria-labelledby="confirmar-envio-olist-titulo" onCancel={(event) => { if (salvando) event.preventDefault(); else aoFechar(); }}
-      className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 text-slate-900 backdrop:bg-black/50 sm:p-6">
-      <h2 id="confirmar-envio-olist-titulo" className="text-lg font-semibold">Deseja enviar o pedido para a Olist?</h2>
-      <p className="mt-3 break-words text-sm text-slate-600">Filial selecionada: <strong>{filial}</strong>.</p>
-      <p className="mt-3 text-sm text-slate-600">Ao confirmar, a filial será salva e o status mudará para PROCESSAR. Nesta etapa, nenhum pedido será criado na Olist.</p>
-      {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="mt-3 break-words text-sm text-red-700">{erro}</p>}
-      <div className="mt-5 flex flex-col gap-3 sm:items-end" aria-busy={salvando}>
-        <button type="button" disabled={salvando || conflito} onClick={aoConfirmar} className={primario}>{salvando ? "Salvando..." : "Sim, marcar como PROCESSAR"}</button>
-        <button type="button" disabled={salvando} onClick={aoFechar} className={secundario}>Cancelar</button>
-      </div>
-    </dialog>, document.body,
   );
 }
 
@@ -157,7 +130,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
               {salvando ? "Salvando..." : "Salvar filial"}
             </button>
             <MaisOpcoesFila
-              disabled={salvando || conflito || !podeAlterar || !filialId || !filiais.some((filial) => filial.id === filialId)}
+              disabled={salvando || conflito || pedido.status === "CANCELADO" || !filialId || filialId !== pedido.filial?.id}
               aoEnviar={() => { setErro(""); setConfirmando(true); }}
             />
           </div>
@@ -165,13 +138,9 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
         {erro && !confirmando && <p role="alert" className="break-words text-sm text-red-700">{erro}</p>}
         {conflito && <button type="button" onClick={aoAtualizar} className={secundario}>Atualizar fila</button>}
       </form>
-      {pedido.status === "PROCESSAR" && <p className="text-sm text-slate-600">Aguardando a futura etapa de envio para a Olist. Nenhum pedido foi criado por esta ação.</p>}
-      {confirmando && <ConfirmarEnvioOlist
-        filial={filiais.find((filial) => filial.id === filialId)?.nome ?? "selecionada"}
-        salvando={salvando} conflito={conflito} erro={erro}
-        aoFechar={() => { setConfirmando(false); setErro(""); }}
-        aoConfirmar={() => void salvarFilial(true)}
-      />}
+      {filialId && filialId !== pedido.filial?.id && <p className="text-sm text-slate-600">Salve a filial antes de configurar o envio para a Olist.</p>}
+      {pedido.status === "PROCESSAR" && <p className="text-sm text-slate-600">Envio reservado. Consulte o resultado em Mais opções antes de tentar novamente.</p>}
+      {confirmando && <EnviarPedidoFilaOlist pedido={pedido} token={token} aoFechar={() => setConfirmando(false)} aoConcluir={aoAtualizar} />}
     </article>
   );
 }

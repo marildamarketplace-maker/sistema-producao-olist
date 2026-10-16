@@ -89,14 +89,18 @@ export async function PATCH(request: Request) {
     const parsed = direcionamentoSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido, filial e versão válidos.", 400);
     const { pedidoId, filialId, versao, enviarOlist } = parsed.data;
+    if (enviarOlist) throw new ErroAdministracaoFila("Use a revisão e confirmação de Enviar para a Olist.", 400);
     const resultado = await prisma.$transaction(async (tx) => {
       const pedido = await tx.pedidoFornecedorQueue.findFirst({
-        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true },
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true, solicitacaoProducaoId: true },
       });
       if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
       if (pedido.status !== "PENDENTE" && pedido.status !== "FALHADO") {
         throw new ErroAdministracaoFila("Este pedido está em PROCESSAR, CONCLUIDO ou CANCELADO e não pode ser alterado.", 409);
       }
+      await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${pedido.solicitacaoProducaoId}::uuid FOR UPDATE`;
+      const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: pedido.solicitacaoProducaoId } });
+      if (envio && !["REJEITADO", "LIBERADO"].includes(envio.estado)) throw new ErroAdministracaoFila("Envio concluído, em andamento ou incerto. Confira o resultado antes de trocar a filial.", 409);
       // Impede a troca do aplicativo pai da filial durante a atribuição.
       const filiais = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM aplicativo
@@ -107,12 +111,12 @@ export async function PATCH(request: Request) {
       const direcionadoEm = new Date();
       const atualizacao = await tx.pedidoFornecedorQueue.updateMany({
         where: { id: pedidoId, aplicativoFornecedorId: aplicativoId, versao, status: { in: ["PENDENTE", "FALHADO"] } },
-        data: { status: enviarOlist ? "PROCESSAR" : "PENDENTE", aplicativoFilialId: filialId, direcionadoPorId: usuarioId, direcionadoEm, versao: { increment: 1 } },
+        data: { status: "PENDENTE", aplicativoFilialId: filialId, direcionadoPorId: usuarioId, direcionadoEm, versao: { increment: 1 } },
       });
       if (atualizacao.count !== 1) {
         throw new ErroAdministracaoFila("Este pedido foi alterado por outro usuário. Atualize a fila antes de direcionar novamente.", 409);
       }
-      return { id: pedidoId, filialId, status: enviarOlist ? "PROCESSAR" : "PENDENTE", direcionadoEm: direcionadoEm.toISOString(), versao: versao + 1 };
+      return { id: pedidoId, filialId, status: "PENDENTE", direcionadoEm: direcionadoEm.toISOString(), versao: versao + 1 };
     });
     return NextResponse.json(resultado);
   } catch (error) { return falha(error); }
