@@ -12,6 +12,7 @@ import { Switch } from "@/components/switch";
 import { supabase } from "@/lib/supabase";
 import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/olist-pedido";
 import { montarSolicitacaoProducaoWhatsapp } from "@/lib/solicitacao-producao-whatsapp";
+import { FILTROS_SOLICITACOES_INICIAIS, filtrarSolicitacoes } from "@/lib/solicitacoes-producao-filtros";
 
 type Produto = {
   id: string;
@@ -374,6 +375,7 @@ export default function SolicitacoesProducaoPage() {
   const [tiposProduto, setTiposProduto] = useState<TipoProdutoOpcao[]>([]);
   const [tamanhos, setTamanhos] = useState<TamanhoOpcao[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
+  const [filtrosSolicitacoes, setFiltrosSolicitacoes] = useState(FILTROS_SOLICITACOES_INICIAIS);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
   const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
@@ -1449,6 +1451,12 @@ export default function SolicitacoesProducaoPage() {
 
   const solicitacoesEmProducao = solicitacoes.filter((solicitacao) => solicitacao.status === "em_producao");
   const demaisSolicitacoes = solicitacoes.filter((solicitacao) => solicitacao.status !== "em_producao");
+  const solicitacoesFiltradas = filtrarSolicitacoes(demaisSolicitacoes, filtrosSolicitacoes, pedidosOlistPorSolicitacao);
+  const filtrosAtivos = Object.values(filtrosSolicitacoes).some((valor) => valor.trim());
+  const datasFiltrosInvalidas = Boolean(
+    (filtrosSolicitacoes.entregaInicio && filtrosSolicitacoes.entregaFim && filtrosSolicitacoes.entregaInicio > filtrosSolicitacoes.entregaFim)
+    || (filtrosSolicitacoes.criacaoInicio && filtrosSolicitacoes.criacaoFim && filtrosSolicitacoes.criacaoInicio > filtrosSolicitacoes.criacaoFim),
+  );
 
   function renderTabelaSolicitacoes(
     solicitacoesTabela: Solicitacao[],
@@ -2002,14 +2010,62 @@ export default function SolicitacoesProducaoPage() {
       <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Solicitações cadastradas</h3>
 
+        <div className="mb-4 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1 text-sm text-slate-700">
+              Observação geral
+              <input
+                type="search"
+                value={filtrosSolicitacoes.observacao}
+                onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, observacao: event.target.value }))}
+                placeholder="Buscar na observação geral"
+                className="input mt-1 min-h-11 w-full"
+              />
+            </label>
+            {filtrosAtivos && (
+              <button type="button" onClick={() => setFiltrosSolicitacoes(FILTROS_SOLICITACOES_INICIAIS)} className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                Limpar filtros
+              </button>
+            )}
+          </div>
+          <details className="rounded-md border border-slate-200">
+            <summary className="min-h-11 cursor-pointer rounded-md px-4 py-3 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+              Filtros avançados{Object.entries(filtrosSolicitacoes).some(([campo, valor]) => campo !== "observacao" && valor) ? " (ativos)" : ""}
+            </summary>
+            <div className="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2 xl:grid-cols-3">
+              <label className="min-w-0 text-sm text-slate-700">Status
+                <select value={filtrosSolicitacoes.status} onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, status: event.target.value }))} className="input mt-1 min-h-11 w-full">
+                  <option value="">Todos</option>
+                  {[...new Set(demaisSolicitacoes.map((solicitacao) => solicitacao.status))].sort().map((status) => <option key={status} value={status}>{status.replaceAll("_", " ").toUpperCase()}</option>)}
+                </select>
+              </label>
+              <label className="min-w-0 text-sm text-slate-700">ID pedido Olist
+                <input type="search" value={filtrosSolicitacoes.pedidoOlist} onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, pedidoOlist: event.target.value }))} placeholder="Buscar ID do pedido" className="input mt-1 min-h-11 w-full" />
+              </label>
+              {([
+                ["entregaInicio", "Data de entrega: de"], ["entregaFim", "Data de entrega: até"],
+                ["criacaoInicio", "Data de criação: de"], ["criacaoFim", "Data de criação: até"],
+              ] as const).map(([campo, rotulo]) => (
+                <label key={campo} className="min-w-0 text-sm text-slate-700">{rotulo}
+                  <input type="date" value={filtrosSolicitacoes[campo]} onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, [campo]: event.target.value }))} className="input mt-1 min-h-11 w-full min-w-0" />
+                </label>
+              ))}
+            </div>
+          </details>
+          {datasFiltrosInvalidas && <p role="alert" className="text-sm text-red-700">A data inicial deve ser anterior ou igual à data final.</p>}
+          {!loading && <p role="status" className="text-sm text-slate-600">{solicitacoesFiltradas.length} de {demaisSolicitacoes.length} solicitações carregadas. A busca considera até as {LIMITE_SOLICITACOES_RESUMO} mais recentes. Datas de criação no horário de Brasília.</p>}
+        </div>
+
         {loading ? (
           <p className="text-sm text-slate-600">Carregando solicitações...</p>
         ) : solicitacoes.length === 0 ? (
           <p className="text-sm text-slate-600">Nenhuma solicitação criada.</p>
         ) : demaisSolicitacoes.length === 0 ? (
           <p className="text-sm text-slate-600">Nenhuma outra solicitação cadastrada.</p>
+        ) : solicitacoesFiltradas.length === 0 ? (
+          <p className="text-sm text-slate-600">Nenhuma solicitação encontrada com os filtros informados.</p>
         ) : (
-          renderTabelaSolicitacoes(demaisSolicitacoes, false, true)
+          renderTabelaSolicitacoes(solicitacoesFiltradas, false, true)
         )}
       </section>
 

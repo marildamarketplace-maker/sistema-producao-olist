@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { observacaoMovimentacaoEstoque } from "@/lib/estoque-observacao";
 
 export async function GET(request: Request) {
   try {
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
         orderBy: { createdAt: "desc" },
         select: {
           id: true, produtoId: true, sku: true, tipoMovimento: true,
-          quantidade: true, origem: true, observacao: true, createdAt: true,
+          quantidade: true, origem: true, observacao: true, createdAt: true, referenciaId: true,
         },
       }),
       prisma.configuracaoSistema.findFirst({
@@ -33,6 +34,20 @@ export async function GET(request: Request) {
       }),
     ]);
 
+    const solicitacaoIds = [...new Set(movimentacoes.flatMap((movimento) =>
+      movimento.tipoMovimento === "entrada" && movimento.origem === "PRODUCAO" && movimento.referenciaId
+        ? [movimento.referenciaId] : [],
+    ))];
+    const solicitacoes = solicitacaoIds.length > 0
+      ? await prisma.solicitacaoProducao.findMany({
+        where: { aplicativoId: autenticado.aplicativoId, id: { in: solicitacaoIds } },
+        select: { id: true, observacaoGeral: true },
+      })
+      : [];
+    const observacoesProducao = new Map(solicitacoes.map((solicitacao) =>
+      [solicitacao.id, solicitacao.observacaoGeral],
+    ));
+
     return NextResponse.json({
       produtos: produtos.map((produto) => ({
         id: produto.id, sku: produto.sku, imagem_url: produto.imagemUrl, meta_estoque: produto.metaEstoque,
@@ -40,7 +55,9 @@ export async function GET(request: Request) {
       movimentacoes: movimentacoes.map((movimento) => ({
         id: movimento.id, produto_id: movimento.produtoId, sku: movimento.sku,
         tipo_movimento: movimento.tipoMovimento, quantidade: movimento.quantidade,
-        origem: movimento.origem, observacao: movimento.observacao, created_at: movimento.createdAt,
+        origem: movimento.origem,
+        observacao: observacaoMovimentacaoEstoque(movimento, observacoesProducao),
+        created_at: movimento.createdAt,
       })),
       metaGeral: Number(configuracao?.valor ?? 0),
     });
