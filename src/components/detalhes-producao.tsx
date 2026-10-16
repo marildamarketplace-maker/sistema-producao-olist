@@ -14,6 +14,7 @@ type Props = {
   onCarregarFoto: () => void;
   onEditar?: () => void;
   editorItens?: ReactNode;
+  editorObservacao?: ReactNode;
 };
 
 const statusRotulos: Record<string, string> = {
@@ -31,7 +32,7 @@ function ImagemItem({ item }: { item: DetalheProducao["itens"][number] }) {
   ) : <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-slate-100 p-1 text-center text-xs text-slate-500">Sem imagem</span>;
 }
 
-export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens }: Props) {
+export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens, editorObservacao }: Props) {
   const entrega = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${producao.dataEntrega}T00:00:00Z`));
   const solicitada = producao.itens.reduce((total, item) => total + item.quantidadeSolicitada, 0);
   const produzida = producao.itens.reduce((total, item) => total + item.quantidadeProduzida, 0);
@@ -60,7 +61,7 @@ export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, 
           <div><dt className="text-slate-500">Data de criação · horário de Brasília</dt><dd className="mt-1 text-slate-900">{dataHora(producao.createdAt)}</dd></div>
           <div className="min-w-0 sm:col-span-2"><dt className="text-slate-500">ID da produção</dt><dd className="mt-1 break-all text-slate-900">{producao.id}</dd></div>
           {(producao.periodoInicio || producao.periodoFim) && <div className="sm:col-span-2"><dt className="text-slate-500">Período dos pedidos Olist · horário de Brasília</dt><dd className="mt-1 text-slate-900">{producao.periodoInicio ? dataHora(producao.periodoInicio) : "Não informado"} até {producao.periodoFim ? dataHora(producao.periodoFim) : "Não informado"}</dd></div>}
-          <div className="min-w-0 sm:col-span-2"><dt className="text-slate-500">Observação geral</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{producao.observacaoGeral || "Nenhuma observação informada."}</dd></div>
+          <div className="min-w-0 sm:col-span-2"><dt className="text-slate-500">Observação geral</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{editorObservacao ?? (producao.observacaoGeral || "Nenhuma observação informada.")}</dd></div>
         </dl>
       </section>
       <section aria-labelledby="pedidos-olist" className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">

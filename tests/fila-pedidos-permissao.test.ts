@@ -6,6 +6,8 @@ import { paginasPermitidas } from "../src/lib/navigation";
 test("fila de pedidos exige permissão própria sem conceder acesso administrativo geral", () => {
   const fila = "/fornecedor/fila-pedidos";
   assert.ok(permissionKeys.includes("podeGerenciarFilaPedidos"));
+  assert.ok(permissionKeys.includes("podeSelecionarFilialFornecedor"));
+  assert.equal(permissionLabels.podeSelecionarFilialFornecedor, "Selecionar filial ao enviar para fila");
   assert.equal(permissionLabels.podeGerenciarFilaPedidos, "Gerenciar fila de pedidos");
   assert.ok(!paginasPermitidas({ podeEditarConfiguracao: true }).some((p) => p.href === fila));
   assert.ok(!paginasPermitidas({ podeGerenciarFilaPedidos: false }).some((p) => p.href === fila));
@@ -29,12 +31,14 @@ test("administração de usuários permite conceder e revogar a permissão da fi
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: "admin", email: "teste@example.test" } }, error: null }));
   const { PATCH } = await import("../src/app/api/usuarios/route");
-  for (const value of [true, false]) {
-    const response = await PATCH(new Request("https://example.test", { method: "PATCH", headers: { Authorization: "Bearer teste" }, body: JSON.stringify({ usuarioId: "usuario", permission: "podeGerenciarFilaPedidos", value }) }));
-    assert.equal(response.status, 200); assert.deepEqual(ultima, { podeGerenciarFilaPedidos: value });
+  for (const permission of ["podeGerenciarFilaPedidos", "podeSelecionarFilialFornecedor"]) {
+    for (const value of [true, false]) {
+      const response = await PATCH(new Request("https://example.test", { method: "PATCH", headers: { Authorization: "Bearer teste" }, body: JSON.stringify({ usuarioId: "usuario", permission, value }) }));
+      assert.equal(response.status, 200); assert.deepEqual(ultima, { [permission]: value });
+    }
   }
   for (const all of [true, false]) {
     const response = await PATCH(new Request("https://example.test", { method: "PATCH", headers: { Authorization: "Bearer teste" }, body: JSON.stringify({ usuarioId: "usuario", all }) }));
-    assert.equal(response.status, 200); assert.equal(ultima.podeGerenciarFilaPedidos, all);
+    assert.equal(response.status, 200); assert.equal(ultima.podeGerenciarFilaPedidos, all); assert.equal(ultima.podeSelecionarFilialFornecedor, all);
   }
 });

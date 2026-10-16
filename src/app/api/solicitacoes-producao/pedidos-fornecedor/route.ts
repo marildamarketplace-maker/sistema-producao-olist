@@ -18,10 +18,14 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
       select: { solicitacaoId: true, pedidoOlistId: true },
     });
-    return NextResponse.json({ pedidos });
-  } catch (error) {
+    const filas = await prisma.pedidoFornecedorQueue.findMany({
+      where: { aplicativoSolicitanteId: autenticado.aplicativoId, solicitacaoProducao: { status: "em_producao" } },
+      select: { id: true, solicitacaoProducaoId: true, status: true },
+    });
+    return NextResponse.json({ pedidos, filas }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar pedidos das solicitações." },
+      { error: "Não foi possível carregar os pedidos das solicitações." },
       { status: 403 },
     );
   }

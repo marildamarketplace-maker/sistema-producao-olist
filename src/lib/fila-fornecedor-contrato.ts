@@ -50,3 +50,9 @@ export type ListaFilaAdministracao = {
   porPagina: number;
 };
 export type SituacaoFila = keyof typeof filtrosStatusFila | "direcionado" | "todos";
+
+export type ResumoFilaProducao = { id: string; solicitacaoProducaoId: string; status: StatusFila };
+export type DetalheFilaProducao = ResumoFilaProducao & {
+  fornecedor: string; filial: FilialFila | null; createdAt: string; direcionadoEm: string | null;
+  dadosPedido: DadosPedidoFila | null;
+};

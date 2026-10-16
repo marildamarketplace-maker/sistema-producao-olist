@@ -17,11 +17,18 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
   let caminho = `producao-evidencias/${app}/${id}/foto.jpg`;
   let falharBanco = false;
   let consultas = 0;
+  let observacaoAtual: string | null = "Pedido especial";
+  let escritas = 0;
   let downloads = 0;
   let tipoImagem = "image/jpeg";
   Object.assign(globalThis, { prisma: {
     usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: app }), findUnique: async () => ({ podeSolicitarProducao: permitido, podeVisualizarProducao: somenteLeitura }) },
-    solicitacaoProducao: { findFirst: async ({ where }: { where: { id: string; aplicativoId: string } }) => {
+    solicitacaoProducao: { updateMany: async ({ where, data }: { where: { id: string; aplicativoId: string; observacaoGeral: string | null }; data: { observacaoGeral: string | null } }) => {
+      assert.equal(where.id, id); assert.equal(where.aplicativoId, app);
+      assert.deepEqual(Object.keys(data), ["observacaoGeral"]);
+      if (!existe || where.observacaoGeral !== observacaoAtual) return { count: 0 };
+      observacaoAtual = data.observacaoGeral; escritas++; return { count: 1 };
+    }, findFirst: async ({ where }: { where: { id: string; aplicativoId: string } }) => {
       consultas++;
       assert.deepEqual(where, { id, aplicativoId: app });
       if (falharBanco) throw new Error("Mensagem privada do banco");
@@ -87,6 +94,25 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
     assert.equal((await PATCH(request(), contexto())).status, 403);
     assert.equal(consultas, antes);
     permitido = true; somenteLeitura = false;
+  });
+  await t.test("edita somente a observação, remove texto vazio e rejeita conflitos e entradas inválidas", async () => {
+    const editar = (body: unknown) => PATCH(new Request("https://example.test", { method: "PATCH", headers: { Authorization: "Bearer token-ficticio", "Content-Type": "application/json" }, body: JSON.stringify(body) }), contexto());
+    assert.equal((await editar({ observacaoGeral: "  Novo texto\nsegunda linha  ", observacaoAnterior: "Pedido especial" })).status, 200);
+    assert.equal(observacaoAtual, "Novo texto\nsegunda linha");
+    assert.equal((await editar({ observacaoGeral: "Sobrescrever", observacaoAnterior: "Pedido especial" })).status, 409);
+    assert.equal((await editar({ observacaoGeral: "   ", observacaoAnterior: observacaoAtual })).status, 200);
+    assert.equal(observacaoAtual, null);
+    const antes = escritas;
+    for (const body of [{ observacaoGeral: 1, observacaoAnterior: null }, { observacaoGeral: "x" }, { observacaoGeral: "x".repeat(5001), observacaoAnterior: null }, { observacaoGeral: "x", observacaoAnterior: null, itens: [] }]) {
+      assert.equal((await editar(body)).status, 400);
+    }
+    permitido = false; somenteLeitura = true;
+    assert.equal((await editar({ observacaoGeral: "x", observacaoAnterior: null })).status, 403);
+    permitido = true; somenteLeitura = false;
+    existe = false;
+    assert.equal((await editar({ observacaoGeral: "x", observacaoAnterior: null })).status, 404);
+    existe = true;
+    assert.equal(escritas, antes);
   });
   await t.test("pedido de outro aplicativo ou inexistente retorna 404", async () => {
     existe = false;

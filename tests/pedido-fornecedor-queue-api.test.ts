@@ -4,12 +4,14 @@ import test from "node:test";
 const app = "00000000-0000-0000-0000-000000000001";
 const destino = "00000000-0000-0000-0000-000000000002";
 const solicitacaoId = "00000000-0000-0000-0000-000000000003";
+const filialId = "00000000-0000-0000-0000-000000000005";
 const fornecedorId = "00000000-0000-0000-0000-000000000004";
 
 test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Olist", async (t) => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia";
   let permitido = true;
+  let podeSelecionarFilial = true;
   let existe = true;
   let fornecedorValido = true;
   let paiDoDestino: string | null = null;
@@ -21,17 +23,27 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   let esperadoMetros = 3;
   let esperadoLaser = true;
   let esperadaObservacao = "Observação";
+  let filialValida = true;
+  let ultimoRegistro: Record<string, unknown> | null = null;
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async (strings: TemplateStringsArray, ...valores: unknown[]) => {
+      if (strings.join("").includes("FROM aplicativo")) {
+        assert.deepEqual(valores, [filialId, destino]);
+        assert.match(strings.join(""), /FOR SHARE/);
+        return filialValida ? [{ id: filialId }] : [];
+      }
+      return [];
+    },
     solicitacaoProducao: { findFirst: async ({ where }: { where: unknown }) => {
       consultas++;
       assert.deepEqual(where, { id: solicitacaoId, aplicativoId: app, status: "em_producao" });
       return existe ? { observacaoGeral: "Observação" } : null;
     } },
     fornecedor: {
-      findMany: async ({ where }: { where: unknown }) => {
+      findMany: async ({ where, select }: { where: unknown; select: unknown }) => {
         assert.deepEqual(where, { aplicativoId: app, aplicativoPai: { aplicativoPaiId: null } });
-        return [{ id: fornecedorId, nome: "Fornecedor" }];
+        assert.deepEqual(select, { id: true, nome: true, aplicativoPai: { select: { filiais: { select: { id: true, nome: true, descricao: true }, orderBy: { nome: "asc" } } } } });
+        return [{ id: fornecedorId, nome: "Fornecedor", aplicativoPai: { filiais: [{ id: destino, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] } }];
       },
       findFirst: async ({ where }: { where: unknown }) => {
         assert.deepEqual(where, { id: fornecedorId, aplicativoId: app });
@@ -53,6 +65,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     pedidoFornecedorQueue: { create: async ({ data }: { data: Record<string, unknown> }) => {
       if (erroBanco) throw { code: erroBanco, message: "segredo do banco" };
       gravacoes++;
+      ultimoRegistro = data;
       assert.equal(data.aplicativoSolicitanteId, app);
       assert.equal(data.aplicativoFornecedorId, destino);
       assert.equal(data.fornecedorId, fornecedorId);
@@ -65,7 +78,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     } },
   };
   Object.assign(globalThis, { prisma: { ...tx,
-    usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: app }), findUnique: async () => ({ podeSolicitarProducao: permitido, aplicativoId: app }) },
+    usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: app }), findUnique: async () => ({ podeSolicitarProducao: permitido, podeSelecionarFilialFornecedor: podeSelecionarFilial, aplicativoId: app }) },
     $transaction: async (fn: (client: typeof tx) => unknown) => fn(tx),
   } });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
@@ -74,7 +87,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   const request = (body: unknown = { fornecedorId, solicitacaoId, aplicativoFornecedorId: app, dadosPedido: {} }) => new Request("https://example.test", { method: "POST", headers: { Authorization: "Bearer token" }, body: JSON.stringify(body) });
   await t.test("lista apenas fornecedores do aplicativo", async () => {
     const response = await GET(request()); assert.equal(response.status, 200);
-    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor" }]);
+    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: destino, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] }]);
   });
   await t.test("ignora dados e aplicativo de destino enviados pelo cliente", async () => {
     assert.equal((await POST(request())).status, 201); assert.equal(gravacoes, 1);
@@ -119,6 +132,41 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     assert.equal((await POST(request(payload))).status, 201);
     assert.equal(gravacoes, antes + 1);
     esperadoMetros = 3; esperadoLaser = true; esperadaObservacao = "Observação";
+  });
+  await t.test("filial opcional define status e autoria; rejeita filial inválida sem gravar", async () => {
+    for (const selecao of [undefined, null]) {
+      assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: selecao, status: "PROCESSAR" }))).status, 201);
+      assert.equal(ultimoRegistro!.status, "PENDENTE");
+      assert.equal(ultimoRegistro!.aplicativoFilialId, null);
+      assert.equal(ultimoRegistro!.direcionadoPorId, null);
+      assert.equal(ultimoRegistro!.direcionadoEm, null);
+    }
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId }))).status, 201);
+    assert.equal(ultimoRegistro!.status, "PROCESSAR");
+    assert.equal(ultimoRegistro!.aplicativoFilialId, filialId);
+    assert.equal(ultimoRegistro!.direcionadoPorId, "usuario");
+    assert.ok(ultimoRegistro!.direcionadoEm instanceof Date);
+    const antes = gravacoes;
+    filialValida = false;
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId }))).status, 400);
+    filialValida = true;
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: "invalido" }))).status, 400);
+    assert.equal(gravacoes, antes);
+  });
+  await t.test("selecionar filial exige permissão específica, inclusive na prévia; sem filial mantém PENDENTE", async () => {
+    podeSelecionarFilial = false;
+    const antes = gravacoes;
+    const consultasAntes = consultas;
+    for (const acao of ["preview", "enviar"]) {
+      const response = await POST(request({ fornecedorId, solicitacaoId, filialId, acao, podeSelecionarFilialFornecedor: true }));
+      assert.equal(response.status, 403);
+    }
+    assert.equal(gravacoes, antes);
+    assert.equal(consultas, consultasAntes);
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: null, status: "PROCESSAR" }))).status, 201);
+    assert.equal(ultimoRegistro!.status, "PENDENTE");
+    assert.equal(ultimoRegistro!.aplicativoFilialId, null);
+    podeSelecionarFilial = true;
   });
   await t.test("duplicação retorna conflito e falhas internas não expõem detalhes", async () => {
     erroBanco = "P2002"; assert.equal((await POST(request())).status, 409);

@@ -67,6 +67,7 @@ type UsuarioAplicativoFallbackResponse = {
   pode_visualizar_configuracao: boolean;
   pode_editar_configuracao: boolean;
   pode_gerenciar_fila_pedidos: boolean;
+  pode_selecionar_filial_fornecedor: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -128,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_visualizar_anotar_sku,
         pode_visualizar_configuracao,
         pode_gerenciar_fila_pedidos,
+        pode_selecionar_filial_fornecedor,
         pode_editar_configuracao,
         aplicativo(nome)
       `)
@@ -184,6 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeVisualizarConfiguracao: Boolean(usuarioData.pode_visualizar_configuracao),
       podeEditarConfiguracao: Boolean(usuarioData.pode_editar_configuracao),
       podeGerenciarFilaPedidos: Boolean(usuarioData.pode_gerenciar_fila_pedidos),
+      podeSelecionarFilialFornecedor: Boolean(usuarioData.pode_selecionar_filial_fornecedor),
     } satisfies UsuarioAplicativo;
   }, []);
 

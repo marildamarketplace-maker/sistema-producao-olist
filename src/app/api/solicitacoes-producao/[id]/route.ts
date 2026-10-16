@@ -52,6 +52,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const usuario = await autorizarDetalheProducao(request, id, true);
     let body: unknown;
     try { body = await request.json(); } catch { throw new DetalheProducaoError("Dados da edição inválidos.", 400); }
+    if (body && typeof body === "object" && "observacaoGeral" in body) {
+      const dados = body as Record<string, unknown>;
+      if (Object.keys(dados).some((campo) => !["observacaoGeral", "observacaoAnterior"].includes(campo)) ||
+          typeof dados.observacaoGeral !== "string" || dados.observacaoGeral.length > 5000 ||
+          (dados.observacaoAnterior !== null && typeof dados.observacaoAnterior !== "string")) {
+        throw new DetalheProducaoError("Informe uma observação de até 5000 caracteres e seu valor anterior.", 400);
+      }
+      const observacaoGeral = dados.observacaoGeral.trim() || null;
+      const resultado = await prisma.solicitacaoProducao.updateMany({
+        where: { id, aplicativoId: usuario.aplicativoId, observacaoGeral: dados.observacaoAnterior as string | null },
+        data: { observacaoGeral },
+      });
+      if (!resultado.count) {
+        const existe = await prisma.solicitacaoProducao.findFirst({ where: { id, aplicativoId: usuario.aplicativoId }, select: { id: true } });
+        throw new DetalheProducaoError(existe ? "A observação foi alterada por outro usuário. Recarregue os detalhes antes de salvar." : "Produção não encontrada.", existe ? 409 : 404);
+      }
+      return NextResponse.json({ success: true, observacaoGeral });
+    }
     const dados = normalizarEdicaoItensProducao(body);
     const resultado = await editarItensProducao({ ...dados, solicitacaoId: id, aplicativoId: usuario.aplicativoId, usuarioId: usuario.id });
     return NextResponse.json({ success: true, ...resultado });

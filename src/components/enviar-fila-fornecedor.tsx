@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "./auth-provider";
 import { montarEdicaoPedidoFila, type PedidoFornecedorEditavel, type TecidoFilaOpcao } from "@/lib/pedido-fornecedor-edicao";
 import type { DadosPedidoFila } from "@/lib/fila-fornecedor-contrato";
 
-type Props = { solicitacaoId: string; token: string; onClose: () => void };
-type Fornecedor = { id: string; nome: string };
+type Props = { solicitacaoId: string; token: string; onClose: () => void; onEnviado?: () => void };
+type Fornecedor = { id: string; nome: string; filiais: Array<{ id: string; nome: string; descricao: string | null }> };
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50";
 
-export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
+export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado }: Props) {
+  const { usuario } = useAuth();
+  const podeSelecionarFilial = Boolean(usuario?.podeSelecionarFilialFornecedor);
   const dialog = useRef<HTMLDialogElement>(null);
   const tituloEtapa = useRef<HTMLHeadingElement>(null);
   const erroRef = useRef<HTMLParagraphElement>(null);
@@ -16,6 +19,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
   const enviandoRef = useRef(false);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [fornecedorId, setFornecedorId] = useState("");
+  const [filialId, setFilialId] = useState("");
+  const filialSelecionadaId = podeSelecionarFilial ? filialId : "";
   const [carregando, setCarregando] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -67,7 +72,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
     try {
       const response = await fetch("/api/fornecedores/fila", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fornecedorId, solicitacaoId, acao: "preview" }),
+        body: JSON.stringify({ fornecedorId, filialId: filialSelecionadaId || null, solicitacaoId, acao: "preview" }),
       });
       const json = await response.json() as { dadosPedido: DadosPedidoFila; tecidos: TecidoFilaOpcao[]; revisao: string; error?: string };
       if (!response.ok) throw new Error(json.error || "Erro ao preparar revisão.");
@@ -95,11 +100,12 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
     try {
       const response = await fetch("/api/fornecedores/fila", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fornecedorId, solicitacaoId, dadosEditados: edicao, revisao }),
+        body: JSON.stringify({ fornecedorId, filialId: filialSelecionadaId || null, solicitacaoId, dadosEditados: edicao, revisao }),
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Erro ao enviar para a fila.");
       setSucesso(true);
+      onEnviado?.();
     } catch (error) { setErro(error instanceof Error ? error.message : "Erro ao enviar para a fila."); }
     finally { enviandoRef.current = false; setEnviando(false); }
   }
@@ -107,6 +113,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
   function alterarItem(index: number, patch: Partial<PedidoFornecedorEditavel["itens"][number]>) {
     setEdicao((atual) => atual ? { ...atual, itens: atual.itens.map((item, i) => i === index ? { ...item, ...patch } : item) } : atual);
   }
+
+  const fornecedorSelecionado = fornecedores.find((fornecedor) => fornecedor.id === fornecedorId);
 
   return (
     <dialog ref={dialog} aria-labelledby="fila-fornecedor-titulo" onCancel={(event) => { if (enviando) event.preventDefault(); else onClose(); }}
@@ -118,19 +126,38 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose }: Props) {
         </header>
         <div className="min-h-0 space-y-4 overflow-y-auto p-5 sm:p-6">
           {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="break-words text-sm text-red-700">{erro}</p>}
-          {sucesso ? <p ref={sucessoRef} tabIndex={-1} role="status" className="text-sm text-emerald-700">Solicitação registrada na fila do fornecedor.</p> : etapa === 1 ? (
+          {sucesso ? <p ref={sucessoRef} tabIndex={-1} role="status" className="text-sm text-emerald-700">Solicitação registrada na fila do fornecedor com status {filialSelecionadaId ? "PROCESSAR" : "PENDENTE"}.</p> : etapa === 1 ? (
             <>
               <label htmlFor="fila-fornecedor" className="block text-sm font-medium">Selecione o fornecedor</label>
-              <select autoFocus id="fila-fornecedor" required className="input min-h-11 w-full" value={fornecedorId} onChange={(event) => { setFornecedorId(event.target.value); setEdicao(null); setDadosOriginais(null); setRevisao(""); setErro(""); }} disabled={carregando || enviando}>
+              <select autoFocus id="fila-fornecedor" required className="input min-h-11 w-full" value={fornecedorId} onChange={(event) => { setFornecedorId(event.target.value); setFilialId(""); setEdicao(null); setDadosOriginais(null); setRevisao(""); setErro(""); }} disabled={carregando || enviando}>
                 <option value="">{carregando ? "Carregando..." : "Selecione"}</option>
                 {fornecedores.map((fornecedor) => <option key={fornecedor.id} value={fornecedor.id}>{fornecedor.nome}</option>)}
               </select>
+              {fornecedorSelecionado && !podeSelecionarFilial && <p className="text-sm text-slate-600">Você não tem permissão para selecionar uma filial. O pedido será enviado como PENDENTE.</p>}
+              {fornecedorSelecionado && <fieldset disabled={enviando || !podeSelecionarFilial} aria-labelledby="fila-fornecedor-filiais" className="min-w-0 space-y-3 rounded-lg border border-slate-200 p-4">
+                <legend id="fila-fornecedor-filiais" className="px-1 text-sm font-semibold">Filial de {fornecedorSelecionado.nome}</legend>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 p-3 text-sm">
+                  <input type="radio" name="fila-filial" value="" checked={!filialSelecionadaId} onChange={() => setFilialId("")} className="h-5 w-5 shrink-0" />
+                  Não selecionar — manter PENDENTE
+                </label>
+                {fornecedorSelecionado.filiais.length ? <ul className="grid min-w-0 gap-3 sm:grid-cols-2">
+                  {fornecedorSelecionado.filiais.map((filial) => <li key={filial.id} className="min-w-0 rounded-md border border-slate-200 p-3">
+                    <label className="flex min-h-11 cursor-pointer items-start gap-3">
+                      <input type="radio" name="fila-filial" value={filial.id} checked={filialSelecionadaId === filial.id} onChange={() => setFilialId(filial.id)} className="mt-0.5 h-5 w-5 shrink-0" />
+                      <span className="min-w-0"><span className="block break-words text-sm font-medium">{filial.nome}</span>
+                        <span className="mt-1 block whitespace-pre-wrap break-words text-sm text-slate-600">{filial.descricao || "Sem descrição cadastrada."}</span></span>
+                    </label>
+                  </li>)}
+                </ul> : <p role="status" className="text-sm text-slate-600">Este fornecedor não possui filiais vinculadas.</p>}
+                <p className="text-sm text-slate-600">{filialSelecionadaId ? "Com filial selecionada, o pedido será enviado com status PROCESSAR." : "Sem filial selecionada, o pedido permanecerá PENDENTE."}</p>
+              </fieldset>}
               {!carregando && !fornecedores.length && <p role="status" className="text-sm text-slate-600">Nenhum fornecedor com aplicativo pai vinculado disponível.</p>}
             </>
           ) : edicao && dadosOriginais ? (
             <>
               <h3 ref={tituloEtapa} tabIndex={-1} className="break-words font-semibold">Revisar pedido para {fornecedores.find((fornecedor) => fornecedor.id === fornecedorId)?.nome}</h3>
               <p className="text-sm text-slate-600">Confira os dados que serão enviados. As alterações valem apenas para este pedido da fila; a solicitação original será preservada. Quantidade de peças e consumo em metros podem ser ajustados separadamente.</p>
+              <p className="break-words rounded-md border border-slate-200 p-3 text-sm">Filial: <strong>{fornecedorSelecionado?.filiais.find((filial) => filial.id === filialSelecionadaId)?.nome ?? "Não selecionar"}</strong> · Status ao enviar: <strong>{filialSelecionadaId ? "PROCESSAR" : "PENDENTE"}</strong></p>
               {edicao.itens.map((item, index) => (
                 <fieldset key={`${item.produtoId}-${index}`} disabled={enviando} className="min-w-0 space-y-3 rounded-lg border border-slate-200 p-4">
                   <legend className="px-1 text-sm font-semibold">Item {index + 1}</legend>

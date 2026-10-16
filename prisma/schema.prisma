@@ -10,6 +10,7 @@ datasource db {
 model Aplicativo {
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
+  descricao                 String?                      @db.Text
   aplicativoPaiId           String?                      @map("aplicativo_pai_id") @db.Uuid
   aplicativoPai             Aplicativo?                  @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   filiais                   Aplicativo[]                 @relation("AplicativoFiliais")
@@ -151,6 +152,7 @@ model Usuario {
   podeVisualizarProducao               Boolean                 @default(false) @map("pode_visualizar_producao")
   podeConfirmarProducao                Boolean                 @default(false) @map("pode_confirmar_producao")
   podeVisualizarConfiguracao           Boolean                 @default(false) @map("pode_visualizar_configuracao")
+  podeSelecionarFilialFornecedor       Boolean                 @default(false) @map("pode_selecionar_filial_fornecedor")
   podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
   podeEditarConfiguracao               Boolean                 @default(false) @map("pode_editar_configuracao")
   createdAt                            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
