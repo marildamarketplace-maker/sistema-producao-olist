@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ModalConfirmacaoProducao } from "@/components/modal-confirmacao-producao";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -47,6 +48,10 @@ export default function ConfirmarProducaoPage() {
   const [produzidas, setProduzidas] = useState<Record<string, string>>({});
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState("+55 37 8803-2390");
   const [loading, setLoading] = useState(true);
+  const [selecionada, setSelecionada] = useState<Solicitacao | null>(null);
+  const [senha, setSenha] = useState("");
+  const [erroModal, setErroModal] = useState<string | null>(null);
+  const operacaoEmAndamento = useRef(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -207,53 +212,76 @@ export default function ConfirmarProducaoPage() {
     window.open(link, "_blank", "noopener,noreferrer");
   }
 
-  async function confirmarProducao(solicitacao: Solicitacao) {
-    const itensSolicitacao = await carregarItensSolicitacao(solicitacao.id);
-    if (!itensSolicitacao?.length) {
-      setMessage("Solicitação sem itens cadastrados.");
-      return;
-    }
-
+  async function abrirConfirmacao(solicitacao: Solicitacao) {
+    if (operacaoEmAndamento.current) return;
+    operacaoEmAndamento.current = true;
     setSavingId(solicitacao.id);
-    setMessage(null);
-
-    const atualizacoes = itensSolicitacao.map((item) => {
-      const qtd = Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0);
-      return { item, qtd };
-    });
-
-    const invalido = atualizacoes.find(({ qtd }) => Number.isNaN(qtd) || qtd < 0);
-    if (invalido) {
-      setMessage("Informe quantidades produzidas válidas (>= 0).");
+    try {
+      const itens = await carregarItensSolicitacao(solicitacao.id);
+      if (!itens?.length) throw new Error("Solicitação sem itens cadastrados.");
+      const invalido = itens.some((item) => {
+        const quantidade = Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0);
+        return !Number.isSafeInteger(quantidade) || quantidade < 0 || quantidade > 2_147_483_647;
+      });
+      if (invalido) throw new Error("Revise as quantidades antes de continuar.");
+      setMessage(null);
+      setErroModal(null);
+      setSenha("");
+      setSelecionada(solicitacao);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao preparar confirmação.");
+    } finally {
       setSavingId(null);
+      operacaoEmAndamento.current = false;
+    }
+  }
+
+  async function confirmarProducao(foto: File) {
+    if (!selecionada || operacaoEmAndamento.current) return;
+    if (!senha) {
+      setErroModal("Digite a senha para confirmar.");
       return;
     }
-
-    const response = await fetch("/api/solicitacoes-producao/confirmar", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ""}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        solicitacaoId: solicitacao.id,
-        itens: atualizacoes.map(({ item, qtd }) => ({
-          id: item.id,
-          quantidadeProduzida: qtd,
-        })),
-      }),
-    });
-    const resultado = await response.json() as { error?: string };
-
-    if (!response.ok) {
-      setMessage(resultado.error ?? "Erro ao confirmar produção.");
+    operacaoEmAndamento.current = true;
+    setSavingId(selecionada.id);
+    setErroModal(null);
+    try {
+      const itens = itensPorSolicitacao[selecionada.id] ?? [];
+      const formulario = new FormData();
+      formulario.set("solicitacaoId", selecionada.id);
+      formulario.set("senha", senha);
+      formulario.set("foto", foto);
+      formulario.set("itens", JSON.stringify(itens.map((item) => ({
+        id: item.id,
+        quantidadeProduzida: Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0),
+      }))));
+      const response = await fetch("/api/solicitacoes-producao/confirmar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: formulario,
+      });
+      const resultado = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(resultado.error ?? "Erro ao confirmar produção.");
+      setSelecionada(null);
+      setSenha("");
+      // Retira imediatamente o pedido confirmado, mesmo se a atualização da lista falhar.
+      setSolicitacoes((atuais) => atuais.filter((item) => item.id !== selecionada.id));
+      try {
+        await carregarDados();
+        setMessage("Solicitação confirmada com sucesso.");
+      } catch {
+        setMessage("Solicitação confirmada. Não foi possível atualizar a lista; recarregue a página.");
+        setLoading(false);
+      }
+    } catch (error) {
+      setSenha("");
+      setErroModal(error instanceof Error ? error.message : "Erro ao confirmar produção.");
+    } finally {
       setSavingId(null);
-      return;
+      operacaoEmAndamento.current = false;
     }
-
-    setMessage("Solicitação confirmada com sucesso.");
-    await carregarDados();
-    setSavingId(null);
   }
 
   return (
@@ -365,9 +393,10 @@ export default function ConfirmarProducaoPage() {
                     Cobrar no WhatsApp
                   </button>
                   <button
-                    onClick={() => confirmarProducao(solicitacao)}
+                    type="button"
+                    onClick={() => void abrirConfirmacao(solicitacao)}
                     disabled={savingId !== null || carregandoItens}
-                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {saving ? "Confirmando..." : "Confirmar produção"}
                   </button>
@@ -433,6 +462,17 @@ export default function ConfirmarProducaoPage() {
             </section>
           );
         })}
+      {selecionada && (
+        <ModalConfirmacaoProducao
+          dataEntregaFormatada={formatarDataEntrega(selecionada.data_entrega)}
+          senha={senha}
+          confirmando={savingId === selecionada.id}
+          erroModal={erroModal}
+          onSenhaChange={setSenha}
+          onFechar={() => { setSelecionada(null); setSenha(""); }}
+          onConfirmar={(foto) => { void confirmarProducao(foto); }}
+        />
+      )}
       </div>
     </AccessGuard>
   );

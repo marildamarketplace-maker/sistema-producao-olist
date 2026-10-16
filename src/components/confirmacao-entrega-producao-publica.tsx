@@ -1,7 +1,8 @@
 "use client";
 
+import { ModalConfirmacaoProducao } from "@/components/modal-confirmacao-producao";
 import Image, { type ImageLoaderProps } from "next/image";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -10,12 +11,10 @@ import {
   ChevronDown,
   ChevronUp,
   LoaderCircle,
-  LockKeyhole,
   Minus,
   PackageCheck,
   Plus,
   RotateCw,
-  X,
 } from "lucide-react";
 
 type ItemProducao = {
@@ -75,6 +74,7 @@ export function ConfirmacaoEntregaProducaoPublica() {
   const [sucesso, setSucesso] = useState<string | null>(null);
   const [selecionada, setSelecionada] = useState<SolicitacaoProducao | null>(null);
   const [senha, setSenha] = useState("");
+  const enviandoRef = useRef(false);
   const [confirmando, setConfirmando] = useState(false);
   const [erroModal, setErroModal] = useState<string | null>(null);
 
@@ -175,33 +175,34 @@ export function ConfirmacaoEntregaProducaoPublica() {
     setSelecionada(solicitacao);
   }
 
-  async function confirmar() {
-    if (!selecionada || confirmando) return;
+  async function confirmar(foto: File) {
+    if (!selecionada || enviandoRef.current) return;
     if (!senha) {
       setErroModal("Digite a senha para confirmar.");
       return;
     }
 
+    enviandoRef.current = true;
     setConfirmando(true);
     setErroModal(null);
     try {
+      const formulario = new FormData();
+      formulario.set("solicitacaoId", selecionada.id);
+      formulario.set("senha", senha);
+      formulario.set("foto", foto);
+      formulario.set("itens", JSON.stringify(selecionada.itens.map((item) => ({
+        id: item.id,
+        quantidadeProduzida: Number(quantidades[item.id]),
+      }))));
       const response = await fetch(
         "/api/public/confirmacao-entrega-producao",
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token ?? ""}`,
-            "Content-Type": "application/json",
           },
           referrerPolicy: "no-referrer",
-          body: JSON.stringify({
-            solicitacaoId: selecionada.id,
-            senha,
-            itens: selecionada.itens.map((item) => ({
-              id: item.id,
-              quantidadeProduzida: Number(quantidades[item.id]),
-            })),
-          }),
+          body: formulario,
         },
       );
       const dados = await response.json() as { error?: string };
@@ -221,6 +222,7 @@ export function ConfirmacaoEntregaProducaoPublica() {
       setSenha("");
       setErroModal(cause instanceof Error ? cause.message : "Erro ao confirmar a entrega.");
     } finally {
+      enviandoRef.current = false;
       setConfirmando(false);
     }
   }
@@ -398,68 +400,15 @@ export function ConfirmacaoEntregaProducaoPublica() {
       </main>
 
       {selecionada && (
-        <div className="fixed inset-0 z-50 flex items-end bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="presentation">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="titulo-modal-confirmacao"
-            className="w-full rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:max-w-md sm:rounded-3xl"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
-                  <LockKeyhole className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <h2 id="titulo-modal-confirmacao" className="mt-4 text-xl font-bold">Autorizar confirmação</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Digite a senha para confirmar a entrega de {formatarData(selecionada.dataEntrega)}.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelecionada(null)}
-                disabled={confirmando}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700"
-                aria-label="Fechar"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form
-              className="mt-5"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmar();
-              }}
-            >
-              <label className="block text-sm font-semibold text-slate-800">
-                Senha
-                <input
-                  autoFocus
-                  type="password"
-                  autoComplete="current-password"
-                  value={senha}
-                  onChange={(event) => setSenha(event.target.value)}
-                  disabled={confirmando}
-                  className="mt-2 h-12 w-full rounded-xl border border-slate-300 px-4 text-base outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                  placeholder="Digite a senha"
-                />
-              </label>
-              {erroModal && (
-                <p className="mt-3 rounded-xl bg-rose-50 p-3 text-sm font-medium text-rose-700" role="alert">{erroModal}</p>
-              )}
-              <button
-                type="submit"
-                disabled={confirmando}
-                className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-base font-bold text-white disabled:opacity-60"
-              >
-                {confirmando ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
-                {confirmando ? "Confirmando..." : "Confirmar entrega"}
-              </button>
-            </form>
-          </div>
-        </div>
+        <ModalConfirmacaoProducao
+          dataEntregaFormatada={formatarData(selecionada.dataEntrega)}
+          senha={senha}
+          confirmando={confirmando}
+          erroModal={erroModal}
+          onSenhaChange={setSenha}
+          onFechar={() => { setSelecionada(null); setSenha(""); }}
+          onConfirmar={(foto) => { void confirmar(foto); }}
+        />
       )}
     </div>
   );

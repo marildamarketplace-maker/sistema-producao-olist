@@ -335,6 +335,9 @@ model SolicitacaoProducao {
   periodoFim         DateTime?                     @map("periodo_fim") @db.Timestamptz(6)
   status             String                        @default("pendente")
   observacaoGeral    String?                       @map("observacao_geral")
+  evidenciaUrl       String?                       @map("evidencia_url")
+  evidenciaBucket    String?                       @map("evidencia_bucket")
+  evidenciaStoragePath String?                     @map("evidencia_storage_path")
   createdAt          DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
   prioridadeProducao Boolean                       @default(false) @map("prioridade_producao")
   aplicativoId       String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid

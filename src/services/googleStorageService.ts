@@ -43,6 +43,19 @@ export class GoogleStorageServiceError extends Error {
   }
 }
 
+// Evidências de pedidos não podem herdar a exposição pública do catálogo.
+export async function verificarGoogleStorageBucketPrivado(bucket: string) {
+  const accessToken = await getGoogleAccessToken();
+  const response = await fetch(`${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}?fields=iamConfiguration`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new GoogleStorageServiceError("Não foi possível verificar a privacidade do armazenamento de evidências.");
+  const metadata = await response.json() as { iamConfiguration?: { publicAccessPrevention?: string } };
+  if (metadata.iamConfiguration?.publicAccessPrevention !== "enforced") {
+    throw new GoogleStorageServiceError("O bucket de evidências deve ter prevenção de acesso público ativada.");
+  }
+}
+
 export async function uploadToGoogleStorage(
   input: UploadToGoogleStorageInput,
 ): Promise<UploadedGoogleStorageObject> {

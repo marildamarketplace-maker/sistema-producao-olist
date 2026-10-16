@@ -51,7 +51,11 @@ export async function confirmarEntregaProducao(input: {
   aplicativoId: string;
   solicitacaoId: string;
   itens: ItemConfirmacaoProducao[];
+  evidencia: { url: string; bucket: string; path: string };
 }) {
+  if (!input.evidencia?.url || !input.evidencia.bucket || !input.evidencia.path) {
+    throw new Error("Envie a foto do pedido em papel para confirmar a produção.");
+  }
   const { prisma } = await import("@/lib/prisma");
   await prisma.$transaction(async (tx) => {
     const solicitacao = await tx.solicitacaoProducao.findFirst({
@@ -137,7 +141,12 @@ export async function confirmarEntregaProducao(input: {
 
     await tx.solicitacaoProducao.update({
       where: { id: input.solicitacaoId },
-      data: { status: "concluida" },
+      data: {
+        status: "concluida",
+        evidenciaUrl: input.evidencia.url,
+        evidenciaBucket: input.evidencia.bucket,
+        evidenciaStoragePath: input.evidencia.path,
+      },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

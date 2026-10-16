@@ -1,8 +1,11 @@
+import { lerFormularioConfirmacao } from "@/lib/confirmacao-producao-form";
+import { confirmarProducaoComEvidencia } from "@/lib/producao-evidencia";
+import { EvidenciaProducaoError } from "@/lib/producao-evidencia-contrato";
+import { estaBloqueado, registrarSenhaInvalida, limparTentativasSenha } from "@/lib/confirmacao-producao-tentativas";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
 import {
-  confirmarEntregaProducao,
   normalizarItensConfirmacaoProducao,
 } from "@/lib/confirmar-producao";
 import {
@@ -13,17 +16,6 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-const MAX_TENTATIVAS_SENHA = 5;
-const JANELA_TENTATIVAS_MS = 15 * 60 * 1_000;
-const MAX_BODY_BYTES = 64 * 1_024;
-
-type RegistroTentativas = { tentativas: number; bloqueadoAte: number };
-const globalRateLimit = globalThis as typeof globalThis & {
-  confirmacaoProducaoRateLimit?: Map<string, RegistroTentativas>;
-};
-const tentativasSenha = globalRateLimit.confirmacaoProducaoRateLimit
-  ?? new Map<string, RegistroTentativas>();
-globalRateLimit.confirmacaoProducaoRateLimit = tentativasSenha;
 
 function resposta(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -76,27 +68,6 @@ function obterChaveRateLimit(request: NextRequest, token: string) {
   return createHash("sha256").update(`${ip}:${token}`).digest("hex");
 }
 
-function estaBloqueado(chave: string, agora = Date.now()) {
-  const registro = tentativasSenha.get(chave);
-  if (!registro) return false;
-  if (registro.bloqueadoAte <= agora) {
-    tentativasSenha.delete(chave);
-    return false;
-  }
-  return registro.tentativas >= MAX_TENTATIVAS_SENHA;
-}
-
-function registrarSenhaInvalida(chave: string, agora = Date.now()) {
-  const atual = tentativasSenha.get(chave);
-  if (!atual || atual.bloqueadoAte <= agora) {
-    tentativasSenha.set(chave, {
-      tentativas: 1,
-      bloqueadoAte: agora + JANELA_TENTATIVAS_MS,
-    });
-    return;
-  }
-  atual.tentativas += 1;
-}
 
 async function validarAplicativoHabilitado(aplicativoId: string) {
   const aplicativo = await prisma.aplicativo.findUnique({
@@ -214,11 +185,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_BODY_BYTES) {
-    return resposta({ error: "Dados enviados excedem o limite permitido." }, 413);
-  }
-
   try {
     const token = obterToken(request);
     const payload = validarTokenPublicoConfirmacaoProducao(token);
@@ -231,20 +197,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const textoBody = await request.text();
-    if (Buffer.byteLength(textoBody, "utf8") > MAX_BODY_BYTES) {
-      return resposta({ error: "Dados enviados excedem o limite permitido." }, 413);
-    }
-    const body = JSON.parse(textoBody) as {
-      solicitacaoId?: unknown;
-      senha?: unknown;
-      itens?: unknown;
-    };
+    const body = await lerFormularioConfirmacao(request);
     if (!senhaPublicaConfirmacaoValida(body.senha)) {
       registrarSenhaInvalida(chaveRateLimit);
       return resposta({ error: "Senha inválida." }, 401);
     }
-    tentativasSenha.delete(chaveRateLimit);
+    limparTentativasSenha(chaveRateLimit);
 
     const solicitacaoId = typeof body.solicitacaoId === "string"
       ? body.solicitacaoId.trim()
@@ -254,15 +212,17 @@ export async function POST(request: NextRequest) {
       return resposta({ error: "Link inválido para esta solicitação." }, 403);
     }
     const itensConfirmacao = normalizarItensConfirmacaoProducao(body.itens);
-    await confirmarEntregaProducao({
+    await confirmarProducaoComEvidencia({
       aplicativoId: payload.aplicativoId,
       solicitacaoId: payload.solicitacaoId,
       itens: itensConfirmacao,
+      foto: body.foto,
     });
 
     return resposta({ success: true });
   } catch (error) {
-    console.error("[confirmacao-entrega-producao-publica] Falha:", error);
+    if (error instanceof EvidenciaProducaoError) return resposta({ error: error.message }, error.status);
+    console.error("[confirmacao-entrega-producao-publica] Falha na confirmação.");
     const falha = erroPublico(error);
     return resposta(
       { error: falha.mensagem },
