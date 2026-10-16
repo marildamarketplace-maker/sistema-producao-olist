@@ -31,6 +31,14 @@ function dataCriacaoLocal(valor: string) {
   return ["year", "month", "day"].map((tipo) => partes.find((parte) => parte.type === tipo)?.value).join("-");
 }
 
+/** Intervalo inclusivo de criação no calendário de São Paulo, calculado ao abrir a tela. */
+export function criarFiltrosSolicitacoesIniciais(agora = new Date()): FiltrosSolicitacoes {
+  const hoje = dataCriacaoLocal(agora.toISOString());
+  const inicio = new Date(`${hoje}T12:00:00Z`);
+  inicio.setUTCDate(inicio.getUTCDate() - 7);
+  return { ...FILTROS_SOLICITACOES_INICIAIS, criacaoInicio: inicio.toISOString().slice(0, 10), criacaoFim: hoje };
+}
+
 export function filtrarSolicitacoes<T extends SolicitacaoFiltravel>(
   solicitacoes: readonly T[],
   filtros: FiltrosSolicitacoes,

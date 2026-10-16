@@ -24,9 +24,9 @@ async function autorizar(request: Request) {
   });
   const usuario = await prisma.usuario.findUnique({
     where: { id: autenticado.id },
-    select: { aplicativoId: true, podeEditarConfiguracao: true },
+    select: { aplicativoId: true, podeGerenciarFilaPedidos: true },
   });
-  if (!usuario?.podeEditarConfiguracao || !usuario.aplicativoId) {
+  if (!usuario?.podeGerenciarFilaPedidos || !usuario.aplicativoId) {
     throw new ErroAdministracaoFila("Sem permissão para administrar a fila de pedidos.", 403);
   }
   return { usuarioId: autenticado.id, aplicativoId: usuario.aplicativoId };

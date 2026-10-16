@@ -35,3 +35,11 @@ test("intervalos invertidos não retornam registros", () => {
   assert.deepEqual(ids({ entregaInicio: "2026-10-08", entregaFim: "2026-10-07" }), []);
   assert.deepEqual(ids({ criacaoInicio: "2026-10-08", criacaoFim: "2026-10-07" }), []);
 });
+
+test("intervalo inicial usa hoje e sete dias antes, inclusive na virada UTC e de ano", async () => {
+  const { criarFiltrosSolicitacoesIniciais } = await import("../src/lib/solicitacoes-producao-filtros");
+  assert.deepEqual(criarFiltrosSolicitacoesIniciais(new Date("2026-10-16T12:00:00Z")), { ...iniciais, criacaoInicio: "2026-10-09", criacaoFim: "2026-10-16" });
+  assert.deepEqual(criarFiltrosSolicitacoesIniciais(new Date("2026-10-16T02:00:00Z")), { ...iniciais, criacaoInicio: "2026-10-08", criacaoFim: "2026-10-15" });
+  assert.deepEqual(criarFiltrosSolicitacoesIniciais(new Date("2027-01-03T12:00:00Z")), { ...iniciais, criacaoInicio: "2026-12-27", criacaoFim: "2027-01-03" });
+  assert.equal(iniciais.criacaoInicio, "");
+});

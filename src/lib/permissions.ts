@@ -32,6 +32,7 @@ export const permissionKeys = [
   "podeVisualizarAnotarSku",
   "podeVisualizarConfiguracao",
   "podeEditarConfiguracao",
+  "podeGerenciarFilaPedidos",
 ] as const;
 
 export type PermissionKey = (typeof permissionKeys)[number];
@@ -72,6 +73,7 @@ export const permissionLabels: Record<PermissionKey, string> = {
   podeVisualizarAnotarSku: "Anotar SKU - histórico (read)",
   podeVisualizarConfiguracao: "Visualizar configurações",
   podeEditarConfiguracao: "Editar configurações",
+  podeGerenciarFilaPedidos: "Gerenciar fila de pedidos",
 };
 
 export function hasAnyPermission(

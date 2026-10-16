@@ -62,7 +62,7 @@ export const menuItems: MenuItem[] = [
       {
         label: "Fila de pedidos",
         href: "/fornecedor/fila-pedidos",
-        permissions: ["podeEditarConfiguracao"],
+        permissions: ["podeGerenciarFilaPedidos"],
       },
       {
         label: "Anotar produção",

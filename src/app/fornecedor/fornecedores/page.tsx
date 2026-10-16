@@ -13,6 +13,8 @@ type UsuarioVendedorOption = {
   aplicativo_id: string;
 };
 
+type AplicativoPaiOption = { id: string; nome: string };
+
 type PlanoPagamentoOption = { id: string; nome: string };
 type FormaPagamentoOption = {
   forma_olist_id: string;
@@ -23,6 +25,7 @@ type FormaPagamentoOption = {
 type Fornecedor = {
   id: string;
   aplicativo_id: string | null;
+  aplicativo_pai_id: string;
   vendedor_olist_id: string | null;
   meu_cliente_olist_id: number | null;
   meu_forma_pagamento_olist_id: number | null;
@@ -35,6 +38,7 @@ type Fornecedor = {
 };
 
 type FornecedorFormData = {
+  aplicativo_pai_id: string;
   vendedor_olist_id: string;
   meu_cliente_olist_id: string;
   meu_forma_pagamento_olist_id: string;
@@ -45,6 +49,7 @@ type FornecedorFormData = {
 };
 
 const INITIAL_FORM: FornecedorFormData = {
+  aplicativo_pai_id: "",
   vendedor_olist_id: "",
   meu_cliente_olist_id: "",
   meu_forma_pagamento_olist_id: "",
@@ -57,6 +62,7 @@ const INITIAL_FORM: FornecedorFormData = {
 export default function FornecedoresPage() {
   const { session } = useAuth();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [aplicativosPai, setAplicativosPai] = useState<AplicativoPaiOption[]>([]);
   const [usuariosVendedores, setUsuariosVendedores] = useState<UsuarioVendedorOption[]>([]);
   const [planosPagamento, setPlanosPagamento] = useState<PlanoPagamentoOption[]>([]);
   const [formasPagamento, setFormasPagamento] = useState<FormaPagamentoOption[]>([]);
@@ -82,7 +88,7 @@ export default function FornecedoresPage() {
     const [fornecedoresResult, usuariosResponse, planosResult] = await Promise.all([
       supabase
         .from("fornecedores")
-        .select("id, aplicativo_id, vendedor_olist_id, meu_cliente_olist_id, meu_forma_pagamento_olist_id, meu_tipo_venda_enum, meu_plano_pagamento_id, nome, endereco, created_at, updated_at")
+        .select("id, aplicativo_id, aplicativo_pai_id, vendedor_olist_id, meu_cliente_olist_id, meu_forma_pagamento_olist_id, meu_tipo_venda_enum, meu_plano_pagamento_id, nome, endereco, created_at, updated_at")
         .order("nome", { ascending: true }),
       fetch("/api/fornecedores/vendedores", {
         headers: session?.access_token
@@ -93,6 +99,7 @@ export default function FornecedoresPage() {
     ]);
 
     const usuariosJson = await usuariosResponse.json() as {
+      aplicativosPai?: AplicativoPaiOption[];
       usuarios?: UsuarioVendedorOption[];
       formasPagamento?: FormaPagamentoOption[];
       error?: string;
@@ -107,6 +114,7 @@ export default function FornecedoresPage() {
     }
 
     setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
+    setAplicativosPai(usuariosJson.aplicativosPai ?? []);
     setUsuariosVendedores(usuariosJson.usuarios ?? []);
     setPlanosPagamento((planosResult.data as PlanoPagamentoOption[]) ?? []);
     setFormasPagamento(usuariosJson.formasPagamento ?? []);
@@ -127,6 +135,7 @@ export default function FornecedoresPage() {
     setEditingId(fornecedor.id);
     setFormOpen(true);
     setFormData({
+      aplicativo_pai_id: fornecedor.aplicativo_pai_id,
       vendedor_olist_id: fornecedor.vendedor_olist_id ?? "",
       meu_cliente_olist_id: fornecedor.meu_cliente_olist_id?.toString() ?? "",
       meu_forma_pagamento_olist_id: fornecedor.meu_forma_pagamento_olist_id?.toString() ?? "",
@@ -141,11 +150,13 @@ export default function FornecedoresPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) return;
     setIsSaving(true);
     setErrorMessage(null);
     setSuccessMessage(null);
 
     const payload = {
+      aplicativo_pai_id: formData.aplicativo_pai_id,
       vendedor_olist_id: formData.vendedor_olist_id || null,
       meu_cliente_olist_id: formData.meu_cliente_olist_id.trim()
         ? Number(formData.meu_cliente_olist_id)
@@ -157,8 +168,13 @@ export default function FornecedoresPage() {
       meu_plano_pagamento_id: formData.meu_plano_pagamento_id || null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
-      updated_at: new Date().toISOString(),
     };
+
+    if (!aplicativosPai.some((aplicativo) => aplicativo.id === payload.aplicativo_pai_id)) {
+      setErrorMessage("Selecione um aplicativo pai válido para o fornecedor.");
+      setIsSaving(false);
+      return;
+    }
 
     if (!payload.nome) {
       setErrorMessage("Nome do fornecedor é obrigatório.");
@@ -180,14 +196,16 @@ export default function FornecedoresPage() {
       return;
     }
 
-    const query = isEditing
-      ? supabase.from("fornecedores").update(payload).eq("id", editingId)
-      : supabase.from("fornecedores").insert(payload);
-
-    const { error } = await query;
-
-    if (error) {
-      setErrorMessage(`Erro ao salvar fornecedor: ${error.message}`);
+    try {
+      const response = await fetch("/api/fornecedores/salvar", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, id: editingId }),
+      });
+      const json = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(json.error || "Não foi possível salvar o fornecedor.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erro ao salvar fornecedor.");
       setIsSaving(false);
       return;
     }
@@ -274,6 +292,23 @@ export default function FornecedoresPage() {
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               placeholder="Nome do fornecedor"
             />
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Aplicativo pai
+            <select
+              required
+              value={formData.aplicativo_pai_id}
+              onChange={(event) => setFormData((prev) => ({ ...prev, aplicativo_pai_id: event.target.value }))}
+              disabled={isLoading || isSaving}
+              className="input mt-1 min-h-11"
+            >
+              <option value="">Selecione o aplicativo pai</option>
+              {aplicativosPai.map((aplicativo) => (
+                <option key={aplicativo.id} value={aplicativo.id}>{aplicativo.nome}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">Aplicativo que receberá os novos pedidos na fila para direcionamento às filiais.</span>
           </label>
 
           <label className="text-sm text-slate-700">
@@ -424,6 +459,7 @@ export default function FornecedoresPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Nome</th>
+                  <th className="p-3">Aplicativo pai</th>
                   <th className="p-3">Usuário vendedor</th>
                   <th className="p-3">Meu ID de cliente</th>
                   <th className="p-3">Minha forma de pagamento Olist</th>
@@ -439,6 +475,9 @@ export default function FornecedoresPage() {
                   <tr key={fornecedor.id} className="border-b border-slate-100">
                     <td className="p-3 font-medium text-slate-700">
                       {fornecedor.nome}
+                    </td>
+                    <td className="p-3 text-slate-700">
+                      {aplicativosPai.find((aplicativo) => aplicativo.id === fornecedor.aplicativo_pai_id)?.nome ?? fornecedor.aplicativo_pai_id}
                     </td>
                     <td className="p-3 text-slate-700">
                       {usuariosVendedores.find((usuario) => usuario.id === fornecedor.vendedor_olist_id)?.nome

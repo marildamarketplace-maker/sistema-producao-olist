@@ -12,10 +12,15 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   let permitido = true;
   let existe = true;
   let fornecedorValido = true;
+  let paiDoDestino: string | null = null;
   let associado = true;
   let erroBanco = "";
   let gravacoes = 0;
   let consultas = 0;
+  let quantidadeAtual = 2;
+  let esperadoMetros = 3;
+  let esperadoLaser = true;
+  let esperadaObservacao = "Observação";
   const tx = {
     $queryRaw: async () => [],
     solicitacaoProducao: { findFirst: async ({ where }: { where: unknown }) => {
@@ -25,21 +30,25 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     } },
     fornecedor: {
       findMany: async ({ where }: { where: unknown }) => {
-        assert.deepEqual(where, { aplicativoId: app, vendedor: { ativo: true } });
+        assert.deepEqual(where, { aplicativoId: app, aplicativoPai: { aplicativoPaiId: null } });
         return [{ id: fornecedorId, nome: "Fornecedor" }];
       },
       findFirst: async ({ where }: { where: unknown }) => {
         assert.deepEqual(where, { id: fornecedorId, aplicativoId: app });
-        return fornecedorValido ? { vendedor: { ativo: true, aplicativoId: destino } } : null;
+        return fornecedorValido ? { aplicativoPaiId: destino, aplicativoPai: { aplicativoPaiId: paiDoDestino } } : null;
       },
     },
     itemSolicitacaoProducao: { findMany: async ({ where }: { where: unknown }) => {
       assert.deepEqual(where, { solicitacaoId, aplicativoId: app });
-      return [{ produtoId: "produto", sku: "EST/6861-A/", quantidadeSolicitada: 2, tipoCorte: "LASER" }];
+      return [{ produtoId: "produto", sku: "EST/6861-A/", quantidadeSolicitada: quantidadeAtual, tipoCorte: "LASER" }];
     } },
     produtoOlistProdutoFornecedor: { findMany: async ({ where }: { where: unknown }) => {
       assert.deepEqual(where, { produtoId: { in: ["produto"] }, produtoFornecedor: { fornecedorId, aplicativoId: app } });
       return associado ? [{ produtoId: "produto", quantidadeUsada: 1.5, produtoFornecedor: { id: "tecido", nome: "Oxford", referencia: null } }] : [];
+    } },
+    produtoFornecedor: { findMany: async ({ where }: { where: unknown }) => {
+      assert.deepEqual(where, { fornecedorId, aplicativoId: app, tipoServico: null });
+      return [{ id: "tecido", nome: "Oxford", referencia: null }];
     } },
     pedidoFornecedorQueue: { create: async ({ data }: { data: Record<string, unknown> }) => {
       if (erroBanco) throw { code: erroBanco, message: "segredo do banco" };
@@ -49,9 +58,9 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
       assert.equal(data.fornecedorId, fornecedorId);
       assert.equal(data.solicitacaoProducaoId, solicitacaoId);
       const dados = data.dadosPedido as { itens: Array<{ quantidadeTecido: number; corteLaser: boolean }>; observacao: string };
-      assert.equal(dados.itens[0].quantidadeTecido, 3);
-      assert.equal(dados.itens[0].corteLaser, true);
-      assert.equal(dados.observacao, "Observação");
+      assert.equal(dados.itens[0].quantidadeTecido, esperadoMetros);
+      assert.equal(dados.itens[0].corteLaser, esperadoLaser);
+      assert.equal(dados.observacao, esperadaObservacao);
       return { id: "fila" };
     } },
   };
@@ -81,7 +90,35 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     existe = false; assert.equal((await POST(request())).status, 404); existe = true;
     fornecedorValido = false; assert.equal((await POST(request())).status, 400); fornecedorValido = true;
     associado = false; assert.equal((await POST(request())).status, 400); associado = true;
+    paiDoDestino = app;
+    assert.equal((await POST(request())).status, 400);
+    paiDoDestino = null;
     assert.equal(gravacoes, 1);
+  });
+  await t.test("prévia não grava; envio persiste edição validada e rejeita revisão desatualizada", async () => {
+    const antes = gravacoes;
+    const preview = await POST(request({ fornecedorId, solicitacaoId, acao: "preview" }));
+    assert.equal(preview.status, 200);
+    const json = await preview.json();
+    assert.equal(json.dadosPedido.itens[0].quantidade, 2);
+    assert.equal(json.tecidos[0].id, "tecido");
+    assert.equal(gravacoes, antes);
+    const { montarEdicaoPedidoFila } = await import("../src/lib/pedido-fornecedor-edicao");
+    const edicao = montarEdicaoPedidoFila(json.dadosPedido);
+    edicao.itens[0].quantidade = 5;
+    edicao.itens[0].quantidadeTecido = 8;
+    edicao.itens[0].corteLaser = false;
+    edicao.observacao = "Editado";
+    const payload = { fornecedorId, solicitacaoId, dadosEditados: edicao, revisao: json.revisao };
+    quantidadeAtual = 3;
+    assert.equal((await POST(request(payload))).status, 409);
+    quantidadeAtual = 2;
+    assert.equal((await POST(request({ ...payload, dadosEditados: { ...edicao, itens: [{ ...edicao.itens[0], tecidoId: "outro-fornecedor" }] } }))).status, 400);
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, dadosEditados: edicao }))).status, 400);
+    esperadoMetros = 8; esperadoLaser = false; esperadaObservacao = "Editado";
+    assert.equal((await POST(request(payload))).status, 201);
+    assert.equal(gravacoes, antes + 1);
+    esperadoMetros = 3; esperadoLaser = true; esperadaObservacao = "Observação";
   });
   await t.test("duplicação retorna conflito e falhas internas não expõem detalhes", async () => {
     erroBanco = "P2002"; assert.equal((await POST(request())).status, 409);

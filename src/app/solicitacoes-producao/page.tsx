@@ -14,7 +14,7 @@ import { Switch } from "@/components/switch";
 import { supabase } from "@/lib/supabase";
 import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/olist-pedido";
 import { montarSolicitacaoProducaoWhatsapp } from "@/lib/solicitacao-producao-whatsapp";
-import { FILTROS_SOLICITACOES_INICIAIS, filtrarSolicitacoes } from "@/lib/solicitacoes-producao-filtros";
+import { FILTROS_SOLICITACOES_INICIAIS, criarFiltrosSolicitacoesIniciais, filtrarSolicitacoes } from "@/lib/solicitacoes-producao-filtros";
 
 type Produto = {
   id: string;
@@ -377,7 +377,7 @@ export default function SolicitacoesProducaoPage() {
   const [tiposProduto, setTiposProduto] = useState<TipoProdutoOpcao[]>([]);
   const [tamanhos, setTamanhos] = useState<TamanhoOpcao[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
-  const [filtrosSolicitacoes, setFiltrosSolicitacoes] = useState(FILTROS_SOLICITACOES_INICIAIS);
+  const [filtrosSolicitacoes, setFiltrosSolicitacoes] = useState(criarFiltrosSolicitacoesIniciais);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
   const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
@@ -2045,9 +2045,16 @@ export default function SolicitacoesProducaoPage() {
               </button>
             )}
           </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {([["criacaoInicio", "Data de criação: de"], ["criacaoFim", "Data de criação: até"]] as const).map(([campo, rotulo]) => (
+              <label key={campo} className="min-w-0 text-sm text-slate-700">{rotulo}
+                <input type="date" value={filtrosSolicitacoes[campo]} onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, [campo]: event.target.value }))} className="input mt-1 min-h-11 w-full min-w-0" />
+              </label>
+            ))}
+          </div>
           <details className="rounded-md border border-slate-200">
             <summary className="min-h-11 cursor-pointer rounded-md px-4 py-3 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
-              Filtros avançados{Object.entries(filtrosSolicitacoes).some(([campo, valor]) => campo !== "observacao" && valor) ? " (ativos)" : ""}
+              Filtros avançados{Object.entries(filtrosSolicitacoes).some(([campo, valor]) => !["observacao", "criacaoInicio", "criacaoFim"].includes(campo) && valor) ? " (ativos)" : ""}
             </summary>
             <div className="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2 xl:grid-cols-3">
               <label className="min-w-0 text-sm text-slate-700">Status
@@ -2061,7 +2068,6 @@ export default function SolicitacoesProducaoPage() {
               </label>
               {([
                 ["entregaInicio", "Data de entrega: de"], ["entregaFim", "Data de entrega: até"],
-                ["criacaoInicio", "Data de criação: de"], ["criacaoFim", "Data de criação: até"],
               ] as const).map(([campo, rotulo]) => (
                 <label key={campo} className="min-w-0 text-sm text-slate-700">{rotulo}
                   <input type="date" value={filtrosSolicitacoes[campo]} onChange={(event) => setFiltrosSolicitacoes((atual) => ({ ...atual, [campo]: event.target.value }))} className="input mt-1 min-h-11 w-full min-w-0" />

@@ -73,7 +73,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
   };
   Object.assign(globalThis, { prisma: {
     ...tx,
-    usuario: { findFirst: async () => ({ id: usuarioId, aplicativoId: matriz }), findUnique: async () => ({ aplicativoId: matriz, podeEditarConfiguracao: permitido }) },
+    usuario: { findFirst: async () => ({ id: usuarioId, aplicativoId: matriz }), findUnique: async () => ({ aplicativoId: matriz, podeGerenciarFilaPedidos: permitido, podeEditarConfiguracao: !permitido }) },
     $transaction: async (fn: (client: typeof tx) => unknown) => fn(tx),
   } });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");

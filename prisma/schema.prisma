@@ -29,7 +29,8 @@ model Aplicativo {
   pedidosFilaOrigem         PedidoFornecedorQueue[] @relation("FilaOrigem")
   pedidosFilaDestino        PedidoFornecedorQueue[] @relation("FilaDestino")
   pedidosFilaFilial         PedidoFornecedorQueue[] @relation("FilaFilial")
-  fornecedores              Fornecedor[]
+  fornecedores              Fornecedor[] @relation("FornecedorOrigem")
+  fornecedoresMatriz        Fornecedor[] @relation("FornecedorMatriz")
   integracoesOlistToken     IntegracaoOlistToken[]
   itensBaixaEstoqueOlist    ItemBaixaEstoqueOlist[]
   itensBuscaSku             ItemBuscaSku[]
@@ -150,6 +151,7 @@ model Usuario {
   podeVisualizarProducao               Boolean                 @default(false) @map("pode_visualizar_producao")
   podeConfirmarProducao                Boolean                 @default(false) @map("pode_confirmar_producao")
   podeVisualizarConfiguracao           Boolean                 @default(false) @map("pode_visualizar_configuracao")
+  podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
   podeEditarConfiguracao               Boolean                 @default(false) @map("pode_editar_configuracao")
   createdAt                            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -245,18 +247,21 @@ model Fornecedor {
   createdAt                DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
   aplicativoId             String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  aplicativoPaiId          String                        @map("aplicativo_pai_id") @db.Uuid
   vendedorOlistId          String?                       @map("vendedor_olist_id") @db.Uuid
   meuClienteOlistId        Int?                          @map("meu_cliente_olist_id")
   meuFormaPagamentoOlistId Int?                          @map("meu_forma_pagamento_olist_id")
   meuPlanoPagamentoId      String?                       @map("meu_plano_pagamento_id") @db.Uuid
   meuTipoVenda             TipoVenda?                    @map("meu_tipo_venda_enum")
-  aplicativo               Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  aplicativo               Aplicativo?                   @relation("FornecedorOrigem", fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  aplicativoPai            Aplicativo                    @relation("FornecedorMatriz", fields: [aplicativoPaiId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   meuPlanoPagamento        PlanoPagamento?               @relation(fields: [meuPlanoPagamentoId], references: [id])
   vendedor                 Usuario?                      @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
   pedidosFila              PedidoFornecedorQueue[]
   pedidosSolicitacao       PedidoFornecedorSolicitacao[]
   produtos                 ProdutoFornecedor[]
 
+  @@index([aplicativoPaiId], map: "idx_fornecedores_aplicativo_pai_id")
   @@index([aplicativoId], map: "idx_fornecedores_aplicativo_id")
   @@index([vendedorOlistId], map: "idx_fornecedores_vendedor_olist_id")
   @@index([meuPlanoPagamentoId], map: "idx_fornecedores_meu_plano_pagamento_id")

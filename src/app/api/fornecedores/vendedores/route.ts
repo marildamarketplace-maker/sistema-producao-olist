@@ -14,7 +14,7 @@ export async function GET(request: Request) {
       throw new Error("Sem permissão para visualizar fornecedores.");
     }
 
-    const [usuarios, formasPagamento] = await Promise.all([
+    const [usuarios, formasPagamento, aplicativosPai] = await Promise.all([
       prisma.usuario.findMany({
         where: { vendedorOlistId: { not: null } },
         orderBy: { nome: "asc" },
@@ -28,6 +28,11 @@ export async function GET(request: Request) {
           formaOlistNome: true,
           planoPagamento: { select: { id: true, nome: true } },
         },
+      }),
+      prisma.aplicativo.findMany({
+        where: { aplicativoPaiId: null },
+        select: { id: true, nome: true },
+        orderBy: { nome: "asc" },
       }),
     ]);
 
@@ -49,6 +54,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
+      aplicativosPai,
       usuarios: usuarios.map((usuario) => ({
         id: usuario.id,
         nome: usuario.nome,

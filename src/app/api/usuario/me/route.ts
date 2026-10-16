@@ -40,6 +40,7 @@ type UsuarioRow = {
   pode_visualizar_anotar_sku: boolean;
   pode_visualizar_configuracao: boolean;
   pode_editar_configuracao: boolean;
+  pode_gerenciar_fila_pedidos: boolean;
 };
 
 type AplicativoRow = {
@@ -103,6 +104,7 @@ export async function GET(request: Request) {
         pode_escrever_anotar_sku,
         pode_visualizar_anotar_sku,
         pode_visualizar_configuracao,
+        pode_gerenciar_fila_pedidos,
         pode_editar_configuracao
       `,
     )
@@ -173,5 +175,6 @@ export async function GET(request: Request) {
     podeVisualizarAnotarSku: Boolean(usuario.pode_visualizar_anotar_sku),
     podeVisualizarConfiguracao: Boolean(usuario.pode_visualizar_configuracao),
     podeEditarConfiguracao: Boolean(usuario.pode_editar_configuracao),
+    podeGerenciarFilaPedidos: Boolean(usuario.pode_gerenciar_fila_pedidos),
   });
 }

@@ -12,7 +12,7 @@ export function montarDadosPedidoFila(itens: Item[], associacoes: Associacao[]) 
   if (!itens.length) throw new Error("A solicitação não possui produtos.");
   const porProduto = new Map(associacoes.map((a) => [a.produtoId, a]));
   return {
-    versao: 1,
+    versao: 1 as const,
     itens: itens.map((item) => {
       const associacao = porProduto.get(item.produtoId);
       if (!associacao) throw new Error(`Produto ${item.sku} sem tecido vinculado ao fornecedor selecionado.`);
@@ -28,9 +28,9 @@ export function montarDadosPedidoFila(itens: Item[], associacoes: Associacao[]) 
         sku: item.sku,
         tecido: { id: associacao.produtoFornecedor.id, nome: associacao.produtoFornecedor.nome, referencia: associacao.produtoFornecedor.referencia },
         quantidade: item.quantidadeSolicitada,
-        unidade: "UN",
+        unidade: "UN" as const,
         quantidadeTecido: Number(metros.toFixed(6)),
-        unidadeTecido: "MT",
+        unidadeTecido: "MT" as const,
         estampa: separador < 0 ? estampaSku : estampaSku.slice(0, separador),
         variante: separador < 0 ? null : estampaSku.slice(separador + 1) || null,
         corteLaser: item.tipoCorte === "LASER",
