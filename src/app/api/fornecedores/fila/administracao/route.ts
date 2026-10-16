@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { dadosPedidoFilaSchema, type ListaFilaAdministracao } from "@/lib/fila-fornecedor-contrato";
+import { dadosPedidoFilaSchema, filtrosStatusFila, type ListaFilaAdministracao } from "@/lib/fila-fornecedor-contrato";
 
 const consultaSchema = z.object({
-  situacao: z.enum(["pendente", "direcionado", "todos"]).default("pendente"),
+  situacao: z.enum(["pendente", "processar", "concluido", "falhado", "cancelado", "direcionado", "todos", "processando", "enviado", "com_falha"]).default("pendente")
+    .transform((valor) => valor === "processando" ? "processar" : valor === "enviado" ? "concluido" : valor === "com_falha" ? "falhado" : valor),
   pagina: z.coerce.number().int().min(1).max(100000).default(1),
 });
 const direcionamentoSchema = z.object({
   pedidoId: z.guid(),
   filialId: z.guid(),
+  enviarOlist: z.boolean().default(false),
   versao: z.number().int().min(0).max(2147483646),
 }).strict();
 
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
     const porPagina = 20;
     const where = {
       aplicativoFornecedorId: aplicativoId,
-      ...(situacao === "pendente" ? { aplicativoFilialId: null } : situacao === "direcionado" ? { aplicativoFilialId: { not: null } } : {}),
+      ...(situacao === "direcionado" ? { aplicativoFilialId: { not: null } } : situacao === "todos" ? {} : { status: filtrosStatusFila[situacao] }),
     };
     const [pedidos, total, filiais] = await Promise.all([
       prisma.pedidoFornecedorQueue.findMany({
@@ -57,7 +59,7 @@ export async function GET(request: Request) {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           id: true, solicitacaoProducaoId: true, createdAt: true, direcionadoEm: true,
-          versao: true, dadosPedido: true,
+          versao: true, dadosPedido: true, status: true,
           aplicativoSolicitante: { select: { nome: true } },
           aplicativoFilial: { select: { id: true, nome: true } },
         },
@@ -69,7 +71,7 @@ export async function GET(request: Request) {
       pedidos: pedidos.map((pedido) => {
         const dados = dadosPedidoFilaSchema.safeParse(pedido.dadosPedido);
         return {
-          id: pedido.id, solicitacaoProducaoId: pedido.solicitacaoProducaoId,
+          id: pedido.id, status: pedido.status, solicitacaoProducaoId: pedido.solicitacaoProducaoId,
           createdAt: pedido.createdAt.toISOString(), origem: pedido.aplicativoSolicitante.nome,
           filial: pedido.aplicativoFilial, direcionadoEm: pedido.direcionadoEm?.toISOString() ?? null,
           versao: pedido.versao, dadosPedido: dados.success ? dados.data : null,
@@ -86,12 +88,15 @@ export async function PATCH(request: Request) {
     const { usuarioId, aplicativoId } = await autorizar(request);
     const parsed = direcionamentoSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido, filial e versão válidos.", 400);
-    const { pedidoId, filialId, versao } = parsed.data;
+    const { pedidoId, filialId, versao, enviarOlist } = parsed.data;
     const resultado = await prisma.$transaction(async (tx) => {
       const pedido = await tx.pedidoFornecedorQueue.findFirst({
-        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true },
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true },
       });
       if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
+      if (pedido.status !== "PENDENTE" && pedido.status !== "FALHADO") {
+        throw new ErroAdministracaoFila("Este pedido está em PROCESSAR, CONCLUIDO ou CANCELADO e não pode ser alterado.", 409);
+      }
       // Impede a troca do aplicativo pai da filial durante a atribuição.
       const filiais = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM aplicativo
@@ -101,13 +106,13 @@ export async function PATCH(request: Request) {
       if (!filiais.length) throw new ErroAdministracaoFila("Selecione uma filial vinculada ao seu aplicativo.", 400);
       const direcionadoEm = new Date();
       const atualizacao = await tx.pedidoFornecedorQueue.updateMany({
-        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId, versao },
-        data: { aplicativoFilialId: filialId, direcionadoPorId: usuarioId, direcionadoEm, versao: { increment: 1 } },
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId, versao, status: { in: ["PENDENTE", "FALHADO"] } },
+        data: { status: enviarOlist ? "PROCESSAR" : "PENDENTE", aplicativoFilialId: filialId, direcionadoPorId: usuarioId, direcionadoEm, versao: { increment: 1 } },
       });
       if (atualizacao.count !== 1) {
         throw new ErroAdministracaoFila("Este pedido foi alterado por outro usuário. Atualize a fila antes de direcionar novamente.", 409);
       }
-      return { id: pedidoId, filialId, direcionadoEm: direcionadoEm.toISOString(), versao: versao + 1 };
+      return { id: pedidoId, filialId, status: enviarOlist ? "PROCESSAR" : "PENDENTE", direcionadoEm: direcionadoEm.toISOString(), versao: versao + 1 };
     });
     return NextResponse.json(resultado);
   } catch (error) { return falha(error); }

@@ -22,6 +22,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
   let falhar = false;
   let jsonValido = true;
   let versaoBanco = 0;
+  let statusBanco = "PENDENTE";
   let consultas = 0;
   let gravacoes = 0;
   let filialBanco: string | null = null;
@@ -36,25 +37,27 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
         assert.ok(args.skip >= 0);
         assert.deepEqual(args.orderBy, [{ createdAt: "asc" }, { id: "asc" }]);
         return [{ id: pedidoId, solicitacaoProducaoId: solicitacaoId, createdAt: new Date("2026-10-16T12:00:00Z"),
-          direcionadoEm: null, versao: versaoBanco, dadosPedido: jsonValido ? dadosPedido : { itens: "invalido" },
+          direcionadoEm: null, status: statusBanco, versao: versaoBanco, dadosPedido: jsonValido ? dadosPedido : { itens: "invalido" },
           aplicativoSolicitante: { nome: "Meury Shop" }, aplicativoFilial: null }];
       },
       count: async ({ where }: { where: unknown }) => { filtros.push(where); return 21; },
       findFirst: async ({ where }: { where: unknown }) => {
         consultas++;
         assert.deepEqual(where, { id: pedidoId, aplicativoFornecedorId: matriz });
-        return existente ? { id: pedidoId } : null;
+        return existente ? { id: pedidoId, status: statusBanco } : null;
       },
-      updateMany: async ({ where, data }: { where: { id: string; aplicativoFornecedorId: string; versao: number }; data: Record<string, unknown> }) => {
+      updateMany: async ({ where, data }: { where: { id: string; aplicativoFornecedorId: string; versao: number; status: { in: string[] } }; data: Record<string, unknown> }) => {
         if (falhar) throw new Error("senha-interna");
         assert.equal(where.id, pedidoId);
         assert.equal(where.aplicativoFornecedorId, matriz);
         assert.equal(data.direcionadoPorId, usuarioId);
         assert.ok(data.direcionadoEm instanceof Date);
         assert.deepEqual(data.versao, { increment: 1 });
-        assert.deepEqual(Object.keys(data).sort(), ["aplicativoFilialId", "direcionadoPorId", "direcionadoEm", "versao"].sort());
-        if (where.versao !== versaoBanco) return { count: 0 };
+        assert.deepEqual(Object.keys(data).sort(), ["aplicativoFilialId", "direcionadoPorId", "direcionadoEm", "versao", "status"].sort());
+        assert.deepEqual(where.status, { in: ["PENDENTE", "FALHADO"] });
+        if (where.versao !== versaoBanco || !where.status.in.includes(statusBanco)) return { count: 0 };
         filialBanco = data.aplicativoFilialId as string;
+        statusBanco = data.status as string;
         versaoBanco++;
         gravacoes++;
         return { count: 1 };
@@ -103,7 +106,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     const json = await response.json();
     assert.equal(json.pagina, 2); assert.equal(json.total, 21); assert.equal(json.porPagina, 20);
     assert.deepEqual(filtros, [
-      { aplicativoFornecedorId: matriz, aplicativoFilialId: null }, { aplicativoFornecedorId: matriz, aplicativoFilialId: null },
+      { aplicativoFornecedorId: matriz, status: "PENDENTE" }, { aplicativoFornecedorId: matriz, status: "PENDENTE" },
     ]);
     assert.equal(json.pedidos[0].origem, "Meury Shop");
     assert.deepEqual(json.pedidos[0].dadosPedido, dadosPedido);
@@ -158,6 +161,31 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
     assert.equal(gravacoes, antes + 1);
     assert.equal(versaoBanco, versao + 1);
+  });
+  await t.test("confirmação muda para PROCESSAR sem chamar Olist e bloqueia nova alteração", async () => {
+    const response = await patch({ pedidoId, filialId: filialA, versao: versaoBanco, enviarOlist: true });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).status, "PROCESSAR");
+    assert.equal(statusBanco, "PROCESSAR");
+    const antes = gravacoes;
+    assert.equal((await patch()).status, 409);
+    assert.equal(gravacoes, antes);
+    for (const status of ["CONCLUIDO", "CANCELADO"]) {
+      statusBanco = status;
+      assert.equal((await patch()).status, 409);
+    }
+    statusBanco = "FALHADO";
+    assert.equal((await patch({ pedidoId, filialId: filialB, versao: versaoBanco, enviarOlist: false })).status, 200);
+    assert.equal(statusBanco, "PENDENTE");
+  });
+  await t.test("filtros usam os cinco status e cliente não pode forjar status final", async () => {
+    for (const [filtro, status] of [["pendente", "PENDENTE"], ["processar", "PROCESSAR"], ["concluido", "CONCLUIDO"], ["falhado", "FALHADO"], ["cancelado", "CANCELADO"], ["processando", "PROCESSAR"], ["enviado", "CONCLUIDO"], ["com_falha", "FALHADO"]]) {
+      filtros.length = 0;
+      assert.equal((await get(`situacao=${filtro}`)).status, 200);
+      assert.deepEqual(filtros[0], { aplicativoFornecedorId: matriz, status });
+    }
+    assert.equal((await patch({ pedidoId, filialId: filialA, versao: versaoBanco, status: "CONCLUIDO" })).status, 400);
+    assert.equal((await patch({ pedidoId, filialId: filialA, versao: versaoBanco, enviarOlist: "true" })).status, 400);
   });
   await t.test("falhas internas não expõem detalhes sensíveis", async () => {
     falhar = true;

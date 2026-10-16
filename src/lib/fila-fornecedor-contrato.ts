@@ -23,7 +23,16 @@ export const dadosPedidoFilaSchema = z.object({
 
 export type DadosPedidoFila = z.infer<typeof dadosPedidoFilaSchema>;
 export type FilialFila = { id: string; nome: string };
+export const statusFilaValores = ["PENDENTE", "PROCESSAR", "CONCLUIDO", "FALHADO", "CANCELADO"] as const;
+export type StatusFila = typeof statusFilaValores[number];
+export const rotulosStatusFila: Record<StatusFila, string> = {
+  PENDENTE: "PENDENTE", PROCESSAR: "PROCESSAR", CONCLUIDO: "CONCLUIDO", FALHADO: "FALHADO", CANCELADO: "CANCELADO",
+};
+export const filtrosStatusFila = {
+  pendente: "PENDENTE", processar: "PROCESSAR", concluido: "CONCLUIDO", falhado: "FALHADO", cancelado: "CANCELADO",
+} as const;
 export type PedidoFilaAdministracao = {
+  status: StatusFila;
   id: string;
   solicitacaoProducaoId: string;
   createdAt: string;
@@ -40,4 +49,4 @@ export type ListaFilaAdministracao = {
   pagina: number;
   porPagina: number;
 };
-export type SituacaoFila = "pendente" | "direcionado" | "todos";
+export type SituacaoFila = keyof typeof filtrosStatusFila | "direcionado" | "todos";

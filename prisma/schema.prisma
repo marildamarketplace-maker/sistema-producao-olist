@@ -964,6 +964,16 @@ model AcessoPaginaUsuario {
   @@map("acesso_pagina_usuario")
 }
 
+enum StatusPedidoFornecedorQueue {
+  PENDENTE
+  PROCESSAR
+  CONCLUIDO
+  FALHADO
+  CANCELADO
+
+  @@map("status_pedido_fornecedor_queue")
+}
+
 model PedidoFornecedorQueue {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoSolicitanteId String @map("aplicativo_solicitante_id") @db.Uuid
@@ -974,6 +984,7 @@ model PedidoFornecedorQueue {
   direcionadoPorId String? @map("direcionado_por_id") @db.Uuid
   direcionadoEm DateTime? @map("direcionado_em") @db.Timestamptz(6)
   versao Int @default(0)
+  status StatusPedidoFornecedorQueue @default(PENDENTE)
   dadosPedido Json @map("dados_pedido") @db.JsonB
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   aplicativoSolicitante Aplicativo @relation("FilaOrigem", fields: [aplicativoSolicitanteId], references: [id], onUpdate: NoAction)

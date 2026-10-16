@@ -1,40 +1,111 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { FilialFila, ListaFilaAdministracao, PedidoFilaAdministracao, SituacaoFila } from "@/lib/fila-fornecedor-contrato";
+import { useEffect, useId, useRef, useState } from "react";
+import { MoreHorizontal, Send } from "lucide-react";
+import { createPortal } from "react-dom";
+import { filtrosStatusFila, rotulosStatusFila } from "@/lib/fila-fornecedor-contrato";
+import type { StatusFila, FilialFila, ListaFilaAdministracao, PedidoFilaAdministracao, SituacaoFila } from "@/lib/fila-fornecedor-contrato";
 
 const API = "/api/fornecedores/fila/administracao";
 const secundario = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:cursor-not-allowed disabled:opacity-50";
 const primario = "min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:cursor-not-allowed disabled:opacity-50";
 const dataHora = (valor: string) => new Date(valor).toLocaleString("pt-BR");
 
+function MaisOpcoesFila({ disabled, aoEnviar }: { disabled: boolean; aoEnviar: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const painelId = useId();
+  const container = useRef<HTMLDivElement>(null);
+  const botao = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!aberto) return;
+    function fecharFora(event: PointerEvent) {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setAberto(false);
+    }
+    document.addEventListener("pointerdown", fecharFora);
+    return () => document.removeEventListener("pointerdown", fecharFora);
+  }, [aberto]);
+  return (
+    <div ref={container} className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAberto(false); }} onKeyDown={(event) => {
+      if (event.key === "Escape" && aberto) { event.preventDefault(); event.stopPropagation(); setAberto(false); botao.current?.focus(); }
+    }}>
+      <button ref={botao} type="button" disabled={disabled} aria-expanded={aberto} aria-controls={painelId}
+        onClick={() => setAberto((valor) => !valor)} className={`${secundario} inline-flex items-center gap-2`}>
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />Mais opções
+      </button>
+      {aberto && !disabled && (
+        <div id={painelId} role="group" aria-label="Mais opções do pedido" className="absolute right-0 z-10 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+          <button type="button" onClick={() => { setAberto(false); botao.current?.focus(); aoEnviar(); }}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500">
+            <Send className="h-4 w-4 shrink-0" aria-hidden="true" />Enviar para a Olist
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfirmarEnvioOlist({ filial, salvando, conflito, erro, aoFechar, aoConfirmar }: {
+  filial: string; salvando: boolean; conflito: boolean; erro: string; aoFechar: () => void; aoConfirmar: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const erroRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const anterior = document.activeElement;
+    const elemento = dialog.current;
+    elemento?.showModal();
+    return () => { elemento?.close(); if (anterior instanceof HTMLElement) anterior.focus(); };
+  }, []);
+  useEffect(() => { if (erro) erroRef.current?.focus(); }, [erro]);
+  return createPortal(
+    <dialog ref={dialog} aria-labelledby="confirmar-envio-olist-titulo" onCancel={(event) => { if (salvando) event.preventDefault(); else aoFechar(); }}
+      className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 text-slate-900 backdrop:bg-black/50 sm:p-6">
+      <h2 id="confirmar-envio-olist-titulo" className="text-lg font-semibold">Deseja enviar o pedido para a Olist?</h2>
+      <p className="mt-3 break-words text-sm text-slate-600">Filial selecionada: <strong>{filial}</strong>.</p>
+      <p className="mt-3 text-sm text-slate-600">Ao confirmar, a filial será salva e o status mudará para PROCESSAR. Nesta etapa, nenhum pedido será criado na Olist.</p>
+      {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="mt-3 break-words text-sm text-red-700">{erro}</p>}
+      <div className="mt-5 flex flex-col gap-3 sm:items-end" aria-busy={salvando}>
+        <button type="button" disabled={salvando || conflito} onClick={aoConfirmar} className={primario}>{salvando ? "Salvando..." : "Sim, marcar como PROCESSAR"}</button>
+        <button type="button" disabled={salvando} onClick={aoFechar} className={secundario}>Cancelar</button>
+      </div>
+    </dialog>, document.body,
+  );
+}
+
 function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
-  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; token: string; aoSalvar: (filial: string) => void; aoAtualizar: () => void;
+  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; token: string; aoSalvar: (filial: string, status: StatusFila) => void; aoAtualizar: () => void;
 }) {
   const [filialId, setFilialId] = useState(pedido.filial?.id ?? "");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
+  const podeAlterar = pedido.status === "PENDENTE" || pedido.status === "FALHADO";
   const [conflito, setConflito] = useState(false);
   const envioEmAndamento = useRef(false);
   const filialAtualDisponivel = !pedido.filial || filiais.some((filial) => filial.id === pedido.filial?.id);
 
   async function direcionar(event: React.FormEvent) {
     event.preventDefault();
-    if (envioEmAndamento.current || !filialId || conflito) return;
+    if (envioEmAndamento.current || !filialId || conflito || !podeAlterar) return;
+    await salvarFilial(false);
+  }
+
+  async function salvarFilial(enviarOlist: boolean) {
+    if (envioEmAndamento.current || !filialId || conflito || !podeAlterar) return;
     envioEmAndamento.current = true;
     setSalvando(true);
     setErro("");
     try {
       const response = await fetch(API, {
         method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ pedidoId: pedido.id, filialId, versao: pedido.versao }),
+        body: JSON.stringify({ pedidoId: pedido.id, filialId, versao: pedido.versao, enviarOlist }),
       });
       const json = await response.json();
       if (!response.ok) {
         if (response.status === 409) setConflito(true);
         throw new Error(json.error || "Não foi possível direcionar o pedido.");
       }
-      aoSalvar(filiais.find((filial) => filial.id === filialId)?.nome ?? "selecionada");
+      setConfirmando(false);
+      aoSalvar(filiais.find((filial) => filial.id === filialId)?.nome ?? "selecionada", json.status);
     } catch (error) { setErro(error instanceof Error ? error.message : "Falha ao direcionar o pedido."); }
     finally { envioEmAndamento.current = false; setSalvando(false); }
   }
@@ -48,7 +119,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
           <p className="mt-1 break-all text-xs text-slate-500">Solicitação de produção: {pedido.solicitacaoProducaoId}</p>
           <p className="mt-1 text-xs text-slate-500">Recebido em {dataHora(pedido.createdAt)}</p>
         </div>
-        <span className="rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">{pedido.filial ? "Direcionado" : "Aguardando filial"}</span>
+        <span className="rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">{rotulosStatusFila[pedido.status]}</span>
       </div>
       {pedido.filial && <p className="break-words text-sm text-slate-600">Filial atual: <strong>{pedido.filial.nome}</strong>{pedido.direcionadoEm ? ` · ${dataHora(pedido.direcionadoEm)}` : ""}</p>}
       {pedido.dadosPedido ? (
@@ -76,18 +147,31 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
       <form onSubmit={direcionar} className="space-y-3" aria-busy={salvando}>
         <label htmlFor={`filial-${pedido.id}`} className="block text-sm font-medium text-slate-700">{pedido.filial ? "Trocar filial" : "Direcionar para filial"}</label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-          <select id={`filial-${pedido.id}`} required className="input min-h-11 min-w-0 flex-1 sm:w-auto" value={filialId} disabled={salvando || conflito || filiais.length === 0} onChange={(event) => setFilialId(event.target.value)}>
+          <select id={`filial-${pedido.id}`} required className="input min-h-11 min-w-0 flex-1 sm:w-auto" value={filialId} disabled={salvando || conflito || !podeAlterar || filiais.length === 0} onChange={(event) => setFilialId(event.target.value)}>
             <option value="">Selecione a filial</option>
             {!filialAtualDisponivel && pedido.filial && <option value={pedido.filial.id} disabled>{pedido.filial.nome} (sem vínculo atual)</option>}
             {filiais.map((filial) => <option key={filial.id} value={filial.id}>{filial.nome}</option>)}
           </select>
-          <button type="submit" className={primario} disabled={salvando || conflito || !filialId || !filiais.some((filial) => filial.id === filialId) || filialId === pedido.filial?.id}>
-            {salvando ? "Salvando..." : pedido.filial ? "Salvar filial" : "Direcionar pedido"}
-          </button>
+          <div className="flex flex-wrap items-start gap-2">
+            <button type="submit" className={primario} disabled={salvando || conflito || !podeAlterar || !filialId || !filiais.some((filial) => filial.id === filialId)}>
+              {salvando ? "Salvando..." : "Salvar filial"}
+            </button>
+            <MaisOpcoesFila
+              disabled={salvando || conflito || !podeAlterar || !filialId || !filiais.some((filial) => filial.id === filialId)}
+              aoEnviar={() => { setErro(""); setConfirmando(true); }}
+            />
+          </div>
         </div>
-        {erro && <p role="alert" className="break-words text-sm text-red-700">{erro}</p>}
+        {erro && !confirmando && <p role="alert" className="break-words text-sm text-red-700">{erro}</p>}
         {conflito && <button type="button" onClick={aoAtualizar} className={secundario}>Atualizar fila</button>}
       </form>
+      {pedido.status === "PROCESSAR" && <p className="text-sm text-slate-600">Aguardando a futura etapa de envio para a Olist. Nenhum pedido foi criado por esta ação.</p>}
+      {confirmando && <ConfirmarEnvioOlist
+        filial={filiais.find((filial) => filial.id === filialId)?.nome ?? "selecionada"}
+        salvando={salvando} conflito={conflito} erro={erro}
+        aoFechar={() => { setConfirmando(false); setErro(""); }}
+        aoConfirmar={() => void salvarFilial(true)}
+      />}
     </article>
   );
 }
@@ -124,8 +208,8 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
   }, [token, situacao, pagina, atualizacao]);
 
   function atualizar() { setAtualizacao((valor) => valor + 1); }
-  function aoSalvar(filial: string) {
-    setMensagem(`Pedido direcionado para ${filial}.`);
+  function aoSalvar(filial: string, status: StatusFila) {
+    setMensagem(`Pedido atribuído a ${filial}. Status: ${rotulosStatusFila[status]}.`);
     atualizar();
   }
 
@@ -133,9 +217,10 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
     <section className="space-y-4" aria-label="Administração da fila de pedidos">
       <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0 sm:w-64">
-          <label htmlFor="situacao-fila" className="mb-2 block text-sm font-medium text-slate-700">Situação</label>
+          <label htmlFor="situacao-fila" className="mb-2 block text-sm font-medium text-slate-700">Status</label>
           <select id="situacao-fila" className="input min-h-11" value={situacao} onChange={(event) => { setSituacao(event.target.value as SituacaoFila); setPagina(1); setMensagem(""); }}>
-            <option value="pendente">Aguardando filial</option><option value="direcionado">Direcionados</option><option value="todos">Todos</option>
+            {Object.entries(filtrosStatusFila).map(([valor, status]) => <option key={valor} value={valor}>{rotulosStatusFila[status]}</option>)}
+            <option value="todos">Todos</option>
           </select>
         </div>
         <button type="button" onClick={atualizar} disabled={carregando} className={secundario}>Atualizar fila</button>
@@ -145,7 +230,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
       {carregando ? <p role="status" className="text-sm text-slate-600">Carregando fila de pedidos...</p> : !erro && dados ? (
         <>
           {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Seu aplicativo não possui filiais vinculadas. Vincule uma filial para direcionar os pedidos.</p>}
-          <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) nesta situação.</p>
+          <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) com o filtro selecionado.</p>
           {dados.pedidos.length === 0 ? <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum pedido encontrado nesta página.</p> : dados.pedidos.map((pedido) => (
             <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizar} />
           ))}

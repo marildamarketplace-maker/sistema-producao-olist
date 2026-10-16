@@ -97,3 +97,22 @@ Aceite: desktop em duas colunas e mobile em uma, ações em rodapé fixo dentro 
 ## Intervalo inicial de Solicitações cadastradas
 
 Ao abrir a tela, os filtros de criação usam o dia atual no calendário de São Paulo e sete dias anteriores, com limites inclusivos (por exemplo 09/10/2026–16/10/2026). Os campos ficam visíveis e editáveis; limpar filtros remove o intervalo. Entrega e outros filtros continuam avançados. A seção de solicitações em produção não recebe esse filtro. Testes cobrem viradas de dia UTC e de ano; a consulta continua limitada ao conjunto carregado pela tela, conforme o aviso existente.
+
+## Confirmação do envio e status da fila
+
+A migration `20261016220000_status_fila_fornecedor` introduziu o enum, posteriormente renomeado pela migration `20261016230000_renomear_status_fila_fornecedor` para `PENDENTE`, `PROCESSAR`, `CONCLUIDO`, `FALHADO`, `CANCELADO`, com valor inicial PENDENTE para pedidos novos e existentes. A atribuição da filial passa a ser independente do status: um pedido pode ter filial e continuar PENDENTE. A lista e seus filtros exibem os cinco estados; o filtro antigo `direcionado` continua aceito pela API como seleção por filial atribuída.
+
+O botão **Salvar filial** grava diretamente a filial, com status PENDENTE. Ao lado dele, **Mais opções → Enviar para a Olist** abre o diálogo **Deseja enviar o pedido para a Olist?**, inclusive quando a filial atual já estiver selecionada:
+
+- **Sim, marcar como PROCESSAR** salva a filial e muda o status para PROCESSAR.
+- **Cancelar** ou Escape fecha a confirmação sem alteração.
+
+Nenhuma dessas ações chama a Olist. PROCESSAR nesta etapa significa intenção de envio registrada, aguardando a implementação futura; não há worker ativo criado por esta alteração. CONCLUIDO, FALHADO e CANCELADO estão disponíveis no modelo e nos filtros, mas esta API não permite ao navegador atribuí-los diretamente. O status CONCLUIDO dependerá de confirmação real de criação na integração futura; não pode ser usado para simular sucesso.
+
+O PATCH aceita `enviarOlist` booleano (default false para clientes anteriores). Somente PENDENTE e FALHADO permitem salvar filial ou solicitar o envio; PROCESSAR, CONCLUIDO e CANCELADO retornam 409. A troca de filial, autor/data, mudança de status e incremento de versão são atômicos, com validação de versão e status no UPDATE para impedir alterações concorrentes. O banco exige filial para PROCESSAR, CONCLUIDO e FALHADO. A permissão específica da fila e o isolamento por aplicativo continuam obrigatórios.
+
+Aceite: localizar e escolher filial, salvar diretamente ou abrir Mais opções, selecionar Enviar para a Olist e confirmar/cancelar, observar status e filtrar a lista. O diálogo deve ser legível em desktop/mobile, operável por teclado, conter foco e restaurá-lo ao fechar; durante gravação deve bloquear repetição e fechamento. Falhas recuperáveis mantêm a seleção e aparecem dentro do diálogo; conflito exige atualização antes de nova tentativa.
+
+Validação: testes da API cobrem confirmação, não confirmação, tentativa de status forjado, cinco filtros, estados bloqueados, isolamento, permissão e concorrência. O teste impede chamadas externas. A migration foi aplicada no Supabase e a leitura posterior confirmou o pedido existente como PENDENTE. A conferência visual usa o componente real e dados fictícios; não cria pedidos na Olist nem confirma o fluxo autenticado de produção.
+
+O painel de Mais opções pode ser operado por botão e Tab, fecha ao clicar fora, ao perder foco ou por Escape e devolve o foco ao botão. A confirmação permanece sem chamada à Olist. Validação em navegador com dados fictícios conferiu salvar diretamente sem diálogo, abrir/fechar opções por teclado, confirmar PROCESSAR e layout em viewport estreito.
