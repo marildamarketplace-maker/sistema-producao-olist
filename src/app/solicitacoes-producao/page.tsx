@@ -2,7 +2,9 @@
 
 import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { ChevronDown, Download, ExternalLink, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, Download, ExternalLink, Eye, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
+import { EnviarFilaFornecedor } from "@/components/enviar-fila-fornecedor";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -388,6 +390,7 @@ export default function SolicitacoesProducaoPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
   const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
+  const [filaSolicitacaoId, setFilaSolicitacaoId] = useState<string | null>(null);
   const [envioModalOpen, setEnvioModalOpen] = useState(false);
   const [envioEtapa, setEnvioEtapa] = useState<1 | 2 | 3>(1);
   const [envioSolicitacao, setEnvioSolicitacao] = useState<Solicitacao | null>(null);
@@ -1514,6 +1517,9 @@ export default function SolicitacoesProducaoPage() {
                     )}
                     <td className="p-3">
                       <div className="flex justify-end gap-2">
+                        <Link href={`/solicitacoes-producao/${solicitacao.id}`} aria-label="Ver detalhes da produção" title="Ver detalhes da produção" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                          <Eye className="h-4 w-4" aria-hidden="true" />
+                        </Link>
                         {solicitacao.status === "em_producao" && (
                           <button
                             type="button"
@@ -1583,6 +1589,17 @@ export default function SolicitacoesProducaoPage() {
                               <XCircle className="h-4 w-4" />
                             </button>
                           </>
+                        )}
+                        {destacarDivisao && (
+                          <button
+                            type="button"
+                            onClick={() => setFilaSolicitacaoId(solicitacao.id)}
+                            disabled={!session || !usuario?.podeSolicitarProducao}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 disabled:opacity-40"
+                          >
+                            <Send className="h-4 w-4" aria-hidden="true" />
+                            Enviar para fila do Fornecedor
+                          </button>
                         )}
                         {destacarDivisao && (
                           <button
@@ -2069,6 +2086,13 @@ export default function SolicitacoesProducaoPage() {
         )}
       </section>
 
+      {filaSolicitacaoId && session?.access_token && (
+        <EnviarFilaFornecedor
+          solicitacaoId={filaSolicitacaoId}
+          token={session.access_token}
+          onClose={() => setFilaSolicitacaoId(null)}
+        />
+      )}
       {envioModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
           <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-xl">

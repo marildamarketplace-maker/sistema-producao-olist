@@ -60,6 +60,11 @@ export const menuItems: MenuItem[] = [
     label: "Pedidos",
     items: [
       {
+        label: "Fila de pedidos",
+        href: "/fornecedor/fila-pedidos",
+        permissions: ["podeEditarConfiguracao"],
+      },
+      {
         label: "Anotar produção",
         href: "/solicitacoes-producao",
         permissions: ["podeSolicitarProducao", "podeVisualizarProducao"],

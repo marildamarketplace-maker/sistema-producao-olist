@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+import { calcularAjustesEstoqueProducao, ORIGENS_ESTOQUE_PRODUCAO, saldoMovimentacoesProducao } from "@/lib/producao-ajustes-estoque";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -46,43 +48,37 @@ export async function POST(request: Request) {
 
       let quantidadeEstornada = 0;
       if (solicitacao.status === "concluida") {
-        const entradas = await tx.movimentacaoEstoque.groupBy({
-          by: ["produtoId", "sku"],
+        const movimentos = await tx.movimentacaoEstoque.findMany({
           where: {
             aplicativoId: autenticado.aplicativoId,
             referenciaId: solicitacao.id,
-            origem: "PRODUCAO",
-            tipoMovimento: "entrada",
+            origem: { in: ORIGENS_ESTOQUE_PRODUCAO },
           },
-          _sum: { quantidade: true },
+          select: { produtoId: true, sku: true, tipoMovimento: true, quantidade: true },
         });
-
-        const estornos = entradas
-          .map((entrada) => ({ ...entrada, quantidade: entrada._sum.quantidade ?? 0 }))
-          .filter((entrada) => entrada.quantidade > 0);
-
+        const estornos = calcularAjustesEstoqueProducao(saldoMovimentacoesProducao(movimentos), []);
         if (estornos.length > 0) {
           await tx.movimentacaoEstoque.createMany({
-            data: estornos.map((entrada) => ({
-              produtoId: entrada.produtoId,
-              sku: entrada.sku,
-              tipoMovimento: "saida",
-              quantidade: entrada.quantidade,
+            data: estornos.map((estorno) => ({
+              ...estorno,
               origem: "CANCELAMENTO_PRODUCAO",
               referenciaId: solicitacao.id,
-              observacao: "Estorno da entrada por cancelamento da solicitação concluída",
+              observacao: "Estorno da produção por cancelamento da solicitação concluída, considerando correções",
               aplicativoId: autenticado.aplicativoId,
             })),
           });
-          quantidadeEstornada = estornos.reduce((total, entrada) => total + entrada.quantidade, 0);
+          quantidadeEstornada = estornos.reduce((total, estorno) => total + estorno.quantidade, 0);
         }
       }
 
       return { eraConcluida: solicitacao.status === "concluida", quantidadeEstornada };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return NextResponse.json({ ok: true, ...resultado });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      return NextResponse.json({ error: "A produção foi alterada durante o cancelamento. Recarregue a página." }, { status: 409 });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao cancelar solicitação." },
       { status: 400 },

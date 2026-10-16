@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { observacaoMovimentacaoEstoque } from "@/lib/estoque-observacao";
+import { ORIGENS_ESTOQUE_PRODUCAO } from "@/lib/producao-ajustes-estoque";
 
 export async function GET(request: Request) {
   try {
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
     ]);
 
     const solicitacaoIds = [...new Set(movimentacoes.flatMap((movimento) =>
-      movimento.tipoMovimento === "entrada" && movimento.origem === "PRODUCAO" && movimento.referenciaId
+      ORIGENS_ESTOQUE_PRODUCAO.includes(movimento.origem) && movimento.referenciaId
         ? [movimento.referenciaId] : [],
     ))];
     const solicitacoes = solicitacaoIds.length > 0
@@ -56,6 +57,8 @@ export async function GET(request: Request) {
         id: movimento.id, produto_id: movimento.produtoId, sku: movimento.sku,
         tipo_movimento: movimento.tipoMovimento, quantidade: movimento.quantidade,
         origem: movimento.origem,
+        producao_id: ORIGENS_ESTOQUE_PRODUCAO.includes(movimento.origem) && movimento.referenciaId && observacoesProducao.has(movimento.referenciaId)
+          ? movimento.referenciaId : null,
         observacao: observacaoMovimentacaoEstoque(movimento, observacoesProducao),
         created_at: movimento.createdAt,
       })),

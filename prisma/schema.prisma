@@ -10,6 +10,9 @@ datasource db {
 model Aplicativo {
   id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
+  aplicativoPaiId           String?                      @map("aplicativo_pai_id") @db.Uuid
+  aplicativoPai             Aplicativo?                  @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  filiais                   Aplicativo[]                 @relation("AplicativoFiliais")
   jobs                      String                       @default("")
   whatsapp                  String                       @default("5537988031061") @db.Text
   olistClientId             String?                      @map("olist_client_id")
@@ -23,6 +26,9 @@ model Aplicativo {
   controlesBuscaOlist       ControleBuscaOlist[]
   formasPagamentoPlanos     FormaPagamentoOlistPlano[]
   formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
+  pedidosFilaOrigem         PedidoFornecedorQueue[] @relation("FilaOrigem")
+  pedidosFilaDestino        PedidoFornecedorQueue[] @relation("FilaDestino")
+  pedidosFilaFilial         PedidoFornecedorQueue[] @relation("FilaFilial")
   fornecedores              Fornecedor[]
   integracoesOlistToken     IntegracaoOlistToken[]
   itensBaixaEstoqueOlist    ItemBaixaEstoqueOlist[]
@@ -40,6 +46,7 @@ model Aplicativo {
   tarefasMidia              TarefaMidia[]
   usuarios                  Usuario[]
 
+  @@index([aplicativoPaiId], map: "idx_aplicativo_pai_id")
   @@map("aplicativo")
 }
 
@@ -171,6 +178,7 @@ model Usuario {
   podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   acessosPaginas                       AcessoPaginaUsuario[]
   fornecedoresComoVendedor             Fornecedor[]
+  pedidosFilaDirecionados              PedidoFornecedorQueue[]
   ocorrenciasTarefasMidiaConcluidas    OcorrenciaTarefaMidia[] @relation("UsuarioConclusaoTarefaMidia")
   tarefasMidiaResponsavel              TarefaMidia[]           @relation("ResponsavelTarefaMidia")
   aplicativo                           Aplicativo              @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -245,6 +253,7 @@ model Fornecedor {
   aplicativo               Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   meuPlanoPagamento        PlanoPagamento?               @relation(fields: [meuPlanoPagamentoId], references: [id])
   vendedor                 Usuario?                      @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
+  pedidosFila              PedidoFornecedorQueue[]
   pedidosSolicitacao       PedidoFornecedorSolicitacao[]
   produtos                 ProdutoFornecedor[]
 
@@ -341,6 +350,7 @@ model SolicitacaoProducao {
   createdAt          DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
   prioridadeProducao Boolean                       @default(false) @map("prioridade_producao")
   aplicativoId       String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  pedidosFila        PedidoFornecedorQueue[]
   pedidosFornecedor  PedidoFornecedorSolicitacao[]
   aplicativo         Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -947,4 +957,31 @@ model AcessoPaginaUsuario {
 
   @@id([usuarioId, pagina])
   @@map("acesso_pagina_usuario")
+}
+
+model PedidoFornecedorQueue {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoSolicitanteId String @map("aplicativo_solicitante_id") @db.Uuid
+  solicitacaoProducaoId String @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
+  aplicativoFornecedorId String @map("aplicativo_fornecedor_id") @db.Uuid
+  fornecedorId String @map("fornecedor_id") @db.Uuid
+  aplicativoFilialId String? @map("aplicativo_filial_id") @db.Uuid
+  direcionadoPorId String? @map("direcionado_por_id") @db.Uuid
+  direcionadoEm DateTime? @map("direcionado_em") @db.Timestamptz(6)
+  versao Int @default(0)
+  dadosPedido Json @map("dados_pedido") @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativoSolicitante Aplicativo @relation("FilaOrigem", fields: [aplicativoSolicitanteId], references: [id], onUpdate: NoAction)
+  aplicativoFornecedor Aplicativo @relation("FilaDestino", fields: [aplicativoFornecedorId], references: [id], onUpdate: NoAction)
+  solicitacaoProducao SolicitacaoProducao @relation(fields: [solicitacaoProducaoId], references: [id], onUpdate: NoAction)
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
+  aplicativoFilial Aplicativo? @relation("FilaFilial", fields: [aplicativoFilialId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  direcionadoPor Usuario? @relation(fields: [direcionadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([aplicativoSolicitanteId], map: "idx_pedido_fornecedor_queue_origem")
+  @@index([aplicativoFornecedorId, createdAt], map: "idx_pedido_fornecedor_queue_destino")
+  @@index([fornecedorId], map: "idx_pedido_fornecedor_queue_fornecedor")
+  @@index([aplicativoFilialId], map: "idx_pedido_fornecedor_queue_filial")
+  @@index([direcionadoPorId], map: "idx_pedido_fornecedor_queue_direcionado_por")
+  @@map("pedido_fornecedor_queue")
 }

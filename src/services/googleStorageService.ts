@@ -56,6 +56,24 @@ export async function verificarGoogleStorageBucketPrivado(bucket: string) {
   }
 }
 
+export async function lerGoogleStorageImagemPrivada(bucket: string, path: string) {
+  const objectPath = normalizeObjectPath(path);
+  const accessToken = await getGoogleAccessToken();
+  const response = await fetch(`${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok || !response.body) {
+    throw new GoogleStorageServiceError("Não foi possível carregar a foto de evidência.", { status: response.status });
+  }
+  // Evidências são JPEG normalizados pelo backend; nunca repassar conteúdo arbitrário como HTML.
+  if (response.headers.get("content-type")?.split(";")[0].trim() !== "image/jpeg") {
+    await response.body.cancel();
+    throw new GoogleStorageServiceError("Formato de evidência inválido.");
+  }
+  return response.body;
+}
+
 export async function uploadToGoogleStorage(
   input: UploadToGoogleStorageInput,
 ): Promise<UploadedGoogleStorageObject> {

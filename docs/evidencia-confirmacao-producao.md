@@ -8,10 +8,12 @@ No envio final, os endpoints recebem `multipart/form-data` com `foto`, `senha`, 
 
 1. Aplicar a migration Prisma `20261016160000_evidencia_confirmacao_producao` antes de publicar o código e gerar o Prisma Client.
 2. Configurar `GOOGLE_CLOUD_STORAGE_EVIDENCIAS_BUCKET` no ambiente de execução com um bucket privado. Não usar o bucket público do catálogo. O código exige `iamConfiguration.publicAccessPrevention=enforced` e falha sem enviar arquivos se essa proteção não estiver habilitada.
-3. Reutilizar `GOOGLE_CLOUD_CLIENT_EMAIL` e `GOOGLE_CLOUD_PRIVATE_KEY`. A conta de serviço precisa consultar a configuração do bucket (`storage.buckets.get`), criar objetos e apagar arquivos sem vínculo. Não são necessárias permissões para tornar objetos públicos.
+3. Reutilizar `GOOGLE_CLOUD_CLIENT_EMAIL` e `GOOGLE_CLOUD_PRIVATE_KEY`. A conta de serviço precisa consultar a configuração do bucket (`storage.buckets.get`), criar objetos, ler evidências (`storage.objects.get`) e apagar arquivos sem vínculo. Não são necessárias permissões para tornar objetos públicos.
 4. Publicar a aplicação e validar câmera/galeria em um celular real, senha incorreta, upload com falha e confirmação completa com um pedido de teste apropriado.
 
 A URL canônica do objeto, o bucket e o caminho são persistidos em `solicitacoes_producao.evidencia_url`, `evidencia_bucket` e `evidencia_storage_path`. O link permanece privado; não contém credenciais nem assinatura com expiração. A visualização direta exige acesso autorizado ao Google Cloud Storage. Confirmações históricas permanecem com os campos nulos.
+
+A página filha `/solicitacoes-producao/[id]`, acessível pelo link “Detalhes” em Anotar produção, permite visualizar e baixar a evidência. O servidor autentica o usuário, verifica as permissões da página e restringe a consulta ao aplicativo do usuário antes de carregar a foto. Bucket, caminho e URL privada não são enviados no JSON dos detalhes; a imagem é entregue pelo endpoint autenticado `/api/solicitacoes-producao/[id]/evidencia`, sem cache compartilhado.
 
 ## Limites e consistência
 

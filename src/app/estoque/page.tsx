@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
+import { MovimentacoesEstoqueModal, type MovimentacaoEstoqueResumo } from "@/components/movimentacoes-estoque-modal";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 
@@ -14,16 +15,7 @@ type Produto = {
   meta_estoque: number | null;
 };
 
-type Movimentacao = {
-  id: string;
-  produto_id: string;
-  sku: string;
-  tipo_movimento: "entrada" | "saida";
-  quantidade: number;
-  origem: string;
-  observacao: string | null;
-  created_at: string;
-};
+type Movimentacao = MovimentacaoEstoqueResumo;
 
 type LinhaEstoque = Produto & {
   total_entradas: number;
@@ -704,68 +696,11 @@ export default function EstoquePage() {
       )}
 
       {produtoMovimentacoesAberto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Movimentacoes de estoque
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  {produtoMovimentacoesAberto.sku} - {movimentacoesProdutoAberto.length} movimentacoes
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setProdutoMovimentacoesAberto(null)}
-                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Fechar
-              </button>
-            </div>
-
-            <div className="overflow-y-auto p-5">
-              {movimentacoesProdutoAberto.length === 0 ? (
-                <p className="text-sm text-slate-600">Nenhuma movimentacao para este item.</p>
-              ) : (
-                <table className="min-w-full border-collapse text-sm">
-                  <thead className="sticky top-0 bg-white">
-                    <tr className="border-b border-slate-200 text-left text-slate-600">
-                      <th className="p-3">Data</th>
-                      <th className="p-3">Tipo</th>
-                      <th className="p-3">Quantidade</th>
-                      <th className="p-3">Origem</th>
-                      <th className="p-3">Observacao</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {movimentacoesProdutoAberto.map((mov) => (
-                      <tr key={mov.id} className="border-b border-slate-100">
-                        <td className="p-3 text-slate-700">
-                          {new Date(mov.created_at).toLocaleString("pt-BR")}
-                        </td>
-                        <td className="p-3">
-                          <span
-                            className={`rounded-md px-2 py-1 text-xs font-semibold uppercase ${
-                              mov.tipo_movimento === "entrada"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-red-50 text-red-700"
-                            }`}
-                          >
-                            {mov.tipo_movimento}
-                          </span>
-                        </td>
-                        <td className="p-3 font-semibold text-slate-900">{mov.quantidade}</td>
-                        <td className="p-3 text-slate-700">{mov.origem}</td>
-                        <td className="p-3 text-slate-700">{mov.observacao || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
+        <MovimentacoesEstoqueModal
+          sku={produtoMovimentacoesAberto.sku}
+          movimentacoes={movimentacoesProdutoAberto}
+          onFechar={() => setProdutoMovimentacoesAberto(null)}
+        />
       )}
       </div>
     </AccessGuard>
