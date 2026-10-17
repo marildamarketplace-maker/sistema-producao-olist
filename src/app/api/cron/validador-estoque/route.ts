@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
-import { obterMensagemErro, registrarErro } from "@/lib/error-handler";
+import { obterMensagemErro } from "@/lib/error-handler";
 import { criarNotification } from "@/lib/notification";
 import { gerarSolicitacaoPorPedidosOlist } from "@/lib/olist";
 import { prisma } from "@/lib/prisma";
 import {
-  criarNotificationErroValidadorEstoque,
   criarNotificationFaltaEstoque,
   executarValidadorEstoque,
 } from "@/lib/validador-estoque-job";
@@ -97,19 +96,10 @@ export async function GET(request: NextRequest) {
           notificacaoCriada: temFaltaEstoque,
         });
       } catch (error) {
-        const notification = criarNotificationErroValidadorEstoque({
-          error,
+        console.error("[olist-api] Falha no job VALIDADOR_ESTOQUE.", {
           aplicativoId,
+          tipoErro: error instanceof Error ? error.name : "Erro desconhecido",
         });
-        try {
-          await criarNotification({ to: whatsapp, ...notification });
-        } catch (notificationError) {
-          await registrarErro({
-            contexto: "[olist-api] Falha ao registrar erro do VALIDADOR_ESTOQUE.",
-            error: notificationError,
-            aplicativoId,
-          });
-        }
         falhas.push({ aplicativoId, erro: obterMensagemErro(error) });
       }
     }
@@ -135,13 +125,9 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     const data = { error: obterMensagemErro(error) };
-    const response = await registrarErro({
-      contexto: "[olist-api] Falha no job VALIDADOR_ESTOQUE.",
-      error,
-      tituloNotification: "Erro no validador de estoque Olist",
-      data,
-      status: 500,
+    console.error("[olist-api] Falha no job VALIDADOR_ESTOQUE.", {
+      tipoErro: error instanceof Error ? error.name : "Erro desconhecido",
     });
-    return response ?? NextResponse.json(data, { status: 500 });
+    return NextResponse.json(data, { status: 500 });
   }
 }

@@ -196,6 +196,7 @@ test("monta o resumo da baixa com quantidades e datas", () => {
     new Date("2026-10-02T12:00:00.000Z"),
   );
 
+  assert.ok(notification);
   assert.equal(notification.titulo, "Resumo da baixa automática de estoque Olist");
   assert.match(notification.mensagem, /Executada em: 02\/10\/2026, 09:00:00/);
   assert.match(notification.mensagem, /Período consultado: 30\/09\/2026, 23:50:00 até 01\/10\/2026, 23:50:00/);
@@ -216,4 +217,20 @@ test("monta a notification de qualquer erro sem incluir stack trace", () => {
   assert.match(notification.mensagem, /Erros: 1/);
   assert.match(notification.mensagem, /Detalhe: Falha ao confirmar a baixa/);
   assert.doesNotMatch(notification.mensagem, /at .*\.ts:/);
+});
+
+
+test("não cria resumo quando não existem itens efetivamente baixados", () => {
+  const notification = criarResumoNotificationBaixaEstoqueOlist({
+    periodo_inicio: "2026-10-01T02:50:00.000Z",
+    periodo_fim: "2026-10-02T02:50:00.000Z",
+    pedidos_encontrados: 2,
+    pedidos_ignorados: 0,
+    pedidos_confirmados: 0,
+    pedidos_pendentes: 2,
+    itens_baixados: 0,
+    baixa_id: null,
+    cursor_atualizado: false,
+  });
+  assert.equal(notification, null);
 });

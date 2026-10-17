@@ -119,27 +119,6 @@ export function criarNotificationFaltaEstoque(
   };
 }
 
-export function criarNotificationErroValidadorEstoque(input: {
-  error: unknown;
-  aplicativoId?: string | null;
-  ocorridoEm?: Date;
-}): ConteudoNotification {
-  const detalhe = input.error instanceof Error
-    ? input.error.message
-    : "Erro inesperado ao executar o job.";
-
-  return {
-    titulo: "Erro no validador de estoque Olist",
-    mensagem: [
-      "O job VALIDADOR_ESTOQUE falhou.",
-      "",
-      `Data do erro: ${formatarDataHoraSaoPaulo(input.ocorridoEm ?? new Date())}`,
-      `Aplicativo: ${input.aplicativoId ?? "não identificado"}`,
-      `Detalhe: ${detalhe.slice(0, 1_000)}`,
-    ].join("\n"),
-  };
-}
-
 export async function executarValidadorEstoque(
   input: { aplicativoId: string; executadoEm?: Date },
   gerarSolicitacao: GerarSolicitacao,

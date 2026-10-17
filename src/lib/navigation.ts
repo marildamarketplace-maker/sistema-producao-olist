@@ -132,6 +132,11 @@ export const menuItems: MenuItem[] = [
         permissions: ["podeVisualizarCategoriasMidia"],
       },
       {
+        label: "Calendário Comercial",
+        href: "/controle-midia/calendario",
+        permissions: ["podeVisualizarTarefasMidia"],
+      },
+      {
         label: "Gestão de Tarefas",
         href: "/controle-midia/tarefas",
         permissions: ["podeVisualizarTarefasMidia"],

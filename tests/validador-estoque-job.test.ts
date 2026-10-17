@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NenhumItemElegivelOlistError } from "../src/lib/olist-errors";
 import {
-  criarNotificationErroValidadorEstoque,
   criarNotificationFaltaEstoque,
   executarValidadorEstoque,
   SITUACOES_VALIDADOR_ESTOQUE,
@@ -83,17 +82,18 @@ test("monta alerta com os itens que precisam de nova solicitação", () => {
   assert.match(notification.mensagem, /demanda 10 \| estoque 1 \| em produção 2 \| PRIORIDADE/);
 });
 
-test("monta alerta de falha sem expor stack trace", () => {
-  const notification = criarNotificationErroValidadorEstoque({
-    error: new Error("Falha ao consultar Olist"),
-    aplicativoId: "app-1",
-    ocorridoEm: new Date("2026-10-03T16:00:00.000Z"),
-  });
-
-  assert.match(notification.mensagem, /Data do erro: 03\/10\/2026, 13:00:00/);
-  assert.match(notification.mensagem, /Aplicativo: app-1/);
-  assert.match(notification.mensagem, /Detalhe: Falha ao consultar Olist/);
-  assert.doesNotMatch(notification.mensagem, /at .*\.ts:/);
+test("preserva resultado sem itens para produção sem criar alerta de falha", async () => {
+  const resultado = criarResultado();
+  resultado.itens = [];
+  resultado.total_itens = 0;
+  const resposta = await executarValidadorEstoque(
+    { aplicativoId: "app-1" },
+    async () => resultado,
+  );
+  assert.equal(resposta.tipo, "VALIDADO");
+  if (resposta.tipo === "VALIDADO") {
+    assert.equal(resposta.resultado.itens.length, 0);
+  }
 });
 
 test("limita mensagens extensas e informa quantos itens foram omitidos", () => {

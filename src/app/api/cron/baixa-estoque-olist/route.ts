@@ -9,7 +9,6 @@ import {
 } from "@/lib/olist";
 import { criarNotification } from "@/lib/notification";
 import {
-  criarErroNotificationBaixaEstoqueOlist,
   criarResumoNotificationBaixaEstoqueOlist,
 } from "@/lib/notificacoes-baixa-estoque-olist";
 import { prisma } from "@/lib/prisma";
@@ -76,7 +75,7 @@ async function registrarNotificationSemInterromper(input: {
   } catch (error) {
     await registrarErro({
       contexto: "[olist-api] Falha ao registrar notification da baixa automática.",
-      error,
+      error: new Error(error instanceof Error ? error.name : "Erro desconhecido"),
       notificar: false,
     });
   }
@@ -101,7 +100,9 @@ export async function GET(request: NextRequest) {
         });
 
         const resumo = criarResumoNotificationBaixaEstoqueOlist(resultado);
-        await registrarNotificationSemInterromper({ to: whatsapp, ...resumo });
+        if (resumo) {
+          await registrarNotificationSemInterromper({ to: whatsapp, ...resumo });
+        }
         resultados.push({ aplicativoId, ...resultado });
 
         console.info("[olist-api] Baixa automática concluída para aplicativo.", {
@@ -113,16 +114,9 @@ export async function GET(request: NextRequest) {
           cursorAtualizado: resultado.cursor_atualizado,
         });
       } catch (error) {
-        const notificationErro = criarErroNotificationBaixaEstoqueOlist({
-          error,
+        console.error("[olist-api] Falha no job de baixa automática.", {
           aplicativoId,
-        });
-        await registrarErro({
-          contexto: "[olist-api] Falha no job de baixa automática.",
-          error,
-          aplicativoId,
-          tituloNotification: notificationErro.titulo,
-          mensagemNotification: notificationErro.mensagem,
+          tipoErro: error instanceof Error ? error.name : "Erro desconhecido",
         });
         falhas.push({ aplicativoId, erro: obterMensagemErro(error) });
       }
@@ -139,20 +133,11 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const aplicativoId =
       process.env.OLIST_BAIXA_AUTOMATICA_APLICATIVO_ID?.trim();
-    const notificationErro = criarErroNotificationBaixaEstoqueOlist({
-      error,
-      aplicativoId,
-    });
     const data = { error: obterMensagemErro(error) };
-    const response = await registrarErro({
-      contexto: "[olist-api] Falha no job de baixa automática.",
-      error,
+    console.error("[olist-api] Falha no job de baixa automática.", {
       aplicativoId,
-      tituloNotification: notificationErro.titulo,
-      mensagemNotification: notificationErro.mensagem,
-      data,
-      status: 500,
+      tipoErro: error instanceof Error ? error.name : "Erro desconhecido",
     });
-    return response ?? NextResponse.json(data, { status: 500 });
+    return NextResponse.json(data, { status: 500 });
   }
 }

@@ -31,7 +31,9 @@ function formatarDataHora(data: Date | string) {
 export function criarResumoNotificationBaixaEstoqueOlist(
   resultado: ResultadoBaixaAutomatica,
   executadoEm = new Date(),
-): ConteudoNotification {
+): ConteudoNotification | null {
+  if (!(resultado.itens_baixados > 0)) return null;
+
   return {
     titulo: "Resumo da baixa automática de estoque Olist",
     mensagem: [

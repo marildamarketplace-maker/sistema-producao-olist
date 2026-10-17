@@ -12,15 +12,15 @@
     },
     {
       "path": "/api/cron/baixa-estoque-olist",
-      "schedule": "50 2 * * *"
+      "schedule": "0 9 * * *"
     },
     {
       "path": "/api/cron/validador-estoque",
-      "schedule": "0 1,11,16 * * *"
+      "schedule": "0 11,16 * * 1-5"
     },
     {
       "path": "/api/cron/cobrar-confirmacao-producao",
-      "schedule": "0 19 * * *"
+      "schedule": "30 20 * * 1-5"
     },
     {
       "path": "/api/cron/processar-estampas",
