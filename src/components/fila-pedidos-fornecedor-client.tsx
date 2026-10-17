@@ -11,7 +11,7 @@ const secundario = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-s
 const primario = "min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:cursor-not-allowed disabled:opacity-50";
 const dataHora = (valor: string) => new Date(valor).toLocaleString("pt-BR");
 
-function MaisOpcoesFila({ disabled, aoEnviar }: { disabled: boolean; aoEnviar: () => void }) {
+function MaisOpcoesFila({ disabled, aoEnviar, consulta = false }: { disabled: boolean; aoEnviar: () => void; consulta?: boolean }) {
   const [aberto, setAberto] = useState(false);
   const painelId = useId();
   const container = useRef<HTMLDivElement>(null);
@@ -36,7 +36,7 @@ function MaisOpcoesFila({ disabled, aoEnviar }: { disabled: boolean; aoEnviar: (
         <div id={painelId} role="group" aria-label="Mais opções do pedido" className="absolute right-0 z-10 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
           <button type="button" onClick={() => { setAberto(false); botao.current?.focus(); aoEnviar(); }}
             className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500">
-            <Send className="h-4 w-4 shrink-0" aria-hidden="true" />Enviar para a Olist
+            <Send className="h-4 w-4 shrink-0" aria-hidden="true" />{consulta ? "Consultar envio na Olist" : "Enviar para a Olist"}
           </button>
         </div>
       )}
@@ -130,6 +130,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
               {salvando ? "Salvando..." : "Salvar filial"}
             </button>
             <MaisOpcoesFila
+              consulta={pedido.status === "PROCESSAR" || pedido.status === "CONCLUIDO"}
               disabled={salvando || conflito || pedido.status === "CANCELADO" || !filialId || filialId !== pedido.filial?.id}
               aoEnviar={() => { setErro(""); setConfirmando(true); }}
             />
@@ -154,7 +155,9 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
   const mensagemRef = useRef<HTMLParagraphElement>(null);
+  const focarAtualizacao = useRef(false);
 
+  useEffect(() => { if (!carregando && focarAtualizacao.current) { focarAtualizacao.current = false; mensagemRef.current?.focus(); } }, [carregando]);
   useEffect(() => { if (mensagem) mensagemRef.current?.focus(); }, [mensagem]);
 
   useEffect(() => {
@@ -177,6 +180,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
   }, [token, situacao, pagina, atualizacao]);
 
   function atualizar() { setAtualizacao((valor) => valor + 1); }
+  function atualizarAposEnvio() { focarAtualizacao.current = true; setMensagem("Resultado atualizado. Consulte o status do pedido na fila."); atualizar(); }
   function aoSalvar(filial: string, status: StatusFila) {
     setMensagem(`Pedido atribuído a ${filial}. Status: ${rotulosStatusFila[status]}.`);
     atualizar();
@@ -201,7 +205,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
           {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Seu aplicativo não possui filiais vinculadas. Vincule uma filial para direcionar os pedidos.</p>}
           <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) com o filtro selecionado.</p>
           {dados.pedidos.length === 0 ? <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum pedido encontrado nesta página.</p> : dados.pedidos.map((pedido) => (
-            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizar} />
+            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} />
           ))}
           <nav aria-label="Páginas da fila" className="flex flex-wrap items-center justify-between gap-3">
             <button type="button" disabled={pagina === 1} onClick={() => setPagina((valor) => valor - 1)} className={secundario}>Anterior</button>

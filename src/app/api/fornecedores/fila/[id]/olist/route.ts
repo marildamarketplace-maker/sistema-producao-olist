@@ -4,16 +4,16 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { dadosPedidoFilaSchema } from "@/lib/fila-fornecedor-contrato";
-import { selecoesFilaOlistSchema, type SelecoesFilaOlist } from "@/lib/fila-olist-contrato";
+import { selecoesFilaOlistSchema } from "@/lib/fila-olist-contrato";
 import { montarPedidoFornecedor, ErroMontagemFornecedor } from "@/lib/pedido-fornecedor-montagem";
 import { marcarEnvioInterrompido, enviarFornecedor, envioBloqueado, envioExpirado, marcadorFornecedor, ErroEnvioFornecedor } from "@/lib/envio-fornecedor";
-import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasPagamentoOlistApi, obterCadastroFornecedorOlist, obterPedidoOlistApi } from "@/lib/olist";
-import { getAplicativoOlistConfig } from "@/lib/aplicativo";
+import { obterPedidoOlistApi } from "@/lib/olist";
+import { consultarCadastrosFilaOlist, validarCadastros, nome, ErroFilaOlist as ErroFila } from "@/lib/fila-olist-cadastros";
 import { getValidOlistAccessToken } from "@/lib/olist";
 
 export const maxDuration = 120;
 
-class ErroFila extends Error { constructor(message: string, readonly status = 400) { super(message); } }
+
 type Contexto = { params: Promise<{ id: string }> };
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 async function autorizar(request: Request, contexto: Contexto) {
@@ -38,8 +38,6 @@ function falha(error: unknown) {
   return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da filial e tente atualizar a fila." }, { status: 502 });
 }
 const resposta = (value: unknown) => NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
-function nome(item: Record<string, unknown>) { return String(item.nome ?? item.descricao ?? item.id); }
-function ativo(item: Record<string, unknown>) { return !["I", "E", "INATIVO", "2", "B"].includes(String(item.situacao ?? "A").toUpperCase()); }
 
 export async function GET(request: Request, contexto: Contexto) {
   try {
@@ -49,36 +47,13 @@ export async function GET(request: Request, contexto: Contexto) {
     const recurso = params.get("recurso") ?? "inicial";
     if (recurso === "inicial") {
       await marcarEnvioInterrompido(fila.solicitacaoProducaoId);
-      const [config, envio] = await Promise.all([
-        prisma.configFornecedorFilial.findUnique({ where: { fornecedorId_filialId: { fornecedorId: fila.fornecedorId, filialId: filial.id } } }),
-        prisma.envioFornecedor.findUnique({ where: { solicitacaoId: fila.solicitacaoProducaoId }, include: { aplicativo: { select: { nome: true } } } }),
-      ]);
-      const configuracao = config?.selecoes as { selecoes?: Prisma.JsonValue; cadastros?: Prisma.JsonValue } | null;
-      return resposta({ filial, selecoes: configuracao?.selecoes ?? config?.selecoes ?? null, cadastros: configuracao?.cadastros ?? null, envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
+      const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId: fila.solicitacaoProducaoId }, include: { aplicativo: { select: { nome: true } } } });
+      const snapshot = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
+      const configuracao = snapshot.success && snapshot.data.olist?.filialId === filial.id ? snapshot.data.olist : null;
+      return resposta({ filial, selecoes: configuracao?.selecoes ?? null, envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
         aplicativoNome: envio.aplicativo?.nome, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId } : null });
     }
-    await validarIntegracao(filial.id);
-    const filtros = z.object({ busca: z.string().max(120), pagina: z.coerce.number().int().min(1).max(1000) }).safeParse({ busca: params.get("busca") ?? "", pagina: params.get("pagina") ?? 1 });
-    if (!filtros.success) throw new ErroFila("Pesquisa inválida.");
-    const { busca, pagina } = filtros.data;
-    const limit = 50, offset = (pagina - 1) * limit;
-    if (recurso === "planos") {
-      const formaId = z.coerce.number().int().positive().safeParse(params.get("formaId"));
-      if (!formaId.success) throw new ErroFila("Selecione uma forma de pagamento.");
-      const planos = await prisma.formaPagamentoOlistPlano.findMany({ where: { aplicativoId: filial.id, formaOlistId: String(formaId.data), planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { id: true, nome: true } } } });
-      return resposta({ itens: planos.map((p) => p.planoPagamento) });
-    }
-    let resultado;
-    if (recurso === "clientes") resultado = await listarContatosOlistApi(filial.id, { nome: busca || undefined, situacao: "A", limit, offset });
-    else if (recurso === "vendedores") resultado = await listarVendedoresOlistApi(filial.id, { nome: busca || undefined, limit, offset });
-    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filial.id, { nome: busca || undefined, situacao: "A", limit, offset });
-    else if (recurso === "servicos") resultado = await listarServicosOlistApi(filial.id, { nome: busca || undefined, limit, offset });
-    else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filial.id, { nome: busca || undefined, situacao: 1, limit, offset });
-    else throw new ErroFila("Consulta inválida.");
-    return resposta({ itens: resultado.itens.filter((i) => ativo(i as Record<string, unknown>)).map((i) => {
-      const item = i as Record<string, unknown>, precos = item.precos as Record<string, unknown> | undefined;
-      return { id: Number(item.id), nome: nome(item), referencia: String(item.codigo ?? item.sku ?? ""), preco: Number(precos?.preco ?? item.preco ?? 0) };
-    }), pagina, mais: resultado.itens.length === limit });
+    return resposta(await consultarCadastrosFilaOlist(filial.id, params));
   } catch (error) { return falha(error); }
 }
 const bodySchema = z.discriminatedUnion("acao", [
@@ -141,7 +116,7 @@ export async function POST(request: Request, contexto: Contexto) {
     const selecoes = body.selecoes;
     const tecidos = new Set(dados.data.itens.map((i) => i.tecido.id));
     if (selecoes.tecidos.length !== tecidos.size || new Set(selecoes.tecidos.map((i) => i.tecidoId)).size !== tecidos.size || selecoes.tecidos.some((i) => !tecidos.has(i.tecidoId))) throw new ErroFila("Associe exatamente um produto para cada tecido.");
-    const { plano, cliente, forma, vendedor, nomes, referencias } = await validarCadastros(filial.id, selecoes, dados.data.itens.some((i) => i.corteLaser));
+    const { plano, cliente, forma, vendedor, nomes } = await validarCadastros(filial.id, selecoes, dados.data.itens.some((i) => i.corteLaser));
     const linhas = dados.data.itens.map((item) => {
       const produto = selecoes.tecidos.find((i) => i.tecidoId === item.tecido.id)!;
       return { referencia: String(produto.id), nome: item.tecido.nome, preco: produto.preco, quantidade: item.quantidadeTecido,
@@ -151,50 +126,19 @@ export async function POST(request: Request, contexto: Contexto) {
       formaId: selecoes.formaId, plano: plano.planoPagamento.nome, tipoVenda: selecoes.tipoVenda, observacao: dados.data.observacao },
       selecoes.laser ? { referencia: String(selecoes.laser.id), preco: selecoes.laser.preco } : null);
     payload.observacoesInternas += `\n\n${marcadorFornecedor(fila.solicitacaoProducaoId)}`;
-    const previa = await prisma.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao,
-      payload: json(payload), selecoes: json(selecoes), expiraEm: new Date(Date.now() + 15 * 60_000) } });
-    const configuracao = { selecoes, cadastros: { nomes: Object.fromEntries(nomes), referencias: Object.fromEntries(referencias), cliente: nome(cliente), vendedor: nome(vendedor), forma: nome(forma) } };
-    await prisma.configFornecedorFilial.upsert({ where: { fornecedorId_filialId: { fornecedorId: fila.fornecedorId, filialId: filial.id } },
-      create: { fornecedorId: fila.fornecedorId, filialId: filial.id, selecoes: json(configuracao) }, update: { selecoes: json(configuracao) } });
-    return resposta({ previaId: previa.id, payload, cliente: nome(cliente), vendedor: nome(vendedor), forma: nome(forma), plano: plano.planoPagamento.nome,
+    const versao = fila.versao + 1;
+    const previa = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${fila.solicitacaoProducaoId}::uuid FOR UPDATE`;
+      const envioAtual = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: fila.solicitacaoProducaoId } });
+      if (envioAtual && envioBloqueado(envioAtual.estado)) throw new ErroFila("Existe uma tentativa em andamento ou sem conferência. Atualize a fila.", 409);
+      const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId,
+        aplicativoFilialId: filial.id, versao: fila.versao, status: { in: ["PENDENTE", "FALHADO"] } },
+        data: { dadosPedido: json({ ...(fila.dadosPedido as Prisma.JsonObject), olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 } } });
+      if (atualizado.count !== 1) throw new ErroFila("Pedido alterado durante a revisão. Atualize a fila.", 409);
+      return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao,
+        payload: json(payload), selecoes: json(selecoes), expiraEm: new Date(Date.now() + 15 * 60_000) } });
+    });
+    return resposta({ previaId: previa.id, versao, payload, cliente: nome(cliente), vendedor: nome(vendedor), forma: nome(forma), plano: plano.planoPagamento.nome,
       produtos: Object.fromEntries(nomes), filial, expiraEm: previa.expiraEm });
   } catch (error) { return falha(error); }
-}
-
-async function validarIntegracao(filialId: string) {
-  const config = await getAplicativoOlistConfig(filialId);
-  if (!config.clientId || !config.clientSecret) throw new ErroFila("Configure o OAuth da Olist no aplicativo da filial antes de continuar.");
-  await getValidOlistAccessToken(filialId).catch(() => { throw new ErroFila("Conecte novamente a integração Olist da filial antes de continuar."); });
-}
-async function validarCadastros(filialId: string, selecoes: SelecoesFilaOlist, precisaLaser: boolean) {
-    await validarIntegracao(filialId);
-    const plano = await prisma.formaPagamentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } });
-    if (!plano) throw new ErroFila("Plano não associado à forma de pagamento nesta filial.");
-    const cliente = await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId);
-    const forma = await obterCadastroFornecedorOlist(filialId, "formas-pagamento", selecoes.formaId);
-    if (!ativo(cliente) || !ativo(forma)) throw new ErroFila("Cliente ou forma de pagamento inativos.");
-    // Vendedores não possuem endpoint de detalhe. Valida por paginação na mesma conta.
-    let vendedor: Record<string, unknown> | undefined;
-    for (let pagina = 0; pagina < 100; pagina++) {
-      const lista = await listarVendedoresOlistApi(filialId, { limit: 100, offset: pagina * 100 });
-      vendedor = lista.itens.find((i) => Number(i.id) === selecoes.vendedorId);
-      if (vendedor || lista.itens.length < 100) break;
-    }
-    if (!vendedor || !ativo(vendedor)) throw new ErroFila("Vendedor indisponível na conta da filial.");
-    const nomes = new Map<string, string>();
-    const referencias = new Map<string, string>();
-    for (const produto of selecoes.tecidos) {
-      const cadastro = await obterCadastroFornecedorOlist(filialId, "produtos", produto.id);
-      if (!ativo(cadastro)) throw new ErroFila("Produto ou serviço inativo na conta da filial.");
-      nomes.set(`P:${produto.id}`, nome(cadastro));
-      referencias.set(`P:${produto.id}`, String(cadastro.sku ?? cadastro.codigo ?? ""));
-    }
-    if (selecoes.laser) {
-      const servico = await obterCadastroFornecedorOlist(filialId, "servicos", selecoes.laser.id);
-      if (!ativo(servico)) throw new ErroFila("Serviço de laser inativo na filial.");
-      nomes.set(`S:${selecoes.laser.id}`, nome(servico));
-      referencias.set(`S:${selecoes.laser.id}`, String(servico.codigo ?? ""));
-    }
-    if (precisaLaser && !selecoes.laser) throw new ErroFila("Selecione o serviço de corte a laser e seu preço.");
-    return { plano, cliente, forma, vendedor, nomes, referencias };
 }

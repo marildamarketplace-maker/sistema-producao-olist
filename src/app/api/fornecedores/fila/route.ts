@@ -1,3 +1,6 @@
+import { dadosOlistFilaSchema } from "@/lib/fila-olist-contrato";
+import { autorizarOlistOrigem } from "@/lib/fila-fornecedor-origem";
+import { validarSelecoesParciais, ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import type { DadosPedidoFila } from "@/lib/fila-fornecedor-contrato";
 import { createHash } from "node:crypto";
 import { aplicarEdicaoPedidoFila, pedidoFornecedorEditavelSchema } from "@/lib/pedido-fornecedor-edicao";
@@ -10,6 +13,7 @@ import { montarDadosPedidoFila } from "@/lib/pedido-fornecedor-queue";
 const entrada = z.object({
   fornecedorId: z.guid(), solicitacaoId: z.guid(),
   filialId: z.guid().nullable().optional(),
+  olist: dadosOlistFilaSchema.optional(),
   acao: z.enum(["preview", "enviar"]).optional(),
   dadosEditados: pedidoFornecedorEditavelSchema.optional(),
   revisao: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -24,6 +28,7 @@ async function autorizar(request: Request) {
   return { aplicativoId: usuario.aplicativoId, usuarioId: autenticado.id, podeSelecionarFilial: usuario.podeSelecionarFilialFornecedor };
 }
 function falha(error: unknown) {
+  if (error instanceof ErroFilaOlist) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof ErroFila) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
     return NextResponse.json({ error: "Esta solicitação já está na fila do fornecedor." }, { status: 409 });
@@ -50,8 +55,14 @@ export async function POST(request: Request) {
     const { aplicativoId, usuarioId, podeSelecionarFilial } = await autorizar(request);
     const parsed = entrada.safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new ErroFila("Fornecedor e solicitação devem possuir IDs válidos.");
-    const { fornecedorId, solicitacaoId, acao, dadosEditados, revisao, filialId } = parsed.data;
+    const { fornecedorId, solicitacaoId, acao, dadosEditados, revisao, filialId, olist } = parsed.data;
     if (filialId && !podeSelecionarFilial) throw new ErroFila("Sem permissão para selecionar filial ao enviar para fila.", 403);
+    if (olist) {
+      if (!filialId || olist.filialId !== filialId) throw new ErroFila("Os dados Olist devem pertencer à filial selecionada.");
+      await autorizarOlistOrigem(request, { fornecedorId, filialId, solicitacaoId });
+      // Não manter transações e locks de produção abertos durante consultas externas.
+      await validarSelecoesParciais(filialId, olist.selecoes);
+    }
     const registro = await prisma.$transaction(async (tx) => {
       // Serializa com alterações da solicitação; a restrição UNIQUE cobre envios concorrentes.
       await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${solicitacaoId}::uuid AND aplicativo_id = ${aplicativoId}::uuid FOR UPDATE`;
@@ -89,12 +100,18 @@ export async function POST(request: Request) {
         try { dadosFinais = aplicarEdicaoPedidoFila(original, dadosEditados, tecidos); }
         catch (error) { throw new ErroFila(error instanceof Error ? error.message : "Dados editados inválidos."); }
       }
+      if (olist) {
+        const permitidos = new Set(dadosFinais.itens.map((item) => item.tecido.id));
+        const ids = olist.selecoes.tecidos?.map((item) => item.tecidoId) ?? [];
+        if (new Set(ids).size !== ids.length || ids.some((id) => !permitidos.has(id))) throw new ErroFila("Os produtos Olist devem corresponder aos tecidos revisados.");
+        dadosFinais = { ...dadosFinais, olist };
+      }
       return tx.pedidoFornecedorQueue.create({ data: {
         aplicativoSolicitanteId: aplicativoId, solicitacaoProducaoId: solicitacaoId,
         aplicativoFornecedorId: fornecedor.aplicativoPaiId, fornecedorId,
         dadosPedido: dadosFinais,
         aplicativoFilialId: filialId ?? null,
-        status: filialId ? "PROCESSAR" : "PENDENTE",
+        status: "PENDENTE",
         direcionadoPorId: filialId ? usuarioId : null,
         direcionadoEm: filialId ? new Date() : null,
       }, select: { id: true } });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dadosOlistFilaSchema } from "./fila-olist-contrato";
 
 const itemSchema = z.object({
   produtoId: z.string(),
@@ -17,6 +18,7 @@ const itemSchema = z.object({
 
 export const dadosPedidoFilaSchema = z.object({
   versao: z.literal(1),
+  olist: dadosOlistFilaSchema.optional(),
   itens: z.array(itemSchema).min(1),
   observacao: z.string().nullable().optional(),
 });

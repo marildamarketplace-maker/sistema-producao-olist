@@ -46,8 +46,9 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
     // Persistido antes do POST: queda do processo deixa uma reserva que bloqueia novo envio.
     await prisma.envioFornecedor.update({ where: { solicitacaoId: contexto.solicitacaoId, tentativaId }, data: { chamadaEm: new Date() } });
     const resultado = await criarPedidoOlistSeguro(contexto.aplicativoId, payload);
-    pedidoOlistId = String(resultado.id ?? "");
-    if (!/^[1-9]\d*$/.test(pedidoOlistId)) throw new ErroCriacaoOlist("A Olist não retornou um ID válido. Resultado incerto; confira manualmente.", false);
+    const idRetornado = String(resultado?.id ?? "");
+    if (!/^[1-9]\d*$/.test(idRetornado)) throw new ErroCriacaoOlist("A Olist não retornou um ID válido. Resultado incerto; confira manualmente.", false);
+    pedidoOlistId = idRetornado;
     const registro = await prisma.$transaction(async (tx) => {
       const registro = await tx.pedidoFornecedorSolicitacao.create({ data: { pedidoOlistId: pedidoOlistId!, fornecedorId: contexto.fornecedorId,
         solicitacaoId: contexto.solicitacaoId, aplicativoDestinatarioId: contexto.aplicativoId } });

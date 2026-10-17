@@ -372,7 +372,10 @@ function logIntegracaoOlist(input: {
   limit?: number;
   offset?: number;
 }) {
-  console.info("[olist-api]", input);
+  // Termos de busca podem conter nomes, documentos e telefones de clientes.
+  let endpoint = "[endpoint indisponível]";
+  try { const url = new URL(input.endpoint); endpoint = `${url.origin}${url.pathname}`; } catch { /* Não registrar a entrada bruta. */ }
+  console.info("[olist-api]", { ...input, endpoint });
 }
 
 function validarRespostaAxiosJsonOrThrow(response: AxiosResponse<unknown>) {

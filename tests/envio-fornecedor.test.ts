@@ -63,12 +63,13 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     assert.equal(estado?.estado, "REJEITADO"); assert.equal(status, "FALHADO"); assert.equal(registros.length, 0);
     http = 200; resposta = { id: 321 }; await enviar(); assert.equal(posts, 2); assert.equal(estado?.historico.filter((e: any) => e.acao === "RESERVA").length, 2);
   });
-  for (const cenario of ["timeout", "sem ID", "HTTP 500", "persistência interrompida"]) await t.test(`${cenario} fica incerto e bloqueia repetição`, async () => {
-    reset(); timeout = cenario === "timeout"; if (cenario === "sem ID") resposta = {}; if (cenario === "HTTP 500") http = 500; persistenciaFalha = cenario === "persistência interrompida";
+  for (const cenario of ["timeout", "sem ID", "ID zero", "ID inválido", "HTTP 500", "persistência interrompida"]) await t.test(`${cenario} fica incerto e bloqueia repetição`, async () => {
+    reset(); timeout = cenario === "timeout"; if (cenario === "sem ID") resposta = {}; if (cenario === "ID zero") resposta = { id: 0 }; if (cenario === "ID inválido") resposta = { id: "abc" }; if (cenario === "HTTP 500") http = 500; persistenciaFalha = cenario === "persistência interrompida";
     await assert.rejects(enviar(), (e: Error) => /incerto/.test(e.message) && !/segredo|token-secreto/.test(e.message));
     assert.equal(estado?.estado, "INCERTO"); assert.equal(status, "FALHADO"); assert.equal(registros.length, 0);
     assert.ok(estado?.chamadaEm instanceof Date); await assert.rejects(enviar()); await assert.rejects(enviar(true)); assert.equal(posts, 1);
     if (persistenciaFalha) assert.equal(estado?.pedidoOlistId, "123");
+    else assert.equal(estado?.pedidoOlistId, null);
   });
   await t.test("401 não causa retry automático do POST", async () => { reset(); http = 401; await assert.rejects(enviar()); assert.equal(posts, 1); });
   await t.test("reserva sem conclusão é bloqueada; expiração só permite conferência manual", async () => {

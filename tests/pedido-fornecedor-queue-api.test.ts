@@ -142,7 +142,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
       assert.equal(ultimoRegistro!.direcionadoEm, null);
     }
     assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId }))).status, 201);
-    assert.equal(ultimoRegistro!.status, "PROCESSAR");
+    assert.equal(ultimoRegistro!.status, "PENDENTE");
     assert.equal(ultimoRegistro!.aplicativoFilialId, filialId);
     assert.equal(ultimoRegistro!.direcionadoPorId, "usuario");
     assert.ok(ultimoRegistro!.direcionadoEm instanceof Date);

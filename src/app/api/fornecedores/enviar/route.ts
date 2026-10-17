@@ -1,6 +1,6 @@
-import { montarPedidoFornecedor } from "@/lib/pedido-fornecedor-montagem";
+import { montarPedidoFornecedor, ErroMontagemFornecedor } from "@/lib/pedido-fornecedor-montagem";
 import { NextResponse } from "next/server";
-import { enviarFornecedor } from "@/lib/envio-fornecedor";
+import { enviarFornecedor, ErroEnvioFornecedor } from "@/lib/envio-fornecedor";
 import {
   extrairTamanhoSku,
   extrairTipoProdutoSku,
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       where: { id: autenticado.id },
       select: { podeSolicitarProducao: true, aplicativoId: true },
     });
-    if (!solicitante?.podeSolicitarProducao) throw new Error("Sem permissão para enviar solicitações.");
+    if (!solicitante?.podeSolicitarProducao) throw new ErroEnvioFornecedor("Sem permissão para enviar solicitações.");
 
     const body = await request.json() as {
       fornecedorId?: unknown;
@@ -32,20 +32,20 @@ export async function POST(request: Request) {
     };
     const fornecedorId = String(body.fornecedorId ?? "");
     const solicitacaoId = String(body.solicitacaoId ?? "");
-    if (!fornecedorId || !solicitacaoId) throw new Error("Fornecedor e solicitação são obrigatórios.");
+    if (!fornecedorId || !solicitacaoId) throw new ErroEnvioFornecedor("Fornecedor e solicitação são obrigatórios.");
 
     const fornecedor = await prisma.fornecedor.findFirst({ where: { id: fornecedorId, aplicativoId: solicitante.aplicativoId } });
-    if (!fornecedor?.vendedorOlistId) throw new Error("Fornecedor sem usuário vendedor vinculado.");
-    if (!fornecedor.meuClienteOlistId) throw new Error("Fornecedor sem Meu ID de cliente cadastrado.");
-    if (!fornecedor.meuFormaPagamentoOlistId) throw new Error("Fornecedor sem forma de pagamento Olist cadastrada.");
-    if (!fornecedor.meuPlanoPagamentoId) throw new Error("Fornecedor sem plano de pagamento cadastrado.");
+    if (!fornecedor?.vendedorOlistId) throw new ErroEnvioFornecedor("Fornecedor sem usuário vendedor vinculado.");
+    if (!fornecedor.meuClienteOlistId) throw new ErroEnvioFornecedor("Fornecedor sem Meu ID de cliente cadastrado.");
+    if (!fornecedor.meuFormaPagamentoOlistId) throw new ErroEnvioFornecedor("Fornecedor sem forma de pagamento Olist cadastrada.");
+    if (!fornecedor.meuPlanoPagamentoId) throw new ErroEnvioFornecedor("Fornecedor sem plano de pagamento cadastrado.");
 
     const vendedor = await prisma.usuario.findUnique({
       where: { id: String(fornecedor.vendedorOlistId) },
       select: { ativo: true, aplicativoId: true, vendedorOlistId: true },
     });
     if (!vendedor?.ativo || !vendedor.vendedorOlistId) {
-      throw new Error("O usuário vendedor está inativo ou não possui ID de vendedor Olist.");
+      throw new ErroEnvioFornecedor("O usuário vendedor está inativo ou não possui ID de vendedor Olist.");
     }
 
     const associacaoPagamento = await prisma.formaPagamentoOlistPlano.findFirst({
@@ -58,25 +58,25 @@ export async function POST(request: Request) {
       select: { planoPagamento: { select: { nome: true } } },
     });
     if (!associacaoPagamento) {
-      throw new Error("O plano cadastrado no fornecedor não está associado à forma de pagamento selecionada.");
+      throw new ErroEnvioFornecedor("O plano cadastrado no fornecedor não está associado à forma de pagamento selecionada.");
     }
 
     const solicitacao = await prisma.solicitacaoProducao.findFirst({
       where: { id: solicitacaoId, aplicativoId: solicitante.aplicativoId, status: "em_producao" },
     });
-    if (!solicitacao) throw new Error("Solicitação em produção não encontrada neste aplicativo.");
+    if (!solicitacao) throw new ErroEnvioFornecedor("Solicitação em produção não encontrada neste aplicativo.");
 
     const envioExistente = await prisma.pedidoFornecedorSolicitacao.findFirst({
       where: { solicitacaoId },
       select: { id: true },
     });
-    if (envioExistente) throw new Error("Esta solicitação já foi enviada para o fornecedor.");
+    if (envioExistente) throw new ErroEnvioFornecedor("Esta solicitação já foi enviada para o fornecedor.");
 
     const itensSolicitacao = await prisma.itemSolicitacaoProducao.findMany({
       where: { solicitacaoId, aplicativoId: solicitante.aplicativoId },
       orderBy: { sku: "asc" },
     });
-    if (itensSolicitacao.length === 0) throw new Error("A solicitação não possui produtos.");
+    if (itensSolicitacao.length === 0) throw new ErroEnvioFornecedor("A solicitação não possui produtos.");
 
     const associacoes = await prisma.produtoOlistProdutoFornecedor.findMany({
       where: { produtoId: { in: itensSolicitacao.map((item) => item.produtoId) }, produtoFornecedor: { fornecedorId, aplicativoId: solicitante.aplicativoId } },
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     const associacaoPorProduto = new Map(associacoes.map((item) => [item.produtoId, item]));
     const linhas = itensSolicitacao.map((item) => {
       const associacao = associacaoPorProduto.get(item.produtoId);
-      if (!associacao?.produtoFornecedor.referencia) throw new Error(`Produto ${item.sku} sem referência de produto fornecido.`);
+      if (!associacao?.produtoFornecedor.referencia) throw new ErroEnvioFornecedor(`Produto ${item.sku} sem referência de produto fornecido.`);
       const { estampa, variante } = extrairEstampaVariante(item.sku);
       return { referencia: associacao.produtoFornecedor.referencia.trim(), nome: associacao.produtoFornecedor.nome,
         preco: Number(associacao.produtoFornecedor.precoUnitarioMetro), quantidade: item.quantidadeSolicitada * Number(associacao.quantidadeUsada),
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
     return NextResponse.json(resultado);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao enviar pedido ao fornecedor." },
+      { error: error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor ? error.message : "Não foi possível enviar o pedido. Verifique os dados e a integração Olist." },
       { status: 400 },
     );
   }
