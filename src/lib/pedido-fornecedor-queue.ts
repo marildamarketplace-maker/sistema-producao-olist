@@ -8,17 +8,17 @@ type Associacao = {
 };
 
 /** Snapshot por SKU: preserva unidades do pedido e consumo em metros separadamente. */
-export function montarDadosPedidoFila(itens: Item[], associacoes: Associacao[]) {
+export function montarDadosPedidoFila(itens: Item[], associacoes: Associacao[], permitirSemTecido = false) {
   if (!itens.length) throw new Error("A solicitação não possui produtos.");
   const porProduto = new Map(associacoes.map((a) => [a.produtoId, a]));
   return {
     versao: 1 as const,
     itens: itens.map((item) => {
       const associacao = porProduto.get(item.produtoId);
-      if (!associacao) throw new Error(`Produto ${item.sku} sem tecido vinculado ao fornecedor selecionado.`);
-      const consumo = Number(associacao.quantidadeUsada);
+      if (!associacao && !permitirSemTecido) throw new Error(`Produto ${item.sku} sem tecido vinculado ao fornecedor selecionado.`);
+      const consumo = associacao ? Number(associacao.quantidadeUsada) : 0;
       const metros = consumo * item.quantidadeSolicitada;
-      if (!Number.isInteger(item.quantidadeSolicitada) || item.quantidadeSolicitada <= 0 || !Number.isFinite(metros) || metros <= 0) {
+      if (!Number.isInteger(item.quantidadeSolicitada) || item.quantidadeSolicitada <= 0 || !Number.isFinite(metros) || (associacao && metros <= 0)) {
         throw new Error(`Quantidade ou consumo de tecido inválido para ${item.sku}.`);
       }
       const estampaSku = item.sku.match(/(?:^|-)EST\/([^/]+)(?:\/|$)/i)?.[1] ?? "";
@@ -26,7 +26,7 @@ export function montarDadosPedidoFila(itens: Item[], associacoes: Associacao[]) 
       return {
         produtoId: item.produtoId,
         sku: item.sku,
-        tecido: { id: associacao.produtoFornecedor.id, nome: associacao.produtoFornecedor.nome, referencia: associacao.produtoFornecedor.referencia },
+        tecido: associacao ? { id: associacao.produtoFornecedor.id, nome: associacao.produtoFornecedor.nome, referencia: associacao.produtoFornecedor.referencia } : { id: item.produtoId, nome: "", referencia: null },
         quantidade: item.quantidadeSolicitada,
         unidade: "UN" as const,
         quantidadeTecido: Number(metros.toFixed(6)),

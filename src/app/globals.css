@@ -197,3 +197,13 @@ html.dark .hover\:text-slate-950:hover {
 html.dark .hover\:text-white:hover {
   color: rgb(2 6 23);
 }
+
+/* Confirmação da pesquisa do tecido na conta Olist selecionada. */
+.tecido-olist-encontrado .input {
+  border-color: #059669;
+  box-shadow: 0 0 0 1px #059669;
+}
+html.dark .tecido-olist-encontrado .input {
+  border-color: #6ee7b7;
+  box-shadow: 0 0 0 1px #6ee7b7;
+}

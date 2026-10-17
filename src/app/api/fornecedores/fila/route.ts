@@ -85,7 +85,7 @@ export async function POST(request: Request) {
         include: { produtoFornecedor: true },
       });
       let dados;
-      try { dados = montarDadosPedidoFila(itens, associacoes); }
+      try { dados = montarDadosPedidoFila(itens, associacoes, acao === "preview" || Boolean(dadosEditados)); }
       catch (error) { throw new ErroFila(error instanceof Error ? error.message : "Itens inválidos."); }
       const original = { ...dados, observacao: solicitacao.observacaoGeral };
       const revisaoAtual = createHash("sha256").update(JSON.stringify({ original, aplicativoFornecedorId: fornecedor.aplicativoPaiId })).digest("hex");

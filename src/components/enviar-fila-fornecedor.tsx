@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { conterFocoNoDialogo } from "@/lib/dialogo-foco";
 import { useAuth } from "./auth-provider";
 import { montarEdicaoPedidoFila, type PedidoFornecedorEditavel, type TecidoFilaOpcao } from "@/lib/pedido-fornecedor-edicao";
+import { PesquisaTecidoOlist } from "./pesquisa-tecido-olist";
 import { DadosComerciaisFilaOlist } from "./dados-comerciais-fila-olist";
 import { criarRascunhoFilaOlist, serializarRascunhoFilaOlist, type RascunhoFilaOlist } from "@/lib/fila-olist-contrato";
 import type { DadosPedidoFila } from "@/lib/fila-fornecedor-contrato";
@@ -119,6 +120,10 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
   }
 
   function alterarItem(index: number, patch: Partial<PedidoFornecedorEditavel["itens"][number]>) {
+    if (patch.tecidoNome !== undefined) {
+      const tecidoId = edicao?.itens[index].tecidoId;
+      setComerciais((atual) => ({ ...atual, tecidos: atual.tecidos.map((t) => t.tecidoId === tecidoId ? { ...t, id: 0, preco: null } : t) }));
+    }
     if (patch.tecidoId) {
       const itens = edicao?.itens.map((item, i) => i === index ? { ...item, ...patch } : item) ?? [];
       setComerciais((atual) => ({ ...atual, tecidos: [...new Set(itens.map((i) => i.tecidoId))].map((tecidoId) => atual.tecidos.find((t) => t.tecidoId === tecidoId) ?? { tecidoId, id: 0, preco: null }) }));
@@ -175,12 +180,19 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                   <legend className="px-1 text-sm font-semibold">Item {index + 1}</legend>
                   <p className="break-all text-xs text-slate-500">SKU da solicitação: {dadosOriginais.itens[index].sku}</p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <label className="min-w-0 text-sm">Tecido<select required value={item.tecidoId} onChange={(event) => alterarItem(index, { tecidoId: event.target.value })} className="input mt-1 min-h-11">
+                    <PesquisaTecidoOlist key={`${revisao}-${index}`} nome={item.tecidoNome ?? tecidos.find((t) => t.id === item.tecidoId)?.nome ?? ""} token={token} disabled={enviando}
+                      produtoId={comerciais.tecidos.find((t) => t.tecidoId === item.tecidoId)?.id ?? 0}
+                      preco={comerciais.tecidos.find((t) => t.tecidoId === item.tecidoId)?.preco ?? null}
+                      aoEncontrar={(produto) => setComerciais((atual) => ({ ...atual, tecidos: atual.tecidos.map((t) => t.tecidoId === item.tecidoId ? { ...t, id: produto.id, preco: produto.preco ?? null } : t) }))}
+                      aoAlterarPreco={(preco) => setComerciais((atual) => ({ ...atual, tecidos: atual.tecidos.map((t) => t.tecidoId === item.tecidoId ? { ...t, preco } : t) }))}
+                      api={filialSelecionadaId ? `/api/fornecedores/fila/olist?${new URLSearchParams({ fornecedorId, filialId: filialSelecionadaId, solicitacaoId })}` : null}>
+                    <label className="block min-w-0 text-sm">Tecido{!dadosOriginais.itens[index].tecido.nome ? <input required maxLength={500} value={item.tecidoNome ?? ""} onChange={(event) => alterarItem(index, { tecidoNome: event.target.value })} placeholder="Informe o nome do tecido" className="input mt-1 min-h-11" /> : <select required value={item.tecidoId} onChange={(event) => alterarItem(index, { tecidoId: event.target.value })} className="input mt-1 min-h-11">
                       <option value="">Selecione</option>
-                      {tecidos.map((tecido) => <option key={tecido.id} value={tecido.id}>{tecido.nome}{tecido.referencia ? ` · ${tecido.referencia}` : ""}</option>)}
-                    </select></label>
+                      {tecidos.map((tecido) => <option key={tecido.id} value={tecido.id}>{tecido.nome}</option>)}
+                    </select>}</label>
+                    </PesquisaTecidoOlist>
                     <label className="text-sm">Quantidade de peças (UN)<input required type="number" min={1} max={2147483647} step={1} value={item.quantidade} onChange={(event) => alterarItem(index, { quantidade: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
-                    <label className="text-sm">Quantidade de tecido (MT)<input required type="number" min={0.000001} max={1000000000} step="0.000001" value={item.quantidadeTecido} onChange={(event) => alterarItem(index, { quantidadeTecido: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
+                    <label className="text-sm">Quantidade de tecido (MT)<input required type="number" min={0.000001} max={1000000000} step="0.000001" value={item.quantidadeTecido || ""} onChange={(event) => alterarItem(index, { quantidadeTecido: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
                     <label className="text-sm">Estampa<input maxLength={500} value={item.estampa} onChange={(event) => alterarItem(index, { estampa: event.target.value })} className="input mt-1 min-h-11" /></label>
                     <label className="text-sm">Variante (opcional)<input maxLength={500} value={item.variante ?? ""} onChange={(event) => alterarItem(index, { variante: event.target.value || null })} className="input mt-1 min-h-11" /></label>
                     <label className="text-sm">Tamanho<input maxLength={500} value={item.tamanho} onChange={(event) => alterarItem(index, { tamanho: event.target.value })} className="input mt-1 min-h-11" /></label>
@@ -196,7 +208,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                 {filialSelecionadaId ? <DadosComerciaisFilaOlist
                   key={`${fornecedorId}-${filialSelecionadaId}`} token={token} disabled={enviando}
                   api={`/api/fornecedores/fila/olist?${new URLSearchParams({ fornecedorId, filialId: filialSelecionadaId, solicitacaoId })}`}
-                  itens={edicao.itens.map((item) => ({ tecidoId: item.tecidoId, nome: tecidos.find((t) => t.id === item.tecidoId)?.nome ?? "Tecido", corteLaser: item.corteLaser }))}
+                  itens={edicao.itens.map((item) => ({ tecidoId: item.tecidoId, nome: item.tecidoNome || tecidos.find((t) => t.id === item.tecidoId)?.nome || "Tecido", corteLaser: item.corteLaser }))}
                   selecoes={comerciais} aoAlterar={setComerciais}
                 /> : <p className="text-sm text-slate-600">Selecione uma filial na etapa anterior para consultar os cadastros da conta Olist correspondente. Você pode enviar sem preencher esses dados.</p>}
               </section>

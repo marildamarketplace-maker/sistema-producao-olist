@@ -35,3 +35,23 @@ test("valida quantidades, textos, booleanos e impede campos extras", () => {
   const semVariante = aplicarEdicaoPedidoFila(original, { ...edicao, itens: [{ ...edicao.itens[0], variante: "" }] }, [tecido]);
   assert.equal(semVariante.itens[0].variante, null);
 });
+
+test("item sem vínculo permite nome manual e exige metragem válida", () => {
+  const dados = montarDadosPedidoFila([{ produtoId: "produto", sku: "SKU", quantidadeSolicitada: 2, tipoCorte: null }], [], true);
+  assert.equal(dados.itens[0].tecido.nome, "");
+  assert.equal(dados.itens[0].quantidadeTecido, 0);
+  const edicao = montarEdicaoPedidoFila(dados);
+  assert.equal(pedidoFornecedorEditavelSchema.safeParse(edicao).success, false);
+  edicao.itens[0].tecidoNome = "  Oxford manual  ";
+  edicao.itens[0].quantidadeTecido = 3;
+  const resultado = aplicarEdicaoPedidoFila(dados, pedidoFornecedorEditavelSchema.parse(edicao), []);
+  assert.deepEqual(resultado.itens[0].tecido, { id: "produto", nome: "Oxford manual", referencia: null });
+  assert.equal(resultado.itens[0].quantidadeTecido, 3);
+  assert.equal(dados.itens[0].tecido.nome, "");
+});
+
+test("nome manual não autoriza tecido externo em item vinculado", () => {
+  const edicao = montarEdicaoPedidoFila(original);
+  edicao.itens[0].tecidoNome = "Forjado";
+  assert.throws(() => aplicarEdicaoPedidoFila(original, edicao, []), /tecido cadastrado/);
+});
