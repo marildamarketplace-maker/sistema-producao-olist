@@ -4,7 +4,7 @@ import { catalogoComercial } from "../src/lib/calendario-comercial/catalogo";
 import { consultarCatalogoAutorizado } from "../src/lib/calendario-comercial/acesso";
 import { escreverFiltros, filtrarEventos, mesAtualBrasil, lerFiltros, montarPlanejamento, resolverOcorrencia, type Evento, type Filtros } from "../src/lib/calendario-comercial/planejamento";
 import { paginasPermitidas } from "../src/lib/navigation";
-const filtros: Filtros = { visao: "mensal", regioes: ["Nacional"], produto: "", categoria: "", busca: "", mes: 10, etapa: "acontecendo" };
+const filtros: Filtros = { visao: "mensal", regioes: ["Nacional"], mes: 10, etapa: "acontecendo" };
 const evento = (id: string) => { const e = catalogoComercial.find((e) => e.id === id); assert.ok(e); return e; };
 const ids = (itens: { evento: Evento }[]) => itens.map((o) => o.evento.id);
 
@@ -62,14 +62,13 @@ test("eventos locais de referência mantêm aviso de confirmação", () => {
   assert.ok(resolverOcorrencia(evento("penha")).referencia);
 });
 test("filtros combinados e múltiplas regiões não duplicam nacionais", () => {
-  assert.deepEqual(filtrarEventos(catalogoComercial, { ...filtros, regioes: ["Nacional", "Norte"], produto: "Painéis", categoria: "Religioso", busca: "nazare" }).map((e) => e.id), ["cirio"]);
+  assert.ok(filtrarEventos(catalogoComercial, { ...filtros, regioes: ["Nacional", "Norte"] }).some((e) => e.id === "cirio"));
   const meses = montarPlanejamento([...catalogoComercial, evento("carnaval")], { ...filtros, regioes: ["Nacional", "Norte", "Sul", "Sudeste"] });
   assert.equal(meses[1].acontecendo.filter((o) => o.evento.id === "carnaval").length, 1);
   assert.ok(ids(meses[7].acontecendo).includes("barretos"));
-  assert.equal(filtrarEventos(catalogoComercial, { ...filtros, busca: "inexistente" }).length, 0);
 });
 test("URL preserva mês, etapa e filtros e descarta valores inválidos", () => {
-  const f: Filtros = { ...filtros, regioes: ["Nacional", "Norte", "Sul"], mes: 6, etapa: "cadastrar", busca: "São José" };
+  const f: Filtros = { ...filtros, regioes: ["Nacional", "Sul"], mes: 6, etapa: "cadastrar" };
   assert.deepEqual(lerFiltros(new URLSearchParams(escreverFiltros(f)), 10), f);
   assert.deepEqual(lerFiltros(new URLSearchParams("mes=13&etapa=outra&regiao=Norte&regiao=Norte&produto=Outro"), 10), { ...filtros, regioes: ["Nacional", "Norte"] });
 });
@@ -162,8 +161,24 @@ test("todo evento tem nível e justificativa de compra, respeitando o público",
 test("visualização mensal é padrão; anual é compartilhável e não altera filtros", () => {
   assert.equal(lerFiltros(new URLSearchParams(), 10).visao, "mensal");
   assert.equal(lerFiltros(new URLSearchParams("visao=outra"), 10).visao, "mensal");
-  const anual: Filtros = { ...filtros, visao: "anual", mes: 6, regioes: ["Nacional", "Nordeste"], busca: "juninas" };
+  const anual: Filtros = { ...filtros, visao: "anual", mes: 6, regioes: ["Nacional", "Nordeste"] };
   assert.deepEqual(lerFiltros(new URLSearchParams(escreverFiltros(anual)), 10), anual);
   assert.equal(new URLSearchParams(escreverFiltros({ ...anual, visao: "mensal" })).has("visao"), false);
   assert.deepEqual(montarPlanejamento(catalogoComercial, anual), montarPlanejamento(catalogoComercial, { ...anual, visao: "mensal" }));
+});
+
+
+test("links antigos ignoram produto, categoria e busca sem ocultar eventos", () => {
+  const antigo = lerFiltros(new URLSearchParams("mes=8&produto=Lenços&categoria=Religioso&busca=nazare"), 10);
+  const atual = lerFiltros(new URLSearchParams("mes=8"), 10);
+  assert.deepEqual(antigo, atual);
+  assert.deepEqual(montarPlanejamento(catalogoComercial, antigo), montarPlanejamento(catalogoComercial, atual));
+  const url = escreverFiltros(antigo);
+  for (const campo of ["produto", "categoria", "busca"]) assert.ok(!new URLSearchParams(url).has(campo));
+});
+
+
+test("select de abrangência normaliza links antigos para uma região visível", () => {
+  assert.deepEqual(lerFiltros(new URLSearchParams("regiao=Norte&regiao=Sul"), 10).regioes, ["Nacional", "Sul"]);
+  assert.deepEqual(lerFiltros(new URLSearchParams("regiao=Outra"), 10).regioes, ["Nacional"]);
 });

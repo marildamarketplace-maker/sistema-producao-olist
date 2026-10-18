@@ -25,7 +25,7 @@ export type Evento = {
 };
 export const ETAPAS = ["cadastrar", "divulgar", "acontecendo"] as const;
 export type Etapa = typeof ETAPAS[number];
-export type Filtros = { visao: "mensal" | "anual"; regioes: Regiao[]; produto: Produto | ""; categoria: Categoria | ""; busca: string; mes: number; etapa: Etapa };
+export type Filtros = { visao: "mensal" | "anual"; regioes: Regiao[]; mes: number; etapa: Etapa };
 export type Ocorrencia = { evento: Evento; meses: number[]; periodo: string; variavel: boolean; referencia: boolean };
 export type MesPlanejamento = { mes: number; cadastrar: Ocorrencia[]; divulgar: Ocorrencia[]; acontecendo: Ocorrencia[] };
 
@@ -60,14 +60,10 @@ export function resolverOcorrencia(evento: Evento): Ocorrencia {
   }
   return { evento, meses, periodo, variavel, referencia: r.tipo === "referencia" || Boolean(evento.confirmarProgramacao) };
 }
-const normalizar = (texto: string) => texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
 export function filtrarEventos(eventos: Evento[], filtros: Filtros) {
-  return eventos.filter((evento) =>
-    evento.regioes.some((r) => r === "Nacional" || filtros.regioes.includes(r)) &&
-    (!filtros.produto || evento.produtos.includes(filtros.produto)) &&
-    (!filtros.categoria || evento.categoria === filtros.categoria) &&
-    (!filtros.busca.trim() || normalizar(`${evento.nome} ${evento.local ?? ""}`).includes(normalizar(filtros.busca.trim()))));
+  return eventos.filter((evento) => evento.regioes.some((r) => r === "Nacional" || filtros.regioes.includes(r)));
 }
+
 export function montarPlanejamento(eventos: Evento[], filtros: Filtros): MesPlanejamento[] {
   const ocorrencias = [...new Map(filtrarEventos(eventos, filtros).map((e) => [e.id, e])).values()]
     .map((e) => resolverOcorrencia(e)).sort((a, b) => a.evento.nome.localeCompare(b.evento.nome, "pt-BR"));
@@ -86,12 +82,10 @@ export function mesAtualBrasil(agora = new Date()): number {
 }
 export function lerFiltros(params: URLSearchParams, mesAtual: number): Filtros {
   const mes = Number(params.get("mes"));
+  const regiao = params.getAll("regiao").filter((r) => r !== "Nacional" && REGIOES.includes(r as Regiao)).pop() as Regiao | undefined;
   return {
     visao: params.get("visao") === "anual" ? "anual" : "mensal",
-    regioes: ["Nacional", ...REGIOES.filter((r) => r !== "Nacional" && params.getAll("regiao").includes(r))],
-    produto: PRODUTOS.find((p) => p === params.get("produto")) ?? "",
-    categoria: CATEGORIAS.find((c) => c === params.get("categoria")) ?? "",
-    busca: (params.get("busca") ?? "").slice(0, 120),
+    regioes: regiao ? ["Nacional", regiao] : ["Nacional"],
     mes: Number.isInteger(mes) && mes >= 1 && mes <= 12 ? mes : mesAtual,
     etapa: ETAPAS.find((e) => e === params.get("etapa")) ?? "acontecendo",
   };
@@ -100,8 +94,5 @@ export function escreverFiltros(filtros: Filtros): string {
   const params = new URLSearchParams({ mes: String(filtros.mes), etapa: filtros.etapa });
   if (filtros.visao === "anual") params.set("visao", "anual");
   REGIOES.filter((r) => r !== "Nacional" && filtros.regioes.includes(r)).forEach((r) => params.append("regiao", r));
-  if (filtros.produto) params.set("produto", filtros.produto);
-  if (filtros.categoria) params.set("categoria", filtros.categoria);
-  if (filtros.busca) params.set("busca", filtros.busca);
   return params.toString();
 }
