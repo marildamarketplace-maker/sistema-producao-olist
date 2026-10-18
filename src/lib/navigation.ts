@@ -15,6 +15,7 @@ export type MenuItem = MenuLink | MenuGroup;
 
 export const menuItems: MenuItem[] = [
   { label: "Dashboard", href: "/dashboard", permissions: ["podeVisualizarDashboard"] },
+  { label: "Calendário", href: "/controle-midia/calendario", permissions: ["podeVisualizarTarefasMidia"] },
   {
     label: "Produtos",
     items: [
@@ -130,11 +131,6 @@ export const menuItems: MenuItem[] = [
         label: "Categorias",
         href: "/controle-midia/categorias",
         permissions: ["podeVisualizarCategoriasMidia"],
-      },
-      {
-        label: "Calendário Comercial",
-        href: "/controle-midia/calendario",
-        permissions: ["podeVisualizarTarefasMidia"],
       },
       {
         label: "Gestão de Tarefas",

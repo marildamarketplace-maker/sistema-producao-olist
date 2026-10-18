@@ -1,0 +1,27 @@
+/** Avaliação editorial do mix em tecido; não mede participação da população. */
+export const NIVEIS_COMPRA = ["Muito alto", "Alto", "Moderado", "Baixo"] as const;
+export type PotencialCompra = {
+  nivel: typeof NIVEIS_COMPRA[number];
+  publico: "Amplo" | "Segmentado" | "Regional/local" | "Institucional";
+  justificativa: string;
+};
+const grupos: { ids: string[]; avaliacao: PotencialCompra }[] = [
+  { ids: ["natal", "juninas"], avaliacao: { nivel: "Muito alto", publico: "Amplo", justificativa: "Forte encaixe de forros e painéis na decoração temática, com possibilidade de conjuntos coordenados. Priorizar coleção e reposição; confirmar a procura no histórico da loja." } },
+  { ids: ["verao"], avaliacao: { nivel: "Muito alto", publico: "Amplo", justificativa: "Uso direto de pareôs e lenços em praia e férias. O potencial depende do clima, destino e público atendido; reforçar estampas reutilizáveis fora das festas." } },
+  { ids: ["carnaval"], avaliacao: { nivel: "Alto", publico: "Amplo", justificativa: "Bom encaixe de lenços e pareôs como acessórios e de painéis para festas. A procura depende da presença de blocos e eventos no mercado atendido." } },
+  { ids: ["pascoa"], avaliacao: { nivel: "Alto", publico: "Amplo", justificativa: "Oportunidade para forros e painéis de mesa e ambientação. O consumo geral da data não se converte automaticamente em compra de tecido; validar coleções lúdicas e religiosas separadamente." } },
+  { ids: ["maes"], avaliacao: { nivel: "Alto", publico: "Amplo", justificativa: "Lenços podem atender a presentes; forros, a encontros em família. Priorizar florais vendáveis depois da data, sem assumir que todo o gasto com presentes se destina a estes produtos." } },
+  { ids: ["primavera", "reveillon"], avaliacao: { nivel: "Alto", publico: "Amplo", justificativa: "Boa aplicação de florais, praia e composições de mesa no mix em tecido. Trabalhar opções sem frases para ampliar o tempo de venda." } },
+  { ids: ["bonfim", "bumba-meu-boi", "dores", "romaria-finados", "parintins", "gloria", "cirio", "caravaggio", "farroupilha", "oktober", "natal-serra", "penha", "barretos", "santana-caico", "cirandas-manacapuru", "saire"], avaliacao: { nivel: "Alto", publico: "Regional/local", justificativa: "Oportunidade concentrada no público do evento e em sua área de influência. Testar lenços e decoração com referências locais; público presente e movimentação turística não equivalem a compradores destes produtos." } },
+  { ids: ["praias-rio", "inverno-sul", "inverno-sudeste"], avaliacao: { nivel: "Alto", publico: "Regional/local", justificativa: "Produtos associados ao uso na temporada: pareôs e lenços no lazer de rio; lenços e mesa nos destinos de inverno. Validar clima, condições locais e canais de venda." } },
+  { ids: ["iemanja", "jorge", "aparecida", "cosme-popular", "joao"], avaliacao: { nivel: "Moderado", publico: "Segmentado", justificativa: "Compra temática depende de devoção, comunidade e uso em festas. Há oportunidade em lenços e painéis, mas a popularidade da celebração não garante compra generalizada. Testar lotes direcionados." } },
+  { ids: ["reis", "sebastiao", "lourdes", "jose", "mariano", "fatima", "antonio", "pedro", "carmo", "cosme-catolico", "francisco", "conceicao", "divino", "semana-santa", "advento"], avaliacao: { nivel: "Moderado", publico: "Segmentado", justificativa: "Atende principalmente comunidades religiosas e organizadores de celebrações. Priorizar produção direcionada de lenços, forros e painéis conforme encomendas e procura local." } },
+  { ids: ["vaquejadas", "vindima", "marabaixo"], avaliacao: { nivel: "Moderado", publico: "Regional/local", justificativa: "Potencial ligado ao público local e ao uso específico dos produtos. Confirmar agenda e demanda antes de ampliar a coleção; manter artes autorais e contextualizadas." } },
+  { ids: ["mulher", "namorados", "avos", "pais", "criancas", "professores", "halloween"], avaliacao: { nivel: "Moderado", publico: "Segmentado", justificativa: "Há ocasiões de presentes ou decoração, mas o encaixe com este mix é específico. Testar lenços quando fizer sentido e painéis/forros para quem organiza encontros, festas e homenagens." } },
+  { ids: ["outubro-rosa"], avaliacao: { nivel: "Moderado", publico: "Institucional", justificativa: "Possibilidade de compras de lenços e painéis por campanhas, empresas e instituições. Priorizar encomendas e parcerias; não tratar engajamento com a causa como intenção individual de compra." } },
+  { ids: ["janeiro-branco", "autismo", "maio-amarelo", "agosto-lilas", "setembro-amarelo", "novembro-azul", "consciencia-negra", "dezembro-vermelho"], avaliacao: { nivel: "Baixo", publico: "Institucional", justificativa: "Estimativa de menor compra espontânea destes produtos pelo consumidor geral. Pode haver pedidos relevantes de escolas, empresas e instituições; trabalhar sob demanda. O nível não avalia a importância social da causa." } },
+  { ids: ["quaresma", "corpus", "folclore", "independencia"], avaliacao: { nivel: "Baixo", publico: "Segmentado", justificativa: "Menor associação direta com compra espontânea de lenços, pareôs, forros e painéis. Explorar encomendas de comunidades, escolas e organizadores, evitando estoque amplo sem demanda identificada." } },
+];
+export const potencialPorEvento: Readonly<Record<string, PotencialCompra>> = Object.fromEntries(
+  grupos.flatMap(({ ids, avaliacao }) => ids.map((id) => [id, avaliacao])),
+);

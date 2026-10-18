@@ -1,3 +1,5 @@
+import type { PotencialCompra } from "./potencial-compra";
+
 export const REGIOES = ["Nacional", "Nordeste", "Norte", "Sul", "Sudeste"] as const;
 export const PRODUTOS = ["Lenços", "Pareôs", "Forros de mesa", "Painéis"] as const;
 export const CATEGORIAS = ["Festas populares", "Religioso", "Conscientização", "Country/rural", "Temporadas/comercial"] as const;
@@ -13,6 +15,7 @@ export type RegraData =
   | { tipo: "advento" }
   | { tipo: "domingo"; mes: number; ordinal: number };
 export type Evento = {
+  potencialCompra: PotencialCompra;
   id: string; nome: string; regioes: Regiao[]; local?: string; categoria: Categoria;
   produtos: Produto[]; estampas: string; recomendacao: string; data: RegraData;
   divulgacao: "anterior" | "periodo" | "ambos";
@@ -20,45 +23,43 @@ export type Evento = {
   confirmarProgramacao?: boolean;
   destaques?: { regiao: Regiao; texto: string }[];
 };
-export type Filtros = { ano: number; regioes: Regiao[]; produto: Produto | ""; categoria: Categoria | ""; busca: string };
-export type Ocorrencia = { evento: Evento; inicio: string; fim: string; referencia: boolean };
+export const ETAPAS = ["cadastrar", "divulgar", "acontecendo"] as const;
+export type Etapa = typeof ETAPAS[number];
+export type Filtros = { visao: "mensal" | "anual"; regioes: Regiao[]; produto: Produto | ""; categoria: Categoria | ""; busca: string; mes: number; etapa: Etapa };
+export type Ocorrencia = { evento: Evento; meses: number[]; periodo: string; variavel: boolean; referencia: boolean };
 export type MesPlanejamento = { mes: number; cadastrar: Ocorrencia[]; divulgar: Ocorrencia[]; acontecendo: Ocorrencia[] };
 
-function utc(ano: number, mes: number, dia: number) { return new Date(Date.UTC(ano, mes - 1, dia)); }
-function iso(data: Date) { return data.toISOString().slice(0, 10); }
-function deslocar(data: Date, dias: number) { return new Date(data.getTime() + dias * 86400000); }
-export function pascoa(ano: number): Date {
-  const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;
-  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const n = h + l - 7 * m + 114;
-  return utc(ano, Math.floor(n / 31), n % 31 + 1);
+function intervalo(inicio: number, fim: number): number[] {
+  const meses = [inicio];
+  while (meses[meses.length - 1] !== fim) meses.push(meses[meses.length - 1] % 12 + 1);
+  return meses;
 }
-export function resolverOcorrencia(evento: Evento, ano: number): Ocorrencia {
-  const regra = evento.data;
-  let inicio: Date, fim: Date;
-  if (regra.tipo === "advento") {
-    const natal = utc(ano, 12, 25);
-    inicio = deslocar(natal, -(natal.getUTCDay() || 7) - 21);
-    fim = utc(ano, 12, 24);
-  } else if (regra.tipo === "pascoa") {
-    inicio = deslocar(pascoa(ano), regra.deslocamento);
-    fim = deslocar(pascoa(ano), regra.fimDeslocamento ?? regra.deslocamento);
-  } else if (regra.tipo === "domingo") {
-    const primeiro = utc(ano, regra.mes, 1);
-    inicio = utc(ano, regra.mes, 1 + (7 - primeiro.getUTCDay()) % 7 + 7 * (regra.ordinal - 1));
-    fim = inicio;
-  } else if (regra.tipo === "fixa") {
-    inicio = utc(ano, regra.mes, regra.dia); fim = inicio;
+/** Janelas anuais de referência: nunca atribuir dia fixo a uma celebração móvel. */
+export function resolverOcorrencia(evento: Evento): Ocorrencia {
+  const r = evento.data;
+  let meses: number[], periodo: string;
+  const variavel = r.tipo === "pascoa" || r.tipo === "domingo" || r.tipo === "advento";
+  if (r.tipo === "fixa") {
+    meses = [r.mes];
+    periodo = `${String(r.dia).padStart(2, "0")}/${String(r.mes).padStart(2, "0")}`;
+  } else if (r.tipo === "domingo") {
+    meses = [r.mes];
+    periodo = `${r.ordinal}º domingo de ${MESES[r.mes - 1].toLocaleLowerCase("pt-BR")}`;
+  } else if (r.tipo === "advento") {
+    meses = [11, 12]; periodo = "Novembro a dezembro · período variável";
+  } else if (r.tipo === "pascoa") {
+    // A Páscoa pode cair de 22/03 a 25/04. O ano-base serve apenas à
+    // aritmética de meses, sem atribuir uma data anual ao evento exibido.
+    const inicioMinimo = new Date(Date.UTC(2001, 2, 22 + r.deslocamento));
+    const fimMaximo = new Date(Date.UTC(2001, 3, 25 + (r.fimDeslocamento ?? r.deslocamento)));
+    meses = intervalo(inicioMinimo.getUTCMonth() + 1, fimMaximo.getUTCMonth() + 1);
+    periodo = `${MESES[meses[0] - 1]} a ${MESES[meses[meses.length - 1] - 1]} · data móvel`;
   } else {
-    const fimMes = regra.fimMes ?? regra.mes;
-    inicio = utc(ano, regra.mes, 1);
-    fim = utc(ano + (fimMes < regra.mes ? 1 : 0), fimMes + 1, 0);
+    meses = intervalo(r.mes, r.fimMes ?? r.mes);
+    periodo = meses.length === 12 ? "Ao longo do ano · confirmar agenda local" : meses.length === 1 ? MESES[r.mes - 1] : `${MESES[r.mes - 1]} a ${MESES[meses[meses.length - 1] - 1]}`;
   }
-  return { evento, inicio: iso(inicio), fim: iso(fim), referencia: regra.tipo === "referencia" || Boolean(evento.confirmarProgramacao) };
+  return { evento, meses, periodo, variavel, referencia: r.tipo === "referencia" || Boolean(evento.confirmarProgramacao) };
 }
-const indiceMes = (data: string) => Number(data.slice(0, 4)) * 12 + Number(data.slice(5, 7)) - 1;
 const normalizar = (texto: string) => texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
 export function filtrarEventos(eventos: Evento[], filtros: Filtros) {
   return eventos.filter((evento) =>
@@ -68,49 +69,39 @@ export function filtrarEventos(eventos: Evento[], filtros: Filtros) {
     (!filtros.busca.trim() || normalizar(`${evento.nome} ${evento.local ?? ""}`).includes(normalizar(filtros.busca.trim()))));
 }
 export function montarPlanejamento(eventos: Evento[], filtros: Filtros): MesPlanejamento[] {
-  const unicos = [...new Map(filtrarEventos(eventos, filtros).map((e) => [e.id, e])).values()];
-  const ocorrencias = [filtros.ano - 1, filtros.ano, filtros.ano + 1]
-    .flatMap((ano) => unicos.map((e) => resolverOcorrencia(e, ano)))
-    .sort((a, b) => a.inicio.localeCompare(b.inicio) || a.evento.nome.localeCompare(b.evento.nome, "pt-BR"));
-  return Array.from({ length: 12 }, (_, mes) => {
-    const indice = filtros.ano * 12 + mes;
-    const acontecendo = (o: Ocorrencia) => indice >= indiceMes(o.inicio) && indice <= indiceMes(o.fim);
-    return { mes: mes + 1,
-      cadastrar: ocorrencias.filter((o) => indiceMes(o.inicio) - 1 === indice),
-      divulgar: ocorrencias.filter((o) =>
-        (o.evento.divulgacao !== "periodo" && indiceMes(o.inicio) - 1 === indice) ||
-        (o.evento.divulgacao !== "anterior" && acontecendo(o))),
-      acontecendo: ocorrencias.filter(acontecendo),
+  const ocorrencias = [...new Map(filtrarEventos(eventos, filtros).map((e) => [e.id, e])).values()]
+    .map((e) => resolverOcorrencia(e)).sort((a, b) => a.evento.nome.localeCompare(b.evento.nome, "pt-BR"));
+  return Array.from({ length: 12 }, (_, i) => {
+    const mes = i + 1;
+    const anterior = (o: Ocorrencia) => o.meses.length < 12 && (o.meses[0] + 10) % 12 + 1 === mes;
+    return { mes,
+      cadastrar: ocorrencias.filter(anterior),
+      divulgar: ocorrencias.filter((o) => (o.evento.divulgacao !== "periodo" && anterior(o)) || (o.evento.divulgacao !== "anterior" && o.meses.includes(mes))),
+      acontecendo: ocorrencias.filter((o) => o.meses.includes(mes)),
     };
   });
 }
-export function hojeBrasil(agora = new Date()) {
-  const partes = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(agora);
-  const valor = (tipo: string) => Number(partes.find((p) => p.type === tipo)?.value);
-  return { ano: valor("year"), mes: valor("month") };
+export function mesAtualBrasil(agora = new Date()): number {
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", month: "numeric" }).format(agora));
 }
-export function lerFiltros(params: URLSearchParams, anoAtual: number): Filtros {
-  const ano = Number(params.get("ano"));
-  const regioes = REGIOES.filter((r) => r !== "Nacional" && params.getAll("regiao").includes(r));
-  const produto = PRODUTOS.find((p) => p === params.get("produto")) ?? "";
-  const categoria = CATEGORIAS.find((c) => c === params.get("categoria")) ?? "";
-  return { ano: Number.isInteger(ano) && ano >= anoAtual - 1 && ano <= anoAtual + 2 ? ano : anoAtual,
-    regioes: ["Nacional", ...regioes], produto, categoria, busca: (params.get("busca") ?? "").slice(0, 120) };
+export function lerFiltros(params: URLSearchParams, mesAtual: number): Filtros {
+  const mes = Number(params.get("mes"));
+  return {
+    visao: params.get("visao") === "anual" ? "anual" : "mensal",
+    regioes: ["Nacional", ...REGIOES.filter((r) => r !== "Nacional" && params.getAll("regiao").includes(r))],
+    produto: PRODUTOS.find((p) => p === params.get("produto")) ?? "",
+    categoria: CATEGORIAS.find((c) => c === params.get("categoria")) ?? "",
+    busca: (params.get("busca") ?? "").slice(0, 120),
+    mes: Number.isInteger(mes) && mes >= 1 && mes <= 12 ? mes : mesAtual,
+    etapa: ETAPAS.find((e) => e === params.get("etapa")) ?? "acontecendo",
+  };
 }
 export function escreverFiltros(filtros: Filtros): string {
-  const params = new URLSearchParams({ ano: String(filtros.ano) });
+  const params = new URLSearchParams({ mes: String(filtros.mes), etapa: filtros.etapa });
+  if (filtros.visao === "anual") params.set("visao", "anual");
   REGIOES.filter((r) => r !== "Nacional" && filtros.regioes.includes(r)).forEach((r) => params.append("regiao", r));
   if (filtros.produto) params.set("produto", filtros.produto);
   if (filtros.categoria) params.set("categoria", filtros.categoria);
   if (filtros.busca) params.set("busca", filtros.busca);
   return params.toString();
-}
-export function formatarPeriodo(o: Ocorrencia): string {
-  const formatar = (data: string) => data.split("-").reverse().join("/");
-  if (o.evento.data.tipo === "referencia" || o.evento.data.tipo === "periodo") {
-    const inicio = indiceMes(o.inicio), fim = indiceMes(o.fim);
-    return inicio === fim ? `${MESES[inicio % 12]} de ${o.inicio.slice(0, 4)}`
-      : `${MESES[inicio % 12]}/${o.inicio.slice(0, 4)} a ${MESES[fim % 12]}/${o.fim.slice(0, 4)}`;
-  }
-  return o.inicio === o.fim ? formatar(o.inicio) : `${formatar(o.inicio)} a ${formatar(o.fim)}`;
 }

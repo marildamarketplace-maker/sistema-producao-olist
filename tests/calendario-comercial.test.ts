@@ -2,85 +2,79 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { catalogoComercial } from "../src/lib/calendario-comercial/catalogo";
 import { consultarCatalogoAutorizado } from "../src/lib/calendario-comercial/acesso";
-import { escreverFiltros, filtrarEventos, formatarPeriodo, hojeBrasil, lerFiltros, montarPlanejamento, resolverOcorrencia, type Evento, type Filtros } from "../src/lib/calendario-comercial/planejamento";
+import { escreverFiltros, filtrarEventos, mesAtualBrasil, lerFiltros, montarPlanejamento, resolverOcorrencia, type Evento, type Filtros } from "../src/lib/calendario-comercial/planejamento";
 import { paginasPermitidas } from "../src/lib/navigation";
-const filtros: Filtros = { ano: 2027, regioes: ["Nacional"], produto: "", categoria: "", busca: "" };
-const evento = (id: string) => {
-  const e = catalogoComercial.find((e) => e.id === id);
-  assert.ok(e, id); return e;
-};
+const filtros: Filtros = { visao: "mensal", regioes: ["Nacional"], produto: "", categoria: "", busca: "", mes: 10, etapa: "acontecendo" };
+const evento = (id: string) => { const e = catalogoComercial.find((e) => e.id === id); assert.ok(e); return e; };
 const ids = (itens: { evento: Evento }[]) => itens.map((o) => o.evento.id);
 
-test("datas móveis de 2027 e 2028 são calculadas anualmente", () => {
-  for (const [id, dia] of Object.entries({ carnaval: "2027-02-09", pascoa: "2027-03-28", corpus: "2027-05-27", maes: "2027-05-09", pais: "2027-08-08", cirio: "2027-10-10" })) {
-    assert.equal(resolverOcorrencia(evento(id), 2027).inicio, dia);
+test("calendário fixo tem doze meses e nenhum ano na URL", () => {
+  assert.equal(montarPlanejamento(catalogoComercial, filtros).length, 12);
+  const params = new URLSearchParams(escreverFiltros(filtros));
+  assert.equal(params.has("ano"), false);
+  assert.equal(lerFiltros(new URLSearchParams("ano=2040"), 10).mes, 10);
+});
+test("datas fixas e regras de domingo não exibem ano", () => {
+  assert.equal(resolverOcorrencia(evento("natal")).periodo, "25/12");
+  assert.equal(resolverOcorrencia(evento("maes")).periodo, "2º domingo de maio");
+  assert.equal(resolverOcorrencia(evento("cirio")).periodo, "2º domingo de outubro");
+});
+test("datas móveis usam janelas indicativas, nunca dias fixos de outro ano", () => {
+  for (const [id, meses] of [["carnaval", [2, 3]], ["pascoa", [3, 4]], ["corpus", [5, 6]], ["marabaixo", [3, 4, 5, 6]], ["advento", [11, 12]]] as const) {
+    const o = resolverOcorrencia(evento(id));
+    assert.deepEqual(o.meses, [...meses]);
+    assert.ok(o.variavel);
+    assert.ok(!/\d{4}|\d{2}\/\d{2}/.test(o.periodo));
   }
-  assert.equal(resolverOcorrencia(evento("pascoa"), 2028).inicio, "2028-04-16");
-  assert.equal(resolverOcorrencia(evento("carnaval"), 2028).inicio, "2028-02-29");
 });
-test("Advento começa no quarto domingo antes do Natal e termina em 24/12", () => {
-  assert.equal(resolverOcorrencia(evento("advento"), 2027).inicio, "2027-11-28");
-  assert.equal(resolverOcorrencia(evento("advento"), 2028).inicio, "2028-12-03");
-  assert.equal(resolverOcorrencia(evento("advento"), 2028).fim, "2028-12-24");
-});
-test("cadastro ocorre no mês anterior inteiro e juninas contínuas não repetem cadastro", () => {
+test("cadastro anterior a temporada contínua não se repete", () => {
   const meses = montarPlanejamento(catalogoComercial, filtros);
   assert.ok(ids(meses[4].cadastrar).includes("juninas"));
   assert.ok(!ids(meses[5].cadastrar).includes("juninas"));
   assert.ok(ids(meses[5].acontecendo).includes("juninas"));
   assert.ok(ids(meses[6].acontecendo).includes("juninas"));
-  assert.ok(ids(meses[4].divulgar).includes("maes"));
-  assert.ok(ids(meses[4].divulgar).includes("juninas"));
 });
-test("cadastro de janeiro seguinte aparece em dezembro; verão mantém divulgação de ano anterior", () => {
+test("janelas móveis geram preparação antes do primeiro mês possível", () => {
   const meses = montarPlanejamento(catalogoComercial, filtros);
-  const reis = meses[11].cadastrar.find((o) => o.evento.id === "reis");
-  assert.equal(reis?.inicio, "2028-01-06");
-  const verao = meses[0].divulgar.find((o) => o.evento.id === "verao");
-  assert.equal(verao?.inicio, "2026-12-01");
-  assert.equal(verao?.fim, "2027-02-28");
-  assert.ok(!ids(meses[0].cadastrar).includes("verao"));
+  assert.ok(ids(meses[0].cadastrar).includes("carnaval"));
+  assert.ok(ids(meses[1].cadastrar).includes("pascoa"));
+  assert.ok(!ids(meses[2].cadastrar).includes("pascoa"));
 });
-test("períodos respeitam fevereiro bissexto e divulgação apenas no período", () => {
-  const ocorrencia = resolverOcorrencia(evento("verao"), 2027);
-  assert.equal(ocorrencia.fim, "2028-02-29");
+test("ciclo de dezembro a janeiro não duplica coleção nem perde divulgação", () => {
+  const meses = montarPlanejamento(catalogoComercial, filtros);
+  assert.ok(ids(meses[11].cadastrar).includes("reis"));
+  assert.ok(ids(meses[10].cadastrar).includes("verao"));
+  assert.ok(ids(meses[0].divulgar).includes("verao"));
+  assert.ok(ids(meses[1].acontecendo).includes("verao"));
+  assert.ok(!ids(meses[0].cadastrar).includes("verao"));
+  assert.equal(meses[0].divulgar.filter((o) => o.evento.id === "verao").length, 1);
+});
+test("conscientização divulga no próprio mês e anterior é respeitado", () => {
   const meses = montarPlanejamento(catalogoComercial, filtros);
   assert.ok(!ids(meses[8].divulgar).includes("outubro-rosa"));
   assert.ok(ids(meses[9].divulgar).includes("outubro-rosa"));
-  assert.ok(ids(meses[8].cadastrar).includes("outubro-rosa"));
+  const anterior = montarPlanejamento([{ ...evento("natal"), divulgacao: "anterior" }], filtros);
+  assert.equal(anterior[10].divulgar.length, 1);
+  assert.equal(anterior[11].divulgar.length, 0);
 });
-test("regra de divulgação apenas anterior não se prolonga até o evento", () => {
-  const meses = montarPlanejamento([{ ...evento("natal"), divulgacao: "anterior" }], filtros);
-  assert.equal(meses[10].divulgar.length, 1);
-  assert.equal(meses[11].divulgar.length, 0);
+test("eventos locais de referência mantêm aviso de confirmação", () => {
+  assert.ok(resolverOcorrencia(evento("barretos")).referencia);
+  assert.ok(resolverOcorrencia(evento("penha")).referencia);
 });
-test("eventos de referência não recebem dia exato e exibem aviso de confirmação", () => {
-  const o = resolverOcorrencia(evento("barretos"), 2027);
-  assert.ok(o.referencia);
-  assert.equal(formatarPeriodo(o), "Agosto de 2027");
-  assert.ok(resolverOcorrencia(evento("penha"), 2027).referencia);
-  assert.equal(resolverOcorrencia(evento("penha"), 2027).inicio, "2027-03-28");
-});
-test("filtros combinam região, produto, categoria e busca sem acentos", () => {
+test("filtros combinados e múltiplas regiões não duplicam nacionais", () => {
   assert.deepEqual(filtrarEventos(catalogoComercial, { ...filtros, regioes: ["Nacional", "Norte"], produto: "Painéis", categoria: "Religioso", busca: "nazare" }).map((e) => e.id), ["cirio"]);
-  assert.equal(filtrarEventos(catalogoComercial, { ...filtros, busca: "parintins" }).length, 0);
-  assert.equal(filtrarEventos(catalogoComercial, { ...filtros, busca: "não existe" }).length, 0);
-});
-test("regiões incluem nacionais e múltiplas seleções não duplicam eventos", () => {
-  const meses = montarPlanejamento([...catalogoComercial, evento("carnaval")], { ...filtros, regioes: ["Nacional", "Nordeste", "Norte", "Sul", "Sudeste"] });
+  const meses = montarPlanejamento([...catalogoComercial, evento("carnaval")], { ...filtros, regioes: ["Nacional", "Norte", "Sul", "Sudeste"] });
   assert.equal(meses[1].acontecendo.filter((o) => o.evento.id === "carnaval").length, 1);
   assert.ok(ids(meses[7].acontecendo).includes("barretos"));
-  assert.ok(ids(meses[9].acontecendo).includes("cirio"));
+  assert.equal(filtrarEventos(catalogoComercial, { ...filtros, busca: "inexistente" }).length, 0);
 });
-test("URL preserva filtros e normaliza valores inválidos e regiões duplicadas", () => {
-  const f: Filtros = { ...filtros, regioes: ["Nacional", "Norte", "Sul"], produto: "Lenços", categoria: "Religioso", busca: "São José" };
-  assert.deepEqual(lerFiltros(new URLSearchParams(escreverFiltros(f)), 2027), f);
-  assert.deepEqual(lerFiltros(new URLSearchParams("ano=3000&regiao=Norte&regiao=Norte&regiao=Outro&produto=Outro&categoria=Outro"), 2027), { ...filtros, regioes: ["Nacional", "Norte"] });
-  assert.equal(lerFiltros(new URLSearchParams("ano=2026"), 2027).ano, 2026);
-  assert.equal(lerFiltros(new URLSearchParams("ano=2029"), 2027).ano, 2029);
+test("URL preserva mês, etapa e filtros e descarta valores inválidos", () => {
+  const f: Filtros = { ...filtros, regioes: ["Nacional", "Norte", "Sul"], mes: 6, etapa: "cadastrar", busca: "São José" };
+  assert.deepEqual(lerFiltros(new URLSearchParams(escreverFiltros(f)), 10), f);
+  assert.deepEqual(lerFiltros(new URLSearchParams("mes=13&etapa=outra&regiao=Norte&regiao=Norte&produto=Outro"), 10), { ...filtros, regioes: ["Nacional", "Norte"] });
 });
-test("hoje usa São Paulo mesmo na virada de ano em UTC", () => {
-  assert.deepEqual(hojeBrasil(new Date("2027-01-01T01:00:00Z")), { ano: 2026, mes: 12 });
+test("mês atual respeita fuso de São Paulo", () => {
+  assert.equal(mesAtualBrasil(new Date("2027-01-01T01:00:00Z")), 12);
 });
 test("catálogo possui IDs únicos, fontes HTTPS e as cinco abrangências", () => {
   assert.equal(new Set(catalogoComercial.map((e) => e.id)).size, catalogoComercial.length);
@@ -110,4 +104,66 @@ test("erro de autenticação é genérico e não expõe dados internos", async (
 test("menu usa permissão existente e não concede acesso por outra permissão", () => {
   assert.ok(paginasPermitidas({ podeVisualizarTarefasMidia: true }).some((p) => p.href === "/controle-midia/calendario"));
   assert.ok(!paginasPermitidas({ podeVisualizarCategoriasMidia: true }).some((p) => p.href === "/controle-midia/calendario"));
+});
+
+test("revisão: Penha alcança maio e Pentecostes fica em maio ou junho", () => {
+  assert.deepEqual(resolverOcorrencia(evento("penha")).meses, [3, 4, 5]);
+  assert.deepEqual(resolverOcorrencia(evento("divino")).meses, [5, 6]);
+  const meses = montarPlanejamento(catalogoComercial, { ...filtros, regioes: ["Nacional", "Sudeste"] });
+  assert.ok(ids(meses[4].acontecendo).includes("penha"));
+  assert.ok(ids(meses[3].cadastrar).includes("divino"));
+});
+test("revisão: vaquejadas são linha permanente sem cadastro sazonal artificial", () => {
+  const meses = montarPlanejamento(catalogoComercial, { ...filtros, regioes: ["Nacional", "Nordeste"] });
+  for (const mes of meses) {
+    assert.ok(ids(mes.acontecendo).includes("vaquejadas"));
+    assert.ok(ids(mes.divulgar).includes("vaquejadas"));
+    assert.ok(!ids(mes.cadastrar).includes("vaquejadas"));
+  }
+  assert.equal(resolverOcorrencia(evento("vaquejadas")).periodo, "Ao longo do ano · confirmar agenda local");
+});
+test("revisão: campanha de autismo abrange abril e mantém o marco de 02/04", () => {
+  const o = resolverOcorrencia(evento("autismo"));
+  assert.deepEqual(o.meses, [4]);
+  assert.equal(o.periodo, "Abril");
+  assert.ok(o.evento.recomendacao.includes("2 de abril"));
+});
+test("revisão: festas regionais novas não vazam para a visão nacional", () => {
+  for (const id of ["santana-caico", "cirandas-manacapuru", "saire"]) {
+    assert.ok(!filtrarEventos(catalogoComercial, filtros).some((e) => e.id === id));
+    assert.ok(resolverOcorrencia(evento(id)).referencia);
+  }
+  const norte = montarPlanejamento(catalogoComercial, { ...filtros, regioes: ["Nacional", "Norte"] });
+  assert.ok(ids(norte[8].acontecendo).includes("saire"));
+  assert.ok(ids(norte[7].cadastrar).includes("saire"));
+  assert.ok(ids(norte[7].acontecendo).includes("cirandas-manacapuru"));
+  const nordeste = montarPlanejamento(catalogoComercial, { ...filtros, regioes: ["Nacional", "Nordeste"] });
+  assert.ok(ids(nordeste[6].acontecendo).includes("santana-caico"));
+});
+test("revisão: tradições em 26 e 27/09 são registros distintos com fontes específicas", () => {
+  assert.equal(resolverOcorrencia(evento("cosme-catolico")).periodo, "26/09");
+  assert.equal(resolverOcorrencia(evento("cosme-popular")).periodo, "27/09");
+  assert.ok(evento("cosme-catolico").fontes.some((f) => f.url.includes("vaticannews.va")));
+  assert.ok(evento("cosme-popular").recomendacao.includes("comunidades católicas locais"));
+});
+
+test("todo evento tem nível e justificativa de compra, respeitando o público", () => {
+  for (const e of catalogoComercial) {
+    assert.ok(e.potencialCompra, e.id);
+    assert.ok(["Muito alto", "Alto", "Moderado", "Baixo"].includes(e.potencialCompra.nivel));
+    assert.ok(e.potencialCompra.justificativa.length > 30);
+  }
+  assert.equal(evento("natal").potencialCompra.nivel, "Muito alto");
+  assert.equal(evento("barretos").potencialCompra.publico, "Regional/local");
+  assert.equal(evento("autismo").potencialCompra.publico, "Institucional");
+});
+
+
+test("visualização mensal é padrão; anual é compartilhável e não altera filtros", () => {
+  assert.equal(lerFiltros(new URLSearchParams(), 10).visao, "mensal");
+  assert.equal(lerFiltros(new URLSearchParams("visao=outra"), 10).visao, "mensal");
+  const anual: Filtros = { ...filtros, visao: "anual", mes: 6, regioes: ["Nacional", "Nordeste"], busca: "juninas" };
+  assert.deepEqual(lerFiltros(new URLSearchParams(escreverFiltros(anual)), 10), anual);
+  assert.equal(new URLSearchParams(escreverFiltros({ ...anual, visao: "mensal" })).has("visao"), false);
+  assert.deepEqual(montarPlanejamento(catalogoComercial, anual), montarPlanejamento(catalogoComercial, { ...anual, visao: "mensal" }));
 });
