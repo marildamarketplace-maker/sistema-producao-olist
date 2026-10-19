@@ -37,3 +37,28 @@ test("valida limites e preserva localização da linha com erro", () => {
   const quinhentos = Array.from({ length: 500 }, (_, i) => ({ ...atual, produtoId: `produto-${i}` }));
   assert.throws(() => importarItensProducao("SKU-A;1", produtos, quinhentos), /máximo 500/);
 });
+
+
+test("importa laser e observação com pontuação e aspas", () => {
+  const resultado = importarItensProducao('sku;qtd;laser;observação\nSKU-A;10;sim;Cortar frente, verso\nSKU-B;2;não;"Usar detalhe; e ""aspas"""', produtos, []);
+  assert.deepEqual(resultado.linhas.map(({ tipoCorte, observacao }) => [tipoCorte, observacao]), [["LASER", "Cortar frente, verso"], [null, 'Usar detalhe; e "aspas"']]);
+  const planilha = importarItensProducao("SKU-A\t3\tsim\tObservação da planilha", produtos, []);
+  assert.equal(planilha.linhas[0].observacao, "Observação da planilha");
+});
+
+test("colunas omitidas preservam metadados; não remove laser e quarta coluna vazia limpa observação", () => {
+  const linha = { ...atual, tipoCorte: "LASER", observacao: "Manter" };
+  assert.deepEqual(importarItensProducao("SKU-A;2", produtos, [linha]).linhas[0], { ...linha, solicitada: "2" });
+  const resultado = importarItensProducao("SKU-A;2;não;", produtos, [linha]).linhas[0];
+  assert.equal(resultado.tipoCorte, null);
+  assert.equal(resultado.observacao, null);
+  assert.equal(resultado.produzida, "3");
+  assert.equal(importarItensProducao("SKU-A\t2\tnão\t", produtos, [linha]).linhas[0].observacao, null);
+  assert.equal(importarItensProducao("SKU-A;2;;Trocar texto", produtos, [linha]).linhas[0].tipoCorte, "LASER");
+});
+
+test("rejeita corte desconhecido, aspas abertas e observação acima do limite", () => {
+  for (const texto of ["SKU-A;2;talvez;teste", 'SKU-A;2;sim;"aberto', `SKU-A;2;sim;${"x".repeat(5001)}`, "SKU-A;2;sim;texto;extra"]) {
+    assert.throws(() => importarItensProducao(texto, produtos, [atual]));
+  }
+});

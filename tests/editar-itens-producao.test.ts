@@ -78,6 +78,18 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
   } });
   const entrada = (itens: ReturnType<typeof normalizarEdicaoItensProducao>["itens"] = [edicao()], revisao = revisaoItensProducao(estado.status, estado.itens)) => ({ aplicativoId: app, solicitacaoId: pedido, usuarioId: "usuario-teste", revisao, itens });
 
+  await t.test("persiste corte e observação em itens existentes e novos sem alterar estoque", async () => {
+    reiniciar();
+    await editarItensProducao(entrada([{ ...edicao(50), tipoCorte: null, observacao: "Texto revisado" }, { id: null, produtoId: produtoB, quantidadeSolicitada: 2, quantidadeProduzida: 0, tipoCorte: "LASER", observacao: "Item novo" }]));
+    assert.equal(estado.itens[0].tipoCorte, null);
+    assert.equal(estado.itens[0].observacao, "Texto revisado");
+    assert.equal(estado.itens[1].tipoCorte, "LASER");
+    assert.equal(estado.itens[1].observacao, "Item novo");
+    assert.equal(estado.movimentos.length, 1);
+    await editarItensProducao(entrada([{ ...edicao(50), observacao: null }, { id: estado.itens[1].id, produtoId: produtoB, quantidadeSolicitada: 2, quantidadeProduzida: 0 }]));
+    assert.equal(estado.itens[0].observacao, null);
+    assert.equal(estado.itens[1].observacao, "Item novo");
+  });
   await t.test("50 para 40 gera saída de 10 sem apagar a entrada original", async () => {
     reiniciar(); await editarItensProducao(entrada());
     assert.deepEqual(estado.movimentos.map((mov) => [mov.origem, mov.tipoMovimento, mov.quantidade]), [["PRODUCAO", "entrada", 50], ["AJUSTE_PRODUCAO", "saida", 10]]);
@@ -140,4 +152,15 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
     assert.match(estado.movimentos.at(-1)?.observacao ?? "", /usuario-http/);
     assert.doesNotMatch(estado.movimentos.at(-1)?.observacao ?? "", /autor-forjado/);
   });
+});
+
+
+test("valida novos campos opcionais da edição no servidor", () => {
+  const revisao = revisaoItensProducao("pendente", [item()]);
+  for (const campos of [{ tipoCorte: "MANUAL" }, { tipoCorte: true }, { observacao: 123 }, { observacao: "x".repeat(5001) }]) {
+    assert.throws(() => normalizarEdicaoItensProducao({ revisao, itens: [{ ...edicao(), ...campos }] }));
+  }
+  const dados = normalizarEdicaoItensProducao({ revisao, itens: [{ ...edicao(), tipoCorte: "LASER", observacao: "Teste" }] });
+  assert.equal(dados.itens[0].tipoCorte, "LASER");
+  assert.equal(dados.itens[0].observacao, "Teste");
 });

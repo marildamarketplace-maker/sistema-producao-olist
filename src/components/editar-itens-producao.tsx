@@ -6,11 +6,11 @@ import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
 import { importarItensProducao } from "@/lib/importar-itens-producao";
 
 type Produto = { id: string; sku: string; imagem_url: string | null };
-type Linha = { chave: string; id: string | null; produtoId: string; sku: string; solicitada: string; produzida: string };
+type Linha = { chave: string; id: string | null; produtoId: string; sku: string; solicitada: string; produzida: string; tipoCorte?: string | null; observacao?: string | null };
 type Props = { producao: DetalheProducao; token: string; onCancelar: () => void; onSalvo: () => void; onRecarregar: () => void };
 
 export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRecarregar }: Props) {
-  const [linhas, setLinhas] = useState<Linha[]>(() => producao.itens.map((item) => ({ chave: item.id, id: item.id, produtoId: item.produtoId, sku: item.sku, solicitada: String(item.quantidadeSolicitada), produzida: String(item.quantidadeProduzida) })));
+  const [linhas, setLinhas] = useState<Linha[]>(() => producao.itens.map((item) => ({ chave: item.id, id: item.id, produtoId: item.produtoId, sku: item.sku, solicitada: String(item.quantidadeSolicitada), produzida: String(item.quantidadeProduzida), tipoCorte: item.tipoCorte, observacao: item.observacao })));
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [busca, setBusca] = useState("");
   const [produtoId, setProdutoId] = useState("");
@@ -58,7 +58,7 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
     try {
       const response = await fetch(`/api/solicitacoes-producao/${encodeURIComponent(producao.id)}`, {
         method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ revisao: producao.revisao, itens: linhas.map((linha) => ({ id: linha.id, produtoId: linha.produtoId, quantidadeSolicitada: Number(linha.solicitada), quantidadeProduzida: Number(linha.produzida) })) }),
+        body: JSON.stringify({ revisao: producao.revisao, itens: linhas.map((linha) => ({ id: linha.id, produtoId: linha.produtoId, quantidadeSolicitada: Number(linha.solicitada), quantidadeProduzida: Number(linha.produzida), tipoCorte: linha.tipoCorte, observacao: linha.observacao })) }),
       });
       const dados = await response.json() as { error?: string };
       if (!response.ok) { setConflito(response.status === 409); throw new Error(dados.error ?? "Não foi possível salvar os itens."); }
@@ -72,9 +72,9 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{producao.status === "concluida" ? "Esta produção está concluída. As alterações nos itens produzidos ajustarão o estoque pela diferença, mantendo o histórico das movimentações." : "Os itens podem ser alterados neste status. Salvar não confirma a produção e não gera entrada de estoque."} O status e a foto de evidência serão mantidos.</p>
     <fieldset disabled={salvando} className="min-w-0 space-y-3 rounded-md border border-slate-200 p-4">
       <legend className="px-1 text-sm font-semibold text-slate-900">Importar itens por SKU e quantidade</legend>
-      <p id="instrucao-importacao" className="text-sm text-slate-600">Cole uma linha por item, separando SKU e quantidade por ponto e vírgula, vírgula, espaço ou tabulação (Excel). A quantidade solicitada será atualizada nos itens existentes; novos itens terão quantidade produzida zero. Os demais itens serão mantidos. Máximo de 500 itens.</p>
-      <label htmlFor="importacao-itens" className="block text-sm text-slate-700">SKU e quantidade solicitada</label>
-      <textarea id="importacao-itens" rows={5} maxLength={100000} value={textoImportacao} onChange={(event) => { setTextoImportacao(event.target.value); setErroImportacao(null); setSucessoImportacao(null); }} aria-describedby="instrucao-importacao" aria-invalid={Boolean(erroImportacao)} placeholder={"SKU-EXEMPLO;10\nOUTRO-SKU;25"} className="input min-h-11 w-full" />
+      <p id="instrucao-importacao" className="text-sm text-slate-600">Cole uma linha por item, separando SKU e quantidade por ponto e vírgula, vírgula, espaço ou tabulação (Excel). A quantidade solicitada será atualizada nos itens existentes; novos itens terão quantidade produzida zero. Os demais itens serão mantidos. Colunas opcionais: corte laser (sim/não) e observação. Sem essas colunas, os valores atuais são preservados; observação vazia na quarta coluna limpa o texto. Para observações com pontuação, prefira ponto e vírgula ou tabulação. Máximo de 500 itens.</p>
+      <label htmlFor="importacao-itens" className="block text-sm text-slate-700">SKU; quantidade solicitada; corte laser; observação</label>
+      <textarea id="importacao-itens" rows={5} maxLength={100000} value={textoImportacao} onChange={(event) => { setTextoImportacao(event.target.value); setErroImportacao(null); setSucessoImportacao(null); }} aria-describedby="instrucao-importacao" aria-invalid={Boolean(erroImportacao)} placeholder={"SKU-EXEMPLO;10;sim;Cortar conforme modelo\nOUTRO-SKU;25;não;"} className="input min-h-11 w-full" />
       <button type="button" disabled={carregandoProdutos || Boolean(erroProdutos) || !textoImportacao.trim()} onClick={() => {
         setErroImportacao(null); setSucessoImportacao(null);
         try {
@@ -91,6 +91,8 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="text-sm text-slate-700">Quantidade solicitada<input required type="number" inputMode="numeric" min={0} max={2147483647} step={1} disabled={salvando} value={linha.solicitada} onChange={(event) => alterar(linha.chave, "solicitada", event.target.value)} className="input mt-1 min-h-11" /></label>
         <label className="text-sm text-slate-700">Quantidade produzida<input required type="number" inputMode="numeric" min={0} max={2147483647} step={1} disabled={salvando} value={linha.produzida} onChange={(event) => alterar(linha.chave, "produzida", event.target.value)} className="input mt-1 min-h-11" /></label>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700"><input type="checkbox" disabled={salvando} checked={linha.tipoCorte === "LASER"} onChange={(event) => setLinhas((atuais) => atuais.map((item) => item.chave === linha.chave ? { ...item, tipoCorte: event.target.checked ? "LASER" : null } : item))} />Corte a laser</label>
+        <label className="text-sm text-slate-700">Observação<textarea rows={2} maxLength={5000} disabled={salvando} value={linha.observacao ?? ""} onChange={(event) => setLinhas((atuais) => atuais.map((item) => item.chave === linha.chave ? { ...item, observacao: event.target.value || null } : item))} className="input mt-1 min-h-11 w-full" /></label>
       </div>
     </article>)}
     {!linhas.length && <p role="status" className="text-sm text-slate-600">Adicione ao menos um item para salvar.</p>}

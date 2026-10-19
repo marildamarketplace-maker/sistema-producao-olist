@@ -4,7 +4,7 @@ import { revisaoItensProducao } from "./producao-revisao";
 import { calcularAjustesEstoqueProducao, ORIGENS_ESTOQUE_PRODUCAO, saldoMovimentacoesProducao } from "./producao-ajustes-estoque";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type ItemEdicao = { id: string | null; produtoId: string; quantidadeSolicitada: number; quantidadeProduzida: number };
+type ItemEdicao = { id: string | null; produtoId: string; quantidadeSolicitada: number; quantidadeProduzida: number; tipoCorte?: "LASER" | null; observacao?: string | null };
 
 export function normalizarEdicaoItensProducao(body: unknown) {
   const dados = body && typeof body === "object" ? body as Record<string, unknown> : {};
@@ -25,7 +25,13 @@ export function normalizarEdicaoItensProducao(body: unknown) {
         throw new DetalheProducaoError("Informe quantidades inteiras entre 0 e 2147483647.", 400);
       }
     }
-    return { id, produtoId: item.produtoId, quantidadeSolicitada: item.quantidadeSolicitada as number, quantidadeProduzida: item.quantidadeProduzida as number };
+    if (item.tipoCorte !== undefined && item.tipoCorte !== null && item.tipoCorte !== "LASER") {
+      throw new DetalheProducaoError("Tipo de corte inválido.", 400);
+    }
+    if (item.observacao !== undefined && item.observacao !== null && (typeof item.observacao !== "string" || item.observacao.length > 5000)) {
+      throw new DetalheProducaoError("Informe uma observação de até 5000 caracteres.", 400);
+    }
+    return { tipoCorte: item.tipoCorte as "LASER" | null | undefined, observacao: item.observacao as string | null | undefined, id, produtoId: item.produtoId, quantidadeSolicitada: item.quantidadeSolicitada as number, quantidadeProduzida: item.quantidadeProduzida as number };
   });
   const ids = itens.flatMap((item) => item.id ? [item.id] : []);
   if (new Set(ids).size !== ids.length) throw new DetalheProducaoError("Existem itens duplicados na edição.", 400);
@@ -85,15 +91,15 @@ export async function editarItensProducao(input: ReturnType<typeof normalizarEdi
       for (const item of input.itens) {
         if (item.id) {
           const anterior = porId.get(item.id)!;
-          if (anterior.quantidadeSolicitada !== item.quantidadeSolicitada || anterior.quantidadeProduzida !== item.quantidadeProduzida) {
-            await tx.itemSolicitacaoProducao.update({ where: { id: item.id }, data: { quantidadeSolicitada: item.quantidadeSolicitada, quantidadeProduzida: item.quantidadeProduzida } });
+          if (anterior.quantidadeSolicitada !== item.quantidadeSolicitada || anterior.quantidadeProduzida !== item.quantidadeProduzida || (item.tipoCorte !== undefined && anterior.tipoCorte !== item.tipoCorte) || (item.observacao !== undefined && anterior.observacao !== item.observacao)) {
+            await tx.itemSolicitacaoProducao.update({ where: { id: item.id }, data: { quantidadeSolicitada: item.quantidadeSolicitada, quantidadeProduzida: item.quantidadeProduzida, ...(item.tipoCorte !== undefined ? { tipoCorte: item.tipoCorte } : {}), ...(item.observacao !== undefined ? { observacao: item.observacao } : {}) } });
           }
         } else {
           const produto = porProduto.get(item.produtoId)!;
           await tx.itemSolicitacaoProducao.create({ data: {
             solicitacaoId: input.solicitacaoId, aplicativoId: input.aplicativoId, produtoId: produto.id, sku: produto.sku,
             imagemUrl: produto.imagemUrl, quantidadeSolicitada: item.quantidadeSolicitada, quantidadeProduzida: item.quantidadeProduzida,
-            statusItem: solicitacao.status,
+            statusItem: solicitacao.status, tipoCorte: item.tipoCorte ?? null, observacao: item.observacao ?? null,
           } });
         }
       }
