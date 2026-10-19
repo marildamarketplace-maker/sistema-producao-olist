@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
+import { importarItensProducao } from "@/lib/importar-itens-producao";
 
 type Produto = { id: string; sku: string; imagem_url: string | null };
 type Linha = { chave: string; id: string | null; produtoId: string; sku: string; solicitada: string; produzida: string };
@@ -19,6 +20,9 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [conflito, setConflito] = useState(false);
+  const [textoImportacao, setTextoImportacao] = useState("");
+  const [erroImportacao, setErroImportacao] = useState<string | null>(null);
+  const [sucessoImportacao, setSucessoImportacao] = useState<string | null>(null);
   const enviando = useRef(false);
 
   useEffect(() => {
@@ -66,6 +70,22 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
 
   return <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void salvar(); }} aria-label="Editar itens da produção">
     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{producao.status === "concluida" ? "Esta produção está concluída. As alterações nos itens produzidos ajustarão o estoque pela diferença, mantendo o histórico das movimentações." : "Os itens podem ser alterados neste status. Salvar não confirma a produção e não gera entrada de estoque."} O status e a foto de evidência serão mantidos.</p>
+    <fieldset disabled={salvando} className="min-w-0 space-y-3 rounded-md border border-slate-200 p-4">
+      <legend className="px-1 text-sm font-semibold text-slate-900">Importar itens por SKU e quantidade</legend>
+      <p id="instrucao-importacao" className="text-sm text-slate-600">Cole uma linha por item, separando SKU e quantidade por ponto e vírgula, vírgula, espaço ou tabulação (Excel). A quantidade solicitada será atualizada nos itens existentes; novos itens terão quantidade produzida zero. Os demais itens serão mantidos. Máximo de 500 itens.</p>
+      <label htmlFor="importacao-itens" className="block text-sm text-slate-700">SKU e quantidade solicitada</label>
+      <textarea id="importacao-itens" rows={5} maxLength={100000} value={textoImportacao} onChange={(event) => { setTextoImportacao(event.target.value); setErroImportacao(null); setSucessoImportacao(null); }} aria-describedby="instrucao-importacao" aria-invalid={Boolean(erroImportacao)} placeholder={"SKU-EXEMPLO;10\nOUTRO-SKU;25"} className="input min-h-11 w-full" />
+      <button type="button" disabled={carregandoProdutos || Boolean(erroProdutos) || !textoImportacao.trim()} onClick={() => {
+        setErroImportacao(null); setSucessoImportacao(null);
+        try {
+          const resultado = importarItensProducao(textoImportacao, produtos, linhas);
+          setLinhas(resultado.linhas); setTextoImportacao("");
+          setSucessoImportacao(`${resultado.quantidade} SKU(s) preparado(s). Revise os itens e clique em Salvar alterações para gravar.`);
+        } catch (error) { setErroImportacao(error instanceof Error ? error.message : "Não foi possível importar os itens."); }
+      }} className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2 disabled:opacity-50">Importar itens</button>
+      {erroImportacao && <p role="alert" className="break-words text-sm text-red-700">{erroImportacao}</p>}
+      {sucessoImportacao && <p role="status" className="text-sm text-slate-700">{sucessoImportacao}</p>}
+    </fieldset>
     {linhas.map((linha, index) => <article key={linha.chave} className="min-w-0 rounded-md border border-slate-200 p-4">
       <div className="flex items-start justify-between gap-3"><h4 className="min-w-0 break-all text-sm font-semibold text-slate-900">{index + 1}. {linha.sku}</h4><button type="button" disabled={salvando} onClick={() => setLinhas((atuais) => atuais.filter((item) => item.chave !== linha.chave))} aria-label={`Remover ${linha.sku}`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 text-red-700 focus-visible:outline focus-visible:outline-2 disabled:opacity-50"><Trash2 className="h-4 w-4" aria-hidden="true" /></button></div>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
