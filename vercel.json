@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/cron/renovar-tokens-olist",
-      "schedule": "5 3 * * *"
+      "schedule": "5 */3 * * *"
     },
     {
       "path": "/api/cron/processar-notifications",
