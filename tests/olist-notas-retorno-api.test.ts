@@ -12,6 +12,7 @@ test("consulta de notas usa filtros oficiais, todas as páginas e falha se a res
   const offsets: string[] = [];
   t.mock.method(axios, "get", async (endereco: string) => {
     const url = new URL(endereco);
+    if (url.pathname.endsWith("/notas/321/link")) return { status: 200, headers: {}, data: { link: "https://notas.example.test/321" } };
     if (url.pathname.endsWith("/notas/321")) return { status: 200, headers: {}, data: { id: 321, finalidade: 4 } };
     assert.equal(url.searchParams.get("tipo"), "E");
     assert.equal(url.searchParams.get("idVenda"), "123");
@@ -24,11 +25,12 @@ test("consulta de notas usa filtros oficiais, todas as páginas e falha se a res
       itens: Array.from({ length: offset === "0" ? 100 : 1 }, (_, i) => ({ id: Number(offset) + i + 1 })), paginacao: { total: 101 },
     } };
   });
-  const { listarNotasEntradaRetornoOlist, obterNotaRetornoOlist } = await import("../src/lib/olist");
+  const { listarNotasEntradaRetornoOlist, obterNotaRetornoOlist, obterLinkNotaRetornoOlist } = await import("../src/lib/olist");
   assert.equal((await listarNotasEntradaRetornoOlist(app, { idVenda: "123" })).length, 101);
   assert.deepEqual(offsets, ["0", "100"]);
   for (const caso of ["erro", "malformado", "incompleto"]) {
     modo = caso; await assert.rejects(listarNotasEntradaRetornoOlist(app, { idVenda: "123" }));
   }
   assert.equal((await obterNotaRetornoOlist(app, "321")).finalidade, 4);
+  assert.equal(await obterLinkNotaRetornoOlist(app, "321"), "https://notas.example.test/321");
 });

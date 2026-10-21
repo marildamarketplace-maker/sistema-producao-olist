@@ -62,3 +62,5 @@ Notas canceladas, rejeitadas ou pendentes são exibidas com sua situação; exis
 Contrato consultado: [Swagger oficial Olist v3](https://erp.tiny.com.br/public-api/v3/swagger/swagger.json).
 
 A consulta retorna `autorizada` para cada nota e destaca a confirmação na tela. Somente a situação `6` (Autorizada) confirma autorização na Olist; as demais situações, inclusive status ausente, emitida, DANFE ou registrada, mantêm a indicação de autorização não confirmada e mostram o status original. Não é uma consulta direta à SEFAZ nem uma autorização histórica de nota atualmente cancelada.
+
+As notas encontradas exibem **Abrir nota de devolução**, em nova aba. O endereço vem da rota oficial `GET /notas/{idNota}/link`, com HTTPS, sem presumir uma rota interna do ERP. Se a Olist não disponibilizar o link, a tela informa essa limitação sem invalidar a existência da nota ou a autorização confirmada.
