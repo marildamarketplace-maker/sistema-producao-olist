@@ -86,6 +86,11 @@ export const menuItems: MenuItem[] = [
         permissions: ["podeVisualizarBaixa", "podeSolicitarBaixa"],
       },
       {
+        label: "Retorno de cancelados Olist",
+        href: "/retorno-estoque-olist",
+        permissions: ["podeVisualizarDevolucao", "podeSolicitarDevolucao"],
+      },
+      {
         label: "Anotar devolução",
         href: "/devolucoes",
         permissions: ["podeVisualizarDevolucao", "podeSolicitarDevolucao"],

@@ -8,6 +8,8 @@ datasource db {
 }
 
 model Aplicativo {
+  retornosEstoqueOlist RetornoEstoqueOlist[]
+  itensRetornoEstoqueOlist ItemRetornoEstoqueOlist[]
   enviosFornecedor EnvioFornecedor[]
   configsFornecedorFilial ConfigFornecedorFilial[]
   previasFornecedor PreviaFornecedor[]
@@ -141,6 +143,7 @@ model Midia {
 }
 
 model Usuario {
+  retornosEstoqueOlist RetornoEstoqueOlist[]
   enviosFornecedor EnvioFornecedor[]
   previasFornecedor PreviaFornecedor[]
   id                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -428,6 +431,7 @@ model PedidoOlistProcessado {
 }
 
 model MovimentacaoEstoque {
+  itemRetornoOlist ItemRetornoEstoqueOlist?
   id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   produtoId     String      @map("produto_id") @db.Uuid
   sku           String
@@ -489,6 +493,7 @@ model BaixaEstoqueOlist {
 }
 
 model ItemBaixaEstoqueOlist {
+  retornos ItemRetornoEstoqueOlist[]
   id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   baixaId        String      @map("baixa_id") @db.Uuid
   produtoId      String?     @map("produto_id") @db.Uuid
@@ -1060,4 +1065,37 @@ model PreviaFornecedor {
   expiraEm DateTime @map("expira_em") @db.Timestamptz(6)
   @@index([expiraEm])
   @@map("previa_fornecedor")
+}
+
+model RetornoEstoqueOlist {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  usuarioId String @map("usuario_id") @db.Uuid
+  chaveIdempotencia String @map("chave_idempotencia") @db.Uuid
+  payloadHash String @map("payload_hash")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  itens ItemRetornoEstoqueOlist[]
+
+  @@unique([aplicativoId, chaveIdempotencia], map: "uq_retorno_olist_idempotencia")
+  @@index([aplicativoId, createdAt], map: "idx_retorno_olist_aplicativo_data")
+  @@map("retornos_estoque_olist")
+}
+
+model ItemRetornoEstoqueOlist {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  retornoId String @map("retorno_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  itemBaixaId String @map("item_baixa_id") @db.Uuid
+  movimentacaoId String @unique @map("movimentacao_id") @db.Uuid
+  quantidade Int
+  retorno RetornoEstoqueOlist @relation(fields: [retornoId], references: [id], onDelete: Restrict)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
+  itemBaixa ItemBaixaEstoqueOlist @relation(fields: [itemBaixaId], references: [id], onDelete: Restrict)
+  movimentacao MovimentacaoEstoque @relation(fields: [movimentacaoId], references: [id], onDelete: Restrict)
+
+  @@unique([retornoId, itemBaixaId], map: "uq_retorno_olist_item")
+  @@index([aplicativoId, itemBaixaId], map: "idx_retorno_olist_baixa")
+  @@map("itens_retorno_estoque_olist")
 }

@@ -2017,6 +2017,23 @@ export async function buscarPedidosParaBaixaEstoqueOlist(aplicativoId: string, i
   };
 }
 
+/** Lista completa dos cancelados, sem alterar controles da busca de baixas. */
+export async function listarPedidosCanceladosOlist(aplicativoId: string, desde: Date) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  return listarPedidosOlist(token, aplicativoId, { tipo: "atualizacao", desde }, "2");
+}
+
+/** Mantém o status e os SKUs originais para revalidar retornos de cancelados. */
+export async function obterPedidoParaRetornoOlist(aplicativoId: string, pedidoId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`pedidos/${encodeURIComponent(pedidoId)}`, normalizarBaseUrl(config.apiBaseUrl));
+  const response = await getOlistComRetry(url.toString(), token, aplicativoId, "pedido-retorno-cancelado");
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status < 200 || response.status >= 300) throw new Error(`Erro Olist ${response.status}`);
+  return response.data as Record<string, unknown>;
+}
+
 export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, pedidoId: string) {
   const token = await getValidOlistAccessToken(aplicativoId);
   const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedidoId);
