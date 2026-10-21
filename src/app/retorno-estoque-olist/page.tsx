@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ValidacaoNotasRetorno } from "@/lib/nota-devolucao-olist";
 import { ExternalLink } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
@@ -43,10 +42,6 @@ export default function RetornoEstoqueOlistPage() {
   const [pagina, setPagina] = useState(1);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
   const [erroHistorico, setErroHistorico] = useState<string | null>(null);
-  const [consultandoNota, setConsultandoNota] = useState<string | null>(null);
-  const [notasValidadas, setNotasValidadas] = useState<Record<string, ValidacaoNotasRetorno>>({});
-  const [errosNotas, setErrosNotas] = useState<Record<string, string>>({});
-  const consultaNotasEmCurso = useRef(false);
   const enviando = useRef(false);
   const resumoRef = useRef<HTMLHeadingElement>(null);
   const armazenamentoKey = usuario ? `retorno_olist_pendente:${usuario.aplicativo_id}:${usuario.id}` : null;
@@ -119,20 +114,6 @@ export default function RetornoEstoqueOlistPage() {
   const itensPositivos = itensSelecionados.filter((item) => Number(item.valor) > 0);
   const total = itensPositivos.reduce((soma, item) => soma + Number(item.valor), 0);
   const bloqueado = buscando || salvando || revisando || Boolean(tentativa);
-
-  async function validarNota(retornoId: string) {
-    if (consultaNotasEmCurso.current) return;
-    consultaNotasEmCurso.current = true;
-    setConsultandoNota(retornoId);
-    setErrosNotas((anteriores) => ({ ...anteriores, [retornoId]: "" }));
-    setNotasValidadas((anteriores) => { const proximas = { ...anteriores }; delete proximas[retornoId]; return proximas; });
-    try {
-      const validacao = await api<ValidacaoNotasRetorno>("validar-nota", { retorno_id: retornoId });
-      setNotasValidadas((anteriores) => ({ ...anteriores, [retornoId]: validacao }));
-    } catch {
-      setErrosNotas((anteriores) => ({ ...anteriores, [retornoId]: "Não foi possível validar as notas. Tente novamente; a ausência de nota não foi confirmada." }));
-    } finally { consultaNotasEmCurso.current = false; setConsultandoNota(null); }
-  }
 
   async function buscar() {
     if (enviando.current || tentativa) return;
@@ -264,30 +245,6 @@ export default function RetornoEstoqueOlistPage() {
         {!carregandoHistorico && !erroHistorico && historico.retornos.length === 0 && <p className="mt-3 text-sm text-slate-500">Nenhum retorno registrado.</p>}
         <div className="mt-4 space-y-3">{historico.retornos.map((retorno) => <article key={retorno.id} className="rounded-md border border-slate-200 p-3 text-sm">
           <p className="break-words font-medium">{new Date(retorno.created_at).toLocaleString("pt-BR")} · {retorno.responsavel}</p>
-          <button type="button" className={`${botao} mt-3`} disabled={Boolean(consultandoNota) || !token}
-            onClick={() => void validarNota(retorno.id)} aria-describedby={`notas-${retorno.id}`}>
-            {consultandoNota === retorno.id ? "Consultando notas…" : "Validar nota e autorização"}
-          </button>
-          <div id={`notas-${retorno.id}`} className="mt-2 space-y-2" aria-live="polite" aria-busy={consultandoNota === retorno.id}>
-            {consultandoNota === retorno.id && <p role="status">Consultando notas na Olist…</p>}
-            {errosNotas[retorno.id] && <p role="alert" className="text-red-700">{errosNotas[retorno.id]}</p>}
-            {notasValidadas[retorno.id]?.pedidos.map((pedido) => <div key={pedido.pedido_olist_id}>
-              <LinkPedidoOlist pedidoId={pedido.pedido_olist_id || null} />
-              <p className={pedido.estado === "erro" ? "text-red-700" : pedido.estado === "inconclusiva" ? "text-amber-800" : "text-slate-600"}>{pedido.mensagem}</p>
-              {pedido.notas.length > 0 && <ul className="mt-1 space-y-1">{pedido.notas.map((nota) => <li key={nota.id} className="break-words">
-                <p>NF {nota.numero}{nota.serie ? ` · Série ${nota.serie}` : ""} · Situação: {nota.situacao}</p>
-                {nota.link ? <a href={nota.link} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex min-h-11 max-w-full items-center gap-1 py-2 text-slate-900 underline underline-offset-2 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500">
-                  <span className="min-w-0 break-words">Abrir nota de devolução</span>
-                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span className="sr-only"> (abre em nova aba)</span>
-                </a> : <p className="text-xs text-slate-500">Link da nota indisponível na Olist. Valide novamente para tentar obter o link.</p>}
-                <p className={nota.autorizada ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-800"}>
-                  {nota.autorizada ? "Autorização confirmada na Olist" : "Autorização não confirmada na Olist"}
-                </p>
-              </li>)}</ul>}
-            </div>)}
-          </div>
           <ul className="mt-2 space-y-1">{retorno.itens.map((item, index) => <li key={index} className="break-words"><LinkPedidoOlist pedidoId={item.pedido_olist_id} /> · SKU {item.sku} · {item.quantidade} unidade(s)</li>)}</ul>
         </article>)}</div>
         <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className={botao} disabled={carregandoHistorico || pagina === 1} onClick={() => void carregarHistorico(pagina - 1)}>Anterior</button>

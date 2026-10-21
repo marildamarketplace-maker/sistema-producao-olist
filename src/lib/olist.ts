@@ -2034,52 +2034,6 @@ export async function obterPedidoParaRetornoOlist(aplicativoId: string, pedidoId
   return response.data as Record<string, unknown>;
 }
 
-/** Notas de entrada: o filtro idVenda e os campos seguem o Swagger oficial v3. */
-export async function listarNotasEntradaRetornoOlist(aplicativoId: string, filtros: { idVenda?: string; cpfCnpj?: string }) {
-  const token = await getValidOlistAccessToken(aplicativoId);
-  const config = await getAplicativoOlistConfig(aplicativoId);
-  const notas: Record<string, unknown>[] = [];
-  for (let pagina = 0; pagina < 20; pagina++) {
-    const url = new URL("notas", normalizarBaseUrl(config.apiBaseUrl));
-    url.searchParams.set("tipo", "E");
-    if (filtros.idVenda) url.searchParams.set("idVenda", filtros.idVenda);
-    if (filtros.cpfCnpj) url.searchParams.set("cpfCnpj", filtros.cpfCnpj);
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("offset", String(pagina * 100));
-    const response = await getOlistComRetry(url.toString(), token, aplicativoId, "notas-retorno-consulta", 3);
-    validarRespostaAxiosJsonOrThrow(response);
-    if (response.status !== 200 || !Array.isArray(response.data?.itens)) throw new Error("Consulta de notas incompleta.");
-    const itens = response.data.itens as Record<string, unknown>[];
-    notas.push(...itens);
-    const total = extrairTotalPaginacao(response.data);
-    if (total !== null && itens.length < 100 && notas.length < total) throw new Error("Paginação de notas incompleta.");
-    if (itens.length < 100 || (total !== null && notas.length >= total)) return notas;
-    await aguardar(300);
-  }
-  throw new Error("Consulta de notas excedeu o limite seguro de paginação.");
-}
-
-export async function obterNotaRetornoOlist(aplicativoId: string, notaId: string) {
-  const token = await getValidOlistAccessToken(aplicativoId);
-  const config = await getAplicativoOlistConfig(aplicativoId);
-  const url = new URL(`notas/${encodeURIComponent(notaId)}`, normalizarBaseUrl(config.apiBaseUrl));
-  const response = await getOlistComRetry(url.toString(), token, aplicativoId, "nota-retorno-detalhe", 3);
-  validarRespostaAxiosJsonOrThrow(response);
-  if (response.status !== 200 || !response.data || typeof response.data !== "object") throw new Error("Consulta de nota incompleta.");
-  return response.data as Record<string, unknown>;
-}
-
-/** Obtém o link oficial da nota, sem presumir rotas internas do ERP. */
-export async function obterLinkNotaRetornoOlist(aplicativoId: string, notaId: string) {
-  const token = await getValidOlistAccessToken(aplicativoId);
-  const config = await getAplicativoOlistConfig(aplicativoId);
-  const url = new URL(`notas/${encodeURIComponent(notaId)}/link`, normalizarBaseUrl(config.apiBaseUrl));
-  const response = await getOlistComRetry(url.toString(), token, aplicativoId, "nota-retorno-link", 3);
-  validarRespostaAxiosJsonOrThrow(response);
-  if (response.status !== 200 || typeof response.data?.link !== "string") throw new Error("Link da nota indisponível.");
-  return response.data.link as string;
-}
-
 export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, pedidoId: string) {
   const token = await getValidOlistAccessToken(aplicativoId);
   const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedidoId);

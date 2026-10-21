@@ -4,13 +4,11 @@ import test from "node:test";
 test("APIs de retorno exigem sessão, permissão e contrato restrito antes de acessar o serviço", async (t) => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia-de-teste";
-  let leitura = true, escrita = false, ativo = true, retornoExiste = true;
+  let leitura = true, escrita = false, ativo = true;
   Object.assign(globalThis, { prisma: { usuario: {
     findFirst: async () => ({ id: "usuario", aplicativoId: "app" }),
     findUnique: async () => ({ ativo, aplicativoId: "app", podeVisualizarDevolucao: leitura, podeSolicitarDevolucao: escrita }),
-  }, retornoEstoqueOlist: { findFirst: async ({ where }: { where: { aplicativoId: string } }) => {
-    assert.equal(where.aplicativoId, "app"); return retornoExiste ? { itens: [] } : null;
-  } } } });
+  } } });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: "usuario", email: "teste@example.test" } }, error: null }));
   const { retornoOlistService } = await import("../src/lib/retorno-estoque-olist-api");
@@ -20,8 +18,6 @@ test("APIs de retorno exigem sessão, permissão e contrato restrito antes de ac
   const busca = await import("../src/app/api/olist/retorno-estoque/buscar/route");
   const confirma = await import("../src/app/api/olist/retorno-estoque/confirmar/route");
   const historico = await import("../src/app/api/olist/retorno-estoque/historico/route");
-  const validarNota = await import("../src/app/api/olist/retorno-estoque/validar-nota/route");
-  const notaPayload = { retorno_id: "30000000-0000-4000-8000-000000000001" };
   const req = (body?: unknown, autenticado = true, query = "") => new Request(`https://example.test/${query}`, {
     method: body ? "POST" : "GET", headers: { ...(autenticado ? { Authorization: "Bearer ficticio" } : {}), "Content-Type": "application/json" },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -32,14 +28,7 @@ test("APIs de retorno exigem sessão, permissão e contrato restrito antes de ac
   assert.equal(buscar.mock.callCount(), 1);
   assert.equal((await confirma.POST(req(payload))).status, 403);
   assert.equal(confirmar.mock.callCount(), 0);
-  assert.equal((await validarNota.POST(req(notaPayload, false))).status, 401);
-  assert.equal((await validarNota.POST(req(notaPayload))).status, 200);
-  assert.equal((await validarNota.POST(req({ ...notaPayload, aplicativo_id: "outro" }))).status, 400);
-  assert.equal((await validarNota.POST(req({ retorno_id: "invalido" }))).status, 400);
-  retornoExiste = false;
-  assert.equal((await validarNota.POST(req(notaPayload))).status, 404);
   leitura = false;
-  assert.equal((await validarNota.POST(req(notaPayload))).status, 403);
   assert.equal((await busca.GET(req())).status, 403);
   assert.equal((await historico.GET(req())).status, 403);
   escrita = true;

@@ -2,15 +2,9 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { listarPedidosCanceladosOlist, obterPedidoParaRetornoOlist, listarNotasEntradaRetornoOlist, obterNotaRetornoOlist, obterLinkNotaRetornoOlist } from "@/lib/olist";
+import { listarPedidosCanceladosOlist, obterPedidoParaRetornoOlist } from "@/lib/olist";
 import { criarServicoRetornoOlist } from "@/lib/retorno-estoque-olist-service";
 import { RetornoOlistError } from "@/lib/retorno-estoque-olist-domain";
-import { criarValidadorNotaDevolucao } from "@/lib/nota-devolucao-olist";
-
-export const validarNotasRetornoOlist = criarValidadorNotaDevolucao(prisma, {
-  obterPedido: obterPedidoParaRetornoOlist, listarNotas: listarNotasEntradaRetornoOlist, obterNota: obterNotaRetornoOlist, obterLinkNota: obterLinkNotaRetornoOlist,
-});
-
 export const retornoOlistService = criarServicoRetornoOlist(prisma, {
   listarCancelados: listarPedidosCanceladosOlist, obterPedido: obterPedidoParaRetornoOlist,
 });

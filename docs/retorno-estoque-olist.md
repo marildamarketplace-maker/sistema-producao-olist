@@ -48,19 +48,3 @@ node --import tsx --test tests/retorno-estoque-olist-database.test.ts
 ```
 
 O teste cria estrutura e dados fictícios e exige privilégios de criação de tabelas/funções e dos roles de teste caso ainda não existam. Descarte o banco após a execução.
-
-## Validação de nota de devolução no histórico
-
-Cada registro do histórico possui **Validar nota e autorização**. A consulta é acionada explicitamente e apresenta o resultado por pedido: nota encontrada (com número, série e situação fiscal), nenhuma nota vinculada encontrada, vínculo inconclusivo ou falha na consulta. A validação não emite notas, não altera estoque e não grava um resultado permanente.
-
-A API `POST /api/olist/retorno-estoque/validar-nota` recebe somente `{ retorno_id: UUID }` e reutiliza a autorização de leitura do histórico. O servidor busca o retorno no aplicativo autenticado e obtém os pedidos a partir das baixas, sem aceitar pedido, aplicativo ou documento enviados pelo cliente.
-
-Usa as rotas oficiais `GET /notas?tipo=E&idVenda=...` e `GET /notas/{id}`. Quando há nota original e documento do cliente, também consulta as entradas desse documento para identificar uma nota com `origem.tipo=notafiscal` e referência exata à nota original. Notas normais ou saídas não comprovam devolução: a finalidade deve ser `4` (Devolução/Retorno) ou `8` (Devolução/Retorno sem NF-e). O vínculo com a venda deve vir do filtro oficial `idVenda` sem origem contraditória ou de uma referência explícita à venda/nota original. Uma nota apenas do mesmo cliente não é confirmada como pertencente ao pedido.
-
-Notas canceladas, rejeitadas ou pendentes são exibidas com sua situação; existência não equivale a autorização. Falhas, respostas malformadas ou consultas que excedam os limites de paginação/detalhes não são tratadas como ausência de nota. A consulta está limitada às informações e vínculos retornados pela Olist; notas emitidas fora desses vínculos podem exigir conferência manual. Testes usam dados fictícios; a validação com notas reais na Olist continua pendente.
-
-Contrato consultado: [Swagger oficial Olist v3](https://erp.tiny.com.br/public-api/v3/swagger/swagger.json).
-
-A consulta retorna `autorizada` para cada nota e destaca a confirmação na tela. Somente a situação `6` (Autorizada) confirma autorização na Olist; as demais situações, inclusive status ausente, emitida, DANFE ou registrada, mantêm a indicação de autorização não confirmada e mostram o status original. Não é uma consulta direta à SEFAZ nem uma autorização histórica de nota atualmente cancelada.
-
-As notas encontradas exibem **Abrir nota de devolução**, em nova aba. O endereço vem da rota oficial `GET /notas/{idNota}/link`, com HTTPS, sem presumir uma rota interna do ERP. Se a Olist não disponibilizar o link, a tela informa essa limitação sem invalidar a existência da nota ou a autorização confirmada.
