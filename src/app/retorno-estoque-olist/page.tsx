@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ValidacaoNotasRetorno } from "@/lib/nota-devolucao-olist";
+import { ExternalLink } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -10,6 +12,17 @@ import type { ConfirmarRetornoInput, HistoricoRetorno, ResultadoBuscaRetorno } f
 type Tentativa = ConfirmarRetornoInput;
 type HistoricoResponse = { retornos: HistoricoRetorno[]; tem_mais: boolean };
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500 disabled:cursor-not-allowed disabled:opacity-50";
+
+function LinkPedidoOlist({ pedidoId }: { pedidoId: string | null }) {
+  if (!pedidoId) return <span>Pedido não informado</span>;
+  return <a href={`https://erp.olist.com/vendas#edit/${encodeURIComponent(pedidoId)}`}
+    target="_blank" rel="noopener noreferrer" title={`Abrir pedido ${pedidoId} na Olist (nova aba)`}
+    className="inline-flex min-h-11 max-w-full items-center gap-1 py-2 align-middle text-slate-900 underline decoration-slate-400 underline-offset-2 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500">
+    <span className="min-w-0 break-all">Pedido Olist {pedidoId}</span>
+    <ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />
+    <span className="sr-only"> (abre em nova aba)</span>
+  </a>;
+}
 
 export default function RetornoEstoqueOlistPage() {
   const { session, usuario } = useAuth();
@@ -30,6 +43,10 @@ export default function RetornoEstoqueOlistPage() {
   const [pagina, setPagina] = useState(1);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
   const [erroHistorico, setErroHistorico] = useState<string | null>(null);
+  const [consultandoNota, setConsultandoNota] = useState<string | null>(null);
+  const [notasValidadas, setNotasValidadas] = useState<Record<string, ValidacaoNotasRetorno>>({});
+  const [errosNotas, setErrosNotas] = useState<Record<string, string>>({});
+  const consultaNotasEmCurso = useRef(false);
   const enviando = useRef(false);
   const resumoRef = useRef<HTMLHeadingElement>(null);
   const armazenamentoKey = usuario ? `retorno_olist_pendente:${usuario.aplicativo_id}:${usuario.id}` : null;
@@ -102,6 +119,20 @@ export default function RetornoEstoqueOlistPage() {
   const itensPositivos = itensSelecionados.filter((item) => Number(item.valor) > 0);
   const total = itensPositivos.reduce((soma, item) => soma + Number(item.valor), 0);
   const bloqueado = buscando || salvando || revisando || Boolean(tentativa);
+
+  async function validarNota(retornoId: string) {
+    if (consultaNotasEmCurso.current) return;
+    consultaNotasEmCurso.current = true;
+    setConsultandoNota(retornoId);
+    setErrosNotas((anteriores) => ({ ...anteriores, [retornoId]: "" }));
+    setNotasValidadas((anteriores) => { const proximas = { ...anteriores }; delete proximas[retornoId]; return proximas; });
+    try {
+      const validacao = await api<ValidacaoNotasRetorno>("validar-nota", { retorno_id: retornoId });
+      setNotasValidadas((anteriores) => ({ ...anteriores, [retornoId]: validacao }));
+    } catch {
+      setErrosNotas((anteriores) => ({ ...anteriores, [retornoId]: "Não foi possível validar as notas. Tente novamente; a ausência de nota não foi confirmada." }));
+    } finally { consultaNotasEmCurso.current = false; setConsultandoNota(null); }
+  }
 
   async function buscar() {
     if (enviando.current || tentativa) return;
@@ -184,7 +215,7 @@ export default function RetornoEstoqueOlistPage() {
           <div className="mb-3 flex min-h-11 items-center gap-3">
             {podeConfirmar && <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center"><input type="checkbox" aria-label={`Selecionar pedido ${pedido.id}`} className="h-5 w-5" disabled={bloqueado}
               checked={selecionados.includes(pedido.id)} onChange={(event) => setSelecionados((anteriores) => event.target.checked ? [...anteriores, pedido.id] : anteriores.filter((id) => id !== pedido.id))} /></label>}
-            <h4 className="break-all font-semibold">Pedido Olist {pedido.id}</h4>
+            <h4 className="min-w-0 font-semibold"><LinkPedidoOlist pedidoId={pedido.id} /></h4>
           </div>
           <div className="space-y-3">{pedido.itens.map((item) => {
             const valor = quantidades[item.item_baixa_id] ?? String(item.saldo);
@@ -208,7 +239,7 @@ export default function RetornoEstoqueOlistPage() {
           <h3 ref={resumoRef} tabIndex={-1} className="mt-4 text-lg font-semibold focus-visible:outline focus-visible:outline-2">{revisando ? "Revise antes de confirmar" : "Resumo da seleção"}</h3>
           <p className="mt-2 text-sm">{selecionados.length} pedido(s) selecionado(s), {itensPositivos.length} item(ns), {itensInvalidos ? "quantidades inválidas" : `${total} unidade(s)`}. Quantidade zero não será enviada.</p>
           {itensPositivos.length > 500 && <p role="alert" className="mt-2 text-sm text-red-700">Confirme no máximo 500 itens por vez. Reduza a seleção.</p>}
-          {revisando && <ul className="mt-3 space-y-1 text-sm">{itensPositivos.map((item) => <li key={item.item_baixa_id} className="break-words">Pedido {item.pedido} · {item.sku}: {item.valor} unidade(s)</li>)}</ul>}
+          {revisando && <ul className="mt-3 space-y-1 text-sm">{itensPositivos.map((item) => <li key={item.item_baixa_id} className="break-words"><LinkPedidoOlist pedidoId={item.pedido} /> · {item.sku}: {item.valor} unidade(s)</li>)}</ul>}
           <div className="mt-4 flex flex-wrap gap-3">
             {revisando ? <><button type="button" disabled={salvando || Boolean(tentativa)} onClick={() => setRevisando(false)} className={botao}>Voltar e editar</button>
               <button type="button" disabled={salvando || Boolean(tentativa)} onClick={() => void confirmar()} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>{salvando ? "Confirmando…" : "Confirmar retorno ao estoque"}</button></>
@@ -220,7 +251,7 @@ export default function RetornoEstoqueOlistPage() {
           return <details key={estado} className="rounded-lg border border-slate-200 bg-white p-5" open={estado === "pendente" && pedidos.length > 0}>
             <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">{titulo} ({pedidos.length})</summary>
             {pedidos.length === 0 ? <p className="text-sm text-slate-500">Nenhum pedido nesta situação.</p> : <ul className="space-y-3 text-sm">{pedidos.map((pedido) => <li key={pedido.id} className="break-words">
-              <p className="font-medium">Pedido {pedido.id}</p>{pedido.motivo && <p className="text-amber-800">{pedido.motivo}</p>}
+              <p className="font-medium"><LinkPedidoOlist pedidoId={pedido.id} /></p>{pedido.motivo && <p className="text-amber-800">{pedido.motivo}</p>}
               {pedido.itens.map((item) => <p key={item.item_baixa_id}>SKU {item.sku} · baixado: {item.quantidade_baixada} · retornado: {item.quantidade_retornada} · saldo: {item.saldo}</p>)}
             </li>)}</ul>}
           </details>;
@@ -233,7 +264,25 @@ export default function RetornoEstoqueOlistPage() {
         {!carregandoHistorico && !erroHistorico && historico.retornos.length === 0 && <p className="mt-3 text-sm text-slate-500">Nenhum retorno registrado.</p>}
         <div className="mt-4 space-y-3">{historico.retornos.map((retorno) => <article key={retorno.id} className="rounded-md border border-slate-200 p-3 text-sm">
           <p className="break-words font-medium">{new Date(retorno.created_at).toLocaleString("pt-BR")} · {retorno.responsavel}</p>
-          <ul className="mt-2 space-y-1">{retorno.itens.map((item, index) => <li key={index} className="break-words">Pedido {item.pedido_olist_id} · SKU {item.sku} · {item.quantidade} unidade(s)</li>)}</ul>
+          <button type="button" className={`${botao} mt-3`} disabled={Boolean(consultandoNota) || !token}
+            onClick={() => void validarNota(retorno.id)} aria-describedby={`notas-${retorno.id}`}>
+            {consultandoNota === retorno.id ? "Consultando notas…" : "Validar nota e autorização"}
+          </button>
+          <div id={`notas-${retorno.id}`} className="mt-2 space-y-2" aria-live="polite" aria-busy={consultandoNota === retorno.id}>
+            {consultandoNota === retorno.id && <p role="status">Consultando notas na Olist…</p>}
+            {errosNotas[retorno.id] && <p role="alert" className="text-red-700">{errosNotas[retorno.id]}</p>}
+            {notasValidadas[retorno.id]?.pedidos.map((pedido) => <div key={pedido.pedido_olist_id}>
+              <LinkPedidoOlist pedidoId={pedido.pedido_olist_id || null} />
+              <p className={pedido.estado === "erro" ? "text-red-700" : pedido.estado === "inconclusiva" ? "text-amber-800" : "text-slate-600"}>{pedido.mensagem}</p>
+              {pedido.notas.length > 0 && <ul className="mt-1 space-y-1">{pedido.notas.map((nota) => <li key={nota.id} className="break-words">
+                <p>NF {nota.numero}{nota.serie ? ` · Série ${nota.serie}` : ""} · Situação: {nota.situacao}</p>
+                <p className={nota.autorizada ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-800"}>
+                  {nota.autorizada ? "Autorização confirmada na Olist" : "Autorização não confirmada na Olist"}
+                </p>
+              </li>)}</ul>}
+            </div>)}
+          </div>
+          <ul className="mt-2 space-y-1">{retorno.itens.map((item, index) => <li key={index} className="break-words"><LinkPedidoOlist pedidoId={item.pedido_olist_id} /> · SKU {item.sku} · {item.quantidade} unidade(s)</li>)}</ul>
         </article>)}</div>
         <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className={botao} disabled={carregandoHistorico || pagina === 1} onClick={() => void carregarHistorico(pagina - 1)}>Anterior</button>
           <span className="text-sm">Página {pagina}</span><button type="button" className={botao} disabled={carregandoHistorico || !historico.tem_mais} onClick={() => void carregarHistorico(pagina + 1)}>Próxima</button></div>
