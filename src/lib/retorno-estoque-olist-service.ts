@@ -112,13 +112,13 @@ export function criarServicoRetornoOlist(db: PrismaClient, olist: OlistRetorno) 
         if (item.quantidade > revisao.saldo) throw new RetornoOlistError(`Quantidade acima do saldo disponível para ${baixa.sku}. Busque novamente.`, 409);
         const produto = await tx.produto.findFirst({ where: { id: baixa.produtoId!, aplicativoId, sku: baixa.sku }, select: { id: true } });
         if (!produto) throw new RetornoOlistError("Produto da baixa não está disponível neste aplicativo.", 409);
-        const movimento = await tx.movimentacaoEstoque.create({ data: {
+        const movimento = item.perdido_na_entrega ? null : await tx.movimentacaoEstoque.create({ data: {
           aplicativoId, produtoId: produto.id, sku: baixa.sku, tipoMovimento: "entrada", quantidade: item.quantidade,
           origem: "RETORNO_CANCELAMENTO_OLIST", referenciaId: retorno.id,
           observacao: `Retorno do pedido cancelado Olist ${baixa.pedidoOlistId}`,
         } });
         await tx.itemRetornoEstoqueOlist.create({ data: { aplicativoId, retornoId: retorno.id,
-          itemBaixaId: baixa.id, movimentacaoId: movimento.id, quantidade: item.quantidade } });
+          itemBaixaId: baixa.id, movimentacaoId: movimento?.id ?? null, quantidade: item.quantidade } });
       }
       return { retorno_id: retorno.id, itens: itens.length, quantidade: itens.reduce((total, item) => total + item.quantidade, 0) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10000, timeout: 30000 });
@@ -131,7 +131,7 @@ export function criarServicoRetornoOlist(db: PrismaClient, olist: OlistRetorno) 
     });
     return { tem_mais: registros.length > 20, retornos: registros.slice(0, 20).map((retorno) => ({
       id: retorno.id, created_at: retorno.createdAt.toISOString(), responsavel: retorno.usuario.nome,
-      itens: retorno.itens.map((item) => ({ pedido_olist_id: item.itemBaixa.pedidoOlistId, sku: item.itemBaixa.sku, quantidade: item.quantidade })),
+      itens: retorno.itens.map((item) => ({ pedido_olist_id: item.itemBaixa.pedidoOlistId, sku: item.itemBaixa.sku, quantidade: item.quantidade, perdido_na_entrega: item.movimentacaoId === null })),
     })) };
   }
   return { buscar, confirmar, historico };

@@ -23,6 +23,7 @@ test("migração, RLS, transação e concorrência dos retornos em banco isolado
     if (!(await sql.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [role])).rowCount) await sql.query(`CREATE ROLE ${role}`);
   }
   await sql.query(await readFile(new URL("../prisma/migrations/20261021013941_retorno_estoque_olist/migration.sql", import.meta.url), "utf8"));
+  await sql.query(await readFile(new URL("../prisma/migrations/20261021140000_retorno_perdido_entrega/migration.sql", import.meta.url), "utf8"));
   const app = await db.aplicativo.create({ data: { nome: "Teste" } });
   const outroApp = await db.aplicativo.create({ data: { nome: "Outro teste" } });
   const usuario = await db.usuario.create({ data: { aplicativoId: app.id, nome: "Responsável teste", email: "teste@example.test" } });

@@ -16,6 +16,7 @@ export const confirmarRetornoSchema = z.object({
   itens: z.array(z.object({
     item_baixa_id: z.uuid().transform((value) => value.toLowerCase()),
     quantidade: z.number().int().min(0).max(2147483647),
+    perdido_na_entrega: z.literal(true).optional(),
   }).strict()).min(1).max(500),
 }).strict();
 export type ConfirmarRetornoInput = z.infer<typeof confirmarRetornoSchema>;
@@ -54,7 +55,7 @@ export type ResultadoBuscaRetorno = {
 };
 export type HistoricoRetorno = {
   id: string; created_at: string; responsavel: string;
-  itens: { pedido_olist_id: string | null; sku: string; quantidade: number }[];
+  itens: { pedido_olist_id: string | null; sku: string; quantidade: number; perdido_na_entrega?: boolean }[];
 };
 
 export function revisarBaixaRetorno(baixa: BaixaRetorno, saida: SaidaRetorno | undefined, aplicativoId: string): ItemRetornoRevisao {

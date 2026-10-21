@@ -129,3 +129,28 @@ test("status alterado, Olist indisponível ou ID de outro aplicativo impedem ent
   const c = ambiente(); c.baixas[0].aplicativoId = "outro"; await assert.rejects(c.service.confirmar(app, "usuario", c.input()), /não encontrada/);
   for (const ambiente of [a, b, c]) assert.equal(ambiente.entradas.length, 0);
 });
+
+test("perda na entrega registra retorno sem entrada e consome saldo com idempotência", async () => {
+  const a = ambiente();
+  const input = { ...a.input(5), itens: [{ item_baixa_id: id, quantidade: 5, perdido_na_entrega: true as const }] };
+  const primeiro = await a.service.confirmar(app, "usuario", input);
+  assert.equal(primeiro.quantidade, 5);
+  assert.equal(a.entradas.length, 0);
+  assert.equal(a.retornos.length, 1);
+  assert.equal((await a.service.buscar(app)).pedidos[0].itens[0].saldo, 0);
+  assert.deepEqual(await a.service.confirmar(app, "usuario", input), primeiro);
+  await assert.rejects(a.service.confirmar(app, "usuario", a.input(5)), /Chave/);
+  await assert.rejects(a.service.confirmar(app, "usuario", a.input(1, "40000000-0000-4000-8000-000000000001")), /saldo disponível/);
+  assert.equal(a.entradas.length, 0);
+});
+
+test("confirmação mista cria entrada apenas dos itens recebidos", async () => {
+  const a = ambiente();
+  await a.service.confirmar(app, "usuario", { ...a.input(), itens: [
+    { item_baixa_id: id, quantidade: 2, perdido_na_entrega: true },
+    { item_baixa_id: outroId, quantidade: 3 },
+  ] });
+  assert.equal(a.entradas.length, 1);
+  assert.equal(a.entradas[0].sku, "SKU-2");
+  assert.equal(a.entradas[0].quantidade, 3);
+});

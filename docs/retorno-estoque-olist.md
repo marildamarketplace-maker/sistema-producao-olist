@@ -48,3 +48,12 @@ node --import tsx --test tests/retorno-estoque-olist-database.test.ts
 ```
 
 O teste cria estrutura e dados fictícios e exige privilégios de criação de tabelas/funções e dos roles de teste caso ainda não existam. Descarte o banco após a execução.
+
+### Perda na entrega
+Por pedido selecionado, a opção “Perdido na entrega — registrar sem entrada no estoque”
+registra as quantidades informadas sem criar movimentação. O registro consome o
+saldo pendente da baixa e mantém responsável, data e proteção contra duplicação.
+No histórico, é identificado como perda na entrega. Itens sem essa opção mantêm
+a entrada de estoque existente. Quantidades parciais continuam permitidas.
+A migration 20261021140000_retorno_perdido_entrega torna o vínculo de movimentação
+opcional; NULL identifica perda na entrega. Aplicar antes de utilizar a opção.

@@ -32,6 +32,7 @@ export default function RetornoEstoqueOlistPage() {
   const [resultado, setResultado] = useState<ResultadoBuscaRetorno | null>(null);
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [quantidades, setQuantidades] = useState<Record<string, string>>({});
+  const [perdidos, setPerdidos] = useState<Record<string, boolean>>({});
   const [buscando, setBuscando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [revisando, setRevisando] = useState(false);
@@ -120,7 +121,7 @@ export default function RetornoEstoqueOlistPage() {
     setBuscando(true); setErro(null); setMensagem(null); setResultado(null); setSelecionados([]); setRevisando(false);
     try {
       const resposta = await api<ResultadoBuscaRetorno>("buscar", { data_atualizacao: data });
-      setResultado(resposta);
+      setResultado(resposta); setPerdidos({});
       setQuantidades(Object.fromEntries(resposta.pedidos.flatMap((pedido) => pedido.itens.map((item) => [item.item_baixa_id, String(item.saldo)]))));
       setMensagem(`Busca concluída: ${resposta.pedidos.length} pedidos cancelados consultados.`);
     } catch (error) { setErro(error instanceof Error ? error.message : "Falha de conexão ao buscar. Tente novamente."); }
@@ -141,7 +142,7 @@ export default function RetornoEstoqueOlistPage() {
     enviando.current = true; setSalvando(true); setErro(null);
     const envio = tentativa ?? {
       chave_idempotencia: crypto.randomUUID(),
-      itens: itensPositivos.map((item) => ({ item_baixa_id: item.item_baixa_id, quantidade: Number(item.valor) })),
+      itens: itensPositivos.map((item) => ({ item_baixa_id: item.item_baixa_id, quantidade: Number(item.valor), ...(perdidos[item.pedido] ? { perdido_na_entrega: true as const } : {}) })),
     };
     guardarTentativa(envio);
     try {
@@ -155,8 +156,9 @@ export default function RetornoEstoqueOlistPage() {
         }));
         return { ...pedido, itens, estado: pedido.estado === "elegivel" && itens.every((item) => item.saldo === 0) ? "retornado" : pedido.estado };
       }) } : anterior);
-      setQuantidades({}); setSelecionados([]); guardarTentativa(null); setRevisando(false);
-      setMensagem(`Retorno confirmado: ${resposta.quantidade} unidade(s) adicionada(s) ao estoque local.`);
+      setQuantidades({}); setPerdidos({}); setSelecionados([]); guardarTentativa(null); setRevisando(false);
+      const semEstoque = envio.itens.filter((item) => item.perdido_na_entrega).reduce((soma, item) => soma + item.quantidade, 0);
+      setMensagem(`Retorno confirmado: ${resposta.quantidade - semEstoque} unidade(s) adicionada(s) ao estoque local; ${semEstoque} unidade(s) registrada(s) como perda na entrega, sem entrada no estoque.`);
       void carregarHistorico(1);
     } catch (error) {
       const status = (error as { status?: number }).status;
@@ -166,7 +168,7 @@ export default function RetornoEstoqueOlistPage() {
   }
 
   return <AccessGuard permissions={["podeVisualizarDevolucao", "podeSolicitarDevolucao"]}>
-    <PageHeader title="Retorno de pedidos cancelados Olist" description="Localize cancelados com baixa vinculada e confirme o retorno ao estoque local." />
+    <PageHeader title="Retorno de pedidos cancelados Olist" description="Localize cancelados com baixa vinculada e registre o retorno ao estoque local ou a perda na entrega." />
     <div className="space-y-6">
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <form onSubmit={(event) => { event.preventDefault(); void buscar(); }} className="flex flex-col items-start gap-4 sm:flex-row sm:items-end">
@@ -198,20 +200,25 @@ export default function RetornoEstoqueOlistPage() {
               checked={selecionados.includes(pedido.id)} onChange={(event) => setSelecionados((anteriores) => event.target.checked ? [...anteriores, pedido.id] : anteriores.filter((id) => id !== pedido.id))} /></label>}
             <h4 className="min-w-0 font-semibold"><LinkPedidoOlist pedidoId={pedido.id} /></h4>
           </div>
+          {podeConfirmar && <label className="mb-3 flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+            <input type="checkbox" className="h-5 w-5 shrink-0" disabled={bloqueado || !selecionados.includes(pedido.id)}
+              checked={Boolean(perdidos[pedido.id])} onChange={(event) => setPerdidos((anteriores) => ({ ...anteriores, [pedido.id]: event.target.checked }))} />
+            Perdido na entrega — registrar sem entrada no estoque
+          </label>}
           <div className="space-y-3">{pedido.itens.map((item) => {
             const valor = quantidades[item.item_baixa_id] ?? String(item.saldo);
             const invalido = !/^\d+$/.test(valor) || !Number.isSafeInteger(Number(valor)) || Number(valor) > item.saldo;
             return <div key={item.item_baixa_id} className="grid min-w-0 gap-3 rounded-md border border-slate-200 p-3 lg:grid-cols-[minmax(0,1fr)_2fr_9rem] lg:items-center">
               <p className="break-all text-sm font-medium">SKU {item.sku}</p>
               <dl className="grid grid-cols-3 gap-2 text-sm"><div><dt className="text-xs text-slate-500">Baixado</dt><dd>{item.quantidade_baixada}</dd></div>
-                <div><dt className="text-xs text-slate-500">Retornado</dt><dd>{item.quantidade_retornada}</dd></div><div><dt className="text-xs text-slate-500">Saldo</dt><dd>{item.saldo}</dd></div></dl>
+                <div><dt className="text-xs text-slate-500">Registrado</dt><dd>{item.quantidade_retornada}</dd></div><div><dt className="text-xs text-slate-500">Saldo</dt><dd>{item.saldo}</dd></div></dl>
               <div>{podeConfirmar && item.saldo > 0 ? <><label htmlFor={`quantidade-${item.item_baixa_id}`} className="mb-1 block text-xs text-slate-600">Quantidade a retornar</label>
                 <input id={`quantidade-${item.item_baixa_id}`} aria-label={`Quantidade a retornar do SKU ${item.sku} no pedido ${pedido.id}`}
                   type="number" min={0} max={item.saldo} step={1} inputMode="numeric" value={valor}
                   disabled={bloqueado || !selecionados.includes(pedido.id)} aria-invalid={invalido}
                   aria-describedby={invalido ? `erro-${item.item_baixa_id}` : undefined}
                   onChange={(event) => setQuantidades((anteriores) => ({ ...anteriores, [item.item_baixa_id]: event.target.value }))} className="input min-h-11" />
-                {invalido && <p id={`erro-${item.item_baixa_id}`} className="mt-1 text-xs text-red-700">Informe um inteiro entre 0 e {item.saldo}.</p>}</> : <p className="text-sm text-slate-500">{item.saldo === 0 ? "Retornado integralmente" : "Somente consulta"}</p>}</div>
+                {invalido && <p id={`erro-${item.item_baixa_id}`} className="mt-1 text-xs text-red-700">Informe um inteiro entre 0 e {item.saldo}.</p>}</> : <p className="text-sm text-slate-500">{item.saldo === 0 ? "Retorno integralmente registrado" : "Somente consulta"}</p>}</div>
             </div>;
           })}</div>
         </article>)}
@@ -220,20 +227,20 @@ export default function RetornoEstoqueOlistPage() {
           <h3 ref={resumoRef} tabIndex={-1} className="mt-4 text-lg font-semibold focus-visible:outline focus-visible:outline-2">{revisando ? "Revise antes de confirmar" : "Resumo da seleção"}</h3>
           <p className="mt-2 text-sm">{selecionados.length} pedido(s) selecionado(s), {itensPositivos.length} item(ns), {itensInvalidos ? "quantidades inválidas" : `${total} unidade(s)`}. Quantidade zero não será enviada.</p>
           {itensPositivos.length > 500 && <p role="alert" className="mt-2 text-sm text-red-700">Confirme no máximo 500 itens por vez. Reduza a seleção.</p>}
-          {revisando && <ul className="mt-3 space-y-1 text-sm">{itensPositivos.map((item) => <li key={item.item_baixa_id} className="break-words"><LinkPedidoOlist pedidoId={item.pedido} /> · {item.sku}: {item.valor} unidade(s)</li>)}</ul>}
+          {revisando && <ul className="mt-3 space-y-1 text-sm">{itensPositivos.map((item) => <li key={item.item_baixa_id} className="break-words"><LinkPedidoOlist pedidoId={item.pedido} /> · {item.sku}: {item.valor} unidade(s) · {perdidos[item.pedido] ? "Perda na entrega: sem entrada no estoque" : "Entrada no estoque local"}</li>)}</ul>}
           <div className="mt-4 flex flex-wrap gap-3">
             {revisando ? <><button type="button" disabled={salvando || Boolean(tentativa)} onClick={() => setRevisando(false)} className={botao}>Voltar e editar</button>
-              <button type="button" disabled={salvando || Boolean(tentativa)} onClick={() => void confirmar()} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>{salvando ? "Confirmando…" : "Confirmar retorno ao estoque"}</button></>
+              <button type="button" disabled={salvando || Boolean(tentativa)} onClick={() => void confirmar()} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>{salvando ? "Confirmando…" : "Confirmar registro do retorno"}</button></>
               : <button type="button" disabled={buscando || itensInvalidos || !itensPositivos.length || itensPositivos.length > 500} onClick={revisar} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>Revisar retorno</button>}
           </div>
         </section>}
-        {([ ["pendente", "Pendentes de verificação"], ["sem_baixa", "Sem baixa vinculada"], ["retornado", "Integralmente retornados"] ] as const).map(([estado, titulo]) => {
+        {([ ["pendente", "Pendentes de verificação"], ["sem_baixa", "Sem baixa vinculada"], ["retornado", "Retornos integralmente registrados"] ] as const).map(([estado, titulo]) => {
           const pedidos = resultado.pedidos.filter((pedido) => pedido.estado === estado);
           return <details key={estado} className="rounded-lg border border-slate-200 bg-white p-5" open={estado === "pendente" && pedidos.length > 0}>
             <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">{titulo} ({pedidos.length})</summary>
             {pedidos.length === 0 ? <p className="text-sm text-slate-500">Nenhum pedido nesta situação.</p> : <ul className="space-y-3 text-sm">{pedidos.map((pedido) => <li key={pedido.id} className="break-words">
               <p className="font-medium"><LinkPedidoOlist pedidoId={pedido.id} /></p>{pedido.motivo && <p className="text-amber-800">{pedido.motivo}</p>}
-              {pedido.itens.map((item) => <p key={item.item_baixa_id}>SKU {item.sku} · baixado: {item.quantidade_baixada} · retornado: {item.quantidade_retornada} · saldo: {item.saldo}</p>)}
+              {pedido.itens.map((item) => <p key={item.item_baixa_id}>SKU {item.sku} · baixado: {item.quantidade_baixada} · registrado: {item.quantidade_retornada} · saldo: {item.saldo}</p>)}
             </li>)}</ul>}
           </details>;
         })}
@@ -245,7 +252,7 @@ export default function RetornoEstoqueOlistPage() {
         {!carregandoHistorico && !erroHistorico && historico.retornos.length === 0 && <p className="mt-3 text-sm text-slate-500">Nenhum retorno registrado.</p>}
         <div className="mt-4 space-y-3">{historico.retornos.map((retorno) => <article key={retorno.id} className="rounded-md border border-slate-200 p-3 text-sm">
           <p className="break-words font-medium">{new Date(retorno.created_at).toLocaleString("pt-BR")} · {retorno.responsavel}</p>
-          <ul className="mt-2 space-y-1">{retorno.itens.map((item, index) => <li key={index} className="break-words"><LinkPedidoOlist pedidoId={item.pedido_olist_id} /> · SKU {item.sku} · {item.quantidade} unidade(s)</li>)}</ul>
+          <ul className="mt-2 space-y-1">{retorno.itens.map((item, index) => <li key={index} className="break-words"><LinkPedidoOlist pedidoId={item.pedido_olist_id} /> · SKU {item.sku} · {item.quantidade} unidade(s) · {item.perdido_na_entrega ? "Perda na entrega: sem entrada no estoque" : "Entrada no estoque local"}</li>)}</ul>
         </article>)}</div>
         <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className={botao} disabled={carregandoHistorico || pagina === 1} onClick={() => void carregarHistorico(pagina - 1)}>Anterior</button>
           <span className="text-sm">Página {pagina}</span><button type="button" className={botao} disabled={carregandoHistorico || !historico.tem_mais} onClick={() => void carregarHistorico(pagina + 1)}>Próxima</button></div>

@@ -1088,12 +1088,12 @@ model ItemRetornoEstoqueOlist {
   retornoId String @map("retorno_id") @db.Uuid
   aplicativoId String @map("aplicativo_id") @db.Uuid
   itemBaixaId String @map("item_baixa_id") @db.Uuid
-  movimentacaoId String @unique @map("movimentacao_id") @db.Uuid
+  movimentacaoId String? @unique @map("movimentacao_id") @db.Uuid
   quantidade Int
   retorno RetornoEstoqueOlist @relation(fields: [retornoId], references: [id], onDelete: Restrict)
   aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
   itemBaixa ItemBaixaEstoqueOlist @relation(fields: [itemBaixaId], references: [id], onDelete: Restrict)
-  movimentacao MovimentacaoEstoque @relation(fields: [movimentacaoId], references: [id], onDelete: Restrict)
+  movimentacao MovimentacaoEstoque? @relation(fields: [movimentacaoId], references: [id], onDelete: Restrict)
 
   @@unique([retornoId, itemBaixaId], map: "uq_retorno_olist_item")
   @@index([aplicativoId, itemBaixaId], map: "idx_retorno_olist_baixa")
