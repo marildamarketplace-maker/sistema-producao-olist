@@ -2069,6 +2069,17 @@ export async function obterNotaRetornoOlist(aplicativoId: string, notaId: string
   return response.data as Record<string, unknown>;
 }
 
+/** Obtém o link oficial da nota, sem presumir rotas internas do ERP. */
+export async function obterLinkNotaRetornoOlist(aplicativoId: string, notaId: string) {
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`notas/${encodeURIComponent(notaId)}/link`, normalizarBaseUrl(config.apiBaseUrl));
+  const response = await getOlistComRetry(url.toString(), token, aplicativoId, "nota-retorno-link", 3);
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status !== 200 || typeof response.data?.link !== "string") throw new Error("Link da nota indisponível.");
+  return response.data.link as string;
+}
+
 export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, pedidoId: string) {
   const token = await getValidOlistAccessToken(aplicativoId);
   const detalhe = await buscarDetalhePedidoOlist(token, aplicativoId, pedidoId);

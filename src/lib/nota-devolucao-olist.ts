@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { RetornoOlistError } from "@/lib/retorno-estoque-olist-domain";
 
 type Registro = Record<string, unknown>;
-export type NotaDevolucaoResumo = { id: string; numero: string; serie: string; situacao: string; autorizada: boolean };
+export type NotaDevolucaoResumo = { id: string; numero: string; serie: string; situacao: string; autorizada: boolean; link: string | null };
 export type ValidacaoNotaPedido = {
   pedido_olist_id: string;
   estado: "encontrada" | "nao_encontrada" | "inconclusiva" | "erro";
@@ -14,6 +14,7 @@ type ConsultaNotas = {
   obterPedido(aplicativoId: string, pedidoId: string): Promise<Registro>;
   listarNotas(aplicativoId: string, filtros: { idVenda?: string; cpfCnpj?: string }): Promise<Registro[]>;
   obterNota(aplicativoId: string, notaId: string): Promise<Registro>;
+  obterLinkNota(aplicativoId: string, notaId: string): Promise<string>;
 };
 const SITUACOES: Record<string, string> = {
   "1": "Pendente", "2": "Emitida", "3": "Cancelada", "4": "Aguardando recibo", "5": "Rejeitada",
@@ -84,9 +85,14 @@ export function criarValidadorNotaDevolucao(db: Pick<PrismaClient, "retornoEstoq
           const contradiz = (origem.tipo === "venda" && Boolean(id(origem.id)) && id(origem.id) !== pedidoId)
             || (origem.tipo === "notafiscal" && Boolean(notaOriginal) && Boolean(id(origem.id)) && id(origem.id) !== notaOriginal);
           if (!vinculo && (!idsDiretos.has(notaId) || contradiz)) { semVinculo = true; continue; }
+          let link: string | null = null;
+          try {
+            const url = new URL(await olist.obterLinkNota(aplicativoId, notaId));
+            if (url.protocol === "https:" && !url.username && !url.password) link = url.href;
+          } catch { /* Falha no link não invalida a existência ou a situação fiscal da nota. */ }
           notas.push({ id: notaId, numero: String(nota.numero ?? resumo.numero ?? "Não informado"), serie: String(nota.serie ?? resumo.serie ?? ""),
             situacao: SITUACOES[String(nota.situacao)] ?? "Situação não informada",
-            autorizada: String(nota.situacao) === "6" });
+            autorizada: String(nota.situacao) === "6", link });
         }
         pedidos.push({ ...base, notas, estado: notas.length ? "encontrada" : semVinculo ? "inconclusiva" : "nao_encontrada",
           mensagem: notas.length ? notas.some((nota) => nota.autorizada)

@@ -10,7 +10,7 @@ function ambiente() {
   let diretas: Registro[] = [], cliente: Registro[] = [];
   const detalhes = new Map<string, Registro>();
   const chamadas: string[] = [];
-  let falha = false;
+  let falha = false, linkNota = "https://notas.example.test/100";
   const db = { retornoEstoqueOlist: { findFirst: async ({ where }: { where: { id: string; aplicativoId: string } }) => {
     assert.equal(where.aplicativoId, "app"); assert.equal(where.id, "retorno");
     return existe ? { itens: [ { itemBaixa: { pedidoOlistId: "123" } }, { itemBaixa: { pedidoOlistId: "123" } } ] } : null;
@@ -19,9 +19,11 @@ function ambiente() {
     obterPedido: async (app, id) => { assert.equal(app, "app"); chamadas.push(`pedido:${id}`); return pedido; },
     listarNotas: async (app, filtros) => { assert.equal(app, "app"); if (falha) throw new Error("429 TOKEN-SECRETO");
       chamadas.push(filtros.idVenda ? `venda:${filtros.idVenda}` : "documento"); return filtros.idVenda ? diretas : cliente; },
+    obterLinkNota: async () => { if (linkNota === "erro") throw new Error("indisponível"); return linkNota; },
     obterNota: async (app, id) => { assert.equal(app, "app"); chamadas.push(`nota:${id}`); if (!detalhes.has(id)) throw new Error("Detalhe indisponível"); return detalhes.get(id)!; },
   });
   return { validar: () => validar("app", "retorno"), chamadas, detalhes,
+    link: (url: string) => { linkNota = url; },
     inexistente: () => { existe = false; }, pedido: (p: Registro) => { pedido = p; }, falhar: () => { falha = true; },
     diretas: (notas: Registro[]) => { diretas = notas; }, cliente: (notas: Registro[]) => { cliente = notas; },
   };
@@ -33,7 +35,7 @@ test("valida nota de devolução vinculada e preserva a situação fiscal", asyn
   const r = await a.validar();
   assert.equal(r.pedidos.length, 1); // Dois SKUs do mesmo pedido exigem só uma consulta.
   assert.equal(r.pedidos[0].estado, "encontrada");
-  assert.deepEqual(r.pedidos[0].notas[0], { id: "100", numero: "1234", serie: "1", situacao: "Autorizada", autorizada: true });
+  assert.deepEqual(r.pedidos[0].notas[0], { id: "100", numero: "1234", serie: "1", situacao: "Autorizada", autorizada: true, link: "https://notas.example.test/100" });
   assert.equal(a.chamadas.filter((c) => c === "pedido:123").length, 1);
 });
 
@@ -105,5 +107,15 @@ test("somente situação 6 confirma autorização; situação ausente ou interme
     assert.equal(pedido.estado, "encontrada");
     assert.equal(pedido.notas[0].autorizada, String(situacao) === "6");
     if (String(situacao) === "6") assert.match(pedido.mensagem, /com autorização confirmada/);
+  }
+});
+
+test("link oficial usa HTTPS; indisponibilidade ou URL insegura não altera a autorização", async () => {
+  for (const link of ["erro", "javascript:alert(1)", "http://notas.example.test/100", "https://usuario:senha@notas.example.test/100"]) {
+    const a = ambiente(); a.diretas([devolucao]); a.detalhes.set("100", devolucao); a.link(link);
+    const resultado = (await a.validar()).pedidos[0];
+    assert.equal(resultado.estado, "encontrada");
+    assert.equal(resultado.notas[0].autorizada, true);
+    assert.equal(resultado.notas[0].link, null);
   }
 });

@@ -276,6 +276,12 @@ export default function RetornoEstoqueOlistPage() {
               <p className={pedido.estado === "erro" ? "text-red-700" : pedido.estado === "inconclusiva" ? "text-amber-800" : "text-slate-600"}>{pedido.mensagem}</p>
               {pedido.notas.length > 0 && <ul className="mt-1 space-y-1">{pedido.notas.map((nota) => <li key={nota.id} className="break-words">
                 <p>NF {nota.numero}{nota.serie ? ` · Série ${nota.serie}` : ""} · Situação: {nota.situacao}</p>
+                {nota.link ? <a href={nota.link} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex min-h-11 max-w-full items-center gap-1 py-2 text-slate-900 underline underline-offset-2 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500">
+                  <span className="min-w-0 break-words">Abrir nota de devolução</span>
+                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="sr-only"> (abre em nova aba)</span>
+                </a> : <p className="text-xs text-slate-500">Link da nota indisponível na Olist. Valide novamente para tentar obter o link.</p>}
                 <p className={nota.autorizada ? "font-medium text-emerald-700 dark:text-emerald-300" : "font-medium text-amber-800"}>
                   {nota.autorizada ? "Autorização confirmada na Olist" : "Autorização não confirmada na Olist"}
                 </p>
