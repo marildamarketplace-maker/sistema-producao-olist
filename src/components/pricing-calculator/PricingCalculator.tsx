@@ -46,7 +46,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest: boolean }) {
+function ResultCard({ result, isLowest, scenarios }: { result: MarketplacePricing; isLowest: boolean; scenarios: Array<{ label: string; target: number; result: MarketplacePricing }> }) {
   return <article className={`rounded-xl border bg-white p-5 shadow-sm ${isLowest ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
     <div className="flex items-start justify-between gap-3">
       <h2 className="text-lg font-semibold text-slate-900">{result.marketplaceName}</h2>
@@ -56,6 +56,14 @@ function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest
     <p className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{formatCurrency(result.recommendedPrice)}</p>
     <p className="mt-2 text-xs text-slate-500">Mínimo calculado: {formatCurrency(result.minimumPrice)}</p>
 
+    <section className="mt-5 space-y-3 border-t border-slate-200 pt-4" aria-label="Cenários de ROI">
+      <h3 className="text-sm font-semibold text-slate-900">Preço por objetivo de ROI</h3>
+      {scenarios.map((scenario) => <div key={scenario.target} className="rounded-md border border-slate-200 p-3">
+        <p className="text-sm font-medium text-slate-800">{scenario.label} · meta {scenario.target}%</p>
+        <p className="mt-1 text-xl font-semibold text-slate-900">{formatCurrency(scenario.result.recommendedPrice)}</p>
+        <p className="mt-1 text-xs text-slate-600">Lucro: {formatCurrency(scenario.result.estimatedProfit)} · ROI: {percentageFormatter.format(scenario.result.estimatedProfit / scenario.result.totalCost * 100)}%</p>
+      </div>)}
+    </section>
     <div className="mt-5 border-t border-slate-200 pt-3">
       <DetailRow label="Custo material" value={formatCurrency(result.materialCost)} />
       <DetailRow label="Gastos extras" value={formatCurrency(result.extraCosts)} />
@@ -84,13 +92,20 @@ export function PricingCalculator() {
     if (hasInvalidValue || values.pricePerMeter <= 0 || values.metersUsed <= 0 || totalPercentage >= 80) return null;
 
     try {
-      return PricingCalculatorUtils.calculateMarketplacePrices(values);
+      return {
+        prices: PricingCalculatorUtils.calculateMarketplacePrices(values),
+        scenarios: [
+          { label: "Mínimo sem prejuízo", target: 0 },
+          { label: "Intermediário", target: 25 },
+          { label: "Bom", target: 50 },
+        ].map((scenario) => ({ ...scenario, prices: PricingCalculatorUtils.calculateMarketplacePrices(values, scenario.target) })),
+      };
     } catch {
       return null;
     }
   }, [form]);
 
-  const lowestPrice = calculation ? Math.min(...calculation.map((result) => result.recommendedPrice)) : null;
+  const lowestPrice = calculation ? Math.min(...calculation.prices.map((result) => result.recommendedPrice)) : null;
 
   function updateField(field: keyof FormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -136,8 +151,9 @@ export function PricingCalculator() {
     {!calculation && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Preencha valores positivos. A soma de imposto, trabalho e lucro deve permitir o cálculo do preço.</div>}
 
     {calculation && <>
+      <p className="text-sm text-slate-600">ROI = lucro após taxas, impostos e trabalho ÷ custo do produto (material + extras). Metas de 25% e 50% são referências de simulação. O mínimo cobre os custos informados; inclua nos extras outros gastos por venda. Os preços usam arredondamento comercial para cima, por isso o ROI pode superar a meta.</p>
       <div className="grid gap-5 lg:grid-cols-3">
-        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} isLowest={result.recommendedPrice === lowestPrice} />)}
+        {calculation.prices.map((result) => <ResultCard key={result.marketplaceId} result={result} isLowest={result.recommendedPrice === lowestPrice} scenarios={calculation.scenarios.map((scenario) => ({ label: scenario.label, target: scenario.target, result: scenario.prices.find((price) => price.marketplaceId === result.marketplaceId)! }))} />)}
       </div>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -150,7 +166,7 @@ export function PricingCalculator() {
               <tr><th className="px-5 py-3">Marketplace</th><th className="px-5 py-3">Preço recomendado</th><th className="px-5 py-3">Taxas</th><th className="px-5 py-3">Lucro</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {calculation.map((result) => <tr key={result.marketplaceId} className={result.recommendedPrice === lowestPrice ? "bg-emerald-50" : ""}>
+              {calculation.prices.map((result) => <tr key={result.marketplaceId} className={result.recommendedPrice === lowestPrice ? "bg-emerald-50" : ""}>
                 <td className="px-5 py-4 font-medium text-slate-900">{result.marketplaceName}{result.recommendedPrice === lowestPrice && <span className="ml-2 text-xs font-semibold text-emerald-700">Menor preço</span>}</td>
                 <td className="px-5 py-4 font-semibold text-slate-900">{formatCurrency(result.recommendedPrice)}</td>
                 <td className="px-5 py-4 text-slate-600">{formatCurrency(result.marketplaceCost)}</td>

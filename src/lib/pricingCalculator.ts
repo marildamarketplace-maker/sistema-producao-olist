@@ -90,18 +90,22 @@ export class PricingCalculatorUtils {
     return this.isPriceInRange(candidate, range) ? candidate : null;
   }
 
-  static calculateMarketplacePrices(input: PricingInput): MarketplacePricing[] {
+  static calculateMarketplacePrices(input: PricingInput, targetRoiPercentage?: number): MarketplacePricing[] {
+    if (targetRoiPercentage !== undefined && (!Number.isFinite(targetRoiPercentage) || targetRoiPercentage < 0)) {
+      throw new Error("ROI deve ser um percentual não negativo.");
+    }
     const materialCost = input.pricePerMeter * input.metersUsed;
     const totalCost = materialCost + input.extraCosts;
     const taxesRate = input.taxesPercentage / 100;
     const laborRate = input.laborPercentage / 100;
-    const profitRate = input.profitPercentage / 100;
+    const profitRate = targetRoiPercentage === undefined ? input.profitPercentage / 100 : 0;
+    const costWithTargetReturn = totalCost * (1 + (targetRoiPercentage ?? 0) / 100);
 
     return Object.values(MARKETPLACE_FEES).map((marketplace) => {
       const validOptions = marketplace.ranges
         .map((range) => ({
           range,
-          price: this.findValidPrice(totalCost, range, taxesRate, laborRate, profitRate),
+          price: this.findValidPrice(costWithTargetReturn, range, taxesRate, laborRate, profitRate),
         }))
         .filter((option): option is { range: FeeRange; price: number } => option.price !== null)
         .sort((a, b) => a.price - b.price);
@@ -114,7 +118,7 @@ export class PricingCalculatorUtils {
       const minimumPrice = minimumOption.price;
       const recommendation = this.findRecommendedPrice(
         minimumPrice,
-        totalCost,
+        costWithTargetReturn,
         marketplace.ranges,
         taxesRate,
         laborRate,
