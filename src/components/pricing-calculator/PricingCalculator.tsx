@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { calculateAdvertisingScenarios } from "@/lib/advertisingReturn";
 import { DEFAULT_PERCENTAGES } from "@/lib/marketplaceFees";
 import { MarketplacePricing, PricingCalculatorUtils } from "@/lib/pricingCalculator";
 
@@ -46,7 +47,9 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-function ResultCard({ result, isLowest, scenarios }: { result: MarketplacePricing; isLowest: boolean; scenarios: Array<{ label: string; target: number; result: MarketplacePricing }> }) {
+function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest: boolean }) {
+  const scenarios = calculateAdvertisingScenarios(result);
+  const metric = result.marketplaceId === "tiktokShop" ? "ROI" : "ROAS";
   return <article className={`rounded-xl border bg-white p-5 shadow-sm ${isLowest ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
     <div className="flex items-start justify-between gap-3">
       <h2 className="text-lg font-semibold text-slate-900">{result.marketplaceName}</h2>
@@ -56,13 +59,20 @@ function ResultCard({ result, isLowest, scenarios }: { result: MarketplacePricin
     <p className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{formatCurrency(result.recommendedPrice)}</p>
     <p className="mt-2 text-xs text-slate-500">Mínimo calculado: {formatCurrency(result.minimumPrice)}</p>
 
-    <section className="mt-5 space-y-3 border-t border-slate-200 pt-4" aria-label="Cenários de ROI">
-      <h3 className="text-sm font-semibold text-slate-900">Preço por objetivo de ROI</h3>
-      {scenarios.map((scenario) => <div key={scenario.target} className="rounded-md border border-slate-200 p-3">
-        <p className="text-sm font-medium text-slate-800">{scenario.label} · meta {scenario.target}%</p>
-        <p className="mt-1 text-xl font-semibold text-slate-900">{formatCurrency(scenario.result.recommendedPrice)}</p>
-        <p className="mt-1 text-xs text-slate-600">Lucro: {formatCurrency(scenario.result.estimatedProfit)} · ROI: {percentageFormatter.format(scenario.result.estimatedProfit / scenario.result.totalCost * 100)}%</p>
-      </div>)}
+    <section className="mt-5 space-y-3 border-t border-slate-200 pt-4" aria-label={`Cenários de ${metric} publicitário`}>
+      <h3 className="text-sm font-semibold text-slate-900">{metric} publicitário por objetivo</h3>
+      <p className="text-xs text-slate-600">Receita atribuída ÷ gasto em anúncios, no preço recomendado acima.</p>
+      {scenarios ? scenarios.map((scenario) => <div key={scenario.label} className="rounded-md border border-slate-200 p-3">
+        <p className="text-sm font-medium text-slate-800">{scenario.label}</p>
+        <p className="mt-1 text-xl font-semibold text-slate-900">{metric} {percentageFormatter.format(scenario.returnMultiple)}x</p>
+        <p className="mt-1 text-xs text-slate-600">Anúncios por venda: até {formatCurrency(Math.floor(scenario.adCost * 100) / 100)}</p>
+        <p className="mt-1 text-xs text-slate-600">Lucro após anúncios: {formatCurrency(scenario.profitAfterAds)} · margem {percentageFormatter.format(scenario.netMargin)}%</p>
+      </div>) : <p role="status" className="text-sm text-slate-600">Sem sobra para anúncios. Aumente o preço ou revise os custos para calcular um retorno de equilíbrio.</p>}
+      <p className="text-xs text-slate-600">{result.marketplaceId === "shopee"
+        ? "Shopee: vendas atribuídas até 7 dias após o clique ou 1 dia após a visualização do anúncio."
+        : result.marketplaceId === "tiktokShop"
+          ? "TikTok: receita total dos pedidos atribuídos ao plano ÷ despesa publicitária. No GMV Max, pode incluir pedidos pagos e orgânicos."
+          : "Mercado Livre: receita atribuída por real investido. Ex.: ROAS 2x = R$ 2 em receita por R$ 1 em anúncios."}</p>
     </section>
     <div className="mt-5 border-t border-slate-200 pt-3">
       <DetailRow label="Custo material" value={formatCurrency(result.materialCost)} />
@@ -73,10 +83,10 @@ function ResultCard({ result, isLowest, scenarios }: { result: MarketplacePricin
       <DetailRow label="Taxa fixa" value={formatCurrency(result.fixedFee)} />
       <DetailRow label="Impostos" value={formatCurrency(result.taxes)} />
       <DetailRow label="Trabalho" value={formatCurrency(result.labor)} />
-      <DetailRow label="Lucro estimado" value={formatCurrency(result.estimatedProfit)} />
+      <DetailRow label="Lucro antes de anúncios" value={formatCurrency(result.estimatedProfit)} />
     </div>
     <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2.5 text-sm">
-      <span className="font-medium text-slate-600">Margem líquida</span>
+      <span className="font-medium text-slate-600">Margem antes de anúncios</span>
       <span className="font-semibold text-slate-900">{percentageFormatter.format(result.netMargin)}%</span>
     </div>
   </article>;
@@ -92,20 +102,13 @@ export function PricingCalculator() {
     if (hasInvalidValue || values.pricePerMeter <= 0 || values.metersUsed <= 0 || totalPercentage >= 80) return null;
 
     try {
-      return {
-        prices: PricingCalculatorUtils.calculateMarketplacePrices(values),
-        scenarios: [
-          { label: "Mínimo sem prejuízo", target: 0 },
-          { label: "Intermediário", target: 25 },
-          { label: "Bom", target: 50 },
-        ].map((scenario) => ({ ...scenario, prices: PricingCalculatorUtils.calculateMarketplacePrices(values, scenario.target) })),
-      };
+      return PricingCalculatorUtils.calculateMarketplacePrices(values);
     } catch {
       return null;
     }
   }, [form]);
 
-  const lowestPrice = calculation ? Math.min(...calculation.prices.map((result) => result.recommendedPrice)) : null;
+  const lowestPrice = calculation ? Math.min(...calculation.map((result) => result.recommendedPrice)) : null;
 
   function updateField(field: keyof FormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -151,9 +154,9 @@ export function PricingCalculator() {
     {!calculation && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Preencha valores positivos. A soma de imposto, trabalho e lucro deve permitir o cálculo do preço.</div>}
 
     {calculation && <>
-      <p className="text-sm text-slate-600">ROI = lucro após taxas, impostos e trabalho ÷ custo do produto (material + extras). Metas de 25% e 50% são referências de simulação. O mínimo cobre os custos informados; inclua nos extras outros gastos por venda. Os preços usam arredondamento comercial para cima, por isso o ROI pode superar a meta.</p>
+      <p className="text-sm text-slate-600">ROAS (Shopee e Mercado Livre) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
       <div className="grid gap-5 lg:grid-cols-3">
-        {calculation.prices.map((result) => <ResultCard key={result.marketplaceId} result={result} isLowest={result.recommendedPrice === lowestPrice} scenarios={calculation.scenarios.map((scenario) => ({ label: scenario.label, target: scenario.target, result: scenario.prices.find((price) => price.marketplaceId === result.marketplaceId)! }))} />)}
+        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} isLowest={result.recommendedPrice === lowestPrice} />)}
       </div>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -163,10 +166,10 @@ export function PricingCalculator() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[620px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr><th className="px-5 py-3">Marketplace</th><th className="px-5 py-3">Preço recomendado</th><th className="px-5 py-3">Taxas</th><th className="px-5 py-3">Lucro</th></tr>
+              <tr><th className="px-5 py-3">Marketplace</th><th className="px-5 py-3">Preço recomendado</th><th className="px-5 py-3">Taxas</th><th className="px-5 py-3">Lucro antes de anúncios</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {calculation.prices.map((result) => <tr key={result.marketplaceId} className={result.recommendedPrice === lowestPrice ? "bg-emerald-50" : ""}>
+              {calculation.map((result) => <tr key={result.marketplaceId} className={result.recommendedPrice === lowestPrice ? "bg-emerald-50" : ""}>
                 <td className="px-5 py-4 font-medium text-slate-900">{result.marketplaceName}{result.recommendedPrice === lowestPrice && <span className="ml-2 text-xs font-semibold text-emerald-700">Menor preço</span>}</td>
                 <td className="px-5 py-4 font-semibold text-slate-900">{formatCurrency(result.recommendedPrice)}</td>
                 <td className="px-5 py-4 text-slate-600">{formatCurrency(result.marketplaceCost)}</td>
