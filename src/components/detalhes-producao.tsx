@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { ArrowLeft, Camera, Download } from "lucide-react";
 import { PageHeader } from "./page-header";
 import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
+import { calcularTotaisProducao } from "@/lib/producao-totais";
 
 type Props = {
   producao: DetalheProducao;
@@ -36,6 +37,8 @@ export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, 
   const entrega = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${producao.dataEntrega}T00:00:00Z`));
   const solicitada = producao.itens.reduce((total, item) => total + item.quantidadeSolicitada, 0);
   const produzida = producao.itens.reduce((total, item) => total + item.quantidadeProduzida, 0);
+  const totais = calcularTotaisProducao(producao.itens);
+  const decimal = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 });
   return (
     <div className="min-w-0 space-y-6">
       <nav aria-label="Navegação estrutural" className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -89,6 +92,18 @@ export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, 
               {producao.itens.map((item) => <tr key={item.id} className="border-b border-slate-100 text-slate-700"><td className="p-3"><ImagemItem item={item} /></td><td className="min-w-48 break-all p-3 font-medium">{item.sku}</td><td className="p-3">{item.quantidadeSolicitada}</td><td className="p-3">{item.quantidadeProduzida}</td><td className="p-3">{item.tipoCorte === "LASER" ? "Sim" : "Não"}</td><td className="min-w-48 whitespace-pre-wrap break-words p-3">{item.observacao || "—"}</td></tr>)}
             </tbody></table>
           </div>
+          <section aria-labelledby="totais-itens-producao" className="mt-6 border-t border-slate-200 pt-5">
+            <h4 id="totais-itens-producao" className="font-semibold text-slate-900">Totais da solicitação</h4>
+            <dl className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["Quantidade total solicitada", `${decimal.format(totais.quantidade)} un.`],
+                ["Metragem com corte a laser", `${decimal.format(totais.comLaser)} m`],
+                ["Metragem sem corte a laser", `${decimal.format(totais.semLaser)} m`],
+                ["Metragem total (ambos)", `${decimal.format(totais.metragem)} m`],
+              ].map(([rotulo, valor]) => <div key={rotulo} className="min-w-0 rounded-md bg-slate-100 p-3"><dt className="text-sm text-slate-600">{rotulo}</dt><dd className="mt-1 break-words text-xl font-semibold text-slate-900">{valor}</dd></div>)}
+            </dl>
+            {totais.itensSemMetragem > 0 && <p className="mt-3 text-sm text-slate-600" role="status">Metragem parcial: {totais.itensSemMetragem} item(ns) sem metragem válida informada. Os totais incluem apenas a metragem informada nas observações.</p>}
+          </section>
         </>)}
       </section>
       <section aria-labelledby="evidencia-producao" className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">

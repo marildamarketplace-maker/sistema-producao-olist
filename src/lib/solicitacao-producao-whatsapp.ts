@@ -1,3 +1,5 @@
+import { extrairConsumosProducao } from "./producao-totais";
+
 type ItemCompartilhamento = {
   sku: string;
   quantidade_solicitada: number;
@@ -16,13 +18,12 @@ export function montarSolicitacaoProducaoWhatsapp(itens: ItemCompartilhamento[])
       .replace(/<!--produto-fornecido:(?:start|end)-->/g, "")
       .replace(/^Produto fornecido:\s*/gim, "")
       .trim();
-    const consumos = [...observacao.matchAll(/(?:^|\n)\s*([\d.,]+)\s*m de\s+(.+?)\s*\(([^\n]+)\)\.?\s*(?=\n|$)/g)];
+    const consumos = extrairConsumosProducao(item.observacao);
     if (!consumos.length) semMetragem++;
     for (const consumo of consumos) {
-      const metros = Number(consumo[1].replace(/\./g, "").replace(",", "."));
+      const { metros, tecido } = consumo;
       if (!Number.isFinite(metros) || metros < 0) throw new Error(`Metragem inválida no item ${item.sku}.`);
       // A referência numérica continua no item; o resumo agrupa pelo nome do tecido.
-      const tecido = consumo[2].trim().replace(/\s+\d+$/, "").toUpperCase();
       totais.set(tecido, (totais.get(tecido) ?? 0) + metros);
     }
     const laser = item.tipo_corte === "LASER"
