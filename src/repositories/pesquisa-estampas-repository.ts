@@ -66,6 +66,13 @@ export type EstampaPesquisaRow = {
   id: bigint;
   codigo: string;
   variante: string | null;
+  originalFilename: string | null;
+  originalRelativePath: string | null;
+  storageKey: string | null;
+  textoPesquisa: string | null;
+  searchVector: string | null;
+  isActive: boolean;
+  updatedAt: Date | null;
   previewUrl: string | null;
   titulo: string | null;
   descricao: string | null;
@@ -174,6 +181,13 @@ export async function pesquisarCatalogoEstampas(
         e.id,
         e.codigo,
         e.variante,
+        e.original_filename AS "originalFilename",
+        e.original_relative_path AS "originalRelativePath",
+        e.storage_key AS "storageKey",
+        e.texto_pesquisa AS "textoPesquisa",
+        e.search_vector::text AS "searchVector",
+        e.is_active AS "isActive",
+        e.updated_at AS "updatedAt",
         e.preview_url AS "previewUrl",
         e.titulo,
         e.descricao,

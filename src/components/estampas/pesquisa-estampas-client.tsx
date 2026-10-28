@@ -698,7 +698,7 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
   const modal = useModalFocus(onClose);
   return (
     <div ref={modal} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label={`Detalhes da estampa ${codigoCompleto(estampa)}`}>
-      <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+      <section className="max-h-[90dvh] w-full min-w-0 max-w-4xl overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div><h2 className="text-xl font-semibold text-slate-900">{codigoCompleto(estampa)}</h2><p className="mt-1 text-sm text-slate-500">{estampa.titulo || "Sem título"}</p></div>
           <button type="button" onClick={onClose} aria-label="Fechar" className="min-h-11 min-w-11 shrink-0 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" /></button>
@@ -706,7 +706,16 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
         {estampa.correspondencia && <div className="mt-4"><CorrespondenciaPesquisa correspondencia={estampa.correspondencia} /></div>}
         <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
           <Preview estampa={estampa} className="aspect-square w-full rounded-lg" />
-          <dl className="grid content-start gap-4 text-sm sm:grid-cols-2">
+          <dl className="grid min-w-0 content-start gap-4 text-sm sm:grid-cols-2">
+            <Detalhe label="Código" valores={[estampa.codigo]} />
+            <Detalhe label="Variante" valores={estampa.variante ? [estampa.variante] : []} />
+            <Detalhe label="Nome original (original_filename)" valores={estampa.originalFilename ? [estampa.originalFilename] : []} className="sm:col-span-2" />
+            <Detalhe label="Caminho original (original_relative_path)" valores={estampa.originalRelativePath ? [estampa.originalRelativePath] : []} className="sm:col-span-2" />
+            <Detalhe label="Chave de armazenamento (storage_key)" valores={estampa.storageKey ? [estampa.storageKey] : []} className="sm:col-span-2" />
+            <Detalhe label="Status de processamento" valores={[rotulosStatus[estampa.processingStatus] ?? estampa.processingStatus]} />
+            <Detalhe label="Ativa na pesquisa" valores={[estampa.isActive ? "Sim" : "Não"]} />
+            <Detalhe label="Criada em" valores={[new Date(estampa.createdAt).toLocaleString("pt-BR")]} />
+            <Detalhe label="Atualizada em" valores={estampa.updatedAt ? [new Date(estampa.updatedAt).toLocaleString("pt-BR")] : []} />
             <Detalhe label="Tipo de imagem" valores={[ROTULOS_TIPO_IMAGEM_ESTAMPA[estampa.tipoImagem]]} />
             <Detalhe label="Suporte da aplicação" valores={[ROTULOS_SUPORTE_APLICACAO_ESTAMPA[estampa.suporteAplicacao]]} />
             <Detalhe label="Conteúdos presentes" valores={estampa.conteudosImagem.map((conteudo) => ROTULOS_CONTEUDO_IMAGEM_ESTAMPA[conteudo])} />
@@ -734,6 +743,13 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
             <Detalhe label="Descrição" valores={estampa.descricao ? [estampa.descricao] : []} className="sm:col-span-2" />
           </dl>
         </div>
+        <section className="mt-6 min-w-0 border-t border-slate-200 pt-5">
+          <h3 className="text-sm font-semibold text-slate-900">Conteúdo usado na busca textual</h3>
+          <dl className="mt-4 grid min-w-0 gap-4 text-sm">
+            <Detalhe label="Texto de pesquisa (texto_pesquisa)" valores={estampa.textoPesquisa ? [estampa.textoPesquisa] : []} />
+            <Detalhe label="Índice textual (search_vector)" valores={estampa.searchVector ? [estampa.searchVector] : []} />
+          </dl>
+        </section>
         <SegmentacaoDetalhada estampa={estampa} />
       </section>
     </div>
@@ -797,7 +813,7 @@ function SelectRotulado<T extends string>({ value, onChange, options, labels, pl
 }
 
 function Detalhe({ label, valores, className = "" }: { label: string; valores: string[]; className?: string }) {
-  return <div className={className}><dt className="text-xs font-semibold uppercase text-slate-500">{label}</dt><dd className="mt-1 text-slate-800">{valores.length > 0 ? valores.join(" · ") : "—"}</dd></div>;
+  return <div className={`min-w-0 [overflow-wrap:anywhere] ${className}`}><dt className="text-xs font-semibold uppercase text-slate-500">{label}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-800">{valores.length > 0 ? valores.join(" · ") : "—"}</dd></div>;
 }
 
 function contarFiltrosAvancados(filtros: Filtros) {

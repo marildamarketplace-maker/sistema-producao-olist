@@ -249,7 +249,10 @@ export async function listarEstampaJobsPainel(
   const codigo = input.codigo?.trim();
   const variante = input.variante?.trim();
   if ((codigo?.length ?? 0) > 100 || (variante?.length ?? 0) > 100) throw new Error("Filtros devem ter até 100 caracteres.");
-  const filtroCodigo = codigo ? Prisma.sql`AND strpos(upper(catalogo.codigo), upper(${codigo})) > 0` : Prisma.empty;
+  const filtroCodigo = codigo ? Prisma.sql`AND (
+    strpos(upper(catalogo.codigo), upper(${codigo})) > 0
+    OR strpos(upper(catalogo.original_relative_path), upper(${codigo})) > 0
+  )` : Prisma.empty;
   const filtroVariante = variante ? Prisma.sql`AND upper(btrim(catalogo.variante)) = upper(${variante})` : Prisma.empty;
   const filtroStatus = input.status
     ? Prisma.sql`AND job.status = ${input.status}::"StatusJobEstampa"`

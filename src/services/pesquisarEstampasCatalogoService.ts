@@ -50,6 +50,13 @@ export type EstampaPesquisaCatalogo = {
   id: string;
   codigo: string;
   variante: string | null;
+  originalFilename: string | null;
+  originalRelativePath: string | null;
+  storageKey: string | null;
+  textoPesquisa: string | null;
+  searchVector: string | null;
+  isActive: boolean;
+  updatedAt: string | null;
   previewUrl: string | null;
   titulo: string | null;
   descricao: string | null;
@@ -202,6 +209,7 @@ export async function pesquisarEstampasCatalogo(
       processingStatus: validarStatus(estampa.processingStatus) ?? "PENDING",
       processedAt: estampa.processedAt?.toISOString() ?? null,
       createdAt: estampa.createdAt.toISOString(),
+      updatedAt: estampa.updatedAt?.toISOString() ?? null,
       relevancia: Number(estampa.relevancia),
     })),
     total: resultado.total,

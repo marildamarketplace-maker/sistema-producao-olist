@@ -19,6 +19,7 @@ test("filtros combinados usam parâmetros e afetam listagem e contagem antes da 
   for (const consulta of consultas) {
     assert.match(consulta.sql, /INNER JOIN estampas AS catalogo/);
     assert.match(consulta.sql, /strpos\(upper\(catalogo.codigo\)/);
+    assert.match(consulta.sql, /AND \(\s*strpos\(upper\(catalogo.codigo\), upper\(\?\)\) > 0\s*OR strpos\(upper\(catalogo.original_relative_path\), upper\(\?\)\) > 0\s*\)/);
     assert.match(consulta.sql, /upper\(btrim\(catalogo.variante\)\)/);
     assert.ok(consulta.values.includes("123%_"));
     assert.ok(consulta.values.includes("a"));
@@ -26,6 +27,19 @@ test("filtros combinados usam parâmetros e afetam listagem e contagem antes da 
     assert.doesNotMatch(consulta.sql, /123%_/);
   }
   assert.deepEqual(consultas[0].values.slice(-2), [20, 40]);
+});
+
+test("busca por caminho original mantém o termo literal nas duas consultas", async () => {
+  const { listarEstampaJobsPainel } = await import("../src/repositories/estampa-jobs-repository");
+  consultas.length = 0;
+  const caminho = "Coleção/D'água/100%_azul.psd";
+  await listarEstampaJobsPainel({ codigo: ` ${caminho} ` });
+  assert.equal(consultas.length, 2);
+  for (const consulta of consultas) {
+    assert.equal(consulta.values.filter(valor => valor === caminho).length, 2);
+    assert.ok(!consulta.sql.includes(caminho));
+    assert.match(consulta.sql, /OR strpos\(upper\(catalogo.original_relative_path\)/);
+  }
 });
 
 test("sem filtros preserva a listagem e rejeita termos excessivos", async () => {

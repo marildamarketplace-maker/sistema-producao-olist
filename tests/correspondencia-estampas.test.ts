@@ -90,6 +90,9 @@ Object.assign(globalThis, { prisma: {
     consultas.push(sql);
     return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [{ total: BigInt(3), completas: BigInt(1), parciais: BigInt(2) }] : [
       { id: BigInt(1), codigo: "MV1", variante: "A", percentualCorrespondencia: 50, termosEncontrados: ["cereja"], termosAusentes: ["amarela"],
+        originalFilename: "100%_cereja.psd", originalRelativePath: "Coleção/Cerejas/100%_cereja.psd",
+        storageKey: "estampas/cereja.jpg", textoPesquisa: "cerejas vermelhas", searchVector: "'cerejas':1A",
+        isActive: true, updatedAt: new Date(1000),
         atributosDesign: null, relevancia: 2, processingStatus: "COMPLETED", processedAt: null, createdAt: new Date(0) },
     ]);
   },
@@ -118,4 +121,22 @@ test("API de serviço rejeita percentuais inválidos antes de ler o banco", asyn
   consultas.length = 0;
   for (const minima of [0, 101, 50.5, NaN]) await assert.rejects(pesquisarEstampasCatalogo({ consulta: "cereja", correspondenciaMinima: minima }), /correspondenciaMinima/);
   assert.equal(consultas.length, 0);
+});
+
+
+test("detalhes recebem os campos de origem e o conteúdo textual efetivamente pesquisado", async () => {
+  const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
+  consultas.length = 0;
+  const { estampas: [estampa] } = await pesquisarEstampasCatalogo({ consulta: "cereja" });
+  assert.equal(estampa.originalFilename, "100%_cereja.psd");
+  assert.equal(estampa.originalRelativePath, "Coleção/Cerejas/100%_cereja.psd");
+  assert.equal(estampa.storageKey, "estampas/cereja.jpg");
+  assert.equal(estampa.textoPesquisa, "cerejas vermelhas");
+  assert.equal(estampa.searchVector, "'cerejas':1A");
+  assert.equal(estampa.isActive, true);
+  assert.equal(estampa.updatedAt, "1970-01-01T00:00:01.000Z");
+  for (const campo of ["original_filename", "original_relative_path", "storage_key", "texto_pesquisa", "search_vector::text", "is_active", "updated_at"]) {
+    assert.ok(consultas[0].sql.includes(`e.${campo} AS`), campo);
+  }
+  assert.doesNotThrow(() => JSON.stringify(estampa));
 });

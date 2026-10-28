@@ -111,8 +111,8 @@ export function EstampaJobsClient() {
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <form onSubmit={event => { event.preventDefault(); setPagina(1); setFiltros({ codigo: codigo.trim(), variante: variante.trim(), status }); }} className="grid gap-4 border-b border-slate-200 p-4 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="min-w-0 text-sm font-medium text-slate-700">Código
-            <input className="input mt-1 min-h-11" value={codigo} maxLength={100} onChange={e => setCodigo(e.target.value)} placeholder="Buscar por código" />
+          <label className="min-w-0 text-sm font-medium text-slate-700">Código ou caminho original
+            <input className="input mt-1 min-h-11" value={codigo} maxLength={100} onChange={e => setCodigo(e.target.value)} placeholder="Buscar código ou parte do caminho" />
           </label>
           <label className="min-w-0 text-sm font-medium text-slate-700">Variante
             <input className="input mt-1 min-h-11" value={variante} maxLength={100} onChange={e => setVariante(e.target.value)} placeholder="Ex.: A" />
