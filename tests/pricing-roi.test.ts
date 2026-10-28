@@ -43,3 +43,25 @@ test('arredonda retorno mínimo para cima mesmo com sobra fracionada', () => {
   assert.equal(scenarios[0].returnMultiple, 7.62);
   assert.ok(scenarios[0].adCost <= 13.123);
 });
+
+test('domínio próprio considera material, extras, impostos, trabalho e lucro sem taxas', () => {
+  const input = { pricePerMeter: 20, metersUsed: 2, extraCosts: 10, taxesPercentage: 4, laborPercentage: 25, profitPercentage: 10 };
+  const marketplaces = PricingCalculatorUtils.calculateMarketplacePrices(input);
+  const channels = PricingCalculatorUtils.calculateMarketplacePrices(input, true);
+  assert.equal(marketplaces.length, 3);
+  assert.deepEqual(channels.slice(0, 3), marketplaces);
+  const ownDomain = channels.find(channel => channel.marketplaceId === 'dominioProprio');
+  assert.ok(ownDomain);
+  assert.equal(ownDomain.marketplaceName, 'Domínio Próprio');
+  assert.equal(ownDomain.materialCost, 40);
+  assert.equal(ownDomain.extraCosts, 10);
+  assert.equal(ownDomain.marketplaceCost, 0);
+  assert.equal(ownDomain.percentageFee, 0);
+  assert.equal(ownDomain.fixedFee, 0);
+  assert.ok(Math.abs(ownDomain.minimumPrice - 50 / 0.61) < 1e-10);
+  assert.equal(ownDomain.recommendedPrice, 85.9);
+  assert.equal(ownDomain.taxes, ownDomain.recommendedPrice * 0.04);
+  assert.equal(ownDomain.labor, ownDomain.recommendedPrice * 0.25);
+  assert.equal(ownDomain.estimatedProfit, ownDomain.recommendedPrice - 50 - ownDomain.taxes - ownDomain.labor);
+  assert.ok(ownDomain.netMargin >= 10);
+});

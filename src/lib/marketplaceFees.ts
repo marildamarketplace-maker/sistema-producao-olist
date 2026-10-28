@@ -1,4 +1,5 @@
 export type MarketplaceId = "shopee" | "mercadoLivre" | "tiktokShop";
+export type SalesChannelId = MarketplaceId | "dominioProprio";
 
 export type FeeRange = {
   minPrice: number;
@@ -9,7 +10,7 @@ export type FeeRange = {
 };
 
 export type MarketplaceFeeConfig = {
-  id: MarketplaceId;
+  id: SalesChannelId;
   name: string;
   ranges: readonly FeeRange[];
 };
@@ -60,3 +61,9 @@ export const DEFAULT_PERCENTAGES = {
   labor: 25,
   profit: 10,
 } as const;
+
+export const OWN_DOMAIN_FEES: MarketplaceFeeConfig = {
+  id: "dominioProprio",
+  name: "Domínio Próprio",
+  ranges: [{ minPrice: 0, maxPrice: null, percentage: 0, fixedFee: 0 }],
+};

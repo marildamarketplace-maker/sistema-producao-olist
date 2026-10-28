@@ -48,6 +48,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest: boolean }) {
+  const isOwnDomain = result.marketplaceId === "dominioProprio";
   const scenarios = calculateAdvertisingScenarios(result);
   const metric = result.marketplaceId === "tiktokShop" ? "ROI" : "ROAS";
   return <article className={`rounded-xl border bg-white p-5 shadow-sm ${isLowest ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
@@ -59,8 +60,9 @@ function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest
     <p className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{formatCurrency(result.recommendedPrice)}</p>
     <p className="mt-2 text-xs text-slate-500">Mínimo calculado: {formatCurrency(result.minimumPrice)}</p>
 
-    <section className="mt-5 space-y-3 border-t border-slate-200 pt-4" aria-label={`Cenários de ${metric} publicitário`}>
-      <h3 className="text-sm font-semibold text-slate-900">{metric} publicitário por objetivo</h3>
+    {!isOwnDomain && <details className="mt-5 border-t border-slate-200 pt-4">
+      <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">{metric} publicitário por objetivo</summary>
+      <div className="mt-3 space-y-3">
       <p className="text-xs text-slate-600">Receita atribuída ÷ gasto em anúncios, no preço recomendado acima.</p>
       {scenarios ? scenarios.map((scenario) => <div key={scenario.label} className="rounded-md border border-slate-200 p-3">
         <p className="text-sm font-medium text-slate-800">{scenario.label}</p>
@@ -73,14 +75,17 @@ function ResultCard({ result, isLowest }: { result: MarketplacePricing; isLowest
         : result.marketplaceId === "tiktokShop"
           ? "TikTok: receita total dos pedidos atribuídos ao plano ÷ despesa publicitária. No GMV Max, pode incluir pedidos pagos e orgânicos."
           : "Mercado Livre: receita atribuída por real investido. Ex.: ROAS 2x = R$ 2 em receita por R$ 1 em anúncios."}</p>
-    </section>
+      </div>
+    </details>}
     <div className="mt-5 border-t border-slate-200 pt-3">
       <DetailRow label="Custo material" value={formatCurrency(result.materialCost)} />
       <DetailRow label="Gastos extras" value={formatCurrency(result.extraCosts)} />
+      {!isOwnDomain && <>
       <DetailRow label="Custo do produto" value={formatCurrency(result.totalCost)} />
       <DetailRow label="Marketplace" value={formatCurrency(result.marketplaceCost)} />
       <DetailRow label="Taxa percentual" value={`${percentageFormatter.format(result.percentageFee)}%`} />
       <DetailRow label="Taxa fixa" value={formatCurrency(result.fixedFee)} />
+      </>}
       <DetailRow label="Impostos" value={formatCurrency(result.taxes)} />
       <DetailRow label="Trabalho" value={formatCurrency(result.labor)} />
       <DetailRow label="Lucro antes de anúncios" value={formatCurrency(result.estimatedProfit)} />
@@ -102,7 +107,7 @@ export function PricingCalculator() {
     if (hasInvalidValue || values.pricePerMeter <= 0 || values.metersUsed <= 0 || totalPercentage >= 80) return null;
 
     try {
-      return PricingCalculatorUtils.calculateMarketplacePrices(values);
+      return PricingCalculatorUtils.calculateMarketplacePrices(values, true);
     } catch {
       return null;
     }
@@ -155,7 +160,7 @@ export function PricingCalculator() {
 
     {calculation && <>
       <p className="text-sm text-slate-600">ROAS (Shopee e Mercado Livre) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid gap-5 xl:grid-cols-2">
         {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} isLowest={result.recommendedPrice === lowestPrice} />)}
       </div>
 
@@ -166,7 +171,7 @@ export function PricingCalculator() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[620px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr><th className="px-5 py-3">Marketplace</th><th className="px-5 py-3">Preço recomendado</th><th className="px-5 py-3">Taxas</th><th className="px-5 py-3">Lucro antes de anúncios</th></tr>
+              <tr><th className="px-5 py-3">Canal de venda</th><th className="px-5 py-3">Preço recomendado</th><th className="px-5 py-3">Taxas de marketplace</th><th className="px-5 py-3">Lucro antes de anúncios</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {calculation.map((result) => <tr key={result.marketplaceId} className={result.recommendedPrice === lowestPrice ? "bg-emerald-50" : ""}>

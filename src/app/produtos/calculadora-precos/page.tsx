@@ -6,7 +6,7 @@ export default function PricingCalculatorPage() {
   return <AccessGuard permissions={["podeVisualizarEstoque", "podeEditarEstoque"]}>
     <PageHeader
       title="Calculadora de Precificação"
-      description="Compare rapidamente o preço de venda para cada marketplace. Os dados ficam somente nesta tela."
+      description="Compare rapidamente o preço de venda nos marketplaces e no domínio próprio. Os dados ficam somente nesta tela."
     />
     <PricingCalculator />
   </AccessGuard>;
