@@ -8,47 +8,47 @@ datasource db {
 }
 
 model Aplicativo {
-  retornosEstoqueOlist RetornoEstoqueOlist[]
-  itensRetornoEstoqueOlist ItemRetornoEstoqueOlist[]
-  enviosFornecedor EnvioFornecedor[]
-  configsFornecedorFilial ConfigFornecedorFilial[]
-  previasFornecedor PreviaFornecedor[]
-  registrosFornecedor PedidoFornecedorSolicitacao[]
-  id                        String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                        String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
-  descricao                 String?                      @db.Text
-  aplicativoPaiId           String?                      @map("aplicativo_pai_id") @db.Uuid
-  aplicativoPai             Aplicativo?                  @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  filiais                   Aplicativo[]                 @relation("AplicativoFiliais")
-  jobs                      String                       @default("")
-  whatsapp                  String                       @default("5537988031061") @db.Text
-  olistClientId             String?                      @map("olist_client_id")
-  olistClientSecret         String?                      @map("olist_client_secret")
-  createdAt                 DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime                     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  olistClientId             String?                       @map("olist_client_id")
+  olistClientSecret         String?                       @map("olist_client_secret")
+  createdAt                 DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  jobs                      String                        @default("")
+  whatsapp                  String                        @default("5537988031061")
+  aplicativoPaiId           String?                       @map("aplicativo_pai_id") @db.Uuid
+  descricao                 String?
+  aplicativoPai             Aplicativo?                   @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict)
+  filiais                   Aplicativo[]                  @relation("AplicativoFiliais")
   baixasEstoqueOlist        BaixaEstoqueOlist[]
   buscasSku                 BuscaSku[]
   categoriasOlist           CategoriaOlist[]
+  configsFornecedorFilial   ConfigFornecedorFilial[]
   configuracoesSistema      ConfiguracaoSistema[]
   controlesBuscaOlist       ControleBuscaOlist[]
+  enviosFornecedor          EnvioFornecedor[]
   formasPagamentoPlanos     FormaPagamentoOlistPlano[]
   formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
-  pedidosFilaOrigem         PedidoFornecedorQueue[] @relation("FilaOrigem")
-  pedidosFilaDestino        PedidoFornecedorQueue[] @relation("FilaDestino")
-  pedidosFilaFilial         PedidoFornecedorQueue[] @relation("FilaFilial")
-  fornecedores              Fornecedor[] @relation("FornecedorOrigem")
-  fornecedoresMatriz        Fornecedor[] @relation("FornecedorMatriz")
+  fornecedores              Fornecedor[]                  @relation("FornecedorOrigem")
+  fornecedoresMatriz        Fornecedor[]                  @relation("FornecedorMatriz")
   integracoesOlistToken     IntegracaoOlistToken[]
   itensBaixaEstoqueOlist    ItemBaixaEstoqueOlist[]
   itensBuscaSku             ItemBuscaSku[]
+  itensRetornoEstoqueOlist  ItemRetornoEstoqueOlist[]
   itensSolicitacaoDevolucao ItemSolicitacaoDevolucao[]
   itensSolicitacaoProducao  ItemSolicitacaoProducao[]
   midias                    Midia[]
   movimentacoesEstoque      MovimentacaoEstoque[]
   ocorrenciasTarefasMidia   OcorrenciaTarefaMidia[]
+  pedidosFilaFilial         PedidoFornecedorQueue[]       @relation("FilaFilial")
+  pedidosFilaDestino        PedidoFornecedorQueue[]       @relation("FilaDestino")
+  pedidosFilaOrigem         PedidoFornecedorQueue[]       @relation("FilaOrigem")
+  registrosFornecedor       PedidoFornecedorSolicitacao[]
   pedidosOlistProcessados   PedidoOlistProcessado[]
+  previasFornecedor         PreviaFornecedor[]
   produtos                  Produto[]
   produtosFornecedor        ProdutoFornecedor[]
+  retornosEstoqueOlist      RetornoEstoqueOlist[]
   solicitacoesDevolucao     SolicitacaoDevolucao[]
   solicitacoesProducao      SolicitacaoProducao[]
   tarefasMidia              TarefaMidia[]
@@ -143,9 +143,6 @@ model Midia {
 }
 
 model Usuario {
-  retornosEstoqueOlist RetornoEstoqueOlist[]
-  enviosFornecedor EnvioFornecedor[]
-  previasFornecedor PreviaFornecedor[]
   id                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoId                         String                  @map("aplicativo_id") @db.Uuid
   nome                                 String
@@ -161,8 +158,6 @@ model Usuario {
   podeVisualizarProducao               Boolean                 @default(false) @map("pode_visualizar_producao")
   podeConfirmarProducao                Boolean                 @default(false) @map("pode_confirmar_producao")
   podeVisualizarConfiguracao           Boolean                 @default(false) @map("pode_visualizar_configuracao")
-  podeSelecionarFilialFornecedor       Boolean                 @default(false) @map("pode_selecionar_filial_fornecedor")
-  podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
   podeEditarConfiguracao               Boolean                 @default(false) @map("pode_editar_configuracao")
   createdAt                            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -189,10 +184,15 @@ model Usuario {
   podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
   podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
   podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
+  podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
+  podeSelecionarFilialFornecedor       Boolean                 @default(false) @map("pode_selecionar_filial_fornecedor")
   acessosPaginas                       AcessoPaginaUsuario[]
+  enviosFornecedor                     EnvioFornecedor[]
   fornecedoresComoVendedor             Fornecedor[]
-  pedidosFilaDirecionados              PedidoFornecedorQueue[]
   ocorrenciasTarefasMidiaConcluidas    OcorrenciaTarefaMidia[] @relation("UsuarioConclusaoTarefaMidia")
+  pedidosFilaDirecionados              PedidoFornecedorQueue[]
+  previasFornecedor                    PreviaFornecedor[]
+  retornosEstoqueOlist                 RetornoEstoqueOlist[]
   tarefasMidiaResponsavel              TarefaMidia[]           @relation("ResponsavelTarefaMidia")
   aplicativo                           Aplicativo              @relation(fields: [aplicativoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -252,21 +252,21 @@ model OcorrenciaTarefaMidia {
 }
 
 model Fornecedor {
-  configsFilial ConfigFornecedorFilial[]
   id                       String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                     String
   endereco                 String?
   createdAt                DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
   aplicativoId             String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativoPaiId          String                        @map("aplicativo_pai_id") @db.Uuid
   vendedorOlistId          String?                       @map("vendedor_olist_id") @db.Uuid
   meuClienteOlistId        Int?                          @map("meu_cliente_olist_id")
   meuFormaPagamentoOlistId Int?                          @map("meu_forma_pagamento_olist_id")
   meuPlanoPagamentoId      String?                       @map("meu_plano_pagamento_id") @db.Uuid
   meuTipoVenda             TipoVenda?                    @map("meu_tipo_venda_enum")
+  aplicativoPaiId          String                        @map("aplicativo_pai_id") @db.Uuid
+  configsFilial            ConfigFornecedorFilial[]
   aplicativo               Aplicativo?                   @relation("FornecedorOrigem", fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  aplicativoPai            Aplicativo                    @relation("FornecedorMatriz", fields: [aplicativoPaiId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  aplicativoPai            Aplicativo                    @relation("FornecedorMatriz", fields: [aplicativoPaiId], references: [id], onUpdate: NoAction)
   meuPlanoPagamento        PlanoPagamento?               @relation(fields: [meuPlanoPagamentoId], references: [id])
   vendedor                 Usuario?                      @relation(fields: [vendedorOlistId], references: [id], onUpdate: NoAction)
   pedidosFila              PedidoFornecedorQueue[]
@@ -331,12 +331,12 @@ model Produto {
 }
 
 model ConfiguracaoJob {
-  chave     String   @id
-  pausado   Boolean  @default(true)
-  variantesPermitidas String[] @default([]) @map("variantes_permitidas")
+  chave                      String   @id
+  pausado                    Boolean  @default(true)
+  createdAt                  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   termosIgnoradosNomeArquivo String[] @default([]) @map("termos_ignorados_nome_arquivo")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  variantesPermitidas        String[] @default([]) @map("variantes_permitidas")
 
   @@map("configuracoes_jobs")
 }
@@ -354,39 +354,39 @@ model ConfiguracaoSistema {
 }
 
 model SolicitacaoProducao {
-  envioFornecedor EnvioFornecedor?
-  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  dataEntrega        DateTime                      @map("data_entrega") @db.Date
-  turnoId            String?                       @map("turno_id") @db.Uuid
-  filtroDataBase     String?                       @map("filtro_data_base")
-  periodoInicio      DateTime?                     @map("periodo_inicio") @db.Timestamptz(6)
-  periodoFim         DateTime?                     @map("periodo_fim") @db.Timestamptz(6)
-  status             String                        @default("pendente")
-  observacaoGeral    String?                       @map("observacao_geral")
-  evidenciaUrl       String?                       @map("evidencia_url")
-  evidenciaBucket    String?                       @map("evidencia_bucket")
-  evidenciaStoragePath String?                     @map("evidencia_storage_path")
-  createdAt          DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
-  prioridadeProducao Boolean                       @default(false) @map("prioridade_producao")
-  aplicativoId       String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  pedidosFila        PedidoFornecedorQueue[]
-  pedidosFornecedor  PedidoFornecedorSolicitacao[]
-  aplicativo         Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                   String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dataEntrega          DateTime                      @map("data_entrega") @db.Date
+  turnoId              String?                       @map("turno_id") @db.Uuid
+  filtroDataBase       String?                       @map("filtro_data_base")
+  periodoInicio        DateTime?                     @map("periodo_inicio") @db.Timestamptz(6)
+  periodoFim           DateTime?                     @map("periodo_fim") @db.Timestamptz(6)
+  status               String                        @default("pendente")
+  observacaoGeral      String?                       @map("observacao_geral")
+  createdAt            DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  prioridadeProducao   Boolean                       @default(false) @map("prioridade_producao")
+  aplicativoId         String?                       @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  evidenciaBucket      String?                       @map("evidencia_bucket")
+  evidenciaStoragePath String?                       @map("evidencia_storage_path")
+  evidenciaUrl         String?                       @map("evidencia_url")
+  envioFornecedor      EnvioFornecedor?
+  pedidosFila          PedidoFornecedorQueue?
+  pedidosFornecedor    PedidoFornecedorSolicitacao[]
+  aplicativo           Aplicativo?                   @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([aplicativoId], map: "idx_solicitacoes_producao_aplicativo_id")
   @@map("solicitacoes_producao")
 }
 
 model PedidoFornecedorSolicitacao {
-  aplicativoDestinatario Aplicativo? @relation(fields: [aplicativoDestinatarioId], references: [id], onDelete: Restrict)
-  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  pedidoOlistId String              @map("pedido_olist_id")
-  fornecedorId  String              @map("fornecedor_id") @db.Uuid
-  solicitacaoId String              @map("solicitacao_id") @db.Uuid
-  aplicativoDestinatarioId String? @map("aplicativo_destinatario_id") @db.Uuid
-  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  fornecedor    Fornecedor          @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
-  solicitacao   SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onUpdate: NoAction)
+  id                       String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pedidoOlistId            String              @map("pedido_olist_id")
+  fornecedorId             String              @map("fornecedor_id") @db.Uuid
+  solicitacaoId            String              @map("solicitacao_id") @db.Uuid
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativoDestinatarioId String?             @map("aplicativo_destinatario_id") @db.Uuid
+  aplicativoDestinatario   Aplicativo?         @relation(fields: [aplicativoDestinatarioId], references: [id], onDelete: Restrict)
+  fornecedor               Fornecedor          @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
+  solicitacao              SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onUpdate: NoAction)
 
   @@unique([pedidoOlistId, fornecedorId], map: "uq_pedido_fornecedor_solicitacao_pedido_fornecedor")
   @@index([fornecedorId], map: "idx_pedido_fornecedor_solicitacao_fornecedor_id")
@@ -432,18 +432,18 @@ model PedidoOlistProcessado {
 }
 
 model MovimentacaoEstoque {
+  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  produtoId        String                   @map("produto_id") @db.Uuid
+  sku              String
+  tipoMovimento    String                   @map("tipo_movimento")
+  quantidade       Int
+  origem           String
+  referenciaId     String?                  @map("referencia_id") @db.Uuid
+  observacao       String?
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativoId     String?                  @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   itemRetornoOlist ItemRetornoEstoqueOlist?
-  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  produtoId     String      @map("produto_id") @db.Uuid
-  sku           String
-  tipoMovimento String      @map("tipo_movimento")
-  quantidade    Int
-  origem        String
-  referenciaId  String?     @map("referencia_id") @db.Uuid
-  observacao    String?
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativoId  String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo    Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  aplicativo       Aplicativo?              @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([aplicativoId], map: "idx_movimentacoes_estoque_aplicativo_id")
   @@map("movimentacoes_estoque")
@@ -494,23 +494,22 @@ model BaixaEstoqueOlist {
 }
 
 model ItemBaixaEstoqueOlist {
-  skuOrigem String? @map("sku_origem")
-  retornos ItemRetornoEstoqueOlist[]
-  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  baixaId        String      @map("baixa_id") @db.Uuid
-  produtoId      String?     @map("produto_id") @db.Uuid
+  id             String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  baixaId        String                    @map("baixa_id") @db.Uuid
+  produtoId      String?                   @map("produto_id") @db.Uuid
   sku            String
   quantidade     Int
-  pedidoOlistId  String?     @map("pedido_olist_id")
-  itemOlistId    String?     @map("item_olist_id")
+  pedidoOlistId  String?                   @map("pedido_olist_id")
+  itemOlistId    String?                   @map("item_olist_id")
   observacao     String?
   origem         String
-  movimentacaoId String?     @map("movimentacao_id") @db.Uuid
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativoId   String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
-  aplicativo     Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  movimentacaoId String?                   @map("movimentacao_id") @db.Uuid
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativoId   String?                   @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
+  aplicativo     Aplicativo?               @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  retornos       ItemRetornoEstoqueOlist[]
 
-  @@unique([pedidoOlistId, itemOlistId, sku], map: "uq_itens_baixa_olist_pedido_item_sku")
+  @@unique([pedidoOlistId, itemOlistId], map: "uq_itens_baixa_olist_pedido_item")
   @@index([aplicativoId], map: "idx_itens_baixa_estoque_olist_aplicativo_id")
   @@map("itens_baixa_estoque_olist")
 }
@@ -622,9 +621,14 @@ model TipoProdutoProdutoFornecedor {
 model Estampa {
   id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   codigo               String
-  varianteCatalogo     String?        @map("variante")
   descricao            String?
   palavrasChave        String?        @map("palavras_chave")
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  extra                String?
+  imagemUrl            String?        @map("imagem_url")
+  imagemUrl2           String?        @map("imagem_url_2")
+  varianteCatalogo     String?        @map("variante")
   previewUrl           String?        @map("preview_url")
   storageKey           String?        @map("storage_key")
   originalRelativePath String?        @map("original_relative_path")
@@ -645,11 +649,6 @@ model Estampa {
   processingError      String?        @map("processing_error")
   processedAt          DateTime?      @map("processed_at") @db.Timestamptz(6)
   isActive             Boolean        @default(true) @map("is_active")
-  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  extra                String?
-  imagemUrl            String?        @map("imagem_url")
-  imagemUrl2           String?        @map("imagem_url_2")
   produtosOlist        ProdutoOlist[]
   variantes            Variante[]
 
@@ -666,20 +665,20 @@ model EstampaJob {
   tentativas        Int              @default(0)
   maxTentativas     Int              @default(3) @map("max_tentativas")
   ultimoErro        String?          @map("ultimo_erro")
-  modeloUtilizado   String?          @map("modelo_utilizado")
-  nextAttemptAt     DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
-  manualRequested   Boolean          @default(false) @map("manual_requested")
-  manualRequestedAt DateTime?        @map("manual_requested_at") @db.Timestamptz(6)
-  manualRequestedBy String?          @map("manual_requested_by") @db.Uuid
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   startedAt         DateTime?        @map("started_at") @db.Timestamptz(6)
   finishedAt        DateTime?        @map("finished_at") @db.Timestamptz(6)
   lockedAt          DateTime?        @map("locked_at") @db.Timestamptz(6)
   workerId          String?          @map("worker_id")
+  nextAttemptAt     DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  manualRequested   Boolean          @default(false) @map("manual_requested")
+  manualRequestedAt DateTime?        @map("manual_requested_at") @db.Timestamptz(6)
+  manualRequestedBy String?          @map("manual_requested_by") @db.Uuid
   batchId           String?          @map("batch_id") @db.Uuid
   providerCustomId  String?          @map("provider_custom_id")
-  batch             EstampaAiBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  modeloUtilizado   String?          @map("modelo_utilizado")
+  batch             EstampaAiBatch?  @relation(fields: [batchId], references: [id])
 
   @@unique([estampaId, tipo], map: "uq_estampa_jobs_estampa_tipo")
   @@index([status], map: "idx_estampa_jobs_status")
@@ -714,47 +713,48 @@ model EstampaAiBatch {
   @@map("estampa_ai_batches")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model EstampaCatalogoIa {
-  id                    BigInt    @id @default(autoincrement())
+  id                    BigInt                   @id @default(autoincrement())
   codigo                String
   variante              String?
-  previewUrl            String?   @map("preview_url")
-  storageKey            String?   @map("storage_key")
-  originalRelativePath  String?   @map("original_relative_path")
-  originalFilename      String?   @map("original_filename")
-  originalExtension     String?   @map("original_extension")
-  contentHash           String?   @map("content_hash")
-  processingStatus      String    @map("processing_status")
-  createdAt             DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime  @map("updated_at") @db.Timestamptz(6)
+  previewUrl            String?                  @map("preview_url")
+  storageKey            String?                  @map("storage_key")
+  originalRelativePath  String?                  @map("original_relative_path")
+  originalFilename      String?                  @map("original_filename")
+  originalExtension     String?                  @map("original_extension")
+  contentHash           String?                  @map("content_hash")
+  processingStatus      String                   @map("processing_status")
+  createdAt             DateTime                 @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                 @map("updated_at") @db.Timestamptz(6)
   titulo                String?
   descricao             String?
   tema                  String?
-  subtemas              String[]  @default([])
-  palavrasChave         String[]  @default([]) @map("palavras_chave")
-  cores                 String[]  @default([])
-  elementosVisuais      String[]  @default([]) @map("elementos_visuais")
-  ocasioes              String[]  @default([])
-  categorias            String[]  @default([])
+  palavrasChave         String[]                 @default([]) @map("palavras_chave")
+  cores                 String[]                 @default([])
+  elementosVisuais      String[]                 @default([]) @map("elementos_visuais")
+  ocasioes              String[]                 @default([])
+  categorias            String[]                 @default([])
+  textoPesquisa         String?                  @map("texto_pesquisa")
+  aiMetadata            Json?                    @map("ai_metadata")
+  aiProcessedHash       String?                  @map("ai_processed_hash")
+  processingError       String?                  @map("processing_error")
+  processedAt           DateTime?                @map("processed_at") @db.Timestamptz(6)
+  arquivoId             String?                  @map("arquivo_id")
+  subtemas              String[]                 @default([])
   estilo                String?
-  tipoImagem            String    @default("INDEFINIDO") @map("tipo_imagem")
-  conteudosImagem       String[]  @default([]) @map("conteudos_imagem")
-  suporteAplicacao      String    @default("NAO_APLICAVEL") @map("suporte_aplicacao")
-  descricaoAplicacao    String?   @map("descricao_aplicacao")
-  confiancaTipoImagem   Float?    @map("confianca_tipo_imagem")
-  publicosSugeridos     String[]  @default([]) @map("publicos_sugeridos")
-  contextosUso          String[]  @default([]) @map("contextos_uso")
-  afinidadesVisuais     String[]  @default([]) @map("afinidades_visuais")
-  confiancaSegmentacao  Float?    @map("confianca_segmentacao")
-  padroesTexteis        String[]  @default([]) @map("padroes_texteis")
-  confiancaPadraoTextil Float?    @map("confianca_padrao_textil")
-  textoPesquisa         String?   @map("texto_pesquisa")
-  aiMetadata            Json?     @map("ai_metadata")
-  aiProcessedHash       String?   @map("ai_processed_hash")
-  processingError       String?   @map("processing_error")
-  processedAt           DateTime? @map("processed_at") @db.Timestamptz(6)
-  isActive              Boolean   @default(true) @map("is_active")
-  arquivoId             String?   @map("arquivo_id")
+  isActive              Boolean                  @default(true) @map("is_active")
+  tipoImagem            String                   @default("INDEFINIDO") @map("tipo_imagem")
+  conteudosImagem       String[]                 @default([]) @map("conteudos_imagem")
+  suporteAplicacao      String                   @default("NAO_APLICAVEL") @map("suporte_aplicacao")
+  descricaoAplicacao    String?                  @map("descricao_aplicacao")
+  confiancaTipoImagem   Float?                   @map("confianca_tipo_imagem")
+  publicosSugeridos     String[]                 @default([]) @map("publicos_sugeridos")
+  contextosUso          String[]                 @default([]) @map("contextos_uso")
+  afinidadesVisuais     String[]                 @default([]) @map("afinidades_visuais")
+  confiancaSegmentacao  Float?                   @map("confianca_segmentacao")
+  padroesTexteis        String[]                 @default([]) @map("padroes_texteis")
+  confiancaPadraoTextil Float?                   @map("confianca_padrao_textil")
   searchVector          Unsupported("tsvector")? @map("search_vector")
 
   @@unique([codigo, variante, arquivoId], map: "estampas_codigo_variante_arquivo_unique")
@@ -772,6 +772,8 @@ model EstampaCatalogoIa {
   @@index([suporteAplicacao], map: "idx_estampas_suporte_aplicacao")
   @@index([processingStatus], map: "idx_estampas_processing_status")
   @@index([contentHash], map: "idx_estampas_content_hash")
+  @@index([categorias], map: "idx_estampas_categorias_gin", type: Gin)
+  @@index([cores], map: "idx_estampas_cores_gin", type: Gin)
   @@map("estampas")
 }
 
@@ -906,6 +908,130 @@ model ProdutoOlistProdutoFornecedor {
   @@map("produto_olist_produto_fornecedor")
 }
 
+model AcessoPaginaUsuario {
+  usuarioId    String   @map("usuario_id") @db.Uuid
+  pagina       String   @db.VarChar(160)
+  acessos      Int      @default(1)
+  ultimoAcesso DateTime @default(now()) @map("ultimo_acesso") @db.Timestamptz(6)
+  usuario      Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, pagina])
+  @@map("acesso_pagina_usuario")
+}
+
+model PedidoFornecedorQueue {
+  id                      String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoSolicitanteId String                      @map("aplicativo_solicitante_id") @db.Uuid
+  solicitacaoProducaoId   String                      @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
+  aplicativoFornecedorId  String                      @map("aplicativo_fornecedor_id") @db.Uuid
+  fornecedorId            String                      @map("fornecedor_id") @db.Uuid
+  dadosPedido             Json                        @map("dados_pedido")
+  createdAt               DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativoFilialId      String?                     @map("aplicativo_filial_id") @db.Uuid
+  direcionadoEm           DateTime?                   @map("direcionado_em") @db.Timestamptz(6)
+  direcionadoPorId        String?                     @map("direcionado_por_id") @db.Uuid
+  versao                  Int                         @default(0)
+  status                  StatusPedidoFornecedorQueue @default(PENDENTE)
+  enviosOlist             EnvioFornecedor[]
+  aplicativoFilial        Aplicativo?                 @relation("FilaFilial", fields: [aplicativoFilialId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  aplicativoFornecedor    Aplicativo                  @relation("FilaDestino", fields: [aplicativoFornecedorId], references: [id], onUpdate: NoAction)
+  aplicativoSolicitante   Aplicativo                  @relation("FilaOrigem", fields: [aplicativoSolicitanteId], references: [id], onUpdate: NoAction)
+  direcionadoPor          Usuario?                    @relation(fields: [direcionadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fornecedor              Fornecedor                  @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
+  solicitacaoProducao     SolicitacaoProducao         @relation(fields: [solicitacaoProducaoId], references: [id], onUpdate: NoAction)
+  previasOlist            PreviaFornecedor[]
+
+  @@index([aplicativoSolicitanteId], map: "idx_pedido_fornecedor_queue_origem")
+  @@index([aplicativoFornecedorId, createdAt], map: "idx_pedido_fornecedor_queue_destino")
+  @@index([fornecedorId], map: "idx_pedido_fornecedor_queue_fornecedor")
+  @@index([aplicativoFilialId], map: "idx_pedido_fornecedor_queue_filial")
+  @@index([direcionadoPorId], map: "idx_pedido_fornecedor_queue_direcionado_por")
+  @@map("pedido_fornecedor_queue")
+}
+
+model EnvioFornecedor {
+  solicitacaoId String                 @id @map("solicitacao_id") @db.Uuid
+  tentativaId   String                 @map("tentativa_id") @db.Uuid
+  aplicativoId  String                 @map("aplicativo_id") @db.Uuid
+  usuarioId     String                 @map("usuario_id") @db.Uuid
+  filaId        String?                @map("fila_id") @db.Uuid
+  estado        String
+  iniciadoEm    DateTime               @map("iniciado_em") @db.Timestamptz(6)
+  chamadaEm     DateTime?              @map("chamada_em") @db.Timestamptz(6)
+  pedidoOlistId String?                @map("pedido_olist_id")
+  diagnostico   String?
+  payload       Json
+  historico     Json
+  aplicativo    Aplicativo             @relation(fields: [aplicativoId], references: [id])
+  fila          PedidoFornecedorQueue? @relation(fields: [filaId], references: [id], onDelete: Restrict)
+  solicitacao   SolicitacaoProducao    @relation(fields: [solicitacaoId], references: [id])
+  usuario       Usuario                @relation(fields: [usuarioId], references: [id])
+
+  @@map("envio_fornecedor")
+}
+
+model ConfigFornecedorFilial {
+  fornecedorId String     @map("fornecedor_id") @db.Uuid
+  filialId     String     @map("filial_id") @db.Uuid
+  selecoes     Json
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  filial       Aplicativo @relation(fields: [filialId], references: [id])
+  fornecedor   Fornecedor @relation(fields: [fornecedorId], references: [id])
+
+  @@id([fornecedorId, filialId])
+  @@map("config_fornecedor_filial")
+}
+
+model PreviaFornecedor {
+  id        String                @id @default(uuid()) @db.Uuid
+  filaId    String                @map("fila_id") @db.Uuid
+  filialId  String                @map("filial_id") @db.Uuid
+  usuarioId String                @map("usuario_id") @db.Uuid
+  versao    Int
+  payload   Json
+  selecoes  Json
+  expiraEm  DateTime              @map("expira_em") @db.Timestamptz(6)
+  fila      PedidoFornecedorQueue @relation(fields: [filaId], references: [id], onDelete: Cascade)
+  filial    Aplicativo            @relation(fields: [filialId], references: [id])
+  usuario   Usuario               @relation(fields: [usuarioId], references: [id])
+
+  @@index([expiraEm])
+  @@map("previa_fornecedor")
+}
+
+model RetornoEstoqueOlist {
+  id                String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId      String                    @map("aplicativo_id") @db.Uuid
+  usuarioId         String                    @map("usuario_id") @db.Uuid
+  chaveIdempotencia String                    @map("chave_idempotencia") @db.Uuid
+  payloadHash       String                    @map("payload_hash")
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  itens             ItemRetornoEstoqueOlist[]
+  aplicativo        Aplicativo                @relation(fields: [aplicativoId], references: [id])
+  usuario           Usuario                   @relation(fields: [usuarioId], references: [id])
+
+  @@unique([aplicativoId, chaveIdempotencia], map: "uq_retorno_olist_idempotencia")
+  @@index([aplicativoId, createdAt], map: "idx_retorno_olist_aplicativo_data")
+  @@map("retornos_estoque_olist")
+}
+
+model ItemRetornoEstoqueOlist {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  retornoId      String                @map("retorno_id") @db.Uuid
+  aplicativoId   String                @map("aplicativo_id") @db.Uuid
+  itemBaixaId    String                @map("item_baixa_id") @db.Uuid
+  movimentacaoId String?               @unique @map("movimentacao_id") @db.Uuid
+  quantidade     Int
+  aplicativo     Aplicativo            @relation(fields: [aplicativoId], references: [id])
+  itemBaixa      ItemBaixaEstoqueOlist @relation(fields: [itemBaixaId], references: [id])
+  movimentacao   MovimentacaoEstoque?  @relation(fields: [movimentacaoId], references: [id], onDelete: Restrict)
+  retorno        RetornoEstoqueOlist   @relation(fields: [retornoId], references: [id])
+
+  @@unique([retornoId, itemBaixaId], map: "uq_retorno_olist_item")
+  @@index([aplicativoId, itemBaixaId], map: "idx_retorno_olist_baixa")
+  @@map("itens_retorno_estoque_olist")
+}
+
 enum TipoServicoProdutoFornecedor {
   CORTE_LASER
 
@@ -947,9 +1073,9 @@ enum TipoJobEstampa {
 enum StatusJobEstampa {
   PENDING
   PROCESSING
-  WAITING_PROVIDER
   COMPLETED
   FAILED
+  WAITING_PROVIDER
 }
 
 enum StatusEstampaAiBatch {
@@ -972,17 +1098,6 @@ enum NotificationStatus {
   SUCESSO
 }
 
-model AcessoPaginaUsuario {
-  usuarioId    String   @map("usuario_id") @db.Uuid
-  pagina       String   @db.VarChar(160)
-  acessos      Int      @default(1)
-  ultimoAcesso DateTime @default(now()) @map("ultimo_acesso") @db.Timestamptz(6)
-  usuario      Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-
-  @@id([usuarioId, pagina])
-  @@map("acesso_pagina_usuario")
-}
-
 enum StatusPedidoFornecedorQueue {
   PENDENTE
   PROCESSAR
@@ -991,123 +1106,4 @@ enum StatusPedidoFornecedorQueue {
   CANCELADO
 
   @@map("status_pedido_fornecedor_queue")
-}
-
-model PedidoFornecedorQueue {
-  enviosOlist EnvioFornecedor[]
-  previasOlist PreviaFornecedor[]
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoSolicitanteId String @map("aplicativo_solicitante_id") @db.Uuid
-  solicitacaoProducaoId String @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
-  aplicativoFornecedorId String @map("aplicativo_fornecedor_id") @db.Uuid
-  fornecedorId String @map("fornecedor_id") @db.Uuid
-  aplicativoFilialId String? @map("aplicativo_filial_id") @db.Uuid
-  direcionadoPorId String? @map("direcionado_por_id") @db.Uuid
-  direcionadoEm DateTime? @map("direcionado_em") @db.Timestamptz(6)
-  versao Int @default(0)
-  status StatusPedidoFornecedorQueue @default(PENDENTE)
-  dadosPedido Json @map("dados_pedido") @db.JsonB
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativoSolicitante Aplicativo @relation("FilaOrigem", fields: [aplicativoSolicitanteId], references: [id], onUpdate: NoAction)
-  aplicativoFornecedor Aplicativo @relation("FilaDestino", fields: [aplicativoFornecedorId], references: [id], onUpdate: NoAction)
-  solicitacaoProducao SolicitacaoProducao @relation(fields: [solicitacaoProducaoId], references: [id], onUpdate: NoAction)
-  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
-  aplicativoFilial Aplicativo? @relation("FilaFilial", fields: [aplicativoFilialId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  direcionadoPor Usuario? @relation(fields: [direcionadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-
-  @@index([aplicativoSolicitanteId], map: "idx_pedido_fornecedor_queue_origem")
-  @@index([aplicativoFornecedorId, createdAt], map: "idx_pedido_fornecedor_queue_destino")
-  @@index([fornecedorId], map: "idx_pedido_fornecedor_queue_fornecedor")
-  @@index([aplicativoFilialId], map: "idx_pedido_fornecedor_queue_filial")
-  @@index([direcionadoPorId], map: "idx_pedido_fornecedor_queue_direcionado_por")
-  @@map("pedido_fornecedor_queue")
-}
-
-// Reserva única compartilhada pelos envios direto e pela fila. Histórico é append-only no serviço.
-model EnvioFornecedor {
-  solicitacao SolicitacaoProducao @relation(fields: [solicitacaoId], references: [id], onDelete: Restrict)
-  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
-  fila PedidoFornecedorQueue? @relation(fields: [filaId], references: [id], onDelete: Restrict)
-  solicitacaoId String @id @map("solicitacao_id") @db.Uuid
-  tentativaId String @map("tentativa_id") @db.Uuid
-  aplicativoId String @map("aplicativo_id") @db.Uuid
-  usuarioId String @map("usuario_id") @db.Uuid
-  filaId String? @map("fila_id") @db.Uuid
-  estado String
-  iniciadoEm DateTime @map("iniciado_em") @db.Timestamptz(6)
-  chamadaEm DateTime? @map("chamada_em") @db.Timestamptz(6)
-  pedidoOlistId String? @map("pedido_olist_id")
-  diagnostico String?
-  payload Json @db.JsonB
-  historico Json @db.JsonB
-  @@map("envio_fornecedor")
-}
-model ConfigFornecedorFilial {
-  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
-  filial Aplicativo @relation(fields: [filialId], references: [id], onDelete: Restrict)
-  fornecedorId String @map("fornecedor_id") @db.Uuid
-  filialId String @map("filial_id") @db.Uuid
-  selecoes Json @db.JsonB
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  @@id([fornecedorId, filialId])
-  @@map("config_fornecedor_filial")
-}
-model PreviaFornecedor {
-  fila PedidoFornecedorQueue @relation(fields: [filaId], references: [id], onDelete: Cascade)
-  filial Aplicativo @relation(fields: [filialId], references: [id], onDelete: Restrict)
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
-  id String @id @default(uuid()) @db.Uuid
-  filaId String @map("fila_id") @db.Uuid
-  filialId String @map("filial_id") @db.Uuid
-  usuarioId String @map("usuario_id") @db.Uuid
-  versao Int
-  payload Json @db.JsonB
-  selecoes Json @db.JsonB
-  expiraEm DateTime @map("expira_em") @db.Timestamptz(6)
-  @@index([expiraEm])
-  @@map("previa_fornecedor")
-}
-
-model RetornoEstoqueOlist {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId String @map("aplicativo_id") @db.Uuid
-  usuarioId String @map("usuario_id") @db.Uuid
-  chaveIdempotencia String @map("chave_idempotencia") @db.Uuid
-  payloadHash String @map("payload_hash")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
-  itens ItemRetornoEstoqueOlist[]
-
-  @@unique([aplicativoId, chaveIdempotencia], map: "uq_retorno_olist_idempotencia")
-  @@index([aplicativoId, createdAt], map: "idx_retorno_olist_aplicativo_data")
-  @@map("retornos_estoque_olist")
-}
-
-model ItemRetornoEstoqueOlist {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  retornoId String @map("retorno_id") @db.Uuid
-  aplicativoId String @map("aplicativo_id") @db.Uuid
-  itemBaixaId String @map("item_baixa_id") @db.Uuid
-  movimentacaoId String? @unique @map("movimentacao_id") @db.Uuid
-  quantidade Int
-  retorno RetornoEstoqueOlist @relation(fields: [retornoId], references: [id], onDelete: Restrict)
-  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
-  itemBaixa ItemBaixaEstoqueOlist @relation(fields: [itemBaixaId], references: [id], onDelete: Restrict)
-  movimentacao MovimentacaoEstoque? @relation(fields: [movimentacaoId], references: [id], onDelete: Restrict)
-
-  @@unique([retornoId, itemBaixaId], map: "uq_retorno_olist_item")
-  @@index([aplicativoId, itemBaixaId], map: "idx_retorno_olist_baixa")
-  @@map("itens_retorno_estoque_olist")
-}
-
-model ComponenteKitEstoque {
-  aplicativoId String @map("aplicativo_id") @db.Uuid
-  kitSku String @map("kit_sku")
-  sku String
-  quantidade Int
-
-  @@id([aplicativoId, kitSku, sku])
-  @@map("componentes_kit_estoque")
 }
