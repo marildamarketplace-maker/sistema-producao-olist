@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { expandirKitProducaoManual, type OpcaoProdutoKitManual } from "@/lib/producao-manual-kits";
 import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
@@ -18,7 +19,7 @@ import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/
 import { montarSolicitacaoProducaoWhatsapp } from "@/lib/solicitacao-producao-whatsapp";
 import { FILTROS_SOLICITACOES_INICIAIS, criarFiltrosSolicitacoesIniciais, filtrarSolicitacoes } from "@/lib/solicitacoes-producao-filtros";
 
-type Produto = {
+type Produto = OpcaoProdutoKitManual & {
   id: string;
   sku: string;
   imagem_url: string | null;
@@ -385,6 +386,9 @@ export default function SolicitacoesProducaoPage() {
   const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
   const [dataEntrega, setDataEntrega] = useState("");
   const [observacaoGeral, setObservacaoGeral] = useState("");
+  const [avisoKitManual, setAvisoKitManual] = useState("");
+  const [selecionandoProduto, setSelecionandoProduto] = useState(false);
+  const selecaoProdutoVersao = useRef(0);
   const [itensForm, setItensForm] = useState<ItemForm[]>([{ ...ITEM_INICIAL }]);
   const [produtoBuscaAberta, setProdutoBuscaAberta] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -445,7 +449,7 @@ export default function SolicitacoesProducaoPage() {
           .neq("status", "em_producao")
           .order("created_at", { ascending: false })
           .limit(LIMITE_SOLICITACOES_RESUMO),
-        fetch("/api/produtos/opcoes", {
+        fetch("/api/produtos/opcoes?incluir_kits=1", {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
         fetch("/api/solicitacoes-producao/pedidos-fornecedor", {
@@ -886,28 +890,47 @@ export default function SolicitacoesProducaoPage() {
   }
 
   async function alterarProdutoBusca(index: number, valor: string) {
-    const produto = produtos.find(
-      (item) => item.sku.toLowerCase() === valor.trim().toLowerCase(),
-    );
-    const produtoFornecido = produto ? await carregarProdutoFornecido(produto.id) : null;
-
-    alterarItem(index, {
-      produto_busca: valor,
-      produto_id: produto?.id ?? "",
-      produto_fornecido: produtoFornecido,
-    });
+    selecaoProdutoVersao.current++;
+    setAvisoKitManual("");
+    const produto = produtos.find((item) => item.sku.toLowerCase() === valor.trim().toLowerCase());
+    alterarItem(index, { produto_busca: valor, produto_id: "", produto_fornecido: null });
     setProdutoBuscaAberta(index);
+    if (produto) await selecionarProduto(index, produto);
   }
 
   async function selecionarProduto(index: number, produto: Produto) {
-    const produtoFornecido = await carregarProdutoFornecido(produto.id);
-
-    alterarItem(index, {
-      produto_id: produto.id,
-      produto_busca: produto.sku,
-      produto_fornecido: produtoFornecido,
-    });
-    setProdutoBuscaAberta(null);
+    const versao = ++selecaoProdutoVersao.current;
+    setSelecionandoProduto(true);
+    setErrorMessage(null);
+    try {
+      const atual = itensForm[index];
+      if (!atual) return;
+      const expandidos = expandirKitProducaoManual(produto, atual.quantidade_solicitada, produtos);
+      if (expandidos) {
+        if (itensForm.length - 1 + expandidos.length > 500) throw new Error("A solicitação pode ter no máximo 500 itens.");
+        const novos = await Promise.all(expandidos.map(async (item) => aplicarObservacaoProdutoFornecido({
+          ...ITEM_INICIAL,
+          produto_id: item.produto.id,
+          produto_busca: item.produto.sku,
+          produto_fornecido: await carregarProdutoFornecido(item.produto.id),
+          quantidade_solicitada: String(item.quantidade),
+          corte_laser: atual.corte_laser,
+          observacao: removerObservacaoProdutoFornecido(atual.observacao),
+        })));
+        if (versao !== selecaoProdutoVersao.current) return;
+        setItensForm((anteriores) => [...anteriores.slice(0, index), ...novos, ...anteriores.slice(index + 1)]);
+        setAvisoKitManual(`Kit ${produto.sku} substituído por ${novos.length} componentes. Confira as quantidades antes de salvar.`);
+      } else {
+        const produtoFornecido = await carregarProdutoFornecido(produto.id);
+        if (versao !== selecaoProdutoVersao.current) return;
+        alterarItem(index, { produto_id: produto.id, produto_busca: produto.sku, produto_fornecido: produtoFornecido });
+      }
+      setProdutoBuscaAberta(null);
+    } catch (error) {
+      if (versao === selecaoProdutoVersao.current) setErrorMessage(error instanceof Error ? error.message : "Não foi possível selecionar o produto.");
+    } finally {
+      if (versao === selecaoProdutoVersao.current) setSelecionandoProduto(false);
+    }
   }
 
   function alternarSituacaoOlist(situacao: string) {
@@ -953,6 +976,9 @@ export default function SolicitacoesProducaoPage() {
   }
 
   function limparFormulario() {
+    setAvisoKitManual("");
+    selecaoProdutoVersao.current++;
+    setSelecionandoProduto(false);
     setDataEntrega("");
     setObservacaoGeral("");
     setItensForm([{ ...ITEM_INICIAL }]);
@@ -1277,6 +1303,7 @@ export default function SolicitacoesProducaoPage() {
 
   async function handleSalvar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (selecionandoProduto) return;
     if (!podeSolicitarProducao) return;
 
     setSaving(true);
@@ -1818,7 +1845,11 @@ export default function SolicitacoesProducaoPage() {
           </span>
         </div>
 
-        <form className="space-y-5" onSubmit={handleSalvar} aria-busy={saving}>
+        <form className="space-y-5" onSubmit={handleSalvar} aria-busy={saving || selecionandoProduto}>
+          {avisoKitManual && <p role="status" className="break-words rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{avisoKitManual}</p>}
+          {selecionandoProduto && <p role="status" className="text-sm text-slate-600">Carregando produto e componentes do kit…</p>}
+          <p className="text-sm text-slate-600">Ao selecionar um kit associado, a linha será substituída pelos componentes. Informe a quantidade de kits antes da seleção; depois, ajuste as quantidades individuais se necessário.</p>
+          <fieldset disabled={saving || selecionandoProduto} className="min-w-0 space-y-5">
           {prioridadeProducao && (
             <div className="rounded-md border-2 border-red-600 bg-red-50 px-4 py-3 text-sm font-black uppercase tracking-wide text-red-700">
               PRIORIDADE
@@ -1905,15 +1936,26 @@ export default function SolicitacoesProducaoPage() {
                 <LinksPedidosOlist pedidoIds={item.pedido_olist_ids} />
 
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                <label className="relative text-sm font-medium text-slate-700 sm:col-span-2 lg:col-span-2">
+                <label className="relative text-sm font-medium text-slate-700 sm:col-span-2 lg:col-span-2" onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) setProdutoBuscaAberta(null);
+                }}>
                   SKU do produto <span className="text-red-600">*</span>
                   <input
                     required
                     value={item.produto_busca}
                     onChange={(event) => void alterarProdutoBusca(index, event.target.value)}
                     onFocus={() => setProdutoBuscaAberta(index)}
-                    onBlur={() => {
-                      window.setTimeout(() => setProdutoBuscaAberta(null), 120);
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setProdutoBuscaAberta(null);
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        event.currentTarget.parentElement?.querySelector("button")?.focus();
+                      }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const produto = produtos.find((opcao) => opcao.sku.toLowerCase() === item.produto_busca.trim().toLowerCase());
+                        if (produto) void selecionarProduto(index, produto);
+                      }
                     }}
                     autoComplete="off"
                     className="mt-1.5 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base sm:text-sm"
@@ -1930,7 +1972,7 @@ export default function SolicitacoesProducaoPage() {
                             onClick={() => void selecionarProduto(index, produto)}
                             className="block min-h-12 w-full border-b border-slate-100 px-3 py-3 text-left text-sm text-slate-700 last:border-0 hover:bg-slate-100"
                           >
-                            {produto.sku}
+                            <span className="break-all">{produto.sku}{produto.componentes_kit?.length ? " — kit associado" : ""}</span>
                           </button>
                         ))
                       ) : (
@@ -2011,6 +2053,7 @@ export default function SolicitacoesProducaoPage() {
               {saving ? "Salvando..." : solicitacaoEditandoId ? "Atualizar solicitação" : "Salvar solicitação"}
             </button>
           </div>
+          </fieldset>
         </form>
 
         {errorMessage && <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage}</p>}

@@ -1,3 +1,4 @@
+import { montarOpcoesKitsManuais } from "@/lib/producao-manual-kits";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -29,8 +30,16 @@ export async function GET(request: Request) {
       }),
     ]);
 
+    const produtosBase = produtos.map((produto) => ({
+      id: produto.id, sku: produto.sku, imagem_url: produto.imagemUrl,
+    }));
+    const incluirKits = new URL(request.url).searchParams.get("incluir_kits") === "1";
+    const composicoes = incluirKits ? await prisma.componenteKitEstoque.findMany({
+      where: { aplicativoId: autenticado.aplicativoId! },
+      select: { kitSku: true, sku: true, quantidade: true },
+    }) : [];
     return NextResponse.json({
-      produtos: produtos.map((produto) => ({
+      produtos: incluirKits ? montarOpcoesKitsManuais(produtosBase, composicoes) : produtos.map((produto) => ({
         id: produto.id,
         sku: produto.sku,
         imagem_url: produto.imagemUrl,
