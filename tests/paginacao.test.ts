@@ -31,3 +31,16 @@ test("interrompe a paginação e devolve o erro recebido", async () => {
   assert.equal(resultado.error, erro);
   assert.equal(chamadas, 2);
 });
+
+test("preserva resultados suficientes para paginar acima de 9999 itens", async () => {
+  const origem = Array.from({ length: 12000 }, (_, indice) => indice + 1);
+  const resultado = await carregarTodasPaginas<number, Error>(async (inicio, fim) => ({
+    data: origem.slice(inicio, fim + 1),
+    error: null,
+  }));
+
+  assert.equal(resultado.error, null);
+  assert.deepEqual(resultado.data, origem);
+  assert.equal(Math.ceil(resultado.data.length / 9999), 2);
+  assert.equal(resultado.data.slice(9999).length, 2001);
+});

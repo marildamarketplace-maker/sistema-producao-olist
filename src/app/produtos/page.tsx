@@ -5,6 +5,7 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
+import { carregarTodasPaginas } from "@/lib/paginacao";
 
 type Produto = {
   id: string;
@@ -401,40 +402,44 @@ export default function ProdutosPage() {
     setIsLoading(true);
     setErrorMessage(null);
 
-    let query = supabase
-      .from("produtos")
-      .select("id, sku, id_cadastro_olist, imagem_url, meta_estoque, minimo_estoque, ativo, created_at")
-      .order("created_at", { ascending: false });
+    const { data, error } = await carregarTodasPaginas<Produto, { message: string }>(async (inicio, fim) => {
+      let query = supabase
+        .from("produtos")
+        .select("id, sku, id_cadastro_olist, imagem_url, meta_estoque, minimo_estoque, ativo, created_at")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
-    const sku = filtrosBusca.sku.trim();
+      const sku = filtrosBusca.sku.trim();
 
-    if (sku) {
-      query = query.ilike("sku", `%${sku}%`);
-    }
+      if (sku) {
+        query = query.ilike("sku", `%${sku}%`);
+      }
 
-    if (filtrosBusca.status === "ativos") {
-      query = query.eq("ativo", true);
-    } else if (filtrosBusca.status === "inativos") {
-      query = query.eq("ativo", false);
-    }
+      if (filtrosBusca.status === "ativos") {
+        query = query.eq("ativo", true);
+      } else if (filtrosBusca.status === "inativos") {
+        query = query.eq("ativo", false);
+      }
 
-    if (filtrosBusca.estoque === "com-meta") {
-      query = query.not("meta_estoque", "is", null);
-    } else if (filtrosBusca.estoque === "sem-meta") {
-      query = query.is("meta_estoque", null);
-    } else if (filtrosBusca.estoque === "com-minimo") {
-      query = query.not("minimo_estoque", "is", null);
-    } else if (filtrosBusca.estoque === "sem-minimo") {
-      query = query.is("minimo_estoque", null);
-    }
+      if (filtrosBusca.estoque === "com-meta") {
+        query = query.not("meta_estoque", "is", null);
+      } else if (filtrosBusca.estoque === "sem-meta") {
+        query = query.is("meta_estoque", null);
+      } else if (filtrosBusca.estoque === "com-minimo") {
+        query = query.not("minimo_estoque", "is", null);
+      } else if (filtrosBusca.estoque === "sem-minimo") {
+        query = query.is("minimo_estoque", null);
+      }
 
-    if (filtrosBusca.idOlist === "com") {
-      query = query.not("id_cadastro_olist", "is", null).neq("id_cadastro_olist", "");
-    } else if (filtrosBusca.idOlist === "sem") {
-      query = query.or("id_cadastro_olist.is.null,id_cadastro_olist.eq.");
-    }
+      if (filtrosBusca.idOlist === "com") {
+        query = query.not("id_cadastro_olist", "is", null).neq("id_cadastro_olist", "");
+      } else if (filtrosBusca.idOlist === "sem") {
+        query = query.or("id_cadastro_olist.is.null,id_cadastro_olist.eq.");
+      }
 
-    const { data, error } = await query;
+      const { data, error } = await query.range(inicio, fim);
+      return { data: data as Produto[] | null, error };
+    });
 
     if (error) {
       setErrorMessage(`Erro ao carregar produtos: ${error.message}`);
