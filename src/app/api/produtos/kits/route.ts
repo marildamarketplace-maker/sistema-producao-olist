@@ -1,3 +1,4 @@
+import { consultarKits, erroApiKits, verificarClienteKits } from "@/lib/kits-estoque-api";
 import { importarLoteKits } from "@/lib/kits-estoque-importacao-service";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -15,8 +16,12 @@ export async function GET(request: Request) {
   let aplicativoId: string;
   try { aplicativoId = await autorizar(request); }
   catch { return NextResponse.json({ error: "Acesso negado." }, { status: 403 }); }
-  const componentes = await prisma.componenteKitEstoque.findMany({ where: { aplicativoId }, orderBy: [{ kitSku: "asc" }, { sku: "asc" }] });
-  return NextResponse.json({ componentes });
+  try {
+    return NextResponse.json(await consultarKits(prisma, aplicativoId));
+  } catch (error) {
+    const resposta = erroApiKits(error);
+    return NextResponse.json({ error: resposta.error }, { status: resposta.status });
+  }
 }
 
 export async function PUT(request: Request) {
@@ -24,6 +29,7 @@ export async function PUT(request: Request) {
   try { aplicativoId = await autorizar(request, true); }
   catch { return NextResponse.json({ error: "Acesso negado." }, { status: 403 }); }
   try {
+    verificarClienteKits(prisma);
     const parsed = composicaoKitSchema.safeParse(await request.json());
     if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     const kit = parsed.data;
@@ -42,6 +48,8 @@ export async function PUT(request: Request) {
     });
     return NextResponse.json({ ok: true });
   } catch (error) {
+    const infraestrutura = erroApiKits(error);
+    if (infraestrutura.status === 503) return NextResponse.json({ error: infraestrutura.error }, { status: 503 });
     return NextResponse.json({ error: error instanceof Error && !('code' in error) ? error.message : "Não foi possível salvar a composição." }, { status: 400 });
   }
 }
@@ -51,6 +59,7 @@ export async function POST(request: Request) {
   try { aplicativoId = await autorizar(request, true); }
   catch { return NextResponse.json({ error: "Acesso negado." }, { status: 403 }); }
   try {
+    verificarClienteKits(prisma);
     const leitor = request.body?.getReader();
     if (!leitor) return NextResponse.json({ error: "Informe o lote." }, { status: 400 });
     const decoder = new TextDecoder();
@@ -71,6 +80,8 @@ export async function POST(request: Request) {
     const resultado = await importarLoteKits(prisma, aplicativoId, JSON.parse(texto));
     return NextResponse.json(resultado);
   } catch (error) {
+    const infraestrutura = erroApiKits(error);
+    if (infraestrutura.status === 503) return NextResponse.json({ error: infraestrutura.error }, { status: 503 });
     return NextResponse.json({ error: error instanceof SyntaxError ? "Lote inválido." : error instanceof Error && !("code" in error) ? error.message : "Não foi possível importar o lote. Nenhuma composição foi alterada." }, { status: 400 });
   }
 }

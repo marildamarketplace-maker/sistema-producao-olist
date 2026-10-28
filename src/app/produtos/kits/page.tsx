@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { lerRespostaKits } from "@/lib/kits-estoque-resposta";
 import { ImportarKitsEstoque } from "@/components/importar-kits-estoque";
 import { AccessGuard } from "@/components/access-guard";
 import { PageHeader } from "@/components/page-header";
@@ -21,9 +22,7 @@ export default function KitsPage() {
   async function requisitar(method = "GET", body?: unknown) {
     const { data } = await supabase.auth.getSession();
     const response = await fetch("/api/produtos/kits", { method, headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    const json = await response.json();
-    if (!response.ok) throw new Error(json.error ?? "Erro ao consultar kits.");
-    return json;
+    return lerRespostaKits(response, method);
   }
   useEffect(() => { let ativo = true; requisitar().then((data) => { if (ativo) setLista(data.componentes); }).catch((error) => { if (ativo) setErro(error.message); }).finally(() => { if (ativo) setLoading(false); }); return () => { ativo = false; }; }, []);
   async function salvar(event: FormEvent, remover = false) {
@@ -41,7 +40,15 @@ export default function KitsPage() {
   return <AccessGuard permissions={["podeVisualizarEstoque", "podeEditarEstoque"]}>
     <PageHeader title="Associação de kits" description="Informe o SKU vendido como kit e os produtos individuais que terão saída de estoque. A quantidade é por unidade do kit. Alterações valem para próximas baixas e gerações automáticas de produção." />
     <div className="space-y-4">
-      {erro && <p role="alert" className="break-words rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{erro}</p>}
+      {erro && <div className="space-y-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p role="alert" className="break-words">{erro}</p>
+        <button type="button" disabled={loading || saving} className="min-h-11 rounded-md border border-red-200 px-4 py-2 font-medium focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-50" onClick={async () => {
+          setLoading(true); setErro("");
+          try { const data = await requisitar(); setLista(data.componentes); }
+          catch (error) { setErro(error instanceof Error ? error.message : "Erro ao carregar associações."); }
+          finally { setLoading(false); }
+        }}>Recarregar associações</button>
+      </div>}
       {mensagem && <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{mensagem}</p>}
       {editar && <form onSubmit={salvar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-5">
         <fieldset disabled={saving || loading} className="min-w-0 space-y-4">
@@ -71,7 +78,7 @@ export default function KitsPage() {
       }} />}
       <section aria-label="Kits cadastrados" className="space-y-4 rounded-lg border border-slate-200 bg-white p-5">
         <h3 className="font-semibold">Kits cadastrados</h3>
-        {loading ? <p role="status">Carregando…</p> : lista.length === 0 ? <p className="text-sm text-slate-500">Nenhum kit associado.</p> : [...new Set(lista.map((item) => item.kitSku))].map((kitSku) => <article key={kitSku} className="min-w-0 space-y-3 border-t border-slate-200 pt-4">
+        {loading ? <p role="status">Carregando…</p> : erro ? <p className="text-sm text-slate-500">Não foi possível atualizar a listagem de associações.</p> : lista.length === 0 ? <p className="text-sm text-slate-500">Nenhum kit associado.</p> : [...new Set(lista.map((item) => item.kitSku))].map((kitSku) => <article key={kitSku} className="min-w-0 space-y-3 border-t border-slate-200 pt-4">
           <h4 className="break-all text-sm font-medium">{kitSku}</h4>
           <ul className="space-y-2 text-sm text-slate-600">{lista.filter((item) => item.kitSku === kitSku).map((item) => <li className="break-all" key={item.sku}>{item.quantidade} × {item.sku}</li>)}</ul>
           {editar && <button disabled={saving} type="button" className={botao} onClick={() => { setSku(kitSku); setComponentes(lista.filter((item) => item.kitSku === kitSku).map((item) => ({ sku: item.sku, quantidade: String(item.quantidade) }))); setMensagem(""); }}>Editar composição</button>}
