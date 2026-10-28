@@ -18,9 +18,11 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const statusTexto = url.searchParams.get("status")?.trim().toUpperCase();
     const status = statusTexto ? validarStatus(statusTexto) : undefined;
+    const codigo = url.searchParams.get("codigo")?.trim() || undefined;
+    const variante = url.searchParams.get("variante")?.trim() || undefined;
     const limite = validarInteiro(url.searchParams.get("limite"), 50, 1, 100, "limite");
     const offset = validarInteiro(url.searchParams.get("offset"), 0, 0, 1_000_000, "offset");
-    return NextResponse.json(await consultarEstampaJobsPainel({ status, limite, offset }));
+    return NextResponse.json(await consultarEstampaJobsPainel({ status, codigo, variante, limite, offset }));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao consultar os jobs." },

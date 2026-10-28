@@ -68,8 +68,8 @@ export function ConfiguracaoJobEstampasPainel({ token }: { token: string }) {
     } finally { envioAtivo.current = false; setSalvando(false); }
   }
 
-  return <section aria-labelledby="configuracao-job-titulo" className="rounded-lg border border-slate-200 bg-white p-5">
-    <h2 id="configuracao-job-titulo" className="font-semibold text-slate-900">Configuração do processamento automático</h2>
+  return <details className="rounded-lg border border-slate-200 bg-white p-5">
+    <summary className="min-h-11 cursor-pointer rounded-md py-3 font-semibold text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500">Configuração do processamento automático</summary>
     {carregando && <p role="status" className="mt-3 text-sm text-slate-600">Carregando configuração...</p>}
     {configuracao && <form onSubmit={salvar} className="mt-4 space-y-4">
       <p className="text-sm text-slate-600">Estado salvo: <strong>{configuracao.pausado ? "Pausado" : "Ativo"}</strong></p>
@@ -105,5 +105,5 @@ export function ConfiguracaoJobEstampasPainel({ token }: { token: string }) {
     {erro && <p role="alert" className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
     {!carregando && !configuracao && <button type="button" onClick={() => setTentativa(v => v + 1)} className="mt-3 min-h-11 rounded-md border border-slate-300 px-4 text-sm">Tentar novamente</button>}
     {mensagem && <p role="status" className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{mensagem}</p>}
-  </section>;
+  </details>;
 }

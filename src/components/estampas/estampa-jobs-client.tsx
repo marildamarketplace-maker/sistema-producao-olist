@@ -28,6 +28,9 @@ export function EstampaJobsClient() {
   const { session, usuario } = useAuth();
   const podeReprocessar = Boolean(usuario?.podeEditarEstampas);
   const [status, setStatus] = useState<FiltroStatus>("TODOS");
+  const [codigo, setCodigo] = useState("");
+  const [variante, setVariante] = useState("");
+  const [filtros, setFiltros] = useState({ codigo: "", variante: "", status: "TODOS" as FiltroStatus });
   const [pagina, setPagina] = useState(1);
   const [atualizacao, setAtualizacao] = useState(0);
   const limite = 100;
@@ -46,7 +49,9 @@ export function EstampaJobsClient() {
     setErro(null);
     try {
       const params = new URLSearchParams({ limite: String(limite), offset: String((pagina - 1) * limite) });
-      if (status !== "TODOS") params.set("status", status);
+      if (filtros.status !== "TODOS") params.set("status", filtros.status);
+      if (filtros.codigo) params.set("codigo", filtros.codigo);
+      if (filtros.variante) params.set("variante", filtros.variante);
       const resposta = await fetch(`/api/estampas/jobs?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
@@ -65,18 +70,13 @@ export function EstampaJobsClient() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [session?.access_token, status, pagina]);
+  }, [session?.access_token, filtros, pagina]);
 
   useEffect(() => {
     const controller = new AbortController();
     void carregar(controller.signal);
     return () => controller.abort();
   }, [carregar, atualizacao]);
-
-  function filtrar(proximoStatus: FiltroStatus) {
-    setPagina(1);
-    setStatus(proximoStatus);
-  }
 
   async function reprocessar(job: EstampaJobPainel) {
     if (!session?.access_token || !podeReprocessar) return;
@@ -106,32 +106,28 @@ export function EstampaJobsClient() {
 
       {podeReprocessar && session?.access_token && <ConfiguracaoJobEstampasPainel key={usuario?.id} token={session.access_token} />}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="min-w-0 flex-1 text-sm font-medium text-slate-700 sm:hidden">
-          Status
-          <select value={status} onChange={(event) => filtrar(event.target.value as FiltroStatus)}
-            className="mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base">
-            {STATUS.map((item) => <option key={item} value={item}>{rotulosStatus[item]}</option>)}
-          </select>
-        </label>
-        <div className="hidden flex-wrap gap-2 sm:flex" aria-label="Filtrar jobs por status">
-          {STATUS.map((item) => (
-            <button key={item} type="button" aria-pressed={status === item} onClick={() => filtrar(item)}
-              className={`rounded-md border px-3 py-2 text-sm font-medium transition ${status === item ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}>
-              {rotulosStatus[item]}
-            </button>
-          ))}
-        </div>
-        <button type="button" onClick={() => setAtualizacao((valor) => valor + 1)} disabled={loading}
-          className="inline-flex min-h-11 items-center gap-2 self-end rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar
-        </button>
-      </div>
-
       {mensagem && <p role="status" className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{mensagem}</p>}
       {erro && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <form onSubmit={event => { event.preventDefault(); setPagina(1); setFiltros({ codigo: codigo.trim(), variante: variante.trim(), status }); }} className="grid gap-4 border-b border-slate-200 p-4 sm:grid-cols-2 xl:grid-cols-4">
+          <label className="min-w-0 text-sm font-medium text-slate-700">Código
+            <input className="input mt-1 min-h-11" value={codigo} maxLength={100} onChange={e => setCodigo(e.target.value)} placeholder="Buscar por código" />
+          </label>
+          <label className="min-w-0 text-sm font-medium text-slate-700">Variante
+            <input className="input mt-1 min-h-11" value={variante} maxLength={100} onChange={e => setVariante(e.target.value)} placeholder="Ex.: A" />
+          </label>
+          <label className="min-w-0 text-sm font-medium text-slate-700">Status
+            <select className="input mt-1 min-h-11" value={status} onChange={e => setStatus(e.target.value as FiltroStatus)}>
+              {STATUS.map(item => <option key={item} value={item}>{rotulosStatus[item]}</option>)}
+            </select>
+          </label>
+          <div className="flex flex-wrap items-end gap-2">
+            <button type="submit" className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">Filtrar</button>
+            <button type="button" onClick={() => { setCodigo(""); setVariante(""); setStatus("TODOS"); setPagina(1); setFiltros({ codigo: "", variante: "", status: "TODOS" }); }} className="min-h-11 rounded-md border border-slate-300 px-3 text-sm text-slate-700">Limpar</button>
+            <button type="button" aria-label="Atualizar jobs" onClick={() => setAtualizacao(v => v + 1)} disabled={loading} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-slate-300 text-slate-700 disabled:opacity-50"><RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
+          </div>
+        </form>
         <div className="border-b border-slate-200 px-4 py-3 text-sm text-slate-600">
           {loading ? "Carregando..." : `${jobs.length} de ${total} job(s)`}
         </div>

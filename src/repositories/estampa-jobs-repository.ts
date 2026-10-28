@@ -61,6 +61,8 @@ export type EstampaJobPainelRow = {
 
 export type ListarEstampaJobsPainelInput = {
   status?: StatusJobEstampa;
+  codigo?: string;
+  variante?: string;
   limite?: number;
   offset?: number;
 };
@@ -244,6 +246,11 @@ export async function listarEstampaJobsPainel(
     throw new Error("offset deve ser um número inteiro maior ou igual a zero.");
   }
 
+  const codigo = input.codigo?.trim();
+  const variante = input.variante?.trim();
+  if ((codigo?.length ?? 0) > 100 || (variante?.length ?? 0) > 100) throw new Error("Filtros devem ter até 100 caracteres.");
+  const filtroCodigo = codigo ? Prisma.sql`AND strpos(upper(catalogo.codigo), upper(${codigo})) > 0` : Prisma.empty;
+  const filtroVariante = variante ? Prisma.sql`AND upper(btrim(catalogo.variante)) = upper(${variante})` : Prisma.empty;
   const filtroStatus = input.status
     ? Prisma.sql`AND job.status = ${input.status}::"StatusJobEstampa"`
     : Prisma.empty;
@@ -270,6 +277,8 @@ export async function listarEstampaJobsPainel(
       INNER JOIN estampas AS catalogo ON catalogo.id = job.estampa_id
       WHERE job.tipo = 'AI_ANALYSIS'::"TipoJobEstampa"
       ${filtroStatus}
+      ${filtroCodigo}
+      ${filtroVariante}
       ORDER BY job.created_at DESC, job.id DESC
       LIMIT ${limite}
       OFFSET ${offset}
@@ -277,8 +286,11 @@ export async function listarEstampaJobsPainel(
     prisma.$queryRaw<Array<{ total: bigint }>>`
       SELECT COUNT(*)::bigint AS total
       FROM estampa_jobs AS job
+      INNER JOIN estampas AS catalogo ON catalogo.id = job.estampa_id
       WHERE job.tipo = 'AI_ANALYSIS'::"TipoJobEstampa"
       ${filtroStatus}
+      ${filtroCodigo}
+      ${filtroVariante}
     `,
   ]);
 

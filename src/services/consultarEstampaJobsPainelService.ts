@@ -31,6 +31,8 @@ export type EstampaJobPainel = {
 
 export async function consultarEstampaJobsPainel(input: {
   status?: StatusJobEstampa;
+  codigo?: string;
+  variante?: string;
   limite?: number;
   offset?: number;
 }) {
