@@ -32,7 +32,7 @@ export default function KitsPage() {
     setSaving(true); setErro(""); setMensagem("");
     try {
       await requisitar("PUT", { sku, componentes: remover ? [] : componentes.map((item) => ({ sku: item.sku, quantidade: Number(item.quantidade) })) });
-      setMensagem(remover ? "Associação removida. Próximas baixas usarão o SKU original." : "Composição salva. Próximas baixas usarão os componentes.");
+      setMensagem(remover ? "Associação removida. SKUs com prefixo KIT ficam bloqueados para baixa até cadastrar uma nova composição." : "Composição salva. Próximas baixas usarão os componentes.");
       const data = await requisitar(); setLista(data.componentes);
     } catch (error) { setErro(error instanceof Error ? error.message : "Erro ao salvar."); }
     finally { setSaving(false); }

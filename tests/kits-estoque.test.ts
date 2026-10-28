@@ -26,3 +26,16 @@ test("valida composição, impede autorreferência e componentes repetidos", () 
   assert.equal(composicaoKitSchema.safeParse({ sku: " KIT ", componentes: [{ sku: "A", quantidade: 2 }] }).success, true);
   assert.equal(composicaoKitSchema.safeParse({ sku: "KIT", componentes: [] }).success, true);
 });
+
+test("bloqueia baixa de kit sem composição em vez de descontar o SKU do kit", () => {
+  for (const sku of ["KIT2-AFRO-1/70X70-6913-E-1/150X150-6913-A", " kit-exemplo "]) {
+    assert.throws(() => expandirItemKit({ sku, quantidade: 1 }, []), /sem associação de componentes/);
+  }
+});
+test("kit associado gera somente componentes, sem saída adicional do kit", () => {
+  const itens = expandirItemKit({ sku: "KIT-A", quantidade: 4 }, [{ sku: "INDIVIDUAL", quantidade: 2 }]);
+  assert.equal(itens.length, 1);
+  assert.equal(itens[0].sku, "INDIVIDUAL");
+  assert.equal(itens[0].quantidade, 8);
+  assert.equal(itens.some((item) => item.sku === "KIT-A"), false);
+});

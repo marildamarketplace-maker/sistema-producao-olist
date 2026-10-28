@@ -2,7 +2,7 @@
 
 Em Produtos → Associação de kits, informe o SKU exato vendido e os SKUs individuais ativos do mesmo aplicativo, com quantidade inteira positiva por kit. O SKU do kit pode ser informado antes de seu cadastro/importação. Componentes precisam estar cadastrados. Não são permitidos componentes duplicados, autorreferência ou kits aninhados.
 
-Exemplo: 3 unidades do kit com A × 2 e B × 1 geram saídas de A × 6 e B × 3, sem saída do SKU do kit. Produtos sem composição seguem o fluxo anterior. A regra vale na confirmação manual e no cron Olist. Alterações não recalculam baixas passadas.
+Exemplo: 3 unidades do kit com A × 2 e B × 1 geram saídas de A × 6 e B × 3, sem saída do SKU do kit. Produtos individuais sem composição seguem o fluxo anterior. SKUs com prefixo KIT sem composição bloqueiam a confirmação inteira antes de qualquer movimentação, com orientação para cadastrar a associação. A regra vale na confirmação manual e no cron Olist. Alterações não recalculam baixas passadas.
 
 Cada componente recebe seu registro de baixa e movimento na mesma transação, preservando pedido/item e SKU original vendido em sku_origem. A confirmação serializa operações concorrentes e verifica novamente se o item já foi baixado. Se a composição mudar durante a preparação, a confirmação é interrompida e deve ser refeita. Retornos de cancelados validam o SKU original com a Olist e devolvem os componentes registrados, sem consultar a composição atual.
 

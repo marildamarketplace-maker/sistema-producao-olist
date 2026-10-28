@@ -19,6 +19,9 @@ export const composicaoKitSchema = z.object({
 export function expandirItemKit<T extends { sku: string; quantidade: number }>(
   item: T, componentes: { sku: string; quantidade: number }[],
 ): (T & { skuOrigem: string })[] {
+  if (!componentes.length && item.sku.trim().toUpperCase().startsWith("KIT")) {
+    throw new Error(`Kit ${item.sku} sem associação de componentes. Cadastre a composição em Produtos → Associação de kits antes de confirmar a baixa.`);
+  }
   if (!Number.isSafeInteger(item.quantidade) || item.quantidade <= 0) throw new Error(`Quantidade inválida para ${item.sku}.`);
   return (componentes.length ? componentes : [{ sku: item.sku, quantidade: 1 }]).map((componente) => {
     const quantidade = item.quantidade * componente.quantidade;
