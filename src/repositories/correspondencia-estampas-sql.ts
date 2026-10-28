@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { planejarConsultaEstampas, type CriterioConsultaEstampas } from "@/domain/consulta-profissional-estampas";
 import { consultaEstampasSql } from "@/repositories/consulta-estampas-sql";
+import { correspondenciaTextoEstampaSql } from "@/repositories/pesquisa-arquivo-estampa-sql";
 
 export function correspondenciaEstampasSql(consulta: string, adicionais: Array<{ termo: string; teste: Prisma.Sql }> = [], consultaPreferencia = true) {
   const plano = planejarConsultaEstampas(consulta);
@@ -10,10 +11,10 @@ export function correspondenciaEstampasSql(consulta: string, adicionais: Array<{
     encontrados: Prisma.sql`ARRAY[]::TEXT[]`, ausentes: Prisma.sql`ARRAY[]::TEXT[]`, termos: Prisma.sql`NULL::tsquery`,
   };
   const criterios = [...plano.positivos.filter((item) => !item.codigo && consultaPreferencia).map((item) => ({ item, teste: testeCriterio(item) })), ...adicionais.map(({ termo, teste }) => ({ item: { termo, consulta: "", codigo: null }, teste }))];
-  // A seleção inicial usa OR entre tsqueries para aproveitar o índice GIN.
+  // Metadados e arquivos usam os mesmos critérios, inclusive na seleção inicial.
   const textuais = plano.positivos.filter((item) => !item.codigo && consultaPreferencia);
   const termos = textuais.length ? Prisma.sql`(${Prisma.join(textuais.map((item) => consultaEstampasSql(item.consulta)), " || ")})` : Prisma.sql`NULL::tsquery`;
-  const candidatos: Prisma.Sql[] = textuais.length ? [Prisma.sql`e.search_vector @@ ${termos}`] : [];
+  const candidatos: Prisma.Sql[] = textuais.length ? [correspondenciaTextoEstampaSql(termos)] : [];
   candidatos.push(...adicionais.map(({ teste }) => teste));
   const quantidade = Prisma.sql`(${Prisma.join(criterios.map(({ teste }) => Prisma.sql`CASE WHEN ${teste} THEN 1 ELSE 0 END`), " + ")})`;
   return {
@@ -33,5 +34,5 @@ function testeCriterio(item: CriterioConsultaEstampas): Prisma.Sql {
       ? Prisma.sql`(lower(e.codigo) = lower(${item.codigo.codigo}) AND lower(COALESCE(e.variante, '')) = lower(${item.codigo.variante}))`
       : Prisma.sql`lower(e.codigo) = lower(${item.codigo.codigo})`;
   }
-  return Prisma.sql`COALESCE(e.search_vector @@ ${consultaEstampasSql(item.consulta)}, FALSE)`;
+  return correspondenciaTextoEstampaSql(consultaEstampasSql(item.consulta));
 }

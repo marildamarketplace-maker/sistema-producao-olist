@@ -13,6 +13,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { correspondenciaEstampasSql } from "@/repositories/correspondencia-estampas-sql";
 import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas";
+import { vetorArquivoEstampaSql } from "@/repositories/pesquisa-arquivo-estampa-sql";
 
 export const ORDENACOES_PESQUISA_ESTAMPAS = [
   "RELEVANCIA",
@@ -162,6 +163,7 @@ export async function pesquisarCatalogoEstampas(
         + CASE WHEN lower(extensions.unaccent(COALESCE(e.titulo, ''))) = lower(extensions.unaccent(${consulta})) THEN 100 ELSE 0 END
         + CASE WHEN lower(extensions.unaccent(COALESCE(e.titulo, ''))) LIKE '%' || lower(extensions.unaccent(${consulta})) || '%' THEN 50 ELSE 0 END
         + COALESCE(ts_rank_cd(e.search_vector, ${termos}, 32), 0) * 25
+        + COALESCE(ts_rank_cd(${vetorArquivoEstampaSql()}, ${termos}, 32), 0) * 10
       )::DOUBLE PRECISION`
     : Prisma.sql`0::DOUBLE PRECISION`;
   const orderBy = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta));

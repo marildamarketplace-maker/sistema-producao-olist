@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Eye, RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useModalFocus } from "@/hooks/use-modal-focus";
+import { ConfiguracaoJobEstampasPainel } from "./configuracao-job-estampas";
 import { PageHeader } from "@/components/page-header";
 import type { EstampaJobPainel } from "@/services/consultarEstampaJobsPainelService";
 
@@ -102,6 +103,8 @@ export function EstampaJobsClient() {
   return (
     <div className="space-y-6">
       <PageHeader title="Jobs de IA das estampas" description="Acompanhe o processamento visual e solicite novas análises quando necessário." />
+
+      {podeReprocessar && session?.access_token && <ConfiguracaoJobEstampasPainel key={usuario?.id} token={session.access_token} />}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="min-w-0 flex-1 text-sm font-medium text-slate-700 sm:hidden">

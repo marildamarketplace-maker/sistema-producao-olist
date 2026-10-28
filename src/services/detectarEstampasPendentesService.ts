@@ -1,3 +1,4 @@
+import { varianteEstampaPermitida } from "@/domain/filtro-variante-estampa";
 import { nomeArquivoEstampaDeveSerIgnorado } from "@/domain/filtro-nome-arquivo-estampa";
 import {
   listarEstampasParaVerificarAnalise,
@@ -19,6 +20,7 @@ export type ResultadoDeteccaoEstampasPendentes = {
 
 export type OpcoesDeteccaoEstampasPendentes = {
   tamanhoLote?: number;
+  variantesPermitidas?: readonly string[];
   termosIgnoradosNomeArquivo?: readonly string[];
   deveContinuar?: () => boolean;
 };
@@ -63,6 +65,7 @@ export async function detectarEstampasPendentes(
 
     resultado.encontradas += estampas.length;
     const candidatas = estampas.filter(estampa =>
+      varianteEstampaPermitida(estampa.variante, options.variantesPermitidas ?? []) &&
       !nomeArquivoEstampaDeveSerIgnorado(
         estampa.original_filename?.trim() || estampa.original_relative_path?.trim() || estampa.storage_key,
         options.termosIgnoradosNomeArquivo ?? [],

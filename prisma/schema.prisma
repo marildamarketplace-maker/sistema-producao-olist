@@ -333,6 +333,7 @@ model Produto {
 model ConfiguracaoJob {
   chave     String   @id
   pausado   Boolean  @default(true)
+  variantesPermitidas String[] @default([]) @map("variantes_permitidas")
   termosIgnoradosNomeArquivo String[] @default([]) @map("termos_ignorados_nome_arquivo")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

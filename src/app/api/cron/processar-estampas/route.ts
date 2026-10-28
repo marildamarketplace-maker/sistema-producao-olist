@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const inicio = Date.now();
   try {
     // Consulta apenas após autenticação; pausado dispensa configuração dos providers.
-    const { processarEstampasEstaPausado, obterTermosIgnoradosNomeArquivoEstampas } = await import("@/repositories/configuracao-jobs-repository");
+    const { processarEstampasEstaPausado, obterConfiguracaoJobEstampas } = await import("@/repositories/configuracao-jobs-repository");
     if (await processarEstampasEstaPausado()) {
       return NextResponse.json({ ok: true, pausado: true, motivoParada: "pausado" });
     }
@@ -50,12 +50,12 @@ export async function GET(request: NextRequest) {
     const { analisarVisualEstampa } = await import("@/services/analisarVisualEstampaService");
     const { criarProvidersEstampasCron } = await import("@/services/image-analysis/criarProvidersEstampasCron");
     const providers = criarProvidersEstampasCron();
-    const termosIgnoradosNomeArquivo = await obterTermosIgnoradosNomeArquivoEstampas();
+    const { termosIgnoradosNomeArquivo, variantesPermitidas } = await obterConfiguracaoJobEstampas();
     const resultado = await executarEstampasCron({ prazoMs: inicio + 280_000, reservaJobMs, maxJobs, concorrencia }, {
       estaPausado: processarEstampasEstaPausado,
-      detectar: deveContinuar => detectarEstampasPendentes({ deveContinuar, termosIgnoradosNomeArquivo }),
+      detectar: deveContinuar => detectarEstampasPendentes({ deveContinuar, termosIgnoradosNomeArquivo, variantesPermitidas }),
       recuperar: () => recuperarJobsAiAnalysisAbandonados(lockTimeoutMs),
-      assumir: () => assumirProximoJobAiAnalysis(workerId, termosIgnoradosNomeArquivo),
+      assumir: () => assumirProximoJobAiAnalysis(workerId, termosIgnoradosNomeArquivo, variantesPermitidas),
       processar: job => processarJob(job, {
         workerId, lockTimeoutMs,
         processar: (estampa, job) => processarAnaliseIaEstampa(

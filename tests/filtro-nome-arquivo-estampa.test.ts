@@ -63,7 +63,7 @@ const linhas = [
   { id: BigInt(3), originalFilename: "MV27761 MOCKUP.jpg" },
   { id: BigInt(4), originalFilename: null, originalRelativePath: "catalogo/MV27761.A.jpg" },
 ].map(row => ({
-  codigo: "MV23704", variante: null, previewUrl: "https://storage.googleapis.com/catalogo/imagem.jpg",
+  codigo: "MV23704", variante: null as string | null, previewUrl: "https://storage.googleapis.com/catalogo/imagem.jpg",
   contentHash: "hash", aiProcessedHash: null, processingStatus: "PENDING", isActive: true,
   createdAt: new Date(0), updatedAt: new Date(0), ...row,
 }));
@@ -101,4 +101,22 @@ test("claim inclui filtro antes de assumir jobs já existentes", async () => {
   const filtro = parametrosClaim.find(value => value && typeof value === "object" && "sql" in value) as { sql: string; values: unknown[] };
   assert.match(filtro.sql, /AND NOT EXISTS/);
   assert.deepEqual(filtro.values, [...termos]);
+});
+
+
+test("detecção filtra variante cadastrada e claim protege também a fila pendente", async () => {
+  linhas[0].variante = "A";
+  linhas[1].variante = "B";
+  lotes = 0;
+  const { detectarEstampasPendentes } = await import("../src/services/detectarEstampasPendentesService");
+  await detectarEstampasPendentes({ variantesPermitidas: ["a"] });
+  const ids = parametrosCriacao.flatMap(value => value && typeof value === "object" && "values" in value ? (value as { values: unknown[] }).values : []);
+  assert.ok(ids.includes(BigInt(1)));
+  assert.ok(!ids.includes(BigInt(2)) && !ids.includes(BigInt(3)) && !ids.includes(BigInt(4)));
+  const { assumirProximoJobAiAnalysis } = await import("../src/repositories/estampa-jobs-repository");
+  await assumirProximoJobAiAnalysis("worker-test", [], ["b"]);
+  const filtros = parametrosClaim.filter(value => value && typeof value === "object" && "sql" in value) as { sql: string; values: unknown[] }[];
+  const variante = filtros.find(f => f.sql.includes("estampa_variante"));
+  assert.ok(variante);
+  assert.deepEqual(variante.values, ["B"]);
 });

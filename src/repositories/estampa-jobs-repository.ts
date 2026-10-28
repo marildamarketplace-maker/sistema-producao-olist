@@ -1,3 +1,4 @@
+import { filtroVarianteEstampaSql } from "./filtro-variante-estampa-sql";
 import { filtroNomeArquivoEstampaSql } from "./filtro-nome-arquivo-estampa-sql";
 import {
   Prisma,
@@ -419,6 +420,7 @@ export async function excluirEstampaJob(id: string): Promise<EstampaJob> {
 export async function assumirProximoJobAiAnalysis(
   workerId: string,
   termosIgnoradosNomeArquivo: readonly string[] = [],
+  variantesPermitidas: readonly string[] = [],
 ): Promise<EstampaJob | null> {
   const worker = validarId(workerId, "workerId");
   const jobs = await prisma.$queryRaw<EstampaJob[]>`
@@ -430,6 +432,7 @@ export async function assumirProximoJobAiAnalysis(
         AND tentativas < max_tentativas
         AND next_attempt_at <= CURRENT_TIMESTAMP
         ${filtroNomeArquivoEstampaSql(termosIgnoradosNomeArquivo)}
+        ${filtroVarianteEstampaSql(variantesPermitidas)}
       ORDER BY next_attempt_at ASC, created_at ASC, id ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1

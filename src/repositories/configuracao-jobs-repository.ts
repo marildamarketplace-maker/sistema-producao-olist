@@ -18,3 +18,22 @@ export async function obterTermosIgnoradosNomeArquivoEstampas(): Promise<string[
   });
   return configuracao?.termosIgnoradosNomeArquivo ?? [];
 }
+
+export async function obterConfiguracaoJobEstampas() {
+  const configuracao = await prisma.configuracaoJob.findUnique({
+    where: { chave: CHAVE_JOB_PROCESSAR_ESTAMPAS },
+    select: { pausado: true, termosIgnoradosNomeArquivo: true, variantesPermitidas: true },
+  });
+  return configuracao ?? { pausado: true, termosIgnoradosNomeArquivo: [], variantesPermitidas: [] };
+}
+
+export async function salvarConfiguracaoJobEstampas(
+  dados: import("@/domain/configuracao-job-estampas").ConfiguracaoJobEstampas,
+) {
+  return prisma.configuracaoJob.upsert({
+    where: { chave: CHAVE_JOB_PROCESSAR_ESTAMPAS },
+    create: { chave: CHAVE_JOB_PROCESSAR_ESTAMPAS, ...dados },
+    update: dados,
+    select: { pausado: true, termosIgnoradosNomeArquivo: true, variantesPermitidas: true },
+  });
+}
