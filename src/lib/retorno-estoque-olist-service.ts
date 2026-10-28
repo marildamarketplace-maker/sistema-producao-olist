@@ -52,7 +52,7 @@ export function criarServicoRetornoOlist(db: PrismaClient, olist: OlistRetorno) 
         let detalhe: Record<string, unknown>;
         try { detalhe = await olist.obterPedido(aplicativoId, id); }
         catch { throw new RetornoOlistError("Consulta de detalhe pendente na Olist. Busque novamente para revisar este pedido.", 502); }
-        validarPedidoCancelado(detalhe, itens.map((item) => item.sku));
+        validarPedidoCancelado(detalhe, vinculadas.map((baixa) => baixa.skuOrigem ?? baixa.sku));
         pedidos.push({ id, estado: "elegivel", itens });
       } catch (error) {
         if (!(error instanceof RetornoOlistError)) throw error;
@@ -82,7 +82,7 @@ export function criarServicoRetornoOlist(db: PrismaClient, olist: OlistRetorno) 
       let detalhe: Record<string, unknown>;
       try { detalhe = await olist.obterPedido(aplicativoId, pedidoId); }
       catch { throw new RetornoOlistError("Não foi possível revalidar o cancelamento na Olist. Nenhum retorno foi registrado.", 502); }
-      validarPedidoCancelado(detalhe, baixas.filter((baixa) => baixa.pedidoOlistId === pedidoId).map((baixa) => baixa.sku));
+      validarPedidoCancelado(detalhe, baixas.filter((baixa) => baixa.pedidoOlistId === pedidoId).map((baixa) => baixa.skuOrigem ?? baixa.sku));
     }
     return db.$transaction(async (tx) => {
       // Serializa reenvios da mesma chave, inclusive quando os conjuntos de baixas diferem.

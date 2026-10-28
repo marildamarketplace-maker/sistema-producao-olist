@@ -389,6 +389,7 @@ export default function BaixaEstoqueOlistPage() {
       return;
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
     const resp = await axios.post(
       "/api/olist/baixa-estoque/confirmar",
       {
@@ -397,7 +398,7 @@ export default function BaixaEstoqueOlistPage() {
         periodo_fim_busca: modoAtual === "automatica" ? resultadoBusca?.periodo_fim ?? null : null,
         itens,
       },
-      { validateStatus: () => true },
+      { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
     );
 
     if (resp.status < 200 || resp.status >= 300) {

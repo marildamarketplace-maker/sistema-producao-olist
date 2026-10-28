@@ -8,7 +8,7 @@ const app = "10000000-0000-4000-8000-000000000001";
 const id = "20000000-0000-4000-8000-000000000001";
 const outroId = "20000000-0000-4000-8000-000000000002";
 const chave = "30000000-0000-4000-8000-000000000001";
-function ambiente() {
+function ambiente(skusVendidos = ["SKU", "SKU-2"]) {
   const baixas: BaixaRetorno[] = [ { id, aplicativoId: app, produtoId: "produto", sku: "SKU", quantidade: 5,
     pedidoOlistId: "123", movimentacaoId: "saida", retornos: [] },
   { id: outroId, aplicativoId: app, produtoId: "produto2", sku: "SKU-2", quantidade: 3,
@@ -64,7 +64,7 @@ function ambiente() {
   const service = criarServicoRetornoOlist(db as unknown as PrismaClient, {
     listarCancelados: async () => { if (erroOlist) throw new Error("429"); return listados.map((id) => ({ id })); },
     obterPedido: async () => { chamadasOlist++; if (erroOlist) throw new Error("429"); return { situacao,
-      itens: [{ produto: { sku: "SKU" } }, { produto: { sku: "SKU-2" } }] }; },
+      itens: skusVendidos.map((sku) => ({ produto: { sku } })) }; },
   });
   const input = (quantidade = 2, chave_idempotencia = chave): ConfirmarRetornoInput => ({ chave_idempotencia, itens: [{ item_baixa_id: id, quantidade }] });
   return { service, baixas, bloqueios, input,
@@ -153,4 +153,15 @@ test("confirmação mista cria entrada apenas dos itens recebidos", async () => 
   assert.equal(a.entradas.length, 1);
   assert.equal(a.entradas[0].sku, "SKU-2");
   assert.equal(a.entradas[0].quantidade, 3);
+});
+
+test("cancelamento de kit valida o SKU vendido e retorna o componente originalmente baixado", async () => {
+  const a = ambiente(["KIT"]);
+  a.baixas.forEach((baixa) => { baixa.skuOrigem = "KIT"; });
+  const busca = await a.service.buscar(app);
+  assert.equal(busca.pedidos[0].estado, "elegivel");
+  assert.deepEqual(busca.pedidos[0].itens.map((item) => item.sku), ["SKU", "SKU-2"]);
+  await a.service.confirmar(app, "usuario", a.input());
+  assert.equal(a.entradas[0].sku, "SKU");
+  assert.equal(a.entradas[0].quantidade, 2);
 });

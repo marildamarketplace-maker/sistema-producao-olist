@@ -29,6 +29,7 @@ export const menuItems: MenuItem[] = [
         href: "/estoque",
         permissions: ["podeVisualizarEstoque", "podeEditarEstoque"],
       },
+      { label: "Associação de kits", href: "/produtos/kits", permissions: ["podeVisualizarEstoque", "podeEditarEstoque"] },
       { label: "Gerador CSV Olist", href: "/gerador-csv-olist", permissions: ["podeEditarEstoque"] },
       {
         label: "Calculadora de Preços",

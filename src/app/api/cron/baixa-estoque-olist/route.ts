@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       try {
         const resultado = await executarBaixaAutomaticaEstoqueOlist({
           buscarPedidos: () => buscarPedidosParaBaixaEstoqueOlist(aplicativoId),
-          confirmarBaixa: confirmarBaixaEstoqueOlist,
+          confirmarBaixa: (input) => confirmarBaixaEstoqueOlist({ ...input, aplicativoId }),
           concluirBuscaSemBaixa: concluirBuscaBaixaEstoqueOlist,
         });
 

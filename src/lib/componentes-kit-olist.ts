@@ -1,3 +1,5 @@
+import { expandirItemKit } from "./kits-estoque";
+
 export type DemandaProdutoOlist = {
   sku: string;
   imagem_url: string | null;
@@ -143,10 +145,26 @@ function somarDemanda(
 export function expandirDemandasKitsOlist(input: {
   demandas: ReadonlyMap<string, DemandaProdutoOlist>;
   skusCandidatos: readonly string[];
+  composicoes?: ReadonlyMap<string, readonly { sku: string; quantidade: number }[]>;
 }) {
   const demandasExpandidas = new Map<string, DemandaProdutoOlist>();
 
   for (const demanda of input.demandas.values()) {
+    const associados = input.composicoes?.get(demanda.sku);
+    if (associados?.length) {
+      for (const componente of associados) {
+        if (!input.skusCandidatos.includes(componente.sku)) {
+          throw new ComponenteKitOlistError(`Componente ${componente.sku} do kit ${demanda.sku} não está ativo neste aplicativo.`);
+        }
+      }
+      const itens = expandirItemKit({ sku: demanda.sku, quantidade: demanda.quantidade_pedidos }, [...associados]);
+      for (const item of itens) {
+        somarDemanda(demandasExpandidas, {
+          ...demanda, sku: item.sku, imagem_url: null, quantidade_pedidos: item.quantidade,
+        });
+      }
+      continue;
+    }
     if (!skuEhKitOlist(demanda.sku)) {
       somarDemanda(demandasExpandidas, demanda);
       continue;

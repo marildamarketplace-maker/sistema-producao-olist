@@ -34,7 +34,7 @@ export function normalizarItensRetorno(input: ConfirmarRetornoInput) {
 }
 
 export type BaixaRetorno = {
-  id: string; aplicativoId: string | null; produtoId: string | null; sku: string;
+  id: string; aplicativoId: string | null; produtoId: string | null; sku: string; skuOrigem?: string | null;
   quantidade: number; pedidoOlistId: string | null; movimentacaoId: string | null;
   retornos: { quantidade: number }[];
 };

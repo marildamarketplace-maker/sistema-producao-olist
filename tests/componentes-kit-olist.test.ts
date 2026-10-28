@@ -137,3 +137,48 @@ test("rejeita SKU KIT em formato desconhecido", () => {
     ComponenteKitOlistError,
   );
 });
+
+function demanda(sku: string, quantidade = 3) {
+  return { sku, imagem_url: null, quantidade_pedidos: quantidade, pedido_olist_ids: ["123"], skus_olist_origem: [sku] };
+}
+
+test("composição cadastrada tem precedência sobre variantes escritas no kit", () => {
+  const resultado = expandirDemandasKitsOlist({
+    demandas: new Map([[SKU_KIT, demanda(SKU_KIT)], [SKU_LENCO, demanda(SKU_LENCO, 1)]]),
+    skusCandidatos: [SKU_LENCO, SKU_PAREO],
+    composicoes: new Map([[SKU_KIT, [{ sku: SKU_LENCO, quantidade: 2 }]]]),
+  });
+  assert.equal(resultado.size, 1);
+  assert.equal(resultado.get(SKU_LENCO)?.quantidade_pedidos, 7);
+  assert.deepEqual(resultado.get(SKU_LENCO)?.skus_olist_origem, [SKU_KIT, SKU_LENCO]);
+});
+
+test("associação permite kit sem padrão reconhecível e mantém pedidos originais", () => {
+  for (const sku of ["KIT-SEM-PADRAO", "COMBO-ESPECIAL"]) {
+    const resultado = expandirDemandasKitsOlist({
+      demandas: new Map([[sku, demanda(sku)]]), skusCandidatos: [SKU_LENCO, SKU_PAREO],
+      composicoes: new Map([[sku, [{ sku: SKU_LENCO, quantidade: 2 }, { sku: SKU_PAREO, quantidade: 1 }]]]),
+    });
+    assert.equal(resultado.has(sku), false);
+    assert.equal(resultado.get(SKU_LENCO)?.quantidade_pedidos, 6);
+    assert.equal(resultado.get(SKU_PAREO)?.quantidade_pedidos, 3);
+    assert.deepEqual(resultado.get(SKU_LENCO)?.pedido_olist_ids, ["123"]);
+  }
+});
+
+test("componente associado indisponível bloqueia geração sem recorrer ao padrão do SKU", () => {
+  assert.throws(() => expandirDemandasKitsOlist({
+    demandas: new Map([[SKU_KIT, demanda(SKU_KIT)]]), skusCandidatos: [SKU_LENCO, SKU_PAREO],
+    composicoes: new Map([[SKU_KIT, [{ sku: "INATIVO-OU-OUTRO-APLICATIVO", quantidade: 1 }]]]),
+  }), /não está ativo neste aplicativo/);
+});
+
+test("mistura associação explícita, kit legado e produto individual sem perder demanda", () => {
+  const resultado = expandirDemandasKitsOlist({
+    demandas: new Map([["COMBO", demanda("COMBO", 2)], [SKU_KIT, demanda(SKU_KIT, 1)], [SKU_LENCO, demanda(SKU_LENCO, 4)]]),
+    skusCandidatos: [SKU_LENCO, SKU_PAREO],
+    composicoes: new Map([["COMBO", [{ sku: SKU_PAREO, quantidade: 3 }]]]),
+  });
+  assert.equal(resultado.get(SKU_LENCO)?.quantidade_pedidos, 5);
+  assert.equal(resultado.get(SKU_PAREO)?.quantidade_pedidos, 7);
+});

@@ -1,3 +1,4 @@
+import { expandirItemKit } from "@/lib/kits-estoque";
 ﻿import axios, { AxiosResponse } from "axios";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
@@ -1514,33 +1515,44 @@ async function expandirKitsEmComponentes(
   agregados: ReadonlyMap<string, DemandaProdutoOlist>,
   aplicativoId: string,
 ) {
+  const componentes = await prisma.componenteKitEstoque.findMany({ where: {
+    aplicativoId, kitSku: { in: [...agregados.keys()] },
+  } });
+  const composicoes = new Map<string, { sku: string; quantidade: number }[]>();
+  for (const componente of componentes) {
+    const lista = composicoes.get(componente.kitSku) ?? [];
+    lista.push({ sku: componente.sku, quantidade: componente.quantidade });
+    composicoes.set(componente.kitSku, lista);
+  }
   const variantes = [
     ...new Set(
       [...agregados.values()]
-        .filter((demanda) => skuEhKitOlist(demanda.sku))
+        .filter((demanda) => skuEhKitOlist(demanda.sku) && !composicoes.has(demanda.sku))
         .flatMap((demanda) => extrairComponentesSkuKitOlist(demanda.sku))
         .map((componente) => componente.variante),
     ),
   ];
 
-  if (variantes.length === 0) return new Map(agregados);
+  if (variantes.length === 0 && componentes.length === 0) return new Map(agregados);
 
   const candidatos = await prisma.produto.findMany({
     where: {
       aplicativoId,
       ativo: true,
-      NOT: {
-        sku: { startsWith: "KIT", mode: "insensitive" },
-      },
-      OR: variantes.map((variante) => ({
-        sku: { contains: variante, mode: "insensitive" },
-      })),
+      OR: [
+        { sku: { in: componentes.map((componente) => componente.sku) } },
+        ...(variantes.length ? [{
+          NOT: { sku: { startsWith: "KIT", mode: "insensitive" as const } },
+          OR: variantes.map((variante) => ({ sku: { contains: variante, mode: "insensitive" as const } })),
+        }] : []),
+      ],
     },
     select: { sku: true },
   });
 
   return expandirDemandasKitsOlist({
     demandas: agregados,
+    composicoes,
     skusCandidatos: candidatos.map((produto) => produto.sku),
   });
 }
@@ -2046,6 +2058,7 @@ export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, p
 }
 
 export async function confirmarBaixaEstoqueOlist(input: {
+  aplicativoId: string;
   origem: "automatica" | "manual";
   observacao?: string | null;
   periodoFimBusca?: string | null;
@@ -2055,13 +2068,19 @@ export async function confirmarBaixaEstoqueOlist(input: {
     throw new Error("Informe ao menos um item para baixa.");
   }
 
-  const itensNormalizados = input.itens.map((item) => ({
+  const itensOriginais = input.itens.map((item) => ({
     ...item,
     sku: item.sku.trim(),
     pedidoOlistId: item.pedidoOlistId?.trim() || null,
     itemOlistId: item.itemOlistId?.trim() || null,
     observacao: item.observacao?.trim() || null,
   }));
+
+  const composicoes = await prisma.componenteKitEstoque.findMany({ where: {
+    aplicativoId: input.aplicativoId, kitSku: { in: itensOriginais.map((item) => item.sku) },
+  } });
+  const itensNormalizados = itensOriginais.flatMap((item) => expandirItemKit(item,
+    composicoes.filter((componente) => componente.kitSku === item.sku)));
 
   const skusInformados = itensNormalizados.map((item) => item.sku);
 
@@ -2072,7 +2091,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
   const skus = [...new Set(skusInformados)];
 
   const produtos = await prisma.produto.findMany({
-    where: { sku: { in: skus } },
+    where: { aplicativoId: input.aplicativoId, sku: { in: skus } },
     select: { id: true, sku: true },
   });
   let produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
@@ -2082,6 +2101,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
     await prisma.produto.createMany({
       data: ausentes.map((sku) => ({
         sku,
+        aplicativoId: input.aplicativoId,
         ativo: true,
         metaEstoque: null,
         createdAt: new Date(),
@@ -2090,14 +2110,14 @@ export async function confirmarBaixaEstoqueOlist(input: {
     });
 
     const produtosAtualizados = await prisma.produto.findMany({
-      where: { sku: { in: skus } },
+      where: { aplicativoId: input.aplicativoId, sku: { in: skus } },
       select: { id: true, sku: true },
     });
 
     produtoPorSku = new Map(produtosAtualizados.map((produto) => [produto.sku, produto]));
   }
 
-  const itensComPedido = itensNormalizados.filter((item) => item.pedidoOlistId && item.itemOlistId);
+  const itensComPedido = itensOriginais.filter((item) => item.pedidoOlistId && item.itemOlistId);
   const chavesPedidoItem = new Set<string>();
   const duplicadosNoEnvio = new Set<string>();
 
@@ -2136,8 +2156,20 @@ export async function confirmarBaixaEstoqueOlist(input: {
   }
 
   const resultado = await prisma.$transaction(async (tx) => {
+    // Serializa confirmações: um item original só pode ser processado uma vez.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('baixa-kits-estoque', 0))::text`;
+    const composicoesAtuais = await tx.componenteKitEstoque.findMany({ where: {
+      aplicativoId: input.aplicativoId, kitSku: { in: itensOriginais.map((item) => item.sku) },
+    } });
+    const assinatura = (rows: typeof composicoes) => JSON.stringify(rows.map((row) => [row.kitSku, row.sku, row.quantidade]).sort());
+    if (assinatura(composicoes) !== assinatura(composicoesAtuais)) throw new Error("Composição do kit alterada durante a baixa. Confirme novamente.");
+    const existentes = itensComPedido.length ? await tx.itemBaixaEstoqueOlist.count({ where: {
+      OR: itensComPedido.map((item) => ({ pedidoOlistId: item.pedidoOlistId, itemOlistId: item.itemOlistId })),
+    } }) : 0;
+    if (existentes) throw new Error("Baixa duplicada bloqueada para pedido/item.");
     const baixa = await tx.baixaEstoqueOlist.create({
       data: {
+        aplicativoId: input.aplicativoId,
         origem: input.origem,
         observacao: input.observacao?.trim() || null,
       },
@@ -2154,6 +2186,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
 
       const movimentacao = await tx.movimentacaoEstoque.create({
         data: {
+          aplicativoId: input.aplicativoId,
           produtoId: produto.id,
           sku: produto.sku,
           tipoMovimento: "saida",
@@ -2170,6 +2203,8 @@ export async function confirmarBaixaEstoqueOlist(input: {
       try {
         await tx.itemBaixaEstoqueOlist.create({
           data: {
+            aplicativoId: input.aplicativoId,
+            skuOrigem: item.skuOrigem,
             baixaId: baixa.id,
             produtoId: produto.id,
             sku: produto.sku,
@@ -2192,7 +2227,7 @@ export async function confirmarBaixaEstoqueOlist(input: {
 
     return {
       baixa_id: baixa.id,
-      itens: itensNormalizados.length,
+      itens: itensOriginais.length,
     };
   }, { maxWait: 10000, timeout: 30000 });
 
@@ -2275,15 +2310,16 @@ export async function gerarSolicitacaoPorPedidosOlist(
 
   const resultadoAgregacao = agregarItensNovos(pedidos);
 
+  const agregadosParaProducao = await expandirKitsEmComponentes(
+    resultadoAgregacao.agregados,
+    input.aplicativoId,
+  );
   const agregadosSemKits = new Map(
-    [...resultadoAgregacao.agregados].filter(([, demanda]) => !skuEhKitOlist(demanda.sku)),
+    [...resultadoAgregacao.agregados].filter(([, demanda]) =>
+      !skuEhKitOlist(demanda.sku) && agregadosParaProducao.has(demanda.sku)),
   );
   const produtosCadastrados = await cadastrarProdutosOlistNaoCadastrados(
     agregadosSemKits,
-    input.aplicativoId,
-  );
-  const agregadosParaProducao = await expandirKitsEmComponentes(
-    resultadoAgregacao.agregados,
     input.aplicativoId,
   );
   const skusParaProducao = [...agregadosParaProducao.keys()];

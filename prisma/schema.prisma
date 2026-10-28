@@ -494,6 +494,7 @@ model BaixaEstoqueOlist {
 }
 
 model ItemBaixaEstoqueOlist {
+  skuOrigem String? @map("sku_origem")
   retornos ItemRetornoEstoqueOlist[]
   id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   baixaId        String      @map("baixa_id") @db.Uuid
@@ -509,7 +510,7 @@ model ItemBaixaEstoqueOlist {
   aplicativoId   String?     @default(dbgenerated("'00000000-0000-0000-0000-000000000001'::uuid")) @map("aplicativo_id") @db.Uuid
   aplicativo     Aplicativo? @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([pedidoOlistId, itemOlistId], map: "uq_itens_baixa_olist_pedido_item")
+  @@unique([pedidoOlistId, itemOlistId, sku], map: "uq_itens_baixa_olist_pedido_item_sku")
   @@index([aplicativoId], map: "idx_itens_baixa_estoque_olist_aplicativo_id")
   @@map("itens_baixa_estoque_olist")
 }
@@ -1099,4 +1100,14 @@ model ItemRetornoEstoqueOlist {
   @@unique([retornoId, itemBaixaId], map: "uq_retorno_olist_item")
   @@index([aplicativoId, itemBaixaId], map: "idx_retorno_olist_baixa")
   @@map("itens_retorno_estoque_olist")
+}
+
+model ComponenteKitEstoque {
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  kitSku String @map("kit_sku")
+  sku String
+  quantidade Int
+
+  @@id([aplicativoId, kitSku, sku])
+  @@map("componentes_kit_estoque")
 }
