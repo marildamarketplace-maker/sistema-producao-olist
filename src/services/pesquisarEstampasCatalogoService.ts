@@ -8,6 +8,7 @@ import {
   pesquisarCatalogoEstampas,
   STATUS_PESQUISA_ESTAMPAS,
   type FacetasPesquisaEstampas,
+  type FiltrosPesquisaEstampas,
   type OrdenacaoPesquisaEstampas,
   type StatusPesquisaEstampas,
 } from "@/repositories/pesquisa-estampas-repository";
@@ -169,7 +170,7 @@ export async function pesquisarEstampasCatalogo(
   const ordenacao = validarOrdenacao(
     entrada.ordenacao ?? (consulta || preferencias.some((campo) => campo !== "consulta" && entrada[campo]) ? "RELEVANCIA" : "RECENTES"),
   );
-  const resultado = await pesquisarCatalogoEstampas({
+  return pesquisarCatalogoComCache({
     ...design,
     modoCores,
     correspondenciaMinima,
@@ -195,35 +196,45 @@ export async function pesquisarEstampasCatalogo(
     limite: porPagina,
     offset: (pagina - 1) * porPagina,
     somenteAtivas: true,
-  });
-  return {
-    estampas: resultado.estampas.map(({ atributosDesign, percentualCorrespondencia, termosEncontrados, termosAusentes, ...estampa }) => ({
-      ...estampa,
-      design: normalizarDesignPesquisa(atributosDesign),
-      correspondencia: resultado.criterios.length ? {
-        percentual: Number(percentualCorrespondencia ?? 0),
-        termosEncontrados: termosEncontrados ?? [], termosAusentes: termosAusentes ?? [],
-      } : null,
-      segmentacaoBusca: normalizarSegmentacaoDetalhada(estampa.segmentacaoBusca),
-      classificacaoTextil: normalizarClassificacaoTextil(estampa.classificacaoTextil),
-      id: estampa.id.toString(),
-      processingStatus: validarStatus(estampa.processingStatus) ?? "PENDING",
-      processedAt: estampa.processedAt?.toISOString() ?? null,
-      createdAt: estampa.createdAt.toISOString(),
-      updatedAt: estampa.updatedAt?.toISOString() ?? null,
-      relevancia: Number(estampa.relevancia),
-    })),
-    total: resultado.total,
-    cobertura: resultado.criterios.length ? {
-      termos: resultado.criterios, excluidos: resultado.excluidos,
-      minima: correspondenciaMinima, completas: resultado.completas, parciais: resultado.parciais,
-    } : null,
-    pagina,
-    porPagina,
-    totalPaginas: Math.ceil(resultado.total / porPagina),
-    ordenacao,
-  };
+  }, pagina, porPagina);
 }
+
+// Cacheia somente dados serializáveis do catálogo global, após validar a entrada.
+// A autorização de cada requisição permanece na rota, fora deste cache.
+const pesquisarCatalogoComCache = unstable_cache(
+  async (filtros: FiltrosPesquisaEstampas, pagina: number, porPagina: number): Promise<ResultadoPesquisaEstampasCatalogo> => {
+    const resultado = await pesquisarCatalogoEstampas(filtros);
+    return {
+      estampas: resultado.estampas.map(({ atributosDesign, percentualCorrespondencia, termosEncontrados, termosAusentes, ...estampa }) => ({
+        ...estampa,
+        design: normalizarDesignPesquisa(atributosDesign),
+        correspondencia: resultado.criterios.length ? {
+          percentual: Number(percentualCorrespondencia ?? 0),
+          termosEncontrados: termosEncontrados ?? [], termosAusentes: termosAusentes ?? [],
+        } : null,
+        segmentacaoBusca: normalizarSegmentacaoDetalhada(estampa.segmentacaoBusca),
+        classificacaoTextil: normalizarClassificacaoTextil(estampa.classificacaoTextil),
+        id: estampa.id.toString(),
+        processingStatus: validarStatus(estampa.processingStatus) ?? "PENDING",
+        processedAt: estampa.processedAt?.toISOString() ?? null,
+        createdAt: estampa.createdAt.toISOString(),
+        updatedAt: estampa.updatedAt?.toISOString() ?? null,
+        relevancia: Number(estampa.relevancia),
+      })),
+      total: resultado.total,
+      cobertura: resultado.criterios.length ? {
+        termos: resultado.criterios, excluidos: resultado.excluidos,
+        minima: filtros.correspondenciaMinima ?? 1, completas: resultado.completas, parciais: resultado.parciais,
+      } : null,
+      pagina,
+      porPagina,
+      totalPaginas: Math.ceil(resultado.total / porPagina),
+      ordenacao: filtros.ordenacao,
+    };
+  },
+  ["pesquisa-estampas", "resultados", "v1"],
+  { revalidate: 86_400, tags: ["estampas-pesquisa"] },
+);
 
 export type SugestaoSegmentacaoDetalhada = {
   termo: string;

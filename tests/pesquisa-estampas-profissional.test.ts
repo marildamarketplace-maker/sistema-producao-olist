@@ -65,6 +65,7 @@ test("filtros SQL exigem estado identificado e usam parâmetros, incluindo a con
 
 const consultas: Prisma.Sql[] = [];
 let permitir = true;
+let resultadoEstampas: Record<string, unknown>[] = [];
 // Executa unstable_cache real com armazenamento isolado, sem servidor Next.
 type EntradaCache = { value: { kind: string; data: { body: string }; revalidate: number }; gravadoEm: number };
 const entradasCache = new Map<string, EntradaCache>();
@@ -82,6 +83,7 @@ Object.assign(globalThis, { AsyncLocalStorage, __incrementalCache: {
 beforeEach(() => {
   entradasCache.clear();
   agoraCache = 0;
+  resultadoEstampas = [];
 });
 Object.assign(globalThis, { prisma: {
   usuario: {
@@ -91,7 +93,7 @@ Object.assign(globalThis, { prisma: {
   $queryRaw(strings: TemplateStringsArray, ...valores: unknown[]) {
     const sql = Prisma.sql(strings, ...valores);
     consultas.push(sql);
-    return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [{ total: BigInt(0) }] : []);
+    return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [{ total: BigInt(0) }] : resultadoEstampas);
   },
   $transaction: () => { throw new Error("Pesquisa de leitura não deve abrir transação"); },
 } });
@@ -200,6 +202,76 @@ test("API revalida permissão mesmo quando as facetas já estão em cache", asyn
   } finally {
     permitir = true;
   }
+});
+
+test("pesquisa cacheia o resultado serializado por 24h e valida antes de ler o cache", async () => {
+  const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
+  consultas.length = 0;
+  resultadoEstampas = [{ id: BigInt(1), createdAt: new Date(0), updatedAt: new Date(0), processedAt: new Date(0), processingStatus: "COMPLETED", relevancia: 0 }];
+  const inicial = await pesquisarEstampasCatalogo({ categoria: "botânico" });
+  const repetida = await pesquisarEstampasCatalogo({ categoria: "  botânico  ", pagina: 1, porPagina: 24, ordenacao: "RECENTES", status: "completed" });
+  assert.deepEqual(repetida, inicial);
+  assert.equal(repetida.estampas[0].id, "1");
+  assert.equal(repetida.estampas[0].createdAt, new Date(0).toISOString());
+  assert.equal(consultas.length, 2);
+  agoraCache = 86_399_000;
+  await pesquisarEstampasCatalogo({ categoria: "botânico" });
+  assert.equal(consultas.length, 2);
+  agoraCache = 86_401_000;
+  await pesquisarEstampasCatalogo({ categoria: "botânico" });
+  assert.equal(consultas.length, 4);
+  await assert.rejects(pesquisarEstampasCatalogo({ categoria: "botânico", porPagina: 61 }), /porPagina/);
+  assert.equal(consultas.length, 4);
+});
+
+test("pesquisa separa filtros, página, ordenação, status e preferências no cache", async () => {
+  const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
+  consultas.length = 0;
+  const casos = [
+    {}, { categoria: "geométrico" }, { pagina: 2 }, { porPagina: 12 },
+    { ordenacao: "CODIGO_ASC" }, { status: "PENDING" },
+    { preferencias: ["categoria"] }, { preferencias: ["categoria"], correspondenciaMinima: 100 },
+    { cores: ["rosa"], modoCores: "QUALQUER" }, { cores: ["rosa"], modoCores: "TODAS" },
+  ];
+  for (const entrada of casos) await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada });
+  assert.equal(consultas.length, casos.length * 2);
+  for (const entrada of casos) await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada });
+  assert.equal(consultas.length, casos.length * 2);
+});
+
+test("pesquisa não cacheia falha de leitura", async (t) => {
+  const { prisma } = await import("../src/lib/prisma");
+  const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
+  const falha = t.mock.method(prisma, "$queryRaw", async () => { throw new Error("Falha de leitura"); });
+  await assert.rejects(pesquisarEstampasCatalogo({ categoria: "botânico" }), /Falha de leitura/);
+  assert.equal(entradasCache.size, 0);
+  falha.mock.restore();
+  consultas.length = 0;
+  await pesquisarEstampasCatalogo({ categoria: "botânico" });
+  assert.equal(consultas.length, 2);
+});
+
+test("API verifica permissão com pesquisa já cacheada", async () => {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://teste.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia-para-teste";
+  const { supabaseAdmin } = await import("../src/lib/supabase-admin");
+  Object.assign(supabaseAdmin.auth, { getUser: async () => ({ data: { user: { id: "usuario-teste", email: "teste@example.com" } }, error: null }) });
+  const { GET } = await import("../src/app/api/estampas/pesquisa/route");
+  const { NextRequest } = await import("next/server");
+  const url = "http://localhost/api/estampas/pesquisa?categoria=botânico";
+  const headers = { Authorization: "Bearer token-ficticio" };
+  consultas.length = 0;
+  assert.equal((await GET(new NextRequest(url, { headers }))).status, 200);
+  assert.equal((await GET(new NextRequest(url, { headers }))).status, 200);
+  assert.equal(consultas.length, 2);
+  permitir = false;
+  try {
+    const negada = await GET(new NextRequest(url, { headers }));
+    assert.match((await negada.json()).error, /Sem permissão/);
+    const semToken = await GET(new NextRequest(url));
+    assert.match((await semToken.json()).error, /autenticação ausente/);
+    assert.equal(consultas.length, 2);
+  } finally { permitir = true; }
 });
 
 test("API bloqueia ausência de token e usuário sem permissão antes de pesquisar", async () => {

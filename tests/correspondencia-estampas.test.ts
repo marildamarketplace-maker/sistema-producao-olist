@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./helpers/next-cache";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { calcularPercentualCorrespondencia, planejarConsultaEstampas } from "../src/domain/consulta-profissional-estampas";

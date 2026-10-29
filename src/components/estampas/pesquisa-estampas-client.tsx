@@ -7,7 +7,8 @@ import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas
 import { FILTROS_DESIGN_PESQUISA } from "@/domain/pesquisa-estampas-design";
 import type { FacetasPesquisaEstampas } from "@/repositories/pesquisa-estampas-repository";
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { criarCarregadorPaginasEstampas } from "@/services/carregadorPaginasEstampas";
 import {
   Check,
   ChevronLeft,
@@ -94,28 +95,36 @@ export function PesquisaEstampasClient() {
   const [linkCopiado, setLinkCopiado] = useState(false);
   const filtrosAntesDoModal = useRef<Filtros | null>(null);
   const timeoutLinkCopiado = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const carregadorPaginas = useMemo(() => session?.access_token
+    ? criarCarregadorPaginasEstampas(session.access_token)
+    : null, [session?.access_token]);
+
+  useEffect(() => () => carregadorPaginas?.limpar(), [carregadorPaginas]);
+  useEffect(() => {
+    if (!filtros) carregadorPaginas?.limpar();
+  }, [filtros, carregadorPaginas]);
 
   const buscar = useCallback(async (signal: AbortSignal) => {
-    if (!session?.access_token || !filtros) return;
-    setCarregando(true);
+    if (!carregadorPaginas || !filtros) return;
+    const params = criarQueryPesquisaEstampas(filtros, pagina, ordenacao, porPagina);
+    setCarregando(!carregadorPaginas.obterPronta(params));
     setErro(null);
     try {
-      const params = criarQueryPesquisaEstampas(filtros, pagina, ordenacao, porPagina);
-      const response = await fetch(`/api/estampas/pesquisa?${params}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-        signal,
-      });
-      const dados = await response.json();
-      if (!response.ok) throw new Error(dados.error ?? "Erro ao pesquisar estampas.");
-      if (!signal.aborted) setResultado(dados);
+      const dados = await carregadorPaginas.carregar(params);
+      if (signal.aborted) return;
+      setResultado(dados);
+      if (pagina < dados.totalPaginas) {
+        const proxima = criarQueryPesquisaEstampas(filtros, pagina + 1, ordenacao, porPagina);
+        // Prefetch é opcional: falhas não interrompem a página atual e permitem retry ao navegar.
+        void carregadorPaginas.carregar(proxima).catch(() => {});
+      }
     } catch (cause) {
       if (signal.aborted) return;
       setErro(cause instanceof Error ? cause.message : "Erro ao pesquisar estampas.");
     } finally {
       if (!signal.aborted) setCarregando(false);
     }
-  }, [filtros, ordenacao, pagina, porPagina, session?.access_token]);
+  }, [filtros, ordenacao, pagina, porPagina, carregadorPaginas]);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -149,7 +158,11 @@ export function PesquisaEstampasClient() {
     setOrdenacao(estado.ordenacao);
     setSelecionada(null);
     setImagemAmpliada(null);
-    setResultado(null);
+    const pronta = carregadorPaginas?.obterPronta(criarQueryPesquisaEstampas(
+      filtrosUrl, estado.pagina, estado.ordenacao, estado.porPagina,
+    )) ?? null;
+    setResultado(pronta);
+    if (pronta) setCarregando(false);
     setErro(null);
     setLinkCopiado(false);
     if (timeoutLinkCopiado.current) clearTimeout(timeoutLinkCopiado.current);
@@ -159,7 +172,7 @@ export function PesquisaEstampasClient() {
       setFiltros(null);
       setCarregando(false);
     }
-  }, [queryAtual]);
+  }, [queryAtual, carregadorPaginas]);
 
   useEffect(() => {
     if (!filtros) return;
