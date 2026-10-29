@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { AsyncLocalStorage } from "node:async_hooks";
+import test, { beforeEach } from "node:test";
 import { Prisma } from "@prisma/client";
 import { FILTROS_DESIGN_PESQUISA, normalizarDesignPesquisa } from "../src/domain/pesquisa-estampas-design";
 import { filtrosDesignEstampasSql } from "../src/repositories/filtros-design-estampas-sql";
@@ -64,6 +65,24 @@ test("filtros SQL exigem estado identificado e usam parâmetros, incluindo a con
 
 const consultas: Prisma.Sql[] = [];
 let permitir = true;
+// Executa unstable_cache real com armazenamento isolado, sem servidor Next.
+type EntradaCache = { value: { kind: string; data: { body: string }; revalidate: number }; gravadoEm: number };
+const entradasCache = new Map<string, EntradaCache>();
+let agoraCache = 0;
+Object.assign(globalThis, { AsyncLocalStorage, __incrementalCache: {
+  generateSimpleCacheKey: async (chave: string) => chave,
+  get: async (chave: string) => {
+    const entrada = entradasCache.get(chave);
+    return entrada ? { value: entrada.value, isStale: agoraCache - entrada.gravadoEm >= entrada.value.revalidate * 1000 } : null;
+  },
+  set: async (chave: string, value: EntradaCache["value"]) => {
+    entradasCache.set(chave, { value, gravadoEm: agoraCache });
+  },
+} });
+beforeEach(() => {
+  entradasCache.clear();
+  agoraCache = 0;
+});
 Object.assign(globalThis, { prisma: {
   usuario: {
     findFirst: async () => ({ id: "usuario-teste" }),
@@ -123,6 +142,64 @@ test("facetas consideram o status solicitado e preservam os enums de apresentaç
   consultas.length = 0;
   await obterFacetasPesquisaEstampas("TODOS");
   assert.doesNotMatch(consultas[0].sql, /AND processing_status =/);
+});
+
+test("facetas reutilizam cache por status normalizado e revalidam após 300 segundos", async () => {
+  const { obterFacetasPesquisaEstampas } = await import("../src/services/pesquisarEstampasCatalogoService");
+  consultas.length = 0;
+  const inicial = await obterFacetasPesquisaEstampas();
+  assert.deepEqual(await obterFacetasPesquisaEstampas(" completed "), inicial);
+  assert.equal(consultas.length, 1);
+  await obterFacetasPesquisaEstampas("PENDING");
+  await obterFacetasPesquisaEstampas("TODOS");
+  assert.equal(consultas.length, 3);
+  assert.ok(consultas[1].values.includes("PENDING"));
+  assert.doesNotMatch(consultas[2].sql, /AND processing_status =/);
+  agoraCache = 299_000;
+  await obterFacetasPesquisaEstampas();
+  assert.equal(consultas.length, 3);
+  agoraCache = 301_000;
+  await obterFacetasPesquisaEstampas();
+  assert.equal(consultas.length, 4);
+  await assert.rejects(obterFacetasPesquisaEstampas("INVALIDO"), /Status de processamento inválido/);
+  assert.equal(consultas.length, 4);
+});
+
+test("falha ao calcular facetas não armazena resultado inválido no cache", async (t) => {
+  const { prisma } = await import("../src/lib/prisma");
+  const { obterFacetasPesquisaEstampas } = await import("../src/services/pesquisarEstampasCatalogoService");
+  const falha = t.mock.method(prisma, "$queryRaw", async () => { throw new Error("Falha de leitura"); });
+  await assert.rejects(obterFacetasPesquisaEstampas(), /Falha de leitura/);
+  assert.equal(entradasCache.size, 0);
+  falha.mock.restore();
+  consultas.length = 0;
+  await obterFacetasPesquisaEstampas();
+  assert.equal(consultas.length, 1);
+});
+
+test("API revalida permissão mesmo quando as facetas já estão em cache", async () => {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://teste.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia-para-teste";
+  const { supabaseAdmin } = await import("../src/lib/supabase-admin");
+  Object.assign(supabaseAdmin.auth, { getUser: async () => ({ data: { user: { id: "usuario-teste", email: "teste@example.com" } }, error: null }) });
+  const { GET } = await import("../src/app/api/estampas/pesquisa/route");
+  const { NextRequest } = await import("next/server");
+  const url = "http://localhost/api/estampas/pesquisa?facetas=1";
+  const headers = { Authorization: "Bearer token-ficticio" };
+  consultas.length = 0;
+  assert.equal((await GET(new NextRequest(url, { headers }))).status, 200);
+  assert.equal((await GET(new NextRequest(url, { headers }))).status, 200);
+  assert.equal(consultas.length, 1);
+  permitir = false;
+  try {
+    const negada = await GET(new NextRequest(url, { headers }));
+    assert.match((await negada.json()).error, /Sem permissão/);
+    const semToken = await GET(new NextRequest(url));
+    assert.match((await semToken.json()).error, /autenticação ausente/);
+    assert.equal(consultas.length, 1);
+  } finally {
+    permitir = true;
+  }
 });
 
 test("API bloqueia ausência de token e usuário sem permissão antes de pesquisar", async () => {

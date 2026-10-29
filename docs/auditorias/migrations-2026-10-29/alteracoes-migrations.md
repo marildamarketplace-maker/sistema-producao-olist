@@ -158,3 +158,9 @@ Oito migrations de seed foram excluídas sem executar SQL e sem apagar dados já
 - `20260721170000_seed_tarefas_mensais_cancelamento_notas`
 
 As validações de 515 testes descritas acima referem-se à primeira etapa. Na segunda etapa foi conferida a integridade do manifesto e executada novamente a suíte isolada das correções, sem conexão ao banco de produção.
+
+## Conferência posterior do histórico
+
+Foi encontrada e removida uma pasta vazia `20260715150000_add_produto_fornecedor_id_externo`, sem migration.sql e sem registro no histórico. Ela explicava a contagem de 26 diretórios contra 25 arquivos SQL. Não foi criado SQL fictício nem registro de resolve.
+
+Uma consulta posterior somente de leitura confirmou 16 registros concluídos e os efeitos das oito correções ainda sem registro: batches (índice parcial), notification, acesso_pagina_usuario, evidência, segurança da fila, checks de direcionamento, segurança/check de retorno e variantes obrigatórias. Checks e índice estão validados; RLS habilitada e grants anon/authenticated ausentes nas tabelas servidoras correspondentes. Essas oito não precisam de nova execução SQL, apenas reconciliação de histórico pelo operador. A reabertura de fila continua separada e não foi executada ou registrada por esta conferência.

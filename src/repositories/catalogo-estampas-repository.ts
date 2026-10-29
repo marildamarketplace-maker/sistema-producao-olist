@@ -10,6 +10,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { pesquisarCatalogoEstampas } from "@/repositories/pesquisa-estampas-repository";
 import { construirTextoPesquisa, type DadosTextoPesquisa } from "@/services/construirTextoPesquisa";
+import { normalizarListaTaxonomia } from "@/services/normalizarTaxonomiaEstampa";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type ProcessingStatusEstampa = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
@@ -192,6 +193,15 @@ export async function atualizarEstampa(id: string, atualizacao: AtualizacaoEstam
   const estampaId = idCatalogo(id);
   const campos = Object.fromEntries(Object.entries(atualizacao).filter(([, valor]) => valor !== undefined));
   if (Object.keys(campos).length === 0) throw new Error("Informe ao menos um campo para atualizar a estampa.");
+  // Categorias também podem chegar diretamente ao repositório, fora do mapper
+  // de IA. Normalize antes de montar texto_pesquisa, sem alterar outros campos.
+  if (campos.categorias !== undefined) {
+    const categorias = campos.categorias ?? [];
+    if (!Array.isArray(categorias) || !categorias.every((item): item is string => typeof item === "string")) {
+      throw new Error("categorias deve ser uma lista de textos.");
+    }
+    campos.categorias = normalizarListaTaxonomia(categorias);
+  }
   if (Object.keys(campos).some((campo) => CAMPOS_PESQUISAVEIS.has(campo as keyof AtualizacaoEstampaCatalogo))) {
     const atual = await buscarEstampaPorId(estampaId); if (!atual) return null;
     campos.texto_pesquisa = construirTextoPesquisa(dadosPesquisa({ ...atual, ...campos } as EstampaCatalogo));

@@ -363,7 +363,6 @@ function adicionarFiltroArrayExato(
   condicoes: Prisma.Sql[],
   coluna:
     | "elementos_visuais"
-    | "categorias"
     | "ocasioes"
     | "publicos_sugeridos"
     | "contextos_uso"
@@ -448,11 +447,10 @@ function condicoesFiltrosEstampas(filtros: Partial<FiltrosPesquisaEstampas>): Pr
     "elementos_visuais",
     normalizarTexto(filtros.elementoVisual),
   );
-  adicionarFiltroArrayExato(
-    condicoes,
-    "categorias",
-    normalizarTexto(filtros.categoria),
-  );
+  const categoria = normalizarTexto(filtros.categoria);
+  if (categoria) {
+    condicoes.push(Prisma.sql`e.categorias @> ARRAY[lower(${categoria})]::TEXT[]`);
+  }
   adicionarFiltroArrayExato(
     condicoes,
     "ocasioes",

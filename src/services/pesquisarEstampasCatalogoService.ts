@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
 import { planejarConsultaEstampas, type CorrespondenciaEstampa } from "@/domain/consulta-profissional-estampas";
 import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, normalizarDesignPesquisa, type FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
@@ -282,8 +283,17 @@ function objetoDesconhecido(valor: unknown): Record<string, unknown> {
     : {};
 }
 
+// O catálogo atual é global. Os argumentos separam o cache por status;
+// autorização permanece na rota, fora da função cacheada.
+const listarFacetasComCache = unstable_cache(
+  async (status: StatusPesquisaEstampas | null) =>
+    listarFacetasPesquisaEstampas(status ?? undefined),
+  ["pesquisa-estampas", "facetas", "v1"],
+  { revalidate: 300, tags: ["estampas-facetas"] },
+);
+
 export async function obterFacetasPesquisaEstampas(status = "COMPLETED"): Promise<FacetasPesquisaEstampas> {
-  return listarFacetasPesquisaEstampas(validarStatus(status));
+  return listarFacetasComCache(validarStatus(status) ?? null);
 }
 
 function validarStatus(valor: string): StatusPesquisaEstampas | undefined {
