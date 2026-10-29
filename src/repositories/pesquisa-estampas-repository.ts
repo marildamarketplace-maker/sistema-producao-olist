@@ -175,7 +175,9 @@ export async function pesquisarCatalogoEstampas(
     : Prisma.sql`0::DOUBLE PRECISION`;
   const orderBy = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta));
 
-  const [estampas, totalRows] = await prisma.$transaction([
+  // Leituras independentes: não precisam manter uma transação aberta durante
+  // a pesquisa, que pode ultrapassar o timeout transacional padrão do Prisma.
+  const [estampas, totalRows] = await Promise.all([
     prisma.$queryRaw<EstampaPesquisaRow[]>`
       SELECT
         e.id,

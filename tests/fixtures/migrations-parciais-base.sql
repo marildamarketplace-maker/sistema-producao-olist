@@ -1,0 +1,28 @@
+-- Base descartável com as lacunas da auditoria. Sem dados/credenciais de produção.
+CREATE ROLE anon;
+CREATE ROLE authenticated;
+CREATE ROLE service_role;
+CREATE TABLE aplicativo (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+CREATE TABLE usuario (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+CREATE TABLE solicitacoes_devolucao (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), status TEXT DEFAULT 'pendente', created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE itens_solicitacao_devolucao (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), solicitacao_id UUID NOT NULL);
+CREATE TABLE produtos (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), id_cadastro_olist TEXT);
+CREATE TABLE tipo_produto (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), updated_at TIMESTAMPTZ);
+CREATE TABLE estampa (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), codigo TEXT NOT NULL, variante TEXT, updated_at TIMESTAMPTZ);
+CREATE TABLE variante (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), updated_at TIMESTAMPTZ);
+CREATE TABLE tamanho (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), updated_at TIMESTAMPTZ);
+CREATE TABLE produto_olist (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), updated_at TIMESTAMPTZ);
+CREATE TABLE tarefas_midia (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), dias_semana INTEGER[] DEFAULT '{}');
+CREATE TABLE buscas_sku (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), situacoes TEXT[] DEFAULT '{}');
+CREATE TABLE estampas (id BIGINT PRIMARY KEY, processing_status TEXT, created_at TIMESTAMPTZ DEFAULT now(), elementos_visuais TEXT[] DEFAULT '{}', ocasioes TEXT[] DEFAULT '{}');
+CREATE TABLE estampa_jobs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), estampa_id BIGINT NOT NULL, provider_custom_id TEXT, status TEXT DEFAULT 'WAITING_PROVIDER');
+CREATE TABLE notification (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tentativas INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE acesso_pagina_usuario (usuario_id UUID NOT NULL, pagina VARCHAR(160) NOT NULL, acessos INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (usuario_id,pagina));
+CREATE TABLE solicitacoes_producao (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), evidencia_url TEXT, evidencia_bucket TEXT, evidencia_storage_path TEXT);
+CREATE TABLE pedido_fornecedor_queue (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), aplicativo_filial_id UUID REFERENCES aplicativo(id), direcionado_por_id UUID REFERENCES usuario(id), direcionado_em TIMESTAMPTZ, versao INTEGER NOT NULL DEFAULT 0, status TEXT DEFAULT 'PENDENTE', dados_pedido JSONB NOT NULL DEFAULT '{}');
+CREATE TABLE retornos_estoque_olist (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+CREATE TABLE itens_retorno_estoque_olist (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), quantidade INTEGER NOT NULL, movimentacao_id UUID);
+CREATE TABLE configuracoes_jobs (chave TEXT PRIMARY KEY, variantes_permitidas TEXT[] DEFAULT '{}');
+CREATE FUNCTION buscar_estampas_por_relevancia(TEXT, INTEGER, INTEGER) RETURNS TEXT LANGUAGE SQL AS $$ SELECT $1 $$;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON FUNCTION buscar_estampas_por_relevancia(TEXT,INTEGER,INTEGER) TO PUBLIC,anon,authenticated,service_role;

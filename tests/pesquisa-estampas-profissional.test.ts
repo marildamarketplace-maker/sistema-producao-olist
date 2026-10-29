@@ -74,7 +74,7 @@ Object.assign(globalThis, { prisma: {
     consultas.push(sql);
     return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [{ total: BigInt(0) }] : []);
   },
-  $transaction: (operacoes: Promise<unknown>[]) => Promise.all(operacoes),
+  $transaction: () => { throw new Error("Pesquisa de leitura não deve abrir transação"); },
 } });
 
 test("serviço rejeita valores inválidos antes de consultar e exige critério explícito", async () => {
@@ -88,7 +88,7 @@ test("serviço rejeita valores inválidos antes de consultar e exige critério e
   assert.equal(consultas.length, 0);
 });
 
-test("lista e contagem aplicam os mesmos filtros profissionais; concluídas são o padrão", async () => {
+test("lista e contagem rodam sem transação e aplicam os mesmos filtros; concluídas são o padrão", async () => {
   const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
   consultas.length = 0;
   await pesquisarEstampasCatalogo({ distribuicao: "corrido", linguagemVisual: "aquarelado", cores: ["creme", "rosa"], modoCores: "QUALQUER", pagina: 2, porPagina: 48 });

@@ -1,27 +1,21 @@
-create table if not exists solicitacoes_devolucao (
-  id uuid primary key default gen_random_uuid(),
-  status text not null default 'pendente',
-  pedido_referencia text,
-  observacao_geral text,
-  created_at timestamptz not null default now(),
-  confirmada_em timestamptz
-);
+-- Ajuste pontual baseado na auditoria de 2026-10-29.
+-- Requer a estrutura existente; nao e uma migration de criacao inicial.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '120s';
 
-create table if not exists itens_solicitacao_devolucao (
-  id uuid primary key default gen_random_uuid(),
-  solicitacao_id uuid not null references solicitacoes_devolucao(id) on delete cascade,
-  produto_id uuid not null,
-  sku text not null,
-  imagem_url text,
-  quantidade_solicitada integer not null,
-  quantidade_confirmada integer not null default 0,
-  observacao text,
-  status_item text not null default 'pendente',
-  created_at timestamptz not null default now()
-);
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_devolucao_status_created
+  ON public.solicitacoes_devolucao (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_itens_solicitacao_devolucao_solicitacao
+  ON public.itens_solicitacao_devolucao (solicitacao_id);
 
-create index if not exists idx_solicitacoes_devolucao_status_created
-  on solicitacoes_devolucao(status, created_at desc);
+DO $migration$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.itens_solicitacao_devolucao'::regclass AND conname = 'itens_solicitacao_devolucao_solicitacao_id_fkey') THEN
+    ALTER TABLE public.itens_solicitacao_devolucao ADD CONSTRAINT itens_solicitacao_devolucao_solicitacao_id_fkey FOREIGN KEY (solicitacao_id) REFERENCES public.solicitacoes_devolucao(id) ON DELETE CASCADE NOT VALID;
+  END IF;
+END
+$migration$;
+ALTER TABLE public.itens_solicitacao_devolucao VALIDATE CONSTRAINT itens_solicitacao_devolucao_solicitacao_id_fkey;
 
-create index if not exists idx_itens_solicitacao_devolucao_solicitacao
-  on itens_solicitacao_devolucao(solicitacao_id);
+COMMIT;

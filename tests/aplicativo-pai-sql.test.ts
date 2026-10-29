@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import pg from "pg";
 
-test("migração vincula filiais e protege a integridade do aplicativo pai", {
+test("estrutura de aplicativo pai vincula filiais e protege a integridade do aplicativo pai", {
   skip: !process.env.APLICATIVO_TEST_DATABASE_URL,
 }, async () => {
   const client = new pg.Client({ connectionString: process.env.APLICATIVO_TEST_DATABASE_URL });
@@ -21,7 +21,7 @@ test("migração vincula filiais e protege a integridade do aplicativo pai", {
       await client.query("INSERT INTO aplicativo (id, nome) VALUES ($1, $2)", [id(suffix), nome]);
     }
     await client.query(await readFile(new URL(
-      "../prisma/migrations/20261016180000_add_aplicativo_pai/migration.sql", import.meta.url,
+      "./fixtures/aplicativo-pai-schema.sql", import.meta.url,
     ), "utf8"));
     const { rows } = await client.query("SELECT id, aplicativo_pai_id FROM aplicativo ORDER BY id");
     assert.deepEqual(rows.map((row) => row.aplicativo_pai_id), [null, null, id(2), id(2), id(2)]);
