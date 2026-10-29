@@ -22,12 +22,12 @@ for (const channel of ['shopee', 'mercadoLivre', 'tiktokShop', 'dominioProprio']
       if (channel !== 'tiktokShop') assert.equal(kit.affiliates + kit.shippingService, 0);
     }
   });
-  test(`${channel}: sem adicionais equivale ao cálculo existente com metragem do kit`, () => {
+  test(`${channel}: aplica redução na meta de lucro por peça da venda avulsa`, () => {
     for (const kit of calculateKitPrices(input, channel, EMPTY_KIT_OPTIONS)) {
-      const base = PricingCalculatorUtils.calculateMarketplacePrices({ ...input, metersUsed: kit.quantity }, true).find(price => price.marketplaceId === channel)!;
-      assert.equal(kit.recommendedPrice, base.recommendedPrice);
-      assert.equal(kit.fixedFee, base.fixedFee);
-      assert.equal(kit.estimatedProfit, base.estimatedProfit);
+      const base = PricingCalculatorUtils.calculateMarketplacePrices({ ...input, metersUsed: input.metersUsed }, true).find(price => price.marketplaceId === channel)!;
+      assert.ok(kit.estimatedProfit + 0.001 >= base.estimatedProfit * kit.quantity * (1 - kit.profitReductionPercentage / 100));
+      assert.equal(kit.targetProfitPerUnit, base.estimatedProfit * (1 - kit.profitReductionPercentage / 100));
+      assert.ok(kit.profitPerUnit + 0.001 >= kit.targetProfitPerUnit);
     }
   });
 }
@@ -46,4 +46,15 @@ test('rejeita entradas inválidas e percentuais inviáveis', () => {
     assert.throws(() => calculateKitPrices({ ...input, metersUsed: invalid }, 'shopee', EMPTY_KIT_OPTIONS));
   }
   assert.throws(() => calculateKitPrices(input, 'tiktokShop', { ...EMPTY_KIT_OPTIONS, advertisingPercentage: 100 }));
+});
+
+
+test('regressão: material de R$ 3,75 preserva lucro avulso nos kits do domínio próprio', () => {
+  const values = { ...input, pricePerMeter: 3.75, extraCosts: 0, laborPercentage: 25, profitPercentage: 15 };
+  const unit = PricingCalculatorUtils.calculateMarketplacePrices(values, true).find(p => p.marketplaceId === 'dominioProprio')!;
+  assert.equal(unit.recommendedPrice, 10.9);
+  const kits = calculateKitPrices(values, 'dominioProprio', EMPTY_KIT_OPTIONS);
+  assert.deepEqual(kits.map(k => k.profitReductionPercentage), [5, 10, 15]);
+  assert.deepEqual(kits.map(k => k.recommendedPrice), [25.9, 35.9, 50.9]);
+  for (const kit of kits) assert.ok(kit.estimatedProfit >= unit.estimatedProfit * kit.quantity * (1 - kit.profitReductionPercentage / 100) - 0.001);
 });

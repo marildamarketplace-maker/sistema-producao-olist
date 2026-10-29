@@ -49,10 +49,23 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-function KitSimulation({ input, channelId }: { input: PricingInput; channelId: SalesChannelId }) {
-  const [options, setOptions] = useState<Record<keyof KitOptions, string>>({
-    shipping: "0", advertisingPercentage: "0", affiliatePercentage: "0", shippingPercentage: "0",
-  });
+type KitFormState = Record<keyof KitOptions, string>;
+const KIT_CHANNELS = [
+  { id: "shopee", name: "Shopee" },
+  { id: "mercadoLivre", name: "Mercado Livre Premium" },
+  { id: "tiktokShop", name: "TikTok Shop" },
+] as const;
+const KIT_FIELDS: Array<{ key: keyof KitOptions; label: string; tiktokOnly?: boolean }> = [
+  { key: "shipping", label: "Frete pago por você por kit (R$)" },
+  { key: "advertisingPercentage", label: "Reserva para anúncios (%)" },
+  { key: "affiliatePercentage", label: "Comissão de afiliados (%)", tiktokOnly: true },
+  { key: "shippingPercentage", label: "Programa de envio (%)", tiktokOnly: true },
+];
+const INITIAL_KIT_FORM: KitFormState = {
+  shipping: "0", advertisingPercentage: "0", affiliatePercentage: "0", shippingPercentage: "0",
+};
+
+function KitSimulation({ input, channelId, options }: { input: PricingInput; channelId: SalesChannelId; options: KitFormState }) {
   const ownDomain = channelId === "dominioProprio";
   const simulation = useMemo(() => {
     try {
@@ -62,31 +75,19 @@ function KitSimulation({ input, channelId }: { input: PricingInput; channelId: S
       return null;
     }
   }, [input, channelId, options, ownDomain]);
-  const fields: Array<{ key: keyof KitOptions; label: string }> = [
-    { key: "shipping", label: "Frete pago por você por kit (R$)" },
-    { key: "advertisingPercentage", label: "Reserva para anúncios (%)" },
-    ...(channelId === "tiktokShop" ? [
-      { key: "affiliatePercentage" as const, label: "Comissão de afiliados (%)" },
-      { key: "shippingPercentage" as const, label: "Programa de envio (%)" },
-    ] : []),
-  ];
   return <details className="mt-5 min-w-0 border-t border-slate-200 pt-4">
     <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">Preço recomendado para kits</summary>
-    <p className="mt-2 text-xs text-slate-600">Metragem por peça × quantidade do kit. Gastos extras são por kit, sem multiplicar. Taxas recalculadas pelo preço final do kit.</p>
-    {!ownDomain && <div className="mt-4 grid gap-3 sm:grid-cols-2">
-      {fields.map(field => <label key={field.key} className="block text-sm font-medium text-slate-700">
-        {field.label}
-        <input className="input mt-1 min-h-11" inputMode="decimal" value={options[field.key]} onChange={event => setOptions(current => ({ ...current, [field.key]: event.target.value }))} />
-      </label>)}
-    </div>}
-    <p className="mt-3 text-xs text-slate-600">{ownDomain ? "Sem taxas de marketplace ou reserva para anúncios." : "Informe os custos da sua operação; zero significa que o custo não será considerado. Lucro desejado preservado após a reserva para anúncios. As taxas são as cadastradas na calculadora; confirme as condições do anúncio."}</p>
+    <p className="mt-2 text-xs text-slate-600">Metragem por peça × quantidade do kit. Gastos extras são por kit, sem multiplicar. Taxas recalculadas pelo preço final do kit. A meta de lucro por peça tem redução de 5% no kit de 2, 10% no de 3 e 15% no de 5, em relação à venda avulsa nas mesmas condições. A margem desejada e o arredondamento podem elevar o lucro final.</p>
+    <p className="mt-3 text-xs text-slate-600">{ownDomain ? "Sem taxas de marketplace ou reserva para anúncios." : "Configure os custos em Percentuais do cálculo, no início da tela; zero significa que o custo não será considerado. Lucro desejado preservado após a reserva para anúncios. As taxas são as cadastradas na calculadora; confirme as condições do anúncio."}</p>
     {!simulation ? <p role="alert" className="mt-3 text-sm text-red-700">Não foi possível calcular os kits. Revise os custos e reduza os percentuais; a soma das taxas e margens deve ser menor que 100%.</p> : <div className="mt-4 space-y-3" aria-live="polite">
       {simulation.map(kit => <details key={kit.quantity} className="rounded-md border border-slate-200 p-3">
         <summary className="min-h-11 cursor-pointer rounded-md py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
           <span className="font-semibold">Kit de {kit.quantity} — {formatCurrency(kit.recommendedPrice)}</span>
-          <span className="mt-1 block text-xs text-slate-600">{formatCurrency(kit.unitPrice)} por peça · Lucro {formatCurrency(kit.estimatedProfit)}</span>
+          <span className="mt-1 block text-xs text-slate-600">{formatCurrency(kit.unitPrice)} por peça · Lucro total {formatCurrency(kit.estimatedProfit)} · Lucro por peça {formatCurrency(kit.profitPerUnit)}</span>
         </summary>
         <div className="mt-3 border-t border-slate-200 pt-3">
+          <DetailRow label="Redução na meta de lucro por peça" value={`${kit.profitReductionPercentage}%`} />
+          <DetailRow label="Meta de lucro por peça" value={formatCurrency(kit.targetProfitPerUnit)} />
           <DetailRow label="Mínimo calculado" value={formatCurrency(kit.minimumPrice)} />
           <DetailRow label="Custo material" value={formatCurrency(kit.materialCost)} />
           <DetailRow label="Gastos extras por kit" value={formatCurrency(kit.extraCosts)} />
@@ -111,7 +112,7 @@ function KitSimulation({ input, channelId }: { input: PricingInput; channelId: S
   </details>;
 }
 
-function ResultCard({ result, isLowest, input }: { result: MarketplacePricing; isLowest: boolean; input: PricingInput }) {
+function ResultCard({ result, isLowest, input, kitOptions }: { result: MarketplacePricing; isLowest: boolean; input: PricingInput; kitOptions: KitFormState }) {
   const isOwnDomain = result.marketplaceId === "dominioProprio";
   const scenarios = calculateAdvertisingScenarios(result);
   const metric = result.marketplaceId === "tiktokShop" ? "ROI" : "ROAS";
@@ -158,12 +159,16 @@ function ResultCard({ result, isLowest, input }: { result: MarketplacePricing; i
       <span className="font-medium text-slate-600">Margem antes de anúncios</span>
       <span className="font-semibold text-slate-900">{percentageFormatter.format(result.netMargin)}%</span>
     </div>
-    <KitSimulation input={input} channelId={result.marketplaceId} />
+    <KitSimulation input={input} channelId={result.marketplaceId} options={kitOptions} />
   </article>;
 }
 
 export function PricingCalculator() {
   const [form, setForm] = useState(INITIAL_FORM);
+  const [kitForms, setKitForms] = useState<Record<SalesChannelId, KitFormState>>({
+    shopee: { ...INITIAL_KIT_FORM }, mercadoLivre: { ...INITIAL_KIT_FORM },
+    tiktokShop: { ...INITIAL_KIT_FORM }, dominioProprio: { ...INITIAL_KIT_FORM },
+  });
 
   const calculation = useMemo(() => {
     const values = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as Record<keyof FormState, number>;
@@ -218,6 +223,21 @@ export function PricingCalculator() {
             </div>
           </label>)}
         </div>
+        <p className="mt-5 text-xs text-slate-600">Custos adicionais para a simulação dos kits. Frete em reais por kit; demais campos em percentual. Zero desconsidera o custo. Os valores são independentes por canal.</p>
+        <div className="mt-4 space-y-4">
+          {KIT_CHANNELS.map(channel => <fieldset key={channel.id} className="min-w-0 rounded-md border border-slate-200 p-4">
+            <legend className="px-1 text-sm font-semibold text-slate-900">{channel.name}</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {KIT_FIELDS.filter(field => !field.tiktokOnly || channel.id === "tiktokShop").map(field => <label key={field.key} className="block text-sm font-medium text-slate-700">
+                {field.label}
+                <input className="input mt-1 min-h-11" inputMode="decimal" value={kitForms[channel.id][field.key]} onChange={event => {
+                  const value = event.target.value;
+                  setKitForms(current => ({ ...current, [channel.id]: { ...current[channel.id], [field.key]: value } }));
+                }} />
+              </label>)}
+            </div>
+          </fieldset>)}
+        </div>
       </details>
     </section>
 
@@ -226,7 +246,7 @@ export function PricingCalculator() {
     {calculation && <>
       <p className="text-sm text-slate-600">ROAS (Shopee e Mercado Livre) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
       <div className="grid gap-5 xl:grid-cols-2">
-        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} input={Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as PricingInput} isLowest={result.recommendedPrice === lowestPrice} />)}
+        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} kitOptions={kitForms[result.marketplaceId]} input={Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as PricingInput} isLowest={result.recommendedPrice === lowestPrice} />)}
       </div>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

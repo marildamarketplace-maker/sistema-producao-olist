@@ -56,6 +56,7 @@ export class PricingCalculatorUtils {
     taxes: number,
     labor: number,
     profit: number,
+    minimumProfit: number,
   ) {
     let candidate = this.roundToCommercialPrice(minimumPrice);
 
@@ -64,7 +65,7 @@ export class PricingCalculatorUtils {
       if (range) {
         const marketplaceCost = candidate * range.percentage + this.calculateFixedFee(candidate, range);
         const availableProfit = candidate - totalCost - marketplaceCost - candidate * taxes - candidate * labor;
-        if (availableProfit + this.CENT_TOLERANCE >= candidate * profit) {
+        if (availableProfit + this.CENT_TOLERANCE >= Math.max(candidate * profit, minimumProfit)) {
           return { price: candidate, range };
         }
       }
@@ -80,13 +81,15 @@ export class PricingCalculatorUtils {
     taxes: number,
     labor: number,
     profit: number,
+    minimumProfit: number,
   ) {
     const totalRate = range.percentage + (range.proportionalFixedFee ?? 0) + taxes + labor + profit;
     const denominator = 1 - totalRate;
     if (denominator <= 0) return null;
 
     const calculatedPrice = (totalCost + range.fixedFee) / denominator;
-    const candidate = Math.max(calculatedPrice, range.minPrice);
+    const profitFloorPrice = (totalCost + range.fixedFee + minimumProfit) / (denominator + profit);
+    const candidate = Math.max(calculatedPrice, profitFloorPrice, range.minPrice);
     return this.isPriceInRange(candidate, range) ? candidate : null;
   }
 
@@ -96,7 +99,8 @@ export class PricingCalculatorUtils {
     return this.calculateChannelPrices(input, channels);
   }
 
-  static calculateChannelPrices(input: PricingInput, channels: readonly MarketplaceFeeConfig[]): MarketplacePricing[] {
+  static calculateChannelPrices(input: PricingInput, channels: readonly MarketplaceFeeConfig[], minimumProfit = 0): MarketplacePricing[] {
+    if (!Number.isFinite(minimumProfit) || minimumProfit < 0) throw new Error("Lucro mínimo inválido.");
     const materialCost = input.pricePerMeter * input.metersUsed;
     const totalCost = materialCost + input.extraCosts;
     const taxesRate = input.taxesPercentage / 100;
@@ -107,7 +111,7 @@ export class PricingCalculatorUtils {
       const validOptions = marketplace.ranges
         .map((range) => ({
           range,
-          price: this.findValidPrice(totalCost, range, taxesRate, laborRate, profitRate),
+          price: this.findValidPrice(totalCost, range, taxesRate, laborRate, profitRate, minimumProfit),
         }))
         .filter((option): option is { range: FeeRange; price: number } => option.price !== null)
         .sort((a, b) => a.price - b.price);
@@ -125,6 +129,7 @@ export class PricingCalculatorUtils {
         taxesRate,
         laborRate,
         profitRate,
+        minimumProfit,
       );
       if (!recommendation) {
         throw new Error(`O preço recomendado não pertence a uma faixa válida de ${marketplace.name}.`);

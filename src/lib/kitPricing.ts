@@ -12,6 +12,12 @@ export const EMPTY_KIT_OPTIONS: KitOptions = {
   shipping: 0, advertisingPercentage: 0, affiliatePercentage: 0, shippingPercentage: 0,
 };
 
+export const KIT_PROFIT_REDUCTIONS = [
+  { quantity: 2, profitReductionPercentage: 5 },
+  { quantity: 3, profitReductionPercentage: 10 },
+  { quantity: 5, profitReductionPercentage: 15 },
+] as const;
+
 export function calculateKitPrices(input: PricingInput, channelId: SalesChannelId, options: KitOptions) {
   if (Object.values(input).some(value => !Number.isFinite(value) || value < 0)
     || Object.values(options).some(value => !Number.isFinite(value) || value < 0)
@@ -29,24 +35,31 @@ export function calculateKitPrices(input: PricingInput, channelId: SalesChannelI
     ...config,
     ranges: config.ranges.map(range => ({ ...range, percentage: range.percentage + extraRate })),
   };
-  return [2, 3, 5].map(quantity => {
+  const [unit] = PricingCalculatorUtils.calculateChannelPrices({
+    ...input, extraCosts: input.extraCosts + shipping,
+  }, [effectiveConfig]);
+  return KIT_PROFIT_REDUCTIONS.map(({ quantity, profitReductionPercentage }) => {
+    const targetProfitPerUnit = unit.estimatedProfit * (1 - profitReductionPercentage / 100);
     const [result] = PricingCalculatorUtils.calculateChannelPrices({
       ...input,
       metersUsed: input.metersUsed * quantity,
       // Embalagem e extras são por kit; frete também é cobrado uma vez.
       extraCosts: input.extraCosts + shipping,
-    }, [effectiveConfig]);
+    }, [effectiveConfig], targetProfitPerUnit * quantity);
     const advertising = result.recommendedPrice * advertisingRate;
     const affiliates = result.recommendedPrice * affiliateRate;
     const shippingService = result.recommendedPrice * shippingRate;
     return {
       ...result,
       quantity,
+      profitReductionPercentage,
+      targetProfitPerUnit,
       extraCosts: input.extraCosts,
       percentageFee: result.percentageFee - extraRate * 100,
       marketplaceCost: result.marketplaceCost - advertising - affiliates - shippingService,
       shipping, advertising, affiliates, shippingService,
       unitPrice: result.recommendedPrice / quantity,
+      profitPerUnit: result.estimatedProfit / quantity,
     };
   });
 }
