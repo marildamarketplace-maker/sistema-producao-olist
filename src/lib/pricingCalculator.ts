@@ -1,4 +1,4 @@
-import { FeeRange, MARKETPLACE_FEES, OWN_DOMAIN_FEES, SalesChannelId } from "@/lib/marketplaceFees";
+import { FeeRange, MARKETPLACE_FEES, OWN_DOMAIN_FEES, SalesChannelId, MarketplaceFeeConfig } from "@/lib/marketplaceFees";
 
 export type PricingInput = {
   pricePerMeter: number;
@@ -91,14 +91,17 @@ export class PricingCalculatorUtils {
   }
 
   static calculateMarketplacePrices(input: PricingInput, includeOwnDomain = false): MarketplacePricing[] {
+    const channels = Object.values(MARKETPLACE_FEES);
+    if (includeOwnDomain) channels.push(OWN_DOMAIN_FEES);
+    return this.calculateChannelPrices(input, channels);
+  }
+
+  static calculateChannelPrices(input: PricingInput, channels: readonly MarketplaceFeeConfig[]): MarketplacePricing[] {
     const materialCost = input.pricePerMeter * input.metersUsed;
     const totalCost = materialCost + input.extraCosts;
     const taxesRate = input.taxesPercentage / 100;
     const laborRate = input.laborPercentage / 100;
     const profitRate = input.profitPercentage / 100;
-
-    const channels = Object.values(MARKETPLACE_FEES);
-    if (includeOwnDomain) channels.push(OWN_DOMAIN_FEES);
 
     return channels.map((marketplace) => {
       const validOptions = marketplace.ranges
