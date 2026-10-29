@@ -12,11 +12,11 @@ export const EMPTY_KIT_OPTIONS: KitOptions = {
   shipping: 0, advertisingPercentage: 0, affiliatePercentage: 0, shippingPercentage: 0,
 };
 
-export const KIT_PROFIT_REDUCTIONS = [
-  { quantity: 2, profitReductionPercentage: 5 },
-  { quantity: 3, profitReductionPercentage: 10 },
-  { quantity: 5, profitReductionPercentage: 15 },
-] as const;
+const PROFIT_REDUCTION_PER_ITEM = 7;
+export const KIT_PROFIT_REDUCTIONS = [2, 3, 5].map(quantity => ({
+  quantity,
+  profitReductionPercentage: PROFIT_REDUCTION_PER_ITEM * quantity,
+}));
 
 export function calculateKitPrices(input: PricingInput, channelId: SalesChannelId, options: KitOptions) {
   if (Object.values(input).some(value => !Number.isFinite(value) || value < 0)

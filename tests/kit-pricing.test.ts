@@ -54,7 +54,14 @@ test('regressão: material de R$ 3,75 preserva lucro avulso nos kits do domínio
   const unit = PricingCalculatorUtils.calculateMarketplacePrices(values, true).find(p => p.marketplaceId === 'dominioProprio')!;
   assert.equal(unit.recommendedPrice, 10.9);
   const kits = calculateKitPrices(values, 'dominioProprio', EMPTY_KIT_OPTIONS);
-  assert.deepEqual(kits.map(k => k.profitReductionPercentage), [5, 10, 15]);
-  assert.deepEqual(kits.map(k => k.recommendedPrice), [25.9, 35.9, 50.9]);
+  assert.deepEqual(kits.map(k => k.profitReductionPercentage), [14, 21, 35]);
+  assert.deepEqual(kits.map(k => k.recommendedPrice), [20.9, 30.9, 45.9]);
   for (const kit of kits) assert.ok(kit.estimatedProfit >= unit.estimatedProfit * kit.quantity * (1 - kit.profitReductionPercentage / 100) - 0.001);
+});
+
+
+test('Premium: simula reduções de 14%, 21% e 35% no exemplo de material de R$ 3,75', () => {
+  const kits = calculateKitPrices({ pricePerMeter: 3.75, metersUsed: 1, extraCosts: 0, taxesPercentage: 4, laborPercentage: 25, profitPercentage: 10 }, 'mercadoLivre', EMPTY_KIT_OPTIONS);
+  assert.deepEqual(kits.map(k => k.recommendedPrice), [40.9, 50.9, 70.9]);
+  assert.deepEqual(kits.map(k => Number(k.estimatedProfit.toFixed(2))), [7.27, 8.47, 11.37]);
 });
