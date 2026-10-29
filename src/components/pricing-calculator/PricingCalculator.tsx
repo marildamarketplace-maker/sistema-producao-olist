@@ -125,7 +125,7 @@ function ResultCard({ result, isLowest, input, kitOptions }: { result: Marketpla
     <p className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{formatCurrency(result.recommendedPrice)}</p>
     <p className="mt-2 text-xs text-slate-500">Mínimo calculado: {formatCurrency(result.minimumPrice)}</p>
 
-    {!isOwnDomain && <details className="mt-5 border-t border-slate-200 pt-4">
+    <details className="mt-5 border-t border-slate-200 pt-4">
       <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">{metric} publicitário por objetivo</summary>
       <div className="mt-3 space-y-3">
       <p className="text-xs text-slate-600">Receita atribuída ÷ gasto em anúncios, no preço recomendado acima.</p>
@@ -139,9 +139,11 @@ function ResultCard({ result, isLowest, input, kitOptions }: { result: Marketpla
         ? "Shopee: vendas atribuídas até 7 dias após o clique ou 1 dia após a visualização do anúncio."
         : result.marketplaceId === "tiktokShop"
           ? "TikTok: receita total dos pedidos atribuídos ao plano ÷ despesa publicitária. No GMV Max, pode incluir pedidos pagos e orgânicos."
-          : "Mercado Livre: receita atribuída por real investido. Ex.: ROAS 2x = R$ 2 em receita por R$ 1 em anúncios."}</p>
+          : isOwnDomain
+            ? "Domínio Próprio: receita atribuída aos anúncios ÷ investimento em publicidade. Ex.: ROAS 2x = R$ 2 em receita por R$ 1 em anúncios."
+            : "Mercado Livre: receita atribuída por real investido. Ex.: ROAS 2x = R$ 2 em receita por R$ 1 em anúncios."}</p>
       </div>
-    </details>}
+    </details>
     <div className="mt-5 border-t border-slate-200 pt-3">
       <DetailRow label="Custo material" value={formatCurrency(result.materialCost)} />
       <DetailRow label="Gastos extras" value={formatCurrency(result.extraCosts)} />
@@ -244,7 +246,7 @@ export function PricingCalculator() {
     {!calculation && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Preencha valores positivos. A soma de imposto, trabalho e lucro deve permitir o cálculo do preço.</div>}
 
     {calculation && <>
-      <p className="text-sm text-slate-600">ROAS (Shopee e Mercado Livre) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
+      <p className="text-sm text-slate-600">ROAS (Shopee, Mercado Livre e Domínio Próprio) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
       <div className="grid gap-5 xl:grid-cols-2">
         {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} kitOptions={kitForms[result.marketplaceId]} input={Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as PricingInput} isLowest={result.recommendedPrice === lowestPrice} />)}
       </div>
