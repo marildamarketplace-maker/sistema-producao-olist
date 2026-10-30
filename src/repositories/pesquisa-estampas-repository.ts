@@ -174,11 +174,23 @@ export async function pesquisarCatalogoEstampas(
       )::DOUBLE PRECISION`
     : Prisma.sql`0::DOUBLE PRECISION`;
   const orderBy = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta));
+  // O JOIN não preserva a ordem da CTE: repita os mesmos critérios na saída.
+  const ordemPagina = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta), true);
 
   // Leituras independentes: não precisam manter uma transação aberta durante
   // a pesquisa, que pode ultrapassar o timeout transacional padrão do Prisma.
+  // A CTE materializada limita IDs/score antes de projetar os metadados pesados.
   const [estampas, totalRows] = await Promise.all([
     prisma.$queryRaw<EstampaPesquisaRow[]>`
+      WITH pagina AS MATERIALIZED (
+        SELECT e.id, ${relevancia} AS relevancia, ${percentual} AS percentual
+        FROM estampas AS e
+        ${lateral}
+        ${where}
+        ${orderBy}
+        LIMIT ${filtros.limite}
+        OFFSET ${filtros.offset}
+      )
       SELECT
         e.id,
         e.codigo,
@@ -224,16 +236,13 @@ export async function pesquisarCatalogoEstampas(
         e.processing_status AS "processingStatus",
         e.processed_at AS "processedAt",
         e.created_at AS "createdAt",
-        ${relevancia} AS relevancia,
-        ${percentual} AS "percentualCorrespondencia",
+        pagina.relevancia AS relevancia,
+        pagina.percentual AS "percentualCorrespondencia",
         ${correspondencia.encontrados} AS "termosEncontrados",
         ${correspondencia.ausentes} AS "termosAusentes"
       FROM estampas AS e
-      ${lateral}
-      ${where}
-      ${orderBy}
-      LIMIT ${filtros.limite}
-      OFFSET ${filtros.offset}
+      INNER JOIN pagina ON pagina.id = e.id
+      ${ordemPagina}
     `,
     prisma.$queryRaw<Array<{ total: bigint; completas: bigint; parciais: bigint }>>`
       SELECT COUNT(*)::BIGINT AS total,
@@ -332,7 +341,7 @@ export async function listarFacetasPesquisaEstampas(status?: StatusPesquisaEstam
   return facetas;
 }
 
-function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: boolean, pesquisaTextual = false) {
+function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: boolean, pesquisaTextual = false, paginaSelecionada = false) {
   if (ordenacao === "CODIGO_ASC") {
     return Prisma.sql`ORDER BY lower(e.codigo) ASC, lower(COALESCE(e.variante, '')) ASC, e.id ASC`;
   }
@@ -340,7 +349,8 @@ function criarOrdenacao(ordenacao: OrdenacaoPesquisaEstampas, possuiConsulta: bo
     return Prisma.sql`ORDER BY lower(e.codigo) DESC, lower(COALESCE(e.variante, '')) DESC, e.id DESC`;
   }
   if (ordenacao === "RELEVANCIA" && possuiConsulta) {
-    return Prisma.sql`ORDER BY aderencia.percentual DESC, relevancia DESC, e.updated_at DESC, e.id DESC`;
+    const percentual = paginaSelecionada ? Prisma.sql`pagina.percentual` : Prisma.sql`aderencia.percentual`;
+    return Prisma.sql`ORDER BY ${percentual} DESC, relevancia DESC, e.updated_at DESC, e.id DESC`;
   }
   if (ordenacao === "RELEVANCIA" && pesquisaTextual) return Prisma.sql`ORDER BY relevancia DESC, e.updated_at DESC, e.id DESC`;
   return Prisma.sql`ORDER BY e.created_at DESC, e.id DESC`;

@@ -96,8 +96,13 @@ function montarMensagemLimitada(cabecalho: string[], itens: string[]) {
 export function criarNotificationFaltaEstoque(
   resultado: ResultadoValidacao,
   executadoEm = new Date(),
-): ConteudoNotification {
-  const totalUnidades = resultado.itens.reduce(
+): ConteudoNotification | null {
+  const itensComFalta = resultado.itens.filter(
+    (item) => Number(item.estoque_atual ?? 0) < Number(item.quantidade_pedidos ?? 0),
+  );
+  if (itensComFalta.length === 0) return null;
+
+  const totalUnidades = itensComFalta.reduce(
     (total, item) => total + item.quantidade_solicitada,
     0,
   );
@@ -107,14 +112,14 @@ export function criarNotificationFaltaEstoque(
     `Executado em: ${formatarDataHoraSaoPaulo(executadoEm)}`,
     "Situações: 0 - Aberta, 3 - Aprovada, 4 - Preparando Envio e 1 - Faturada",
     `Pedidos encontrados: ${resultado.pedidos_encontrados}`,
-    `Itens: ${resultado.itens.length} SKU(s) / ${totalUnidades} unidade(s)`,
+    `Itens: ${itensComFalta.length} SKU(s) / ${totalUnidades} unidade(s)`,
     "",
   ];
   return {
     titulo: "Alerta de estoque Olist",
     mensagem: montarMensagemLimitada(
       cabecalho,
-      resultado.itens.map(formatarItem),
+      itensComFalta.map(formatarItem),
     ),
   };
 }

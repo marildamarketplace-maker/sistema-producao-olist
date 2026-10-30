@@ -1,3 +1,4 @@
+import { normalizarDestinatarioWhatsapp } from "@/lib/whatsapp";
 import type {
   Notification,
   NotificationStatus,
@@ -22,23 +23,12 @@ function validarTexto(valor: string, campo: "titulo" | "mensagem") {
   return valor;
 }
 
-function normalizarNumeroWhatsapp(to: string) {
-  if (!/^[+\d\s().-]+$/.test(to)) {
-    throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
-  }
-  const numero = to.replace(/\D/g, "");
-  if (numero.length < 10 || numero.length > 15) {
-    throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
-  }
-  return numero;
-}
-
 export function normalizarDestinatariosWhatsapp(valor: string): string[] {
   const numeros = valor.split(",").map((numero) => numero.trim()).filter(Boolean);
   if (numeros.length === 0) {
     throw new Error("to deve conter um número de WhatsApp válido com DDI e DDD.");
   }
-  return [...new Set(numeros.map(normalizarNumeroWhatsapp))];
+  return [...new Set(numeros.map(normalizarDestinatarioWhatsapp))];
 }
 
 export function prepararDadosNotification(
@@ -52,7 +42,7 @@ export function prepararDadosNotification(
 
   return {
     tipo,
-    to: tipo === "WHATSAPP" ? normalizarNumeroWhatsapp(input.to) : input.to,
+    to: tipo === "WHATSAPP" ? normalizarDestinatarioWhatsapp(input.to) : input.to,
     titulo: validarTexto(input.titulo, "titulo"),
     mensagem: validarTexto(input.mensagem, "mensagem"),
     data,

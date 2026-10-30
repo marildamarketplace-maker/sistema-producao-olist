@@ -156,9 +156,18 @@ test("categoria compartilha seleção com a contagem em ambos os modos e preserv
       const [lista, contagem] = consultas;
       const selecaoLista = lista.sql.slice(lista.sql.indexOf("FROM estampas AS e")).split("ORDER BY")[0].trim();
       const selecaoContagem = contagem.sql.slice(contagem.sql.indexOf("FROM estampas AS e")).trim();
-      assert.equal(selecaoLista, selecaoContagem);
-      assert.deepEqual(lista.values.slice(-(contagem.values.length + 2), -2), contagem.values);
-      assert.deepEqual(lista.values.slice(-2), [12, 24]);
+      assert.equal(selecaoLista.replace(/\s+/g, " "), selecaoContagem.replace(/\s+/g, " "));
+      const trechoSelecao = lista.text.slice(lista.text.indexOf("FROM estampas AS e")).split("ORDER BY")[0];
+      const trechoContagem = contagem.text.slice(contagem.text.indexOf("FROM estampas AS e"));
+      const parametros = (sql: Prisma.Sql, trecho: string) => [...trecho.matchAll(/\$(\d+)/g)].map((m) => sql.values[Number(m[1]) - 1]);
+      assert.deepEqual(parametros(lista, trechoSelecao), parametros(contagem, trechoContagem));
+      const paginacao = lista.text.match(/LIMIT (\$\d+)\s+OFFSET (\$\d+)/)!;
+      assert.deepEqual(parametros(lista, paginacao[0]), [12, 24]);
+      // O JSON e os detalhes são projetados somente após selecionar a página.
+      const cte = lista.sql.slice(0, lista.sql.indexOf(")\n      SELECT"));
+      assert.match(cte, /WITH pagina AS MATERIALIZED/);
+      assert.doesNotMatch(cte, /ai_metadata|AS "atributosDesign"|e\.descricao/);
+      assert.match(lista.sql, /INNER JOIN pagina ON pagina.id = e.id/);
       assert.doesNotMatch(contagem.sql, /LIMIT|OFFSET|ORDER BY/);
       const ordemEsperada = ordenacao === "CODIGO_ASC"
         ? "ORDER BY lower(e.codigo) ASC, lower(COALESCE(e.variante, '')) ASC, e.id ASC"
@@ -168,6 +177,7 @@ test("categoria compartilha seleção com a contagem em ambos os modos e preserv
             ? "ORDER BY aderencia.percentual DESC, relevancia DESC, e.updated_at DESC, e.id DESC"
             : "ORDER BY e.created_at DESC, e.id DESC";
       assert.ok(lista.sql.includes(ordemEsperada));
+      assert.ok(lista.sql.slice(lista.sql.lastIndexOf("ORDER BY")).includes(ordemEsperada.replace("aderencia.percentual", "pagina.percentual")));
       assert.equal(resultado.pagina, 3);
       assert.equal(resultado.porPagina, 12);
       assert.equal(resultado.ordenacao, ordenacao);

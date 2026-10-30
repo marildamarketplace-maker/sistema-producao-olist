@@ -129,3 +129,30 @@ function restoreEnv(name: string, value: string | undefined) {
 
   process.env[name] = value;
 }
+
+test("envia ID de grupo intacto e rejeita destinatário inválido sem chamar Z-API", async (context) => {
+  const envAnterior = {
+    instanceApi: process.env.ZAPI_INSTANCE_API,
+    clientToken: process.env.ZAPI_CLIENT_TOKEN,
+  };
+  process.env.ZAPI_INSTANCE_API = "https://api.z-api.io/instances/teste/token/teste";
+  process.env.ZAPI_CLIENT_TOKEN = "teste";
+  const chamadas: unknown[] = [];
+  context.mock.method(axios, "post", async (_endpoint: string, data: unknown) => {
+    chamadas.push(data);
+    return { data: { messageId: "grupo-1" }, status: 200 } as AxiosResponse;
+  });
+  const notification: NotificationPendente = {
+    id: "grupo-1", tipo: "WHATSAPP", to: "120363412284116447-group",
+    titulo: "Alerta", mensagem: "Mensagem", data: new Date(), tentativas: 0,
+  };
+  try {
+    await enviarNotificationWhatsapp(notification);
+    assert.deepEqual(chamadas, [{ phone: notification.to, message: "Alerta\n\nMensagem" }]);
+    await assert.rejects(enviarNotificationWhatsapp({ ...notification, to: "123-group-extra" }), /válido/);
+    assert.equal(chamadas.length, 1);
+  } finally {
+    restoreEnv("ZAPI_INSTANCE_API", envAnterior.instanceApi);
+    restoreEnv("ZAPI_CLIENT_TOKEN", envAnterior.clientToken);
+  }
+});

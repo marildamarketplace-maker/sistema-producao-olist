@@ -76,6 +76,7 @@ test("monta alerta com os itens que precisam de nova solicitação", () => {
     new Date("2026-10-03T11:00:00.000Z"),
   );
 
+  assert.ok(notification);
   assert.equal(notification.titulo, "Alerta de estoque Olist");
   assert.match(notification.mensagem, /Executado em: 03\/10\/2026, 08:00:00/);
   assert.match(notification.mensagem, /SKU-A: 7 un\. para nova solicitação/);
@@ -105,8 +106,33 @@ test("limita mensagens extensas e informa quantos itens foram omitidos", () => {
 
   const notification = criarNotificationFaltaEstoque(resultado);
 
+  assert.ok(notification);
   assert.ok(notification.mensagem.length <= 3_500);
   assert.match(notification.mensagem, /e mais \d+ item\(ns\)\./);
+});
+
+test("não gera alerta quando estoque cobre as vendas, mesmo havendo reposição de mínimo", () => {
+  for (const estoque of [10, 12]) {
+    const resultado = criarResultado();
+    resultado.itens[0].estoque_atual = estoque;
+    assert.equal(criarNotificationFaltaEstoque(resultado), null);
+  }
+});
+
+test("não gera alerta sem itens para nova produção", () => {
+  const resultado = criarResultado();
+  resultado.itens = [];
+  assert.equal(criarNotificationFaltaEstoque(resultado), null);
+});
+
+test("alerta misto inclui apenas os SKUs com estoque insuficiente para as vendas", () => {
+  const resultado = criarResultado();
+  resultado.itens.push({ ...resultado.itens[0], sku: "SKU-COBERTO", estoque_atual: 10 });
+  const notification = criarNotificationFaltaEstoque(resultado);
+  assert.ok(notification);
+  assert.match(notification.mensagem, /SKU-A:/);
+  assert.doesNotMatch(notification.mensagem, /SKU-COBERTO/);
+  assert.match(notification.mensagem, /Itens: 1 SKU\(s\) \/ 7 unidade\(s\)/);
 });
 
 test("trata ausência tipada de itens como resultado normal", async () => {

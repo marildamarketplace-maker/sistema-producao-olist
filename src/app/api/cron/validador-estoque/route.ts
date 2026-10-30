@@ -79,12 +79,12 @@ export async function GET(request: NextRequest) {
         }
 
         const { dataLimite, resultado } = execucao;
-        const temFaltaEstoque = resultado.itens.length > 0;
+        const notification = criarNotificationFaltaEstoque(resultado);
 
-        if (temFaltaEstoque) {
+        if (notification) {
           await criarNotification({
             to: whatsapp,
-            ...criarNotificationFaltaEstoque(resultado),
+            ...notification,
           });
         }
 
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
           dataLimite,
           pedidosEncontrados: resultado.pedidos_encontrados,
           itensNovaSolicitacao: resultado.itens.length,
-          notificacaoCriada: temFaltaEstoque,
+          notificacaoCriada: notification !== null,
         });
       } catch (error) {
         console.error("[olist-api] Falha no job VALIDADOR_ESTOQUE.", {

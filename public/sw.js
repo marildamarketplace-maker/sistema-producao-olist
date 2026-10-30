@@ -1,8 +1,9 @@
-const CACHE_NAME = "erp-shop-v2";
+const CACHE_NAME = "mts-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
   "/favicon.png",
+  "/brand/mts.png",
   "/apple-touch-icon.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",

@@ -1,4 +1,5 @@
 import axios, { AxiosResponse } from "axios";
+import { normalizarDestinatarioWhatsapp } from "@/lib/whatsapp";
 
 type EnviarMensagemZApiInput = {
   telefone: string;
@@ -14,11 +15,7 @@ type EnviarMensagemZApiResponse = {
 export async function enviarMensagemZApi(input: EnviarMensagemZApiInput) {
   const instanceApi = getRequiredEnv("ZAPI_INSTANCE_API").replace(/\/+$/, "");
   const clientToken = getRequiredEnv("ZAPI_CLIENT_TOKEN");
-  const telefone = input.telefone.replace(/\D/g, "");
-
-  if (telefone.length < 10) {
-    throw new Error(`Telefone inválido para envio Z-API: ${input.telefone}`);
-  }
+  const telefone = normalizarDestinatarioWhatsapp(input.telefone);
 
   const endpoint = instanceApi.endsWith("/send-text")
     ? instanceApi

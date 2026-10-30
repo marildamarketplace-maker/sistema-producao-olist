@@ -127,3 +127,26 @@ test("rejeita dados obrigatórios inválidos antes de acessar o banco", () => {
     /data deve ser uma data válida/,
   );
 });
+
+test("preserva grupos e deduplica lista mista antes de persistir", async () => {
+  const grupo = "120363412284116447-group";
+  const recebidos: string[] = [];
+  await criarNotification({
+    to: ` ${grupo},+55 (11) 99999-9999,${grupo},5511999999999`,
+    titulo: "Alerta", mensagem: "Mensagem",
+  }, async (dados) => {
+    recebidos.push(dados.to);
+    return notificationPersistida(dados);
+  });
+  assert.deepEqual(recebidos, [grupo, "5511999999999"]);
+  assert.deepEqual(normalizarDestinatariosWhatsapp("5511999999999-1234567890-group"),
+    ["5511999999999-1234567890-group"]);
+});
+
+test("rejeita grupos malformados antes de persistir qualquer destinatário", async () => {
+  for (const grupo of ["-group", "abc-group", "123-group-extra", "123@g.us", "123 group", "123--456-group"]) {
+    await assert.rejects(criarNotification({
+      to: `5511999999999,${grupo}`, titulo: "Alerta", mensagem: "Mensagem",
+    }, async () => { assert.fail("não deve persistir destinatários inválidos"); }), /válido/);
+  }
+});

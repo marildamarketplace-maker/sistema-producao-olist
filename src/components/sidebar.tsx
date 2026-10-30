@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AppBrand } from "@/components/app-brand";
 import { usePathname } from "next/navigation";
 import { Menu, LogOut, X, ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -57,7 +58,7 @@ export function Sidebar() {
         title="Página inicial"
         className="mb-5 min-h-11 shrink-0 rounded-md pr-10 text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 md:pr-0"
       >
-        <h1 className="text-lg font-semibold text-slate-900">ERP Shop</h1>
+        <AppBrand />
         <p className="mt-1 text-xs text-slate-500">
           {nomeAplicativo}
         </p>
@@ -126,7 +127,7 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <Link href="/" title="Página inicial" className="min-h-11 min-w-0 rounded-md text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
-          <h1 className="truncate text-base font-semibold text-slate-900">ERP Shop</h1>
+          <AppBrand />
           <p className="truncate text-xs text-slate-500">
             {nomeAplicativo}
           </p>

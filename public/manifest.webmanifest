@@ -1,6 +1,6 @@
 {
-  "name": "ERP Shop",
-  "short_name": "ERP Shop",
+  "name": "MTS — MT Serviços",
+  "short_name": "MTS",
   "description": "ERP para controle de produção, estoque, fornecedores e integração Olist.",
   "start_url": "/",
   "scope": "/",

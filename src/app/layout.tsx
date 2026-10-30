@@ -7,14 +7,14 @@ import { PwaRegister } from "@/components/pwa-register";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "ERP Shop",
+  title: "MTS — MT Serviços",
   description: "ERP para controle de produção, estoque, fornecedores e integração Olist",
-  applicationName: "ERP Shop",
+  applicationName: "MTS — MT Serviços",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ERP Shop",
+    title: "MTS — MT Serviços",
   },
   formatDetection: {
     telephone: false,
