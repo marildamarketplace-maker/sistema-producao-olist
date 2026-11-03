@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 /** Identidade compartilhada entre login e navegação, preservando a logo original. */
-export function AppBrand() {
+export function AppBrand({ nomeAplicativo }: { nomeAplicativo?: string }) {
   return (
     <span className="flex min-w-0 items-center gap-3">
       <Image
@@ -13,7 +13,12 @@ export function AppBrand() {
       />
       <span className="min-w-0">
         <span className="block text-lg font-semibold text-slate-900">MTS</span>
-        <span className="block text-xs text-slate-500">MT Serviços</span>
+        <span className="block whitespace-nowrap text-xs text-slate-500">MT Serviços</span>
+        {nomeAplicativo ? (
+          <span className="mt-1 block break-words text-xs text-slate-500">
+            {nomeAplicativo}
+          </span>
+        ) : null}
       </span>
     </span>
   );

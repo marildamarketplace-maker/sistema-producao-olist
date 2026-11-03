@@ -16,7 +16,7 @@ export function Sidebar() {
   const { isDarkMode, toggleDarkMode } = useTheme();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
-  const nomeAplicativo = usuario?.aplicativo?.nome ?? "Aplicativo";
+  const nomeAplicativo = usuario?.aplicativo?.nome?.trim() || undefined;
 
   useEffect(() => {
     setIsOpen(false);
@@ -58,10 +58,7 @@ export function Sidebar() {
         title="Página inicial"
         className="mb-5 min-h-11 shrink-0 rounded-md pr-10 text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 md:pr-0"
       >
-        <AppBrand />
-        <p className="mt-1 text-xs text-slate-500">
-          {nomeAplicativo}
-        </p>
+        <AppBrand nomeAplicativo={nomeAplicativo} />
       </Link>
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">
         <ul className="space-y-3 pb-3">
@@ -127,10 +124,7 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <Link href="/" title="Página inicial" className="min-h-11 min-w-0 rounded-md text-left transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
-          <AppBrand />
-          <p className="truncate text-xs text-slate-500">
-            {nomeAplicativo}
-          </p>
+          <AppBrand nomeAplicativo={nomeAplicativo} />
         </Link>
         <button
           type="button"
