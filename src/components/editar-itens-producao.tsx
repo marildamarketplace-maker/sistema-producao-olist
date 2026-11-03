@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
+import { tipoCorteDoSku } from "@/lib/producao-tipo-corte";
 import { importarItensProducao } from "@/lib/importar-itens-producao";
 
 type Produto = { id: string; sku: string; imagem_url: string | null };
@@ -104,7 +105,7 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
       <button type="button" disabled={!produtoId} onClick={() => {
         const produto = disponiveis.find((item) => item.id === produtoId);
         if (!produto) return;
-        setLinhas((atuais) => [...atuais, { chave: `novo:${crypto.randomUUID()}`, id: null, produtoId: produto.id, sku: produto.sku, solicitada: "1", produzida: "0" }]); setProdutoId(""); setBusca("");
+        setLinhas((atuais) => [...atuais, { chave: `novo:${crypto.randomUUID()}`, id: null, produtoId: produto.id, sku: produto.sku, solicitada: "1", produzida: "0", tipoCorte: tipoCorteDoSku(produto.sku) }]); setProdutoId(""); setBusca("");
       }} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2 disabled:opacity-50"><Plus className="h-4 w-4" aria-hidden="true" />Adicionar item</button>
     </fieldset>
     {carregandoProdutos && <p role="status" className="text-sm text-slate-600">Carregando produtos...</p>}

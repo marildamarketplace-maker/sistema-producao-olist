@@ -9,6 +9,7 @@ const pedido = "00000000-0000-0000-0000-000000000001";
 const app = "00000000-0000-0000-0000-000000000002";
 const produtoA = "00000000-0000-0000-0000-000000000003";
 const produtoB = "00000000-0000-0000-0000-000000000004";
+const skuLaser = "TP/LENCO-MODA-AFRO-C/LASER-TA/70X70-EST/6907-E";
 const itemId = "00000000-0000-0000-0000-000000000005";
 const item = (): ItemRevisaoProducao => ({ id: itemId, produtoId: produtoA, sku: "SKU-A", imagemUrl: null, quantidadeSolicitada: 50, quantidadeProduzida: 50, tipoCorte: "LASER", observacao: "Preservar observação" });
 const edicao = (quantidadeProduzida = 40) => ({ id: itemId, produtoId: produtoA, quantidadeSolicitada: 50, quantidadeProduzida });
@@ -62,7 +63,7 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
             assert.equal(data.statusItem, rascunho.status); rascunho.itens.push({ ...data, id: produtoB });
           },
         },
-        produto: { findMany: async ({ where }: { where: { aplicativoId: string; ativo: boolean } }) => { assert.equal(where.aplicativoId, app); assert.equal(where.ativo, true); return produtoDisponivel ? [{ id: produtoB, sku: "SKU-B", imagemUrl: null }] : []; } },
+        produto: { findMany: async ({ where }: { where: { aplicativoId: string; ativo: boolean } }) => { assert.equal(where.aplicativoId, app); assert.equal(where.ativo, true); return produtoDisponivel ? [{ id: produtoB, sku: skuLaser, imagemUrl: null }] : []; } },
         movimentacaoEstoque: {
           findMany: async ({ where }: { where: { aplicativoId: string; referenciaId: string; origem: { in: string[] } } }) => {
             assert.equal(where.aplicativoId, app); assert.equal(where.referenciaId, pedido);
@@ -90,6 +91,33 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
     assert.equal(estado.itens[0].observacao, null);
     assert.equal(estado.itens[1].observacao, "Item novo");
   });
+  await t.test("PATCH preserva PADRAO existente ao adicionar SKU C/LASER e permite editar novamente", async () => {
+    reiniciar("pendente");
+    estado.itens[0].tipoCorte = "PADRAO";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia-de-teste";
+    const { supabaseAdmin } = await import("../src/lib/supabase-admin");
+    t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: "usuario-http", email: "teste@example.test" } }, error: null }));
+    const { PATCH } = await import("../src/app/api/solicitacoes-producao/[id]/route");
+    const salvar = async (itens: unknown[]) => PATCH(new Request("https://example.test", {
+      method: "PATCH", headers: { Authorization: "Bearer ficticio", "Content-Type": "application/json" },
+      body: JSON.stringify({ revisao: revisaoItensProducao(estado.status, estado.itens), itens }),
+    }), { params: Promise.resolve({ id: pedido }) });
+    const anterior = structuredClone(estado.itens[0]);
+    assert.equal((await salvar([{ ...edicao(50), tipoCorte: "PADRAO" }, { id: null, produtoId: produtoB, quantidadeSolicitada: 2, quantidadeProduzida: 0 }])).status, 200);
+    assert.deepEqual(estado.itens[0], anterior);
+    assert.equal(estado.itens[1].tipoCorte, "LASER");
+    assert.equal(estado.itens[1].sku, skuLaser);
+    assert.equal((await salvar(estado.itens.map((item) => ({ ...item, quantidadeSolicitada: 3 })))).status, 200);
+    assert.equal(estado.itens[1].quantidadeSolicitada, 3);
+    assert.equal(estado.movimentos.length, 0);
+  });
+  await t.test("novo produto laser respeita escolha explícita de não cortar", async () => {
+    reiniciar("pendente");
+    await editarItensProducao(entrada([edicao(50), { id: null, produtoId: produtoB, quantidadeSolicitada: 2, quantidadeProduzida: 0, tipoCorte: null }]));
+    assert.equal(estado.itens[1].tipoCorte, null);
+    assert.equal(estado.itens[1].sku, skuLaser);
+  });
   await t.test("50 para 40 gera saída de 10 sem apagar a entrada original", async () => {
     reiniciar(); await editarItensProducao(entrada());
     assert.deepEqual(estado.movimentos.map((mov) => [mov.origem, mov.tipoMovimento, mov.quantidade]), [["PRODUCAO", "entrada", 50], ["AJUSTE_PRODUCAO", "saida", 10]]);
@@ -105,8 +133,8 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
   });
   await t.test("substituir o produto estorna o anterior e registra o novo usando SKU do banco", async () => {
     reiniciar(); await editarItensProducao(entrada([{ id: null, produtoId: produtoB, quantidadeSolicitada: 7, quantidadeProduzida: 7 }]));
-    assert.equal(estado.itens.length, 1); assert.equal(estado.itens[0].sku, "SKU-B");
-    assert.deepEqual(saldoMovimentacoesProducao(estado.movimentos).map((saldo) => [saldo.sku, saldo.quantidade]), [["SKU-A", 0], ["SKU-B", 7]]);
+    assert.equal(estado.itens.length, 1); assert.equal(estado.itens[0].sku, skuLaser);
+    assert.deepEqual(saldoMovimentacoesProducao(estado.movimentos).map((saldo) => [saldo.sku, saldo.quantidade]), [["SKU-A", 0], [skuLaser, 7]]);
   });
   await t.test("pendente, em produção e cancelada aceitam correções sem alterar estoque ou status", async () => {
     for (const status of ["pendente", "em_producao", "cancelada"]) {
@@ -157,7 +185,7 @@ test("edições em todos os status são atômicas e ajustam somente o saldo de c
 
 test("valida novos campos opcionais da edição no servidor", () => {
   const revisao = revisaoItensProducao("pendente", [item()]);
-  for (const campos of [{ tipoCorte: "MANUAL" }, { tipoCorte: true }, { observacao: 123 }, { observacao: "x".repeat(5001) }]) {
+  for (const campos of [{ tipoCorte: "MANUAL" }, { tipoCorte: "C/LASER" }, { tipoCorte: "" }, { tipoCorte: true }, { observacao: 123 }, { observacao: "x".repeat(5001) }]) {
     assert.throws(() => normalizarEdicaoItensProducao({ revisao, itens: [{ ...edicao(), ...campos }] }));
   }
   const dados = normalizarEdicaoItensProducao({ revisao, itens: [{ ...edicao(), tipoCorte: "LASER", observacao: "Teste" }] });

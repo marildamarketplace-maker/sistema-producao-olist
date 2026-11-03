@@ -1,3 +1,5 @@
+import { tipoCorteDoSku } from "./producao-tipo-corte";
+
 export type LinhaImportacaoProducao = {
   chave: string; id: string | null; produtoId: string; sku: string;
   solicitada: string; produzida: string; tipoCorte?: string | null; observacao?: string | null;
@@ -52,7 +54,7 @@ export function importarItensProducao(
       if (tipoCorte !== undefined) existente.tipoCorte = tipoCorte;
       if (observacao !== undefined) existente.observacao = observacao;
     }
-    else linhas.push({ chave: `importado:${produto.id}`, id: null, produtoId: produto.id, sku: produto.sku, solicitada, produzida: "0", tipoCorte: tipoCorte ?? null, observacao: observacao ?? null });
+    else linhas.push({ chave: `importado:${produto.id}`, id: null, produtoId: produto.id, sku: produto.sku, solicitada, produzida: "0", tipoCorte: tipoCorte === undefined ? tipoCorteDoSku(produto.sku) : tipoCorte, observacao: observacao ?? null });
   }
   if (linhas.length > 500) throw new Error("A produção pode ter no máximo 500 itens. Nenhum item foi importado.");
   return { linhas, quantidade: importados.length };
