@@ -6,6 +6,7 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
+import { solicitarReconexaoOlist } from "@/lib/reconectar-olist";
 
 const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
 const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
@@ -105,25 +106,21 @@ export default function ConfiguracoesPage() {
 
     setReconnecting(true);
     setMessage(null);
-    const { data: sessaoAtual } = await supabase.auth.getSession();
-    const accessToken = sessaoAtual.session?.access_token;
-    if (!accessToken) {
-      setMessage("Sua sessão expirou. Entre novamente para conectar a Olist.");
+    try {
+      const loginUrl = await solicitarReconexaoOlist(supabase.auth, (token) =>
+        axios.post("/api/olist/reconnect", null, {
+          headers: { Authorization: `Bearer ${token}` },
+          validateStatus: () => true,
+        }),
+      );
+      window.location.href = loginUrl;
+    } catch (error) {
+      setMessage(error instanceof Error && !axios.isAxiosError(error)
+        ? error.message
+        : "Não foi possível reconectar a Olist. Verifique sua conexão e tente novamente.");
+    } finally {
       setReconnecting(false);
-      return;
     }
-    const resp = await axios.post("/api/olist/reconnect", null, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      validateStatus: () => true,
-    });
-    const json = resp.data;
-    if (resp.status < 200 || resp.status >= 300) {
-      setMessage(`Erro ao reconectar Olist: ${json.error ?? "desconhecido"}`);
-      setReconnecting(false);
-      return;
-    }
-
-    window.location.href = json.login_url ?? "/api/olist/login";
   }
 
   function labelStatus(status: string) {

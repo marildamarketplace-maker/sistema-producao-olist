@@ -5,6 +5,9 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 export async function POST(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
+    if (!usuario.podeEditarConfiguracao) {
+      return NextResponse.json({ error: "Sem permissão para reconectar a Olist." }, { status: 403 });
+    }
     const existente = await prisma.integracaoOlistToken.findFirst({
     where: { aplicativoId: usuario.aplicativoId, provider: "olist" }, select: { id: true },
   });
