@@ -46,6 +46,7 @@ async function buscarProducoesPendentes(
       createdAt: true,
       dataEntrega: true,
       prioridadeProducao: true,
+      observacaoGeral: true,
     },
     orderBy: [
       { prioridadeProducao: "desc" },

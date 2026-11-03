@@ -5,7 +5,7 @@ export function AppBrand() {
   return (
     <span className="flex min-w-0 items-center gap-3">
       <Image
-        src="/brand/mts.png"
+        src="/brand/mts-transparent.png"
         alt=""
         width={48}
         height={48}

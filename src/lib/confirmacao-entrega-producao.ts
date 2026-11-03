@@ -5,6 +5,7 @@ export type ProducaoPendenteConfirmacao = {
   createdAt: Date;
   dataEntrega: Date;
   prioridadeProducao: boolean;
+  observacaoGeral?: string | null;
   quantidadeItens: number;
   quantidadeUnidades: number;
 };
@@ -13,12 +14,6 @@ type ConteudoWhatsapp = {
   titulo: string;
   mensagem: string;
 };
-
-const formatadorData = new Intl.DateTimeFormat("pt-BR", {
-  // data_entrega é DATE no Postgres e chega como meia-noite UTC pelo Prisma.
-  // UTC evita exibir o dia anterior no fuso de São Paulo.
-  timeZone: "UTC",
-});
 
 const formatadorDataHora = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
@@ -36,20 +31,13 @@ export function criarAlertaConfirmacaoEntregaProducao(input: {
   agora?: Date;
   urlConfirmacao?: string | null;
 }): ConteudoWhatsapp {
-  const agora = input.agora ?? new Date();
   const { producao } = input;
-  const dias = Math.floor(
-    (agora.getTime() - producao.createdAt.getTime()) / (24 * 60 * 60 * 1_000),
-  );
+  const observacao = producao.observacaoGeral?.trim();
 
   return {
-    titulo: "Confirmação de entrega de produção pendente",
+    titulo: `${producao.prioridadeProducao ? "🚨" : "⏰"} Confirmação de entrega de produção pendente`,
     mensagem: [
-      ...(producao.prioridadeProducao ? ["🚨 *PRODUÇÃO PRIORITÁRIA*"] : []),
-      "Esta entrega de produção está sem confirmação há mais de 24 horas.",
-      "",
-      `Entrega: *${formatadorData.format(producao.dataEntrega)}*`,
-      `Criada há: *${dias} ${dias === 1 ? "dia" : "dias"}*`,
+      ...(observacao ? [observacao] : []),
       `Total: *${producao.quantidadeItens} item(ns) / ${producao.quantidadeUnidades} unidades*`,
       "",
       "Confirme a entrega da produção o quanto antes.",

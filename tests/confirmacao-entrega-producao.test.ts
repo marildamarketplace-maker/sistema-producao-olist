@@ -22,19 +22,20 @@ test("monta um alerta para uma confirmação atrasada", () => {
       createdAt: new Date("2026-10-01T18:00:00.000Z"),
       dataEntrega: new Date("2026-10-06T00:00:00.000Z"),
       prioridadeProducao: true,
+      observacaoGeral: "  Separar por pedido.  ",
       quantidadeItens: 3,
       quantidadeUnidades: 12,
     },
   });
 
-  assert.equal(alerta.titulo, "Confirmação de entrega de produção pendente");
-  assert.match(alerta.mensagem, /mais de 24 horas/);
-  assert.match(alerta.mensagem, /PRODUÇÃO PRIORITÁRIA/);
-  assert.match(alerta.mensagem, /Entrega: \*06\/10\/2026\*/);
-  assert.match(alerta.mensagem, /Criada há: \*3 dias\*/);
-  assert.match(alerta.mensagem, /3 item\(ns\) \/ 12 unidades/);
-  assert.doesNotMatch(alerta.mensagem, /produções/);
-  assert.match(alerta.mensagem, /https:\/\/producao\.example\/confirmar-producao/);
+  assert.equal(alerta.titulo, "🚨 Confirmação de entrega de produção pendente");
+  assert.equal(alerta.mensagem, [
+    "Separar por pedido.",
+    "Total: *3 item(ns) / 12 unidades*",
+    "",
+    "Confirme a entrega da produção o quanto antes.",
+    "https://producao.example/confirmar-producao",
+  ].join("\n"));
 });
 
 test("monta alerta de falha sem expor stack trace", () => {
@@ -48,4 +49,23 @@ test("monta alerta de falha sem expor stack trace", () => {
   assert.match(alerta.mensagem, /Aplicativo: aplicativo-1/);
   assert.match(alerta.mensagem, /Detalhe: Banco indisponível/);
   assert.doesNotMatch(alerta.mensagem, /at .*\.ts:/);
+});
+
+
+test("omite observações vazias e link ausente em produção sem prioridade", () => {
+  for (const observacaoGeral of [undefined, null, "", "   "]) {
+    const alerta = criarAlertaConfirmacaoEntregaProducao({
+      producao: {
+        id: "producao-2",
+        createdAt: new Date("2026-10-01T18:00:00.000Z"),
+        dataEntrega: new Date("2026-10-06T00:00:00.000Z"),
+        prioridadeProducao: false,
+        observacaoGeral,
+        quantidadeItens: 1,
+        quantidadeUnidades: 2,
+      },
+    });
+    assert.equal(alerta.titulo, "⏰ Confirmação de entrega de produção pendente");
+    assert.equal(alerta.mensagem, "Total: *1 item(ns) / 2 unidades*\n\nConfirme a entrega da produção o quanto antes.");
+  }
 });
