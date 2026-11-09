@@ -38,6 +38,9 @@ test("invoca ImageGen em ordem, exige artefato único do thread e valida o WebP"
       assert.ok(opcoes.args.includes("image_generation"));
       assert.match(opcoes.stdin ?? "", /ordem de leitura/);
       assert.match(opcoes.stdin ?? "", /MODELO, TECIDO E ACABAMENTO/);
+      assert.match(opcoes.stdin ?? "", /a ponta corresponde a um canto real/);
+      assert.match(opcoes.stdin ?? "", /Não presuma impressão dupla face/);
+      assert.match(opcoes.stdin ?? "", /Uma faixa que cai na lateral deve permanecer na lateral/);
       assert.match(opcoes.stdin ?? "", /quadrada \(1:1\)/);
       if (artefato) await writeFile(join(pasta, "resultado.png"), artefato);
       return {

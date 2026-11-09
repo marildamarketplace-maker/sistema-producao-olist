@@ -85,24 +85,34 @@ export function montarPromptFilaMockups(referencias: string[], layout: boolean, 
   return `Use exatamente uma chamada à ferramenta nativa image_gen.imagegen em modo de edição. Passe estes arquivos como referenced_image_paths na ordem indicada: ${JSON.stringify(referencias)}.
 Inclua no prompt da ferramenta a atribuição de cada estampa, os requisitos visuais abaixo e os detalhes pertinentes do catálogo e da observação do lote.
 
+OBJETIVO
+Recrie uma fotografia comercial de um produto têxtil com a nova estampa aplicada ao próprio tecido. Trate a imagem do mockup como referência da peça confeccionada e a arte plana como fonte visual do desenho.
+
 REFERÊNCIAS E ATRIBUIÇÃO
 ${atribuicao}
-A arte anexada é a fonte visual da estampa. Use os dados do catálogo para identificar e conferir a arte, inclusive quando houver variantes parecidas. Em divergência de motivo, cor, orientação ou distribuição, siga a imagem da variante anexada. A observação do lote informa características físicas e ajustes visuais solicitados. Aplique apenas o que for pertinente ao produto e compatível com a arte, a geometria do modelo e estas regras. Não deduza composição química, gramatura, medidas ou propriedades do tecido quando ausentes.
+O mockup define forma, dimensões aparentes, pose, câmera, enquadramento, fundo, iluminação e caimento. A arte anexada define os motivos, a variante, as cores e a distribuição do desenho. Em caso de divergência com o catálogo, siga a imagem da variante. Use a observação do lote para características confirmadas do tecido e orientações de aplicação. Preserve as características visíveis da referência quando a observação não especificar material, gramatura, transparência ou acabamento.
 
-LEITURA E FIDELIDADE DA ESTAMPA
-- Identifique a paleta dominante e secundária, a cor de fundo, o contraste, os motivos principais e secundários e os detalhes finos de cada arte. Preserve as relações entre eles, sem recolorir, simplificar, redesenhar ou inventar elementos.
-- Observe se a arte é localizada, corrida, centralizada, em faixas, com moldura ou com barrado. Preserve orientação de leitura, escala relativa, proporção, densidade, espaçamento, margens e posição dos motivos. Em repetição contínua, mantenha o ritmo e as transições. Em arte localizada, preserve a posição e a área de respiro. Não repita um painel localizado para cobrir áreas vazias.
-- Preserve textos, números, letras, símbolos e logotipos presentes e visíveis na arte. Mantenha grafia, direção, contornos e alinhamento. Não imprima no produto códigos, nomes, observações, metadados ou palavras novas.
-- Aplique a arte na superfície em perspectiva. Faça o desenho acompanhar o plano do tecido, as curvas, vincos, sobreposições e quedas laterais. Mantenha motivos ocultos nas áreas ocultas. Não os mova para exibir partes cortadas pelo enquadramento ou pela dobra.
+GEOMETRIA E POSICIONAMENTO DA ESTAMPA
+- Antes da edição, identifique a peça inteira e mapeie o painel imprimível, os cantos, as bainhas, as costuras, a direção do tecido e as áreas cobertas. Determine qual setor da arte estaria visível nessa posição.
+- Aplique cada arte como um desenho contínuo. Preserve proporções, escala relativa, direção de leitura, contraste, fundo, margens e distância entre motivos. A perspectiva e o caimento podem deformar localmente o desenho. Não gire, endireite, espelhe, estique ou mova motivos isolados para fazê-los caber.
+- Em arte localizada, mantenha o painel e suas áreas de respiro. Em estampa corrida, preserve a escala e o ritmo da repetição. Em arte com barrado ou moldura, mantenha cada faixa na borda correspondente e respeite o encontro dos cantos.
+- Faça o desenho acompanhar o volume da peça, incluindo curvas, vincos, dobras e caídas laterais. Oclusões escondem partes do desenho. Não comprima a arte inteira na área visível, nem desloque motivos ocultos para a frente.
+- Preserve a grafia e a orientação de letras, números e símbolos que pertencem à estampa. Não transfira códigos de catálogo, etiquetas da imagem de referência, observações ou marcas-d’água para o tecido. Se uma etiqueta ou um recorte encobrir um trecho necessário, informe a limitação em vez de reconstruir o desenho.
 
 MODELO, TECIDO E ACABAMENTO
-- Preserve câmera, perspectiva, enquadramento, escala e geometria do produto, fundo, pose, costuras, barras, acabamentos e objetos do cenário. Preserve a relação entre bordas e margens da arte e do produto, sem esticar ou comprimir os motivos para preencher espaço.
-- Represente textura, trama, opacidade, acabamento fosco ou brilho, espessura aparente e caimento de acordo com a referência e com o tecido descrito na observação. Integre sombras e reflexos existentes à superfície impressa. A estampa deve parecer parte do tecido, com continuidade visual nas dobras e sem efeito de adesivo plano.
-- Preserve iluminação e sombras do mockup. Compense apenas a variação natural de luz sobre o tecido, mantendo reconhecíveis a paleta e o contraste da arte. Não introduza adereços, marcas-d’água, logos, textos nem alterações de cenário.
+- Faça a estampa acompanhar a trama e o relevo do tecido. Preserve nitidez dos motivos, textura aparente das fibras, sombras das dobras, reflexos e variações naturais de luz. O resultado deve parecer tecido impresso, sem efeito de adesivo plano, relevo artificial ou brilho plástico.
+- Mantenha a espessura aparente, a opacidade e o caimento coerentes com o mockup e com a observação. Preserve bainhas, costuras e acabamentos. Quando o verso estiver visível, siga sua aparência confirmada na referência ou na observação. Não presuma impressão dupla face, verso branco ou transparência.
+- Preserve a forma da peça, a posição dos objetos, a iluminação e o cenário. Substitua a arte anterior nas áreas impressas visíveis, inclusive em pontas e sobreposições, sem pintar áreas lisas, acessórios ou objetos que não façam parte da peça.
 
-ENTREGA
-- Gere uma única imagem comercial quadrada (1:1), com pelo menos 1024 × 1024 px. Se a referência for retangular, complete o quadrado estendendo apenas o fundo. Preserve as proporções do produto e a transparência quando presente no modelo.
-- Antes de concluir, confira a associação entre estampas e quadros, as cores, a orientação de leitura, as margens e o caimento em relação às referências.
+APLICAÇÃO CONFORME A PEÇA MOSTRADA
+- Lenço ou pareô dobrado, enrolado ou com nó: mostre somente o setor correspondente da arte. Se um lenço quadrado estiver dobrado na diagonal, a ponta corresponde a um canto real, com as duas bordas adjacentes coerentes. Preserve a inclinação aparente dos motivos; a dobra oculta parte da arte.
+- Forro de mesa: mantenha a continuidade da estampa entre tampo e queda lateral. Preserve a posição das bordas, dos barrados e dos cantos. Uma faixa que cai na lateral deve permanecer na lateral.
+- Bandeira: acompanhe as ondulações e as oclusões causadas pelo movimento do pano. Preserve a orientação de leitura e o acabamento das bordas; siga a referência para frente e verso.
+- Aplique somente as regras pertinentes à peça mostrada. Quando o tipo de produto não estiver claro, siga a geometria da referência.
+
+ENTREGA E CONFERÊNCIA
+- Gere uma única imagem comercial quadrada (1:1), com pelo menos 1024 × 1024 px. Se a referência for retangular, complete o quadrado estendendo apenas o fundo. Preserve as proporções da peça e a transparência quando presente no modelo.
+- Compare com a arte plana e com o mockup: confira a variante por peça e quadro, paleta, escala, orientação, cantos, margens, dobras, verso e ausência de resíduos da estampa anterior. Preserve a composição do modelo sem acrescentar textos, adereços ou elementos de cenário.
 
 DADOS VISUAIS DO LOTE (JSON)
 ${JSON.stringify(dados, null, 2)}

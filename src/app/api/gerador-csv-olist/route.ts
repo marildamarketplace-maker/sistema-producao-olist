@@ -2,12 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildProdutoMockupPrompt } from "@/lib/mockup-prompt";
-import {
-  deleteGoogleStorageObject,
-  getGoogleStorageObjectInfo,
-  GoogleStorageServiceError,
-  uploadToGoogleStorage,
-} from "@/services/googleStorageService";
+import { getDefaultStorage } from "@/services/defaultStorageService";
+import { GoogleStorageServiceError } from "@/services/googleStorageService";
 import { gerarImagemMockupComEstampa } from "@/services/openaiImageService";
 
 const PREVIEW_IMAGE_MODEL = "gpt-image-1-mini";
@@ -232,7 +228,7 @@ function normalizeMockupQuality(value: unknown) {
 
 async function findExistingMockup(outputPath: string) {
   try {
-    const storageObject = await getGoogleStorageObjectInfo(outputPath);
+    const storageObject = await getDefaultStorage().getObjectInfo(outputPath);
     return storageObject.exists ? storageObject : null;
   } catch (error) {
     if (error instanceof GoogleStorageServiceError && error.message.includes("Variavel de ambiente")) {
@@ -949,7 +945,7 @@ export async function POST(request: Request) {
         }
 
         await prisma.produtoOlist.findUniqueOrThrow({ where: { id: produtoId }, select: { id: true } });
-        const uploadedImage = await uploadToGoogleStorage({
+        const uploadedImage = await getDefaultStorage().upload({
           path: buildTemporaryMockupEstampaPath(produtoId, file.type),
           buffer: Buffer.from(await file.arrayBuffer()),
           contentType: file.type,
@@ -982,9 +978,9 @@ export async function POST(request: Request) {
       }
 
       const outputPath = buildEstampaImagemStoragePath(codigo, index);
-      await deleteGoogleStorageObject(outputPath);
+      await getDefaultStorage().deleteObject(outputPath);
 
-      const uploadedImage = await uploadToGoogleStorage({
+      const uploadedImage = await getDefaultStorage().upload({
         path: outputPath,
         buffer: Buffer.from(await file.arrayBuffer()),
         contentType: file.type || "image/jpeg",
@@ -1138,8 +1134,8 @@ export async function POST(request: Request) {
 
       for (const estampa of estampas) {
         const [imagem0, imagem1] = await Promise.all([
-          getGoogleStorageObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 0)),
-          getGoogleStorageObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 1)),
+          getDefaultStorage().getObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 0)),
+          getDefaultStorage().getObjectInfo(buildEstampaImagemStoragePath(estampa.codigo, 1)),
         ]);
         const data: { imagemUrl?: string; imagemUrl2?: string } = {};
 
@@ -2320,9 +2316,9 @@ export async function POST(request: Request) {
       }
 
       const { outputPath } = await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
-      await deleteGoogleStorageObject(outputPath);
+      await getDefaultStorage().deleteObject(outputPath);
 
-      const uploadedImage = await uploadToGoogleStorage({
+      const uploadedImage = await getDefaultStorage().upload({
         path: outputPath,
         buffer: Buffer.from(base64, "base64"),
         contentType: mimeType,

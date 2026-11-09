@@ -57,6 +57,7 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
   const [layoutAtivo, setLayoutAtivo] = useState("");
   const [individuais, setIndividuais] = useState<Vinculos>({});
   const [layouts, setLayouts] = useState<Vinculos>({});
+  const [buscaModelo, setBuscaModelo] = useState("");
   const [preview, setPreview] = useState<Mockup | null>(null);
   const [erro, setErro] = useState("");
   const [observacao, setObservacao] = useState("");
@@ -145,11 +146,17 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
       <h2 ref={confirmacao} tabIndex={-1} className="font-semibold text-emerald-700 dark:text-emerald-300">Lote salvo na fila</h2>
       <p role="status" className="text-sm">{salvo.quantidade} {salvo.quantidade === 1 ? "saída pendente" : "saídas pendentes"}.</p>
       <p className="break-all text-xs text-slate-600">Lote {salvo.loteId}</p>
+      <Link href={`/controle-midia/estampas/criar-mockups/lote/${salvo.loteId}`} className={secundario}>
+        Ver detalhes da solicitação
+      </Link>
     </section>
   );
 
   const layoutsDisponiveis = mockups.filter(({ tipo }) => tipo === "LAYOUT");
   const individuaisDisponiveis = mockups.filter(({ tipo }) => tipo === "INDIVIDUAL");
+  const modelosFiltrados = individuaisDisponiveis.filter(({ nome }) =>
+    nome.toLocaleLowerCase("pt-BR").includes(buscaModelo.trim().toLocaleLowerCase("pt-BR")));
+  const modelosAtivos = individuais[estampaAtiva] ?? [];
   const idLayout = layoutAtivo || layoutsDisponiveis[0]?.id;
   const layout = layoutsDisponiveis.find(({ id }) => id === idLayout);
 
@@ -173,8 +180,26 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
             </select>
           </label>
           {individuaisDisponiveis.length > 0 && (
+            <label className="block text-sm font-medium">
+              Buscar nos modelos carregados
+              <input type="search" className="input mt-1 min-h-11" value={buscaModelo}
+                onChange={(event) => setBuscaModelo(event.target.value)} />
+            </label>
+          )}
+          {modelosAtivos.length > 0 && estampas.length > 1 && (
+            <button type="button" className={secundario} onClick={() => setIndividuais((atual) =>
+              Object.fromEntries(estampas.map(({ id }) => [
+                id, [...new Set([...(atual[id] ?? []), ...modelosAtivos])],
+              ])))}>
+              Adicionar estes modelos a todas as estampas
+            </button>
+          )}
+          {individuaisDisponiveis.length > 0 && !modelosFiltrados.length && (
+            <p className="text-sm text-slate-600">Nenhum modelo carregado corresponde à busca.</p>
+          )}
+          {modelosFiltrados.length > 0 && (
             <ul className="divide-y divide-slate-200">
-              {individuaisDisponiveis.map((mockup) => (
+              {modelosFiltrados.map((mockup) => (
                 <li key={mockup.id} className="flex flex-wrap items-center justify-between gap-x-3">
                   <label className={`${opcao} flex-1`}>
                     <input type="checkbox" className="h-4 w-4 shrink-0 accent-slate-900"
@@ -222,6 +247,31 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
                   );
                 })}
               </ul>
+              {(layouts[layout.id]?.length ?? 0) > 1 && (
+                <ol aria-label="Ordem de aplicação" className="space-y-2 rounded-md border border-slate-200 p-3">
+                  {layouts[layout.id].map((id, indice) => (
+                    <li key={id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 break-words">{indice + 1}. {codigos.get(id)}</span>
+                      <span className="flex flex-wrap gap-2">
+                        {[-1, 1].map((passo) => {
+                          const destino = indice + passo;
+                          const acao = passo < 0 ? "Subir" : "Descer";
+                          return (
+                            <button key={passo} type="button" className={secundario}
+                              aria-label={`${acao} ${codigos.get(id)}`}
+                              disabled={destino < 0 || destino >= layouts[layout.id].length}
+                              onClick={() => setLayouts((atual) => {
+                                const ordem = [...atual[layout.id]];
+                                [ordem[indice], ordem[destino]] = [ordem[destino], ordem[indice]];
+                                return { ...atual, [layout.id]: ordem };
+                              })}>{acao}</button>
+                          );
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </>
           ) : <p className="text-sm text-slate-600">Nenhum layout nas páginas carregadas.</p>}
         </section>

@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { deleteGoogleStorageObject, uploadToGoogleStorage } from "@/services/googleStorageService";
+import { getDefaultStorage } from "@/services/defaultStorageService";
+import { deleteGoogleStorageObject } from "@/services/googleStorageService";
 
 const TIPOS = new Set(["HOME_PC", "HOME_MOBILE", "CATEGORIA", "STORY", "FEED"]);
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     const extensao = arquivo.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "") || "bin";
     const path = `controle-midia/${tipo.toLowerCase()}/${randomUUID()}.${extensao}`;
-    const uploaded = await uploadToGoogleStorage({ path, buffer: Buffer.from(await arquivo.arrayBuffer()), contentType: arquivo.type });
+    const uploaded = await getDefaultStorage().upload({ path, buffer: Buffer.from(await arquivo.arrayBuffer()), contentType: arquivo.type });
     const midia = await prisma.midia.create({ data: {
       aplicativoId: usuario.aplicativoId, categoriaId, tipo, titulo,
       arquivoUrl: uploaded.publicUrl, storagePath: uploaded.path, contentType: arquivo.type,
