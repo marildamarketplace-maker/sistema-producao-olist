@@ -78,7 +78,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
     proximaSaida: 0, tentativas: 1, resultados: [], observacao: "Oxford fosco",
     trabalhos: [{ mockupId, estampaIds: ["2", "1"] }],
   };
-  const path = "mockups-gerados/aplicativo/usuario/lote/1.webp";
+  const path = () => `mockups-gerados/${reserva.aplicativoId}/usuario/lote/1.webp`;
   let existe = false;
   let perdeuReserva = false;
   let semTrabalho = false;
@@ -87,8 +87,9 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   let falha: Error | null = null;
   const updates: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
   Object.assign(globalThis, { prisma: {
-    $queryRaw: async (sql: TemplateStringsArray, aplicativo: string) => {
-      assert.equal(aplicativo, "aplicativo");
+    $queryRaw: async (sql: TemplateStringsArray, ...parametros: unknown[]) => {
+      assert.equal(parametros.length, 1);
+      assert.match(sql.join(""), /WHERE proxima_saida/);
       assert.match(sql.join(""), /FOR UPDATE SKIP LOCKED/);
       return semTrabalho ? [] : [reserva];
     },
@@ -106,7 +107,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       updates.push(args);
       assert.equal(args.where.reservaId, "reserva");
       assert.equal(args.where.proximaSaida, 0);
-      assert.equal(args.where.aplicativoId, "aplicativo");
+      assert.equal(args.where.aplicativoId, reserva.aplicativoId);
       return { count: perdeuReserva ? 0 : 1 };
     } },
   } });
@@ -120,22 +121,22 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       return Response.json({ iamConfiguration: { publicAccessPrevention: "enforced" } });
     }
     if (url.searchParams.get("alt") === "media") {
-      assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), `mockups/aplicativo/${mockupId}.webp`);
+      assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), `mockups/${reserva.aplicativoId}/${mockupId}.webp`);
       return new Response(new Uint8Array(modelo), { headers: { "Content-Type": "image/webp" } });
     }
     if (init?.method === "POST") {
       uploads++;
       assert.equal(url.searchParams.get("ifGenerationMatch"), "0");
-      assert.equal(url.searchParams.get("name"), path);
+      assert.equal(url.searchParams.get("name"), path());
       return Response.json({});
     }
-    assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), path);
+    assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), path());
     return new Response(null, { status: existe ? 200 : 404 });
   });
 
   const { processarProximaSaidaMockup } = await import("../src/services/processarFilaMockupsService");
   const processar = () => processarProximaSaidaMockup({
-    aplicativoId: "aplicativo", bucket: "privado", gerador: {
+    bucket: "privado", gerador: {
       gerar: async (base, estampas, layout, contexto) => {
         chamadasGerador++;
         assert.deepEqual([base, estampas, layout], [modelo, [b, a], true]);
@@ -157,7 +158,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   assert.equal((await processar())?.status, "COMPLETED");
   assert.equal(updates.at(-1)?.data.status, "COMPLETED");
   assert.deepEqual(updates.at(-1)?.data.resultados, [{
-    status: "COMPLETED", bucket: "privado", path, width: 1024, height: 1024, bytes: modelo.length, threadId,
+    status: "COMPLETED", bucket: "privado", path: path(), width: 1024, height: 1024, bytes: modelo.length, threadId,
   }]);
 
   existe = true;
@@ -179,6 +180,13 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   falha = erroCodexCli("AUTHENTICATION_ERROR", "login expirado");
   await assert.rejects(processar(), /login expirado/);
   assert.deepEqual(updates.at(-1)?.data.tentativas, { decrement: 1 });
+  falha = null;
+  reserva.aplicativoId = "outro-aplicativo";
+  reserva.tentativas = 1;
+  const outraSaida = await processar();
+  assert.equal(outraSaida?.status, "COMPLETED");
+  assert.equal(outraSaida?.aplicativoId, "outro-aplicativo");
+  assert.equal(uploads, 2);
   semTrabalho = true;
   assert.equal(await processar(), null);
 });

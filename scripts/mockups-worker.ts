@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { writeFile } from "node:fs/promises";
 import { setTimeout as esperar } from "node:timers/promises";
-import { z } from "zod";
 import { MAX_ESTAMPAS_LAYOUT } from "@/lib/fila-mockups-contrato";
 import { GeradorMockupCodex, lerArquivoImagem } from "@/services/gerarMockupCodexService";
 import { GoogleStorageServiceError, verificarGoogleStorageBucketPrivado } from "@/services/googleStorageService";
@@ -10,7 +9,7 @@ import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnaly
 const ajuda = `Worker local de mockups
 
 npm run worker:mockups
-  Processa uma saída da fila do aplicativo configurado e encerra.
+  Processa uma saída da fila compartilhada por todos os aplicativos e encerra.
 
 npm run worker:mockups -- --watch
   Processa continuamente, uma saída por vez. Ctrl+C encerra após a saída atual.
@@ -20,7 +19,7 @@ npm run worker:mockups -- --piloto saida.webp modelo.png estampa.png [outras-est
   Até ${MAX_ESTAMPAS_LAYOUT} estampas por layout. Grava um WebP novo sem acessar a fila ou o bucket.
 
 Requer Codex CLI autenticado via ChatGPT (codex login).
-A fila requer POSTGRES_PRISMA_URL, MOCKUPS_APLICATIVO_ID e GOOGLE_CLOUD_MOCKUPS_BUCKET,
+A fila requer POSTGRES_PRISMA_URL e GOOGLE_CLOUD_MOCKUPS_BUCKET,
 além das credenciais Google Cloud e das migrations de fila_mockups aplicadas.
 Resultados de fila ficam no bucket privado, em mockups-gerados/.
 Configurações opcionais: CODEX_CLI_PATH, MOCKUPS_CODEX_MODEL e MOCKUPS_CODEX_TIMEOUT_MS.`;
@@ -49,11 +48,10 @@ async function main(args: string[]) {
 
   const watch = args.length === 1 && args[0] === "--watch";
   if (args.length && !watch) throw new ConfiguracaoWorkerError("Opção inválida. Consulte --help.");
-  const aplicativo = z.uuid().safeParse(process.env.MOCKUPS_APLICATIVO_ID?.trim());
   const bucket = process.env.GOOGLE_CLOUD_MOCKUPS_BUCKET?.trim();
-  if (!aplicativo.success || !bucket || !process.env.POSTGRES_PRISMA_URL
+  if (!bucket || !process.env.POSTGRES_PRISMA_URL
     || !process.env.GOOGLE_CLOUD_CLIENT_EMAIL || !process.env.GOOGLE_CLOUD_PRIVATE_KEY) {
-    throw new ConfiguracaoWorkerError("Configure o aplicativo, o banco e o bucket privado no .env antes de iniciar.");
+    throw new ConfiguracaoWorkerError("Configure o banco e o bucket privado no .env antes de iniciar.");
   }
 
   await gerador.verificarDisponibilidade();
@@ -71,7 +69,7 @@ async function main(args: string[]) {
   try {
     const { processarProximaSaidaMockup } = await import("@/services/processarFilaMockupsService");
     while (!controller.signal.aborted) {
-      const resultado = await processarProximaSaidaMockup({ aplicativoId: aplicativo.data, bucket, gerador });
+      const resultado = await processarProximaSaidaMockup({ bucket, gerador });
       if (resultado) console.info("[mockups-worker]", resultado);
       if (!watch) {
         if (!resultado) console.info("[mockups-worker] Nenhuma saída pronta.");

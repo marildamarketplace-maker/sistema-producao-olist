@@ -25,17 +25,16 @@ export type ReservaMockup = {
   tentativas: number;
 };
 
-export async function reservarSaidaMockup(aplicativoId: string) {
+export async function reservarSaidaMockup() {
   const reservaId = randomUUID();
   const [reserva] = await prisma.$queryRaw<ReservaMockup[]>`
     WITH candidato AS (
       SELECT aplicativo_id, solicitado_por, id
       FROM public.fila_mockups
-      WHERE aplicativo_id = ${aplicativoId}::uuid
-        AND proxima_saida < jsonb_array_length(trabalhos)
+      WHERE proxima_saida < jsonb_array_length(trabalhos)
         AND ((status = 'PENDING' AND proxima_tentativa_em <= now())
           OR (status = 'PROCESSING' AND reserva_ate <= now()))
-      ORDER BY created_at, id, solicitado_por
+      ORDER BY created_at, id, solicitado_por, aplicativo_id
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )

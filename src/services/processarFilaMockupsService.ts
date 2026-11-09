@@ -17,12 +17,12 @@ const MAX_TENTATIVAS = 3;
 const TIMEOUT_STORAGE = 45_000;
 const MAX_MODELO_BYTES = 32 * 1024 * 1024;
 
-type Opcoes = { aplicativoId: string; bucket: string; gerador: Pick<GeradorMockupCodex, "gerar"> };
+type Opcoes = { bucket: string; gerador: Pick<GeradorMockupCodex, "gerar"> };
 
 export async function processarProximaSaidaMockup(opcoes: Opcoes) {
-  const reserva = await reservarSaidaMockup(opcoes.aplicativoId);
+  const reserva = await reservarSaidaMockup();
   if (!reserva) return null;
-  const dados = { loteId: reserva.id, saida: reserva.proximaSaida + 1 };
+  const dados = { aplicativoId: reserva.aplicativoId, loteId: reserva.id, saida: reserva.proximaSaida + 1 };
   let resultado: SaidaMockup;
   try {
     resultado = await gerarSaida(opcoes, reserva);
