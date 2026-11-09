@@ -55,7 +55,7 @@ test("pesquisa geral pode ser obrigatória; só preferências selecionadas pontu
   const resultado = await pesquisarEstampasCatalogo({ consulta: "cereja amarela -texto", estilo: "romântico", preferencias: ["estilo"] });
   assert.deepEqual(resultado.cobertura?.termos, ["Estilo: romântico"]);
   assert.deepEqual(resultado.cobertura?.excluidos, ["texto"]);
-  assert.match(consultas[0].sql, /AND NOT/);
+  assert.match(consultas[0].sql, /IS NOT TRUE/);
   assert.ok(consultas[0].values.includes('"cereja"'));
   assert.ok(consultas[0].values.includes('"amarelo" OR "amarela" OR "amarelos" OR "amarelas"'));
 });
@@ -78,7 +78,7 @@ test("código digitado no texto e exclusões são obrigatórios mesmo com prefer
   for (const sql of consultas) {
     assert.match(sql.sql, /lower\(e.codigo\) = lower/);
     assert.match(sql.sql, /e.variante/);
-    assert.match(sql.sql, /AND NOT/);
+    assert.match(sql.sql, /IS NOT TRUE/);
     assert.ok(sql.values.includes("MV27849"));
   }
 });

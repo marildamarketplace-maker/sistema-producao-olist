@@ -7,7 +7,7 @@ export function correspondenciaEstampasSql(consulta: string, adicionais: Array<{
   const plano = planejarConsultaEstampas(consulta);
   const obrigatorios = plano.positivos.filter((item) => item.codigo || !consultaPreferencia).map(testeCriterio);
   if (!plano.positivos.filter((item) => !item.codigo && consultaPreferencia).length && !adicionais.length) return {
-    plano, obrigatorios, criterios: [], candidatos: Prisma.empty, exclusoes: plano.excluidos.map((item) => Prisma.sql`NOT (${testeCriterio(item)})`), percentual: Prisma.sql`NULL::DOUBLE PRECISION`,
+    plano, obrigatorios, criterios: [], candidatos: Prisma.empty, exclusoes: plano.excluidos.map((item) => Prisma.sql`(${testeCriterio(item)}) IS NOT TRUE`), percentual: Prisma.sql`NULL::DOUBLE PRECISION`,
     encontrados: Prisma.sql`ARRAY[]::TEXT[]`, ausentes: Prisma.sql`ARRAY[]::TEXT[]`, termos: Prisma.sql`NULL::tsquery`,
   };
   const criterios = [...plano.positivos.filter((item) => !item.codigo && consultaPreferencia).map((item) => ({ item, teste: testeCriterio(item) })), ...adicionais.map(({ termo, teste }) => ({ item: { termo, consulta: "", codigo: null }, teste }))];
@@ -21,7 +21,7 @@ export function correspondenciaEstampasSql(consulta: string, adicionais: Array<{
     plano, obrigatorios, criterios: criterios.map(({ item }) => item.termo),
     termos,
     candidatos: Prisma.sql`(${Prisma.join(candidatos, " OR ")})`,
-    exclusoes: plano.excluidos.map((item) => Prisma.sql`NOT (${testeCriterio(item)})`),
+    exclusoes: plano.excluidos.map((item) => Prisma.sql`(${testeCriterio(item)}) IS NOT TRUE`),
     percentual: Prisma.sql`ROUND(${quantidade} * 100.0 / ${criterios.length}, 1)::DOUBLE PRECISION`,
     encontrados: Prisma.sql`array_remove(ARRAY[${Prisma.join(criterios.map(({ item, teste }) => Prisma.sql`CASE WHEN ${teste} THEN ${item.termo} ELSE NULL END`))}]::TEXT[], NULL)`,
     ausentes: Prisma.sql`array_remove(ARRAY[${Prisma.join(criterios.map(({ item, teste }) => Prisma.sql`CASE WHEN ${teste} THEN NULL ELSE ${item.termo} END`))}]::TEXT[], NULL)`,

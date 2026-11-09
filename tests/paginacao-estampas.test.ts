@@ -57,8 +57,8 @@ test("SQL limita IDs e pontuações antes de projetar os detalhes, preservando r
   const [lista, contagem] = consultas;
   const [selecao, detalhes] = lista.sql.split(")\n      SELECT");
   assert.match(selecao, /WITH pagina AS MATERIALIZED/);
-  assert.match(selecao, /ts_rank_cd/);
-  assert.match(selecao, /NOT \(/);
+  assert.match(selecao, /ts_rank_cd\(e.search_vector_arquivo,/);
+  assert.match(selecao, /IS NOT TRUE/);
   assert.match(selecao, /ORDER BY aderencia.percentual DESC, relevancia DESC/);
   assert.match(selecao, /LIMIT \?\s+OFFSET \?/);
   assert.doesNotMatch(selecao, /ai_metadata|AS "atributosDesign"/);

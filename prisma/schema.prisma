@@ -766,10 +766,12 @@ model EstampaCatalogoIa {
   padroesTexteis        String[]                 @default([]) @map("padroes_texteis")
   confiancaPadraoTextil Float?                   @map("confianca_padrao_textil")
   searchVector          Unsupported("tsvector")? @map("search_vector")
+  searchVectorArquivo   Unsupported("tsvector") @default(dbgenerated("estampas_gerar_vetor_arquivo(original_filename, original_relative_path, storage_key)")) @map("search_vector_arquivo")
   jobs                  EstampaJob[]
 
   @@unique([codigo, variante, arquivoId], map: "estampas_codigo_variante_arquivo_unique")
   @@index([searchVector], map: "idx_estampas_search_vector_gin", type: Gin)
+  @@index([searchVectorArquivo], map: "idx_estampas_search_vector_arquivo_gin", type: Gin)
   @@index([aiProcessedHash])
   @@index([categorias], map: "estampas_categorias_gin", type: Gin)
   @@index([publicosSugeridos], map: "estampas_publicos_sugeridos_gin", type: Gin)
