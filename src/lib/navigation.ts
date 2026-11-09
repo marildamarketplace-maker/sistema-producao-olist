@@ -129,6 +129,11 @@ export const menuItems: MenuItem[] = [
     label: "Controle de mídia",
     items: [
       {
+        label: "Mockups",
+        href: "/controle-midia/mockups",
+        permissions: ["podeVisualizarCategoriasMidia"],
+      },
+      {
         label: "Produtos",
         href: "/controle-midia/produtos",
         permissions: ["podeVisualizarCategoriasMidia"],

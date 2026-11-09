@@ -14,6 +14,7 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node --import tsx --test tests/**/*.test.ts",
+    "worker:mockups": "node --import tsx scripts/mockups-worker.ts",
     "worker:estampas": "tsx scripts/estampas-worker.ts",
     "batch:estampas": "tsx scripts/estampas-batch.ts"
   },

@@ -19,8 +19,11 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { useSelecaoEstampasMockups } from "@/hooks/use-selecao-estampas-mockups";
+import { MAX_ESTAMPAS_MOCKUPS } from "@/lib/fila-mockups-contrato";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -67,7 +70,12 @@ const FACETAS_VAZIAS: Facetas = {
 };
 
 export function PesquisaEstampasClient() {
-  const { session } = useAuth();
+  const { session, usuario } = useAuth();
+  const podeCriarMockups = Boolean(usuario?.podeEditarEstampas);
+  const { itens: estampasMockup, pronto: selecaoPronta, salvarSelecao } = useSelecaoEstampasMockups(
+    usuario?.podeEditarEstampas ? `${usuario.aplicativo_id}:${usuario.id}` : null,
+  );
+  const [erroSelecao, setErroSelecao] = useState("");
   const router = useRouter();
   const pathname = usePathname();
   const parametrosUrl = useSearchParams();
@@ -287,6 +295,15 @@ export function PesquisaEstampasClient() {
     }
   }
 
+  function alternarEstampaMockup(estampa: EstampaPesquisaCatalogo) {
+    const selecionada = estampasMockup.some(({ id }) => id === estampa.id);
+    const selecao = selecionada
+      ? estampasMockup.filter(({ id }) => id !== estampa.id)
+      : [...estampasMockup, { id: estampa.id, codigo: codigoCompleto(estampa) }];
+    if (selecao.length > MAX_ESTAMPAS_MOCKUPS) return;
+    setErroSelecao(salvarSelecao(selecao) ? "" : "Permita o armazenamento da aba para abrir a configuração.");
+  }
+
   const totalFiltrosAvancados = contarFiltrosAvancados(form);
 
   return (
@@ -295,6 +312,29 @@ export function PesquisaEstampasClient() {
         title="Pesquisa de estampas"
         description="Encontre estampas por motivos, cores, estilo e composição. Combine critérios e compartilhe a pesquisa por link."
       />
+
+      {podeCriarMockups && (
+        <section aria-label="Seleção para mockups" className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <p role="status" className="text-sm font-medium text-slate-700">
+            {estampasMockup.length} de {MAX_ESTAMPAS_MOCKUPS} estampas selecionadas
+          </p>
+          {erroSelecao && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erroSelecao}</p>}
+          <div className="flex flex-wrap gap-2">
+            {estampasMockup.length > 0 && (
+              <button type="button" onClick={() => { salvarSelecao([]); setErroSelecao(""); }}
+                className="min-h-11 rounded-md border border-slate-300 px-4 text-sm font-medium hover:bg-slate-100">
+                Limpar seleção
+              </button>
+            )}
+            {estampasMockup.length > 0 && !erroSelecao && (
+              <Link href={`/controle-midia/estampas/criar-mockups${queryAtual ? `?${queryAtual}` : ""}`}
+                className="inline-flex min-h-11 items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+                Criar mockups
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       <form onSubmit={pesquisar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:space-y-5 sm:p-5">
         <label className="block">
@@ -438,6 +478,11 @@ export function PesquisaEstampasClient() {
             estampa={estampa}
             onAmpliarImagem={() => setImagemAmpliada(estampa)}
             onDetalhes={() => setSelecionada(estampa)}
+            selecaoMockup={podeCriarMockups && selecaoPronta ? {
+              marcada: estampasMockup.some(({ id }) => id === estampa.id),
+              limite: estampasMockup.length >= MAX_ESTAMPAS_MOCKUPS,
+              alternar: () => alternarEstampaMockup(estampa),
+            } : undefined}
           />
         ))}
       </section>
@@ -625,10 +670,12 @@ function EstampaCard({
   estampa,
   onAmpliarImagem,
   onDetalhes,
+  selecaoMockup,
 }: {
   estampa: EstampaPesquisaCatalogo;
   onAmpliarImagem: () => void;
   onDetalhes: () => void;
+  selecaoMockup?: { marcada: boolean; limite: boolean; alternar: () => void };
 }) {
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -662,7 +709,15 @@ function EstampaCard({
       </span>}
       </div>
       </div>
-      <div className="p-3">
+      <div className="space-y-2 p-3">
+        {selecaoMockup && (
+          <label className="flex min-h-11 items-center gap-2 rounded-md border border-slate-300 px-3 text-sm">
+            <input type="checkbox" className="h-4 w-4 shrink-0 accent-slate-900" checked={selecaoMockup.marcada}
+              disabled={selecaoMockup.limite && !selecaoMockup.marcada} onChange={selecaoMockup.alternar}
+              aria-label={`Selecionar estampa ${codigoCompleto(estampa)} para mockups`} />
+            Selecionar para mockups
+          </label>
+        )}
         <button type="button" onClick={onDetalhes} aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" aria-hidden="true" /> Ver detalhes</button>
       </div>
     </article>

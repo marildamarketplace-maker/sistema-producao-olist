@@ -19,6 +19,8 @@ type UploadToGoogleStorageInput = {
   buffer: Buffer;
   contentType: string;
   bucket?: string;
+  somenteNovo?: boolean;
+  signal?: AbortSignal;
 };
 
 export type UploadedGoogleStorageObject = {
@@ -44,34 +46,56 @@ export class GoogleStorageServiceError extends Error {
 }
 
 // Evidências de pedidos não podem herdar a exposição pública do catálogo.
-export async function verificarGoogleStorageBucketPrivado(bucket: string) {
-  const accessToken = await getGoogleAccessToken();
+export async function verificarGoogleStorageBucketPrivado(bucket: string, signal?: AbortSignal) {
+  const accessToken = await getGoogleAccessToken(signal);
   const response = await fetch(`${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}?fields=iamConfiguration`, {
+    signal,
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new GoogleStorageServiceError("Não foi possível verificar a privacidade do armazenamento de evidências.");
+  if (!response.ok) {
+    throw new GoogleStorageServiceError("Não foi possível verificar a privacidade do armazenamento privado.", { status: response.status });
+  }
   const metadata = await response.json() as { iamConfiguration?: { publicAccessPrevention?: string } };
   if (metadata.iamConfiguration?.publicAccessPrevention !== "enforced") {
-    throw new GoogleStorageServiceError("O bucket de evidências deve ter prevenção de acesso público ativada.");
+    throw new GoogleStorageServiceError("O bucket privado deve ter prevenção de acesso público ativada.", { status: 403 });
   }
 }
 
-export async function lerGoogleStorageImagemPrivada(bucket: string, path: string) {
+export async function lerGoogleStorageImagemPrivada(bucket: string, path: string, contentType = "image/jpeg", signal?: AbortSignal) {
   const objectPath = normalizeObjectPath(path);
-  const accessToken = await getGoogleAccessToken();
+  const accessToken = await getGoogleAccessToken(signal);
   const response = await fetch(`${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`, {
+    signal,
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
   if (!response.ok || !response.body) {
-    throw new GoogleStorageServiceError("Não foi possível carregar a foto de evidência.", { status: response.status });
+    throw new GoogleStorageServiceError("Não foi possível carregar a imagem privada.", { status: response.status });
   }
-  // Evidências são JPEG normalizados pelo backend; nunca repassar conteúdo arbitrário como HTML.
-  if (response.headers.get("content-type")?.split(";")[0].trim() !== "image/jpeg") {
+  // Só repasse o tipo de imagem normalizado pelo backend.
+  if (response.headers.get("content-type")?.split(";")[0].trim() !== contentType) {
     await response.body.cancel();
-    throw new GoogleStorageServiceError("Formato de evidência inválido.");
+    throw new GoogleStorageServiceError("Formato de imagem inválido.");
   }
   return response.body;
+}
+
+export async function listarGoogleStorageObjetos(bucket: string, prefix: string, pageToken?: string) {
+  const accessToken = await getGoogleAccessToken();
+  const query = new URLSearchParams({
+    prefix,
+    maxResults: "24",
+    fields: "items(name),nextPageToken",
+  });
+  if (pageToken) query.set("pageToken", pageToken);
+  const response = await fetch(`${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}/o?${query}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new GoogleStorageServiceError("Não foi possível listar os arquivos na nuvem.", { status: response.status });
+  }
+  return await response.json() as { items?: { name: string }[]; nextPageToken?: string };
 }
 
 export async function uploadToGoogleStorage(
@@ -79,10 +103,12 @@ export async function uploadToGoogleStorage(
 ): Promise<UploadedGoogleStorageObject> {
   const bucket = input.bucket || getRequiredEnv("GOOGLE_CLOUD_STORAGE_BUCKET");
   const objectPath = normalizeObjectPath(input.path);
-  const accessToken = await getGoogleAccessToken();
-  const uploadUrl = `${GOOGLE_STORAGE_UPLOAD_URL}/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
+  const accessToken = await getGoogleAccessToken(input.signal);
+  const precondition = input.somenteNovo ? "&ifGenerationMatch=0" : "";
+  const uploadUrl = `${GOOGLE_STORAGE_UPLOAD_URL}/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}${precondition}`;
 
   const response = await fetch(uploadUrl, {
+    signal: input.signal,
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -130,15 +156,31 @@ export async function deleteGoogleStorageObject(
   }
 }
 
+export async function existemGoogleStorageObjetos(bucket: string, caminhos: string[]) {
+  const token = await getGoogleAccessToken();
+  for (let inicio = 0; inicio < caminhos.length; inicio += 6) {
+    const objetos = await Promise.all(caminhos.slice(inicio, inicio + 6).map((path) =>
+      consultarGoogleStorageObjeto(bucket, path, token)));
+    if (objetos.some((objeto) => !objeto.exists)) return false;
+  }
+  return true;
+}
+
 export async function getGoogleStorageObjectInfo(
   path: string,
   bucket = getRequiredEnv("GOOGLE_CLOUD_STORAGE_BUCKET"),
+  signal?: AbortSignal,
 ): Promise<GoogleStorageObjectInfo> {
+  return consultarGoogleStorageObjeto(bucket, path, await getGoogleAccessToken(signal), signal);
+}
+
+async function consultarGoogleStorageObjeto(bucket: string, path: string, accessToken: string, signal?: AbortSignal): Promise<GoogleStorageObjectInfo> {
   const objectPath = normalizeObjectPath(path);
-  const accessToken = await getGoogleAccessToken();
   const url = `${GOOGLE_STORAGE_API_URL}/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`;
   const response = await fetch(url, {
     method: "GET",
+    signal,
+    cache: "no-store",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
@@ -158,6 +200,7 @@ export async function getGoogleStorageObjectInfo(
     });
   }
 
+  await response.body?.cancel();
   return {
     bucket,
     path: objectPath,
@@ -166,7 +209,7 @@ export async function getGoogleStorageObjectInfo(
   };
 }
 
-async function getGoogleAccessToken() {
+async function getGoogleAccessToken(signal?: AbortSignal) {
   const assertion = buildServiceAccountJwt();
   const body = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -174,6 +217,7 @@ async function getGoogleAccessToken() {
   });
 
   const response = await fetch(GOOGLE_TOKEN_URL, {
+    signal,
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
