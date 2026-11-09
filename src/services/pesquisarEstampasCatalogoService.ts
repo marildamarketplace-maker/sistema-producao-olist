@@ -5,10 +5,12 @@ import { FILTROS_DESIGN_PESQUISA, normalizarFiltroDesign, normalizarDesignPesqui
 import {
   listarFacetasPesquisaEstampas,
   ORDENACOES_PESQUISA_ESTAMPAS,
-  pesquisarCatalogoEstampas,
+  listarPaginaCatalogoEstampas,
+  contarCatalogoEstampas,
   STATUS_PESQUISA_ESTAMPAS,
   type FacetasPesquisaEstampas,
   type FiltrosPesquisaEstampas,
+  type FiltrosSelecaoEstampas,
   type OrdenacaoPesquisaEstampas,
   type StatusPesquisaEstampas,
 } from "@/repositories/pesquisa-estampas-repository";
@@ -170,7 +172,7 @@ export async function pesquisarEstampasCatalogo(
   const ordenacao = validarOrdenacao(
     entrada.ordenacao ?? (consulta || preferencias.some((campo) => campo !== "consulta" && entrada[campo]) ? "RELEVANCIA" : "RECENTES"),
   );
-  return pesquisarCatalogoComCache({
+  const filtros: FiltrosSelecaoEstampas = {
     ...design,
     modoCores,
     correspondenciaMinima,
@@ -192,19 +194,42 @@ export async function pesquisarEstampasCatalogo(
     suporteAplicacao,
     conteudoImagem,
     status,
-    ordenacao,
-    limite: porPagina,
-    offset: (pagina - 1) * porPagina,
     somenteAtivas: true,
-  }, pagina, porPagina);
+  };
+  const [resultado, totais] = await Promise.all([
+    listarPaginaComCache({ ...filtros, ordenacao, limite: porPagina, offset: (pagina - 1) * porPagina }),
+    contarCatalogoComCache(filtros),
+  ]);
+  return {
+    estampas: resultado.estampas,
+    total: totais.total,
+    cobertura: resultado.criterios.length ? {
+      termos: resultado.criterios, excluidos: resultado.excluidos,
+      minima: correspondenciaMinima, completas: totais.completas, parciais: totais.parciais,
+    } : null,
+    pagina,
+    porPagina,
+    totalPaginas: Math.ceil(totais.total / porPagina),
+    ordenacao,
+  };
 }
 
-// Cacheia somente dados serializáveis do catálogo global, após validar a entrada.
-// A autorização de cada requisição permanece na rota, fora deste cache.
-const pesquisarCatalogoComCache = unstable_cache(
-  async (filtros: FiltrosPesquisaEstampas, pagina: number, porPagina: number): Promise<ResultadoPesquisaEstampasCatalogo> => {
-    const resultado = await pesquisarCatalogoEstampas(filtros);
+// Os dois caches compartilham a política de revalidação do catálogo.
+// A rota autoriza cada requisição antes de acessar o cache.
+const cachePesquisaEstampas = { revalidate: 86_400, tags: ["estampas-pesquisa"] };
+
+const contarCatalogoComCache = unstable_cache(
+  contarCatalogoEstampas,
+  ["pesquisa-estampas", "totais", "v1"],
+  cachePesquisaEstampas,
+);
+
+const listarPaginaComCache = unstable_cache(
+  async (filtros: FiltrosPesquisaEstampas) => {
+    const resultado = await listarPaginaCatalogoEstampas(filtros);
     return {
+      criterios: resultado.criterios,
+      excluidos: resultado.excluidos,
       estampas: resultado.estampas.map(({ atributosDesign, percentualCorrespondencia, termosEncontrados, termosAusentes, ...estampa }) => ({
         ...estampa,
         design: normalizarDesignPesquisa(atributosDesign),
@@ -221,19 +246,10 @@ const pesquisarCatalogoComCache = unstable_cache(
         updatedAt: estampa.updatedAt?.toISOString() ?? null,
         relevancia: Number(estampa.relevancia),
       })),
-      total: resultado.total,
-      cobertura: resultado.criterios.length ? {
-        termos: resultado.criterios, excluidos: resultado.excluidos,
-        minima: filtros.correspondenciaMinima ?? 1, completas: resultado.completas, parciais: resultado.parciais,
-      } : null,
-      pagina,
-      porPagina,
-      totalPaginas: Math.ceil(resultado.total / porPagina),
-      ordenacao: filtros.ordenacao,
     };
   },
-  ["pesquisa-estampas", "resultados", "v1"],
-  { revalidate: 86_400, tags: ["estampas-pesquisa"] },
+  ["pesquisa-estampas", "pagina", "v1"],
+  cachePesquisaEstampas,
 );
 
 export type SugestaoSegmentacaoDetalhada = {

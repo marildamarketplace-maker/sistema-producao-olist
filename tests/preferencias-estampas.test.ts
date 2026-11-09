@@ -148,12 +148,16 @@ test("categoria preferencial mantém cobertura e não altera os outros filtros e
 test("categoria compartilha seleção com a contagem em ambos os modos e preserva todas as ordenações e paginação", async () => {
   const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
   for (const preferencias of [[], ["categoria"]]) {
+    let contagemOriginal: Prisma.Sql | undefined;
     for (const ordenacao of ["RELEVANCIA", "RECENTES", "CODIGO_ASC", "CODIGO_DESC"]) {
       consultas.length = 0;
       const resultado = await pesquisarEstampasCatalogo({
         categoria: "BOTÂNICO", preferencias, ordenacao, pagina: 3, porPagina: 12,
       });
-      const [lista, contagem] = consultas;
+      const [lista, novaContagem] = consultas;
+      assert.equal(consultas.length, contagemOriginal ? 1 : 2);
+      const contagem = contagemOriginal ?? novaContagem;
+      contagemOriginal = contagem;
       const selecaoLista = lista.sql.slice(lista.sql.indexOf("FROM estampas AS e")).split("ORDER BY")[0].trim();
       const selecaoContagem = contagem.sql.slice(contagem.sql.indexOf("FROM estampas AS e")).trim();
       assert.equal(selecaoLista.replace(/\s+/g, " "), selecaoContagem.replace(/\s+/g, " "));

@@ -66,6 +66,7 @@ test("filtros SQL exigem estado identificado e usam parâmetros, incluindo a con
 const consultas: Prisma.Sql[] = [];
 let permitir = true;
 let resultadoEstampas: Record<string, unknown>[] = [];
+let totaisEstampas = { total: BigInt(0), completas: BigInt(0), parciais: BigInt(0) };
 // Executa unstable_cache real com armazenamento isolado, sem servidor Next.
 type EntradaCache = { value: { kind: string; data: { body: string }; revalidate: number }; gravadoEm: number };
 const entradasCache = new Map<string, EntradaCache>();
@@ -84,6 +85,7 @@ beforeEach(() => {
   entradasCache.clear();
   agoraCache = 0;
   resultadoEstampas = [];
+  totaisEstampas = { total: BigInt(0), completas: BigInt(0), parciais: BigInt(0) };
 });
 Object.assign(globalThis, { prisma: {
   usuario: {
@@ -93,7 +95,7 @@ Object.assign(globalThis, { prisma: {
   $queryRaw(strings: TemplateStringsArray, ...valores: unknown[]) {
     const sql = Prisma.sql(strings, ...valores);
     consultas.push(sql);
-    return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [{ total: BigInt(0) }] : resultadoEstampas);
+    return Promise.resolve(sql.sql.includes("COUNT(*)::BIGINT") ? [totaisEstampas] : resultadoEstampas);
   },
   $transaction: () => { throw new Error("Pesquisa de leitura não deve abrir transação"); },
 } });
@@ -223,19 +225,49 @@ test("pesquisa cacheia o resultado serializado por 24h e valida antes de ler o c
   assert.equal(consultas.length, 4);
 });
 
-test("pesquisa separa filtros, página, ordenação, status e preferências no cache", async () => {
+test("página seguinte, tamanho e ordenação reaproveitam os totais e mantêm a cobertura", async () => {
+  const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
+  consultas.length = 0;
+  totaisEstampas = { total: BigInt(65), completas: BigInt(20), parciais: BigInt(45) };
+  const filtros = { categoria: "botânico", preferencias: ["categoria", "cores"], cores: ["rosa"] };
+  const inicial = await pesquisarEstampasCatalogo(filtros);
+  assert.deepEqual(inicial.cobertura && [inicial.cobertura.completas, inicial.cobertura.parciais], [20, 45]);
+  const casos = [
+    { pagina: 2, porPagina: 24, ordenacao: "RELEVANCIA" },
+    { pagina: 1, porPagina: 12, ordenacao: "RELEVANCIA" },
+    { pagina: 1, porPagina: 24, ordenacao: "CODIGO_ASC" },
+    { pagina: 1000, porPagina: 24, ordenacao: "RELEVANCIA" },
+  ];
+  for (const paginacao of casos) {
+    const resultado = await pesquisarEstampasCatalogo({ ...filtros, ...paginacao });
+    assert.equal(resultado.total, 65);
+    assert.deepEqual(resultado.cobertura, inicial.cobertura);
+    assert.equal(resultado.pagina, paginacao.pagina);
+    assert.equal(resultado.ordenacao, paginacao.ordenacao);
+    assert.equal(resultado.totalPaginas, Math.ceil(65 / paginacao.porPagina));
+  }
+  assert.equal(consultas.filter(({ sql }) => sql.includes("COUNT(*)::BIGINT")).length, 1);
+  assert.equal(consultas.filter(({ sql }) => sql.includes("WITH pagina AS MATERIALIZED")).length, casos.length + 1);
+});
+
+test("cada seleção tem totais próprios, inclusive status, preferências, mínimo e modo de cores", async () => {
   const { pesquisarEstampasCatalogo } = await import("../src/services/pesquisarEstampasCatalogoService");
   consultas.length = 0;
   const casos = [
-    {}, { categoria: "geométrico" }, { pagina: 2 }, { porPagina: 12 },
-    { ordenacao: "CODIGO_ASC" }, { status: "PENDING" },
+    {}, { categoria: "geométrico" }, { status: "PENDING" }, { status: "TODOS" },
     { preferencias: ["categoria"] }, { preferencias: ["categoria"], correspondenciaMinima: 100 },
     { cores: ["rosa"], modoCores: "QUALQUER" }, { cores: ["rosa"], modoCores: "TODAS" },
+    { consulta: "flor" }, { consulta: "flor -rosa" }, { distribuicao: "corrido" },
   ];
-  for (const entrada of casos) await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada });
-  assert.equal(consultas.length, casos.length * 2);
-  for (const entrada of casos) await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada });
-  assert.equal(consultas.length, casos.length * 2);
+  for (const [i, entrada] of casos.entries()) {
+    totaisEstampas = { total: BigInt(i), completas: BigInt(0), parciais: BigInt(0) };
+    assert.equal((await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada })).total, i);
+  }
+  for (const [i, entrada] of casos.entries()) {
+    assert.equal((await pesquisarEstampasCatalogo({ categoria: "botânico", ...entrada, pagina: 2 })).total, i);
+  }
+  assert.equal(consultas.filter(({ sql }) => sql.includes("COUNT(*)::BIGINT")).length, casos.length);
+  assert.equal(consultas.filter(({ sql }) => sql.includes("WITH pagina AS MATERIALIZED")).length, casos.length * 2);
 });
 
 test("pesquisa não cacheia falha de leitura", async (t) => {

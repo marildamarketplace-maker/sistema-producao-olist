@@ -34,7 +34,7 @@ export const STATUS_PESQUISA_ESTAMPAS = [
 export type StatusPesquisaEstampas =
   (typeof STATUS_PESQUISA_ESTAMPAS)[number];
 
-export type FiltrosPesquisaEstampas = FiltrosDesignPesquisa & {
+export type FiltrosSelecaoEstampas = FiltrosDesignPesquisa & {
   modoCores?: "TODAS" | "QUALQUER";
   consulta?: string;
   preferencias?: string[];
@@ -55,10 +55,13 @@ export type FiltrosPesquisaEstampas = FiltrosDesignPesquisa & {
   suporteAplicacao?: SuporteAplicacaoEstampa;
   conteudoImagem?: ConteudoImagemEstampa;
   status?: StatusPesquisaEstampas;
+  somenteAtivas?: boolean;
+};
+
+export type FiltrosPesquisaEstampas = FiltrosSelecaoEstampas & {
   ordenacao: OrdenacaoPesquisaEstampas;
   limite: number;
   offset: number;
-  somenteAtivas?: boolean;
 };
 
 export type EstampaPesquisaRow = {
@@ -121,9 +124,15 @@ export type FacetasPesquisaEstampas = FacetasDesignPesquisa & {
   suportesAplicacao: SuporteAplicacaoEstampa[];
 };
 
-export async function pesquisarCatalogoEstampas(
-  filtros: FiltrosPesquisaEstampas,
-): Promise<{ estampas: EstampaPesquisaRow[]; total: number; completas: number; parciais: number; criterios: string[]; excluidos: string[] }> {
+export async function pesquisarCatalogoEstampas(filtros: FiltrosPesquisaEstampas) {
+  const [pagina, totais] = await Promise.all([
+    listarPaginaCatalogoEstampas(filtros),
+    contarCatalogoEstampas(filtros),
+  ]);
+  return { ...pagina, ...totais };
+}
+
+function prepararSelecaoEstampas(filtros: FiltrosSelecaoEstampas) {
   const consulta = normalizarTexto(filtros.consulta);
   const preferencias = validarPreferenciasPesquisa(filtros.preferencias);
   const obrigatorios = { ...filtros };
@@ -138,9 +147,6 @@ export async function pesquisarCatalogoEstampas(
   }
   const correspondencia = correspondenciaEstampasSql(consulta, adicionais, preferencias.includes("consulta"));
   const possuiPreferencias = correspondencia.criterios.length > 0;
-  const codigoConsulta = extrairCodigoConsulta(consulta);
-  const codigoVarianteConsulta = extrairCodigoVarianteConsulta(consulta);
-  const termos = correspondencia.termos;
   const lateral = possuiPreferencias
     ? Prisma.sql`CROSS JOIN LATERAL (SELECT ${correspondencia.percentual} AS percentual) AS aderencia`
     : Prisma.empty;
@@ -157,6 +163,14 @@ export async function pesquisarCatalogoEstampas(
   const where = condicoes.length > 0
     ? Prisma.sql`WHERE ${Prisma.join(condicoes, " AND ")}`
     : Prisma.empty;
+  return { consulta, correspondencia, possuiPreferencias, lateral, percentual, where };
+}
+
+export async function listarPaginaCatalogoEstampas(filtros: FiltrosPesquisaEstampas) {
+  const { consulta, correspondencia, possuiPreferencias, lateral, percentual, where } = prepararSelecaoEstampas(filtros);
+  const codigoConsulta = extrairCodigoConsulta(consulta);
+  const codigoVarianteConsulta = extrairCodigoVarianteConsulta(consulta);
+  const termos = correspondencia.termos;
   const relevancia = consulta
     ? Prisma.sql`(
         CASE WHEN ${codigoVarianteConsulta !== null}
@@ -176,11 +190,8 @@ export async function pesquisarCatalogoEstampas(
   // O JOIN não preserva a ordem da CTE: repita os mesmos critérios na saída.
   const ordemPagina = criarOrdenacao(filtros.ordenacao, possuiPreferencias, Boolean(consulta), true);
 
-  // Leituras independentes: não precisam manter uma transação aberta durante
-  // a pesquisa, que pode ultrapassar o timeout transacional padrão do Prisma.
-  // A CTE materializada limita IDs/score antes de projetar os metadados pesados.
-  const [estampas, totalRows] = await Promise.all([
-    prisma.$queryRaw<EstampaPesquisaRow[]>`
+  // A CTE limita IDs e pontuações antes de projetar os metadados pesados.
+  const estampas = await prisma.$queryRaw<EstampaPesquisaRow[]>`
       WITH pagina AS MATERIALIZED (
         SELECT e.id, ${relevancia} AS relevancia, ${percentual} AS percentual
         FROM estampas AS e
@@ -242,21 +253,24 @@ export async function pesquisarCatalogoEstampas(
       FROM estampas AS e
       INNER JOIN pagina ON pagina.id = e.id
       ${ordemPagina}
-    `,
-    prisma.$queryRaw<Array<{ total: bigint; completas: bigint; parciais: bigint }>>`
-      SELECT COUNT(*)::BIGINT AS total,
-        COUNT(*) FILTER (WHERE ${percentual} = 100)::BIGINT AS completas,
-        COUNT(*) FILTER (WHERE ${percentual} < 100)::BIGINT AS parciais
-      FROM estampas AS e
-      ${lateral}
-      ${where}
-    `,
-  ]);
+  `;
+  return { estampas, criterios: correspondencia.criterios, excluidos: correspondencia.plano.excluidos.map(({ termo }) => termo) };
+}
 
+export async function contarCatalogoEstampas(filtros: FiltrosSelecaoEstampas) {
+  const { lateral, percentual, where } = prepararSelecaoEstampas(filtros);
+  const [totais] = await prisma.$queryRaw<Array<{ total: bigint; completas: bigint; parciais: bigint }>>`
+    SELECT COUNT(*)::BIGINT AS total,
+      COUNT(*) FILTER (WHERE ${percentual} = 100)::BIGINT AS completas,
+      COUNT(*) FILTER (WHERE ${percentual} < 100)::BIGINT AS parciais
+    FROM estampas AS e
+    ${lateral}
+    ${where}
+  `;
   return {
-    criterios: correspondencia.criterios, excluidos: correspondencia.plano.excluidos.map(({ termo }) => termo),
-    estampas, total: Number(totalRows[0]?.total ?? 0),
-    completas: Number(totalRows[0]?.completas ?? 0), parciais: Number(totalRows[0]?.parciais ?? 0),
+    total: Number(totais?.total ?? 0),
+    completas: Number(totais?.completas ?? 0),
+    parciais: Number(totais?.parciais ?? 0),
   };
 }
 
