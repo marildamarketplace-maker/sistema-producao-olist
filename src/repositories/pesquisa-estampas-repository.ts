@@ -1,6 +1,6 @@
 import { CRITERIOS_FLEXIVEIS_ESTAMPAS, validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
 import type { FacetasDesignPesquisa, FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
-import { filtrosDesignEstampasSql, confiancaAplicacaoSql } from "@/repositories/filtros-design-estampas-sql";
+import { filtrosDesignEstampasSql } from "@/repositories/filtros-design-estampas-sql";
 import { Prisma } from "@prisma/client";
 import {
   CONTEUDOS_IMAGEM_ESTAMPA,
@@ -262,47 +262,10 @@ export async function pesquisarCatalogoEstampas(
 
 export async function listarFacetasPesquisaEstampas(status?: StatusPesquisaEstampas): Promise<FacetasPesquisaEstampas> {
   const rows = await prisma.$queryRaw<Array<{ tipo: string; valor: string }>>`
-    WITH base AS MATERIALIZED (
-      SELECT * FROM estampas WHERE is_active = TRUE
-      ${status ? Prisma.sql`AND processing_status = ${status}` : Prisma.empty}
-    ), valores AS (
-      SELECT 'temas'::TEXT AS tipo, tema AS valor FROM base
-      UNION ALL SELECT 'cores', unnest(cores) FROM base
-      UNION ALL SELECT 'elementosVisuais', unnest(elementos_visuais) FROM base
-      UNION ALL SELECT 'categorias', unnest(categorias) FROM base
-      UNION ALL SELECT 'ocasioes', unnest(ocasioes) FROM base
-      UNION ALL SELECT 'publicosSugeridos', unnest(publicos_sugeridos) FROM base
-      UNION ALL SELECT 'contextosUso', unnest(contextos_uso) FROM base
-      UNION ALL SELECT 'afinidadesVisuais', unnest(afinidades_visuais) FROM base
-      UNION ALL SELECT 'padroesTexteis', unnest(padroes_texteis) FROM base
-      UNION ALL SELECT 'estilos', estilo FROM base
-      UNION ALL SELECT 'tiposImagem', tipo_imagem FROM base
-      UNION ALL SELECT 'conteudosImagem', unnest(conteudos_imagem) FROM base
-      UNION ALL SELECT 'suportesAplicacao', suporte_aplicacao FROM base
-      UNION ALL SELECT 'distribuicoes', jsonb_array_elements_text(CASE WHEN ai_metadata #>> '{response,composicaoVisual,distribuicao,estado}' = 'IDENTIFICADO' AND jsonb_typeof(ai_metadata #> '{response,composicaoVisual,distribuicao,valores}') = 'array' THEN ai_metadata #> '{response,composicaoVisual,distribuicao,valores}' ELSE '[]'::jsonb END) FROM base
-      UNION ALL SELECT 'orientacoes', jsonb_array_elements_text(CASE WHEN ai_metadata #>> '{response,composicaoVisual,orientacao,estado}' = 'IDENTIFICADO' AND jsonb_typeof(ai_metadata #> '{response,composicaoVisual,orientacao,valores}') = 'array' THEN ai_metadata #> '{response,composicaoVisual,orientacao,valores}' ELSE '[]'::jsonb END) FROM base
-      UNION ALL SELECT 'densidades', jsonb_array_elements_text(CASE WHEN ai_metadata #>> '{response,composicaoVisual,densidade,estado}' = 'IDENTIFICADO' AND jsonb_typeof(ai_metadata #> '{response,composicaoVisual,densidade,valores}') = 'array' THEN ai_metadata #> '{response,composicaoVisual,densidade,valores}' ELSE '[]'::jsonb END) FROM base
-      UNION ALL SELECT 'linguagensVisuais', jsonb_array_elements_text(CASE WHEN ai_metadata #>> '{response,linguagemVisual,estado}' = 'IDENTIFICADO' AND jsonb_typeof(ai_metadata #> '{response,linguagemVisual,valores}') = 'array' THEN ai_metadata #> '{response,linguagemVisual,valores}' ELSE '[]'::jsonb END) FROM base
-      UNION ALL SELECT 'aplicacoesSugeridas', sugestao->>'termo' FROM base
-        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN ai_metadata #>> '{response,aplicacoesSugeridas,estado}' = 'IDENTIFICADO' AND jsonb_typeof(ai_metadata #> '{response,aplicacoesSugeridas,sugestoes}') = 'array' THEN ai_metadata #> '{response,aplicacoesSugeridas,sugestoes}' ELSE '[]'::jsonb END) AS sugestao
-        WHERE ${confiancaAplicacaoSql()}
-    ), distintos AS (
-      SELECT tipo,
-        CASE WHEN tipo IN ('tiposImagem', 'conteudosImagem', 'suportesAplicacao')
-          THEN upper(btrim(valor))
-          ELSE lower(regexp_replace(btrim(valor), '[[:space:]]+', ' ', 'g')) END AS valor,
-        count(*) AS frequencia
-      FROM valores
-      WHERE btrim(COALESCE(valor, '')) <> ''
-      GROUP BY tipo, CASE WHEN tipo IN ('tiposImagem', 'conteudosImagem', 'suportesAplicacao')
-        THEN upper(btrim(valor))
-        ELSE lower(regexp_replace(btrim(valor), '[[:space:]]+', ' ', 'g')) END
-    ), numerados AS (
-      SELECT tipo, valor, frequencia,
-        row_number() OVER (PARTITION BY tipo ORDER BY frequencia DESC, valor) AS posicao
-      FROM distintos
-    )
-    SELECT tipo, valor FROM numerados WHERE posicao <= 300 ORDER BY tipo, frequencia DESC, valor
+    SELECT tipo, valor
+    FROM estampas_interno.facetas_pesquisa
+    WHERE status = ${status ?? "TODOS"}
+    ORDER BY tipo, posicao
   `;
   const facetas: FacetasPesquisaEstampas = {
     estilos: [], distribuicoes: [], orientacoes: [], densidades: [], linguagensVisuais: [], aplicacoesSugeridas: [],

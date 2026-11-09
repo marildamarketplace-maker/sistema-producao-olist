@@ -132,18 +132,17 @@ test("modo TODAS mantém inclusão de todas as cores; TODOS preserva consulta a 
   assert.doesNotMatch(consultas[0].sql, /e.processing_status =/);
 });
 
-test("facetas consideram o status solicitado e preservam os enums de apresentação", async () => {
+test("facetas leem somente o resumo do status solicitado, na ordem pré-calculada", async () => {
   const { obterFacetasPesquisaEstampas } = await import("../src/services/pesquisarEstampasCatalogoService");
   consultas.length = 0;
   await obterFacetasPesquisaEstampas();
   assert.ok(consultas[0].values.includes("COMPLETED"));
-  assert.match(consultas[0].sql, /upper\(btrim\(valor\)\)/);
-  assert.match(consultas[0].sql, /frequencia DESC/);
-  assert.match(consultas[0].sql, /aplicacoesSugeridas/);
-  assert.ok(consultas[0].values.includes(0.7));
+  assert.match(consultas[0].sql, /FROM estampas_interno\.facetas_pesquisa/);
+  assert.match(consultas[0].sql, /ORDER BY tipo, posicao/);
+  assert.doesNotMatch(consultas[0].sql, /unnest|jsonb_array_elements|FROM estampas\s/i);
   consultas.length = 0;
   await obterFacetasPesquisaEstampas("TODOS");
-  assert.doesNotMatch(consultas[0].sql, /AND processing_status =/);
+  assert.deepEqual(consultas[0].values, ["TODOS"]);
 });
 
 test("facetas reutilizam cache por status normalizado e revalidam após 300 segundos", async () => {
@@ -156,7 +155,7 @@ test("facetas reutilizam cache por status normalizado e revalidam após 300 segu
   await obterFacetasPesquisaEstampas("TODOS");
   assert.equal(consultas.length, 3);
   assert.ok(consultas[1].values.includes("PENDING"));
-  assert.doesNotMatch(consultas[2].sql, /AND processing_status =/);
+  assert.deepEqual(consultas[2].values, ["TODOS"]);
   agoraCache = 299_000;
   await obterFacetasPesquisaEstampas();
   assert.equal(consultas.length, 3);

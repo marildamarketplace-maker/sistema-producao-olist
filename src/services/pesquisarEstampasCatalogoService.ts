@@ -299,7 +299,7 @@ function objetoDesconhecido(valor: unknown): Record<string, unknown> {
 const listarFacetasComCache = unstable_cache(
   async (status: StatusPesquisaEstampas | null) =>
     listarFacetasPesquisaEstampas(status ?? undefined),
-  ["pesquisa-estampas", "facetas", "v1"],
+  ["pesquisa-estampas", "facetas", "v2"],
   { revalidate: 300, tags: ["estampas-facetas"] },
 );
 
