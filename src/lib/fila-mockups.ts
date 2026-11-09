@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { interpretarIdMockup } from "./mockups";
 
-import { MAX_ESTAMPAS_LAYOUT, MAX_ESTAMPAS_MOCKUPS, MAX_MODELOS_MOCKUPS, MAX_SAIDAS_MOCKUPS } from "./fila-mockups-contrato";
+import { MAX_ESTAMPAS_LAYOUT, MAX_ESTAMPAS_MOCKUPS, MAX_MODELOS_MOCKUPS, MAX_OBSERVACAO_MOCKUPS, MAX_SAIDAS_MOCKUPS } from "./fila-mockups-contrato";
 
 const estampaId = z.string().regex(/^[1-9]\d{0,18}$/).refine((id) => {
   return id.length < 19 || id <= "9223372036854775807";
@@ -18,6 +18,9 @@ export const trabalhoFilaMockups = z.object({
 
 export const pedidoFilaMockups = z.object({
   loteId: z.uuid(),
+  observacao: z.string().trim().max(MAX_OBSERVACAO_MOCKUPS)
+    .refine((texto) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(texto))
+    .optional(),
   estampas: z.array(estampaId).min(1).max(MAX_ESTAMPAS_MOCKUPS),
   trabalhos: z.array(trabalhoFilaMockups).min(1).max(MAX_SAIDAS_MOCKUPS),
 }).superRefine(({ estampas, trabalhos }, ctx) => {

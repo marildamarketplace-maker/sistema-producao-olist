@@ -1,5 +1,6 @@
 export const MAX_ESTAMPAS_MOCKUPS = 60;
 export const MAX_MODELOS_MOCKUPS = 24;
+export const MAX_OBSERVACAO_MOCKUPS = 1500;
 export const MAX_ESTAMPAS_LAYOUT = 4;
 export const MAX_SAIDAS_MOCKUPS = 500;
 

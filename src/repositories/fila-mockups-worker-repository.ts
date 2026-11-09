@@ -18,6 +18,7 @@ export type ReservaMockup = {
   aplicativoId: string;
   solicitadoPor: string;
   reservaId: string;
+  observacao: string;
   trabalhos: Prisma.JsonArray;
   resultados: Prisma.JsonArray;
   proximaSaida: number;
@@ -44,7 +45,7 @@ export async function reservarSaidaMockup(aplicativoId: string) {
     FROM candidato c
     WHERE (f.aplicativo_id, f.solicitado_por, f.id) = (c.aplicativo_id, c.solicitado_por, c.id)
     RETURNING f.id, f.aplicativo_id AS "aplicativoId", f.solicitado_por AS "solicitadoPor",
-      f.reserva_id AS "reservaId", f.trabalhos, f.resultados,
+      f.reserva_id AS "reservaId", f.trabalhos, f.resultados, f.observacao,
       f.proxima_saida AS "proximaSaida", f.tentativas
   `;
   return reserva ?? null;

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { trabalhoFilaMockups } from "@/lib/fila-mockups";
+import { camposEstampaPrompt, descreverEstampaMockup } from "@/lib/prompt-fila-mockups";
 import { interpretarIdMockup } from "@/lib/mockups";
 import {
   registrarSaidaMockup, reagendarSaidaMockup,
@@ -57,19 +58,22 @@ async function gerarSaida({ bucket, gerador }: Opcoes, reserva: ReservaMockup): 
 
   const estampas = await prisma.estampaCatalogoIa.findMany({
     where: { id: { in: estampaIds.map(BigInt) }, isActive: true },
-    select: { id: true, previewUrl: true },
+    select: camposEstampaPrompt,
   });
   const porId = new Map(estampas.map((item) => [String(item.id), item]));
-  const ordenadas = estampaIds.map((id) => porId.get(id));
-  if (ordenadas.some((item) => !item?.previewUrl)) return { status: "FAILED", erro: "ESTAMPA_SEM_PREVIEW" };
+  const ordenadas = estampaIds.map((id) => porId.get(id)).filter((item) => item !== undefined);
+  if (ordenadas.length !== estampaIds.length || ordenadas.some((item) => !item.previewUrl)) return { status: "FAILED", erro: "ESTAMPA_SEM_PREVIEW" };
 
   const [modelo, ...artes] = await Promise.all([
     carregarModelo(bucket, `mockups/${reserva.aplicativoId}/${mockupId}.webp`),
     ...ordenadas.map(async (item) => (await carregarPreviewEstampa({
-      id: String(item!.id), preview_url: item!.previewUrl,
+      id: String(item.id), preview_url: item.previewUrl,
     })).buffer),
   ]);
-  const gerada = await gerador.gerar(modelo, artes, interpretarIdMockup(mockupId)?.tipo === "LAYOUT");
+  const gerada = await gerador.gerar(modelo, artes, interpretarIdMockup(mockupId)?.tipo === "LAYOUT", {
+    observacao: reserva.observacao,
+    estampas: ordenadas.map(descreverEstampaMockup),
+  });
   try {
     await verificarGoogleStorageBucketPrivado(bucket, AbortSignal.timeout(TIMEOUT_STORAGE));
     await uploadToGoogleStorage({

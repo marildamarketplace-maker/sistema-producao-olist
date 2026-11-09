@@ -11,6 +11,7 @@ import {
   alternarSelecao,
   MAX_ESTAMPAS_LAYOUT,
   MAX_MODELOS_MOCKUPS,
+  MAX_OBSERVACAO_MOCKUPS,
   MAX_SAIDAS_MOCKUPS,
   type EstampaSelecionadaMockup,
   type TrabalhoMockup,
@@ -58,6 +59,7 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
   const [layouts, setLayouts] = useState<Vinculos>({});
   const [preview, setPreview] = useState<Mockup | null>(null);
   const [erro, setErro] = useState("");
+  const [observacao, setObservacao] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState<{ loteId: string; quantidade: number } | null>(null);
   const reenvio = useRef<{ assinatura: string; loteId: string } | null>(null);
@@ -117,7 +119,7 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
 
   async function salvar() {
     if (salvando || salvo || pendentes.length || limiteExcedido) return;
-    const lote = { estampas: estampas.map(({ id }) => id), trabalhos };
+    const lote = { estampas: estampas.map(({ id }) => id), trabalhos, observacao: observacao.trim() };
     const assinatura = JSON.stringify(lote);
     if (reenvio.current?.assinatura !== assinatura) {
       reenvio.current = { assinatura, loteId: crypto.randomUUID() };
@@ -257,6 +259,17 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
             </ul>
           </details>
         )}
+        <div>
+          <label htmlFor="mockups-observacao" className="block text-sm font-medium">Observação do lote (opcional)</label>
+          <textarea id="mockups-observacao" className="input mt-1 resize-y" rows={4} value={observacao}
+            maxLength={MAX_OBSERVACAO_MOCKUPS} disabled={salvando} aria-describedby="mockups-observacao-ajuda"
+            placeholder="Ex.: tecido Oxford 100% poliéster, acabamento fosco e caimento estruturado."
+            onChange={(event) => setObservacao(event.target.value)} />
+          <p id="mockups-observacao-ajuda" className="mt-1 text-xs text-slate-600">
+            Informe tecido, composição, textura, acabamento ou outras orientações visuais. Aplica-se a todas as saídas do lote.
+            <span className="ml-1 tabular-nums">{observacao.length}/{MAX_OBSERVACAO_MOCKUPS}</span>
+          </p>
+        </div>
         {erro && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erro}</p>}
         <button type="button" onClick={salvar} disabled={salvando || pendentes.length > 0 || limiteExcedido}
           className="min-h-11 w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">

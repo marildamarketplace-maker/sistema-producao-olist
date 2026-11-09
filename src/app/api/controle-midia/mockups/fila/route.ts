@@ -38,14 +38,14 @@ export async function POST(request: Request) {
     const pedido = pedidoFilaMockups.safeParse(corpo);
     if (!pedido.success) return erro("Revise os vínculos e os limites do lote antes de salvar.", 400);
 
-    const { loteId, estampas, trabalhos } = pedido.data;
+    const { loteId, estampas, trabalhos, observacao = "" } = pedido.data;
     const chave = { aplicativoId: usuario.aplicativoId, solicitadoPor: autenticado.id, id: loteId };
     const where = { aplicativoId_solicitadoPor_id: chave };
     const verificarLote = async () => {
-      const salvo = await prisma.filaMockup.findUnique({ where, select: { trabalhos: true } });
+      const salvo = await prisma.filaMockup.findUnique({ where, select: { trabalhos: true, observacao: true } });
       if (!salvo) return null;
       const anteriores = salvo.trabalhos;
-      const equivalentes = Array.isArray(anteriores) && anteriores.length === trabalhos.length
+      const equivalentes = salvo.observacao === observacao && Array.isArray(anteriores) && anteriores.length === trabalhos.length
         && trabalhos.every((trabalho, indice) => {
           const anterior = anteriores[indice];
           return anterior && typeof anterior === "object" && !Array.isArray(anterior)
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      await prisma.filaMockup.create({ data: { ...chave, trabalhos } });
+      await prisma.filaMockup.create({ data: { ...chave, trabalhos, observacao } });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const concorrente = await verificarLote();

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import sharp from "sharp";
+import { montarPromptFilaMockups } from "../src/lib/prompt-fila-mockups";
 import { GeradorMockupCodex } from "../src/services/gerarMockupCodexService";
 import { erroCodexCli } from "../src/services/image-analysis/executarCodexCli";
 import type { ReservaMockup } from "../src/repositories/fila-mockups-worker-repository";
@@ -36,6 +37,7 @@ test("invoca ImageGen em ordem, exige artefato único do thread e valida o WebP"
       assert.ok(opcoes.args.includes("read-only"));
       assert.ok(opcoes.args.includes("image_generation"));
       assert.match(opcoes.stdin ?? "", /ordem de leitura/);
+      assert.match(opcoes.stdin ?? "", /MODELO, TECIDO E ACABAMENTO/);
       assert.match(opcoes.stdin ?? "", /quadrada \(1:1\)/);
       if (artefato) await writeFile(join(pasta, "resultado.png"), artefato);
       return {
@@ -73,7 +75,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
 
   const reserva: ReservaMockup = {
     id: "lote", aplicativoId: "aplicativo", solicitadoPor: "usuario", reservaId: "reserva",
-    proximaSaida: 0, tentativas: 1, resultados: [],
+    proximaSaida: 0, tentativas: 1, resultados: [], observacao: "Oxford fosco",
     trabalhos: [{ mockupId, estampaIds: ["2", "1"] }],
   };
   const path = "mockups-gerados/aplicativo/usuario/lote/1.webp";
@@ -91,8 +93,14 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       return semTrabalho ? [] : [reserva];
     },
     estampaCatalogoIa: { findMany: async () => [
-      { id: BigInt(1), previewUrl: "https://storage.googleapis.com/teste/1.png" },
-      { id: BigInt(2), previewUrl: "https://storage.googleapis.com/teste/2.png" },
+      { id: BigInt(1), previewUrl: "https://storage.googleapis.com/teste/1.png", codigo: "MV1", variante: "A", cores: ["vermelho"] },
+      { id: BigInt(2), previewUrl: "https://storage.googleapis.com/teste/2.png", codigo: "MV2", variante: "B",
+        descricao: "Flores azuis com barrado", elementosVisuais: ["flores"], aiMetadata: {
+          request_id: "dado-operacional",
+          response: { coresPrincipais: ["azul"], composicaoVisual: {
+            orientacao: { estado: "IDENTIFICADO", valores: ["diagonal"] },
+          } },
+        } },
     ] },
     filaMockup: { updateMany: async (args: typeof updates[number]) => {
       updates.push(args);
@@ -128,9 +136,18 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   const { processarProximaSaidaMockup } = await import("../src/services/processarFilaMockupsService");
   const processar = () => processarProximaSaidaMockup({
     aplicativoId: "aplicativo", bucket: "privado", gerador: {
-      gerar: async (base, estampas, layout) => {
+      gerar: async (base, estampas, layout, contexto) => {
         chamadasGerador++;
         assert.deepEqual([base, estampas, layout], [modelo, [b, a], true]);
+        assert.equal(contexto?.observacao, "Oxford fosco");
+        assert.deepEqual(contexto?.estampas?.map(({ codigo, variante }) => [codigo, variante]), [["MV2", "B"], ["MV1", "A"]]);
+        const prompt = montarPromptFilaMockups(["layout.png", "mv2.png", "mv1.png"], layout, contexto);
+        assert.match(prompt, /"posicao": 1,\s*"imagemDeReferencia": 2,\s*"codigo": "MV2"/);
+        assert.match(prompt, /Flores azuis com barrado/);
+        assert.match(prompt, /Oxford fosco/);
+        assert.match(prompt, /"coresPrincipais": \[\s*"azul"/);
+        assert.match(prompt, /"orientacao": \[\s*"diagonal"/);
+        assert.doesNotMatch(prompt, /dado-operacional|storage\.googleapis/);
         if (falha) throw falha;
         return { buffer: modelo, width: 1024, height: 1024, threadId };
       },

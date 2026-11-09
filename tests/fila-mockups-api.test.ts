@@ -14,10 +14,13 @@ const trabalhos = [
   { mockupId: individual, estampaIds: ["2"] },
   { mockupId: layout, estampaIds: ["2", "1"] },
 ];
-const lote = { loteId, estampas: ["1", "2"], trabalhos };
+const observacao = "Oxford 100% poliéster, fosco.\nCaimento estruturado.";
+const lote = { loteId, estampas: ["1", "2"], trabalhos, observacao };
 
 test("aceita relações N para N e preserva a ordem das estampas de um layout", () => {
   assert.deepEqual(pedidoFilaMockups.parse(lote), lote);
+  assert.equal(pedidoFilaMockups.parse({ ...lote, observacao: `  ${observacao}  ` }).observacao, observacao);
+  assert.equal(pedidoFilaMockups.parse({ ...lote, observacao: undefined }).observacao, undefined);
 });
 
 test("rejeita combinações inválidas, estampas extras e layouts duplicados", () => {
@@ -28,6 +31,8 @@ test("rejeita combinações inválidas, estampas extras e layouts duplicados", (
     { ...lote, trabalhos: [{ mockupId: layout, estampaIds: ["1", "1"] }] },
     { ...lote, trabalhos: [{ mockupId: layout, estampaIds: ["1", "3"] }] },
     { ...lote, trabalhos: [trabalhos[0]] },
+    { ...lote, observacao: "a".repeat(1501) },
+    { ...lote, observacao: "Oxford\u0000fosco" },
     { ...lote, estampas: ["1", "9223372036854775808"] },
     { ...lote, trabalhos: [{ mockupId: `../${layout}`, estampaIds: ["1", "2"] }] },
   ]) {
@@ -49,7 +54,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   let falharGravacao = false;
   let consultasGoogle = 0;
   let escritas = 0;
-  let salvo: { trabalhos: typeof trabalhos } | null = null;
+  let salvo: { trabalhos: typeof trabalhos; observacao: string } | null = null;
   const chave = { aplicativoId: "tenant-correto", solicitadoPor: "usuario", id: loteId };
 
   Object.assign(globalThis, { prisma: {
@@ -68,9 +73,9 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
         assert.deepEqual(where, { aplicativoId_solicitadoPor_id: chave });
         return salvo;
       },
-      create: async ({ data }: { data: typeof chave & { trabalhos: typeof trabalhos } }) => {
+      create: async ({ data }: { data: typeof chave & { trabalhos: typeof trabalhos; observacao: string } }) => {
         if (falharGravacao) throw new Error("detalhes-internos-do-banco");
-        assert.deepEqual(data, { ...chave, trabalhos });
+        assert.deepEqual(data, { ...chave, trabalhos, observacao });
         if (salvo) throw new Prisma.PrismaClientKnownRequestError("lote duplicado", { code: "P2002", clientVersion: "teste" });
         escritas++;
         salvo = data;
@@ -120,6 +125,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   const consultasAntesDoReenvio = consultasGoogle;
   assert.equal((await enviar()).status, 200);
   assert.equal((await enviar({ ...lote, trabalhos: [trabalhos[3]] })).status, 409);
+  assert.equal((await enviar({ ...lote, observacao: "Cetim acetinado" })).status, 409);
   assert.equal(consultasGoogle, consultasAntesDoReenvio);
   assert.equal(escritas, 1);
 

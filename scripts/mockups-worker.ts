@@ -21,7 +21,7 @@ npm run worker:mockups -- --piloto saida.webp modelo.png estampa.png [outras-est
 
 Requer Codex CLI autenticado via ChatGPT (codex login).
 A fila requer POSTGRES_PRISMA_URL, MOCKUPS_APLICATIVO_ID e GOOGLE_CLOUD_MOCKUPS_BUCKET,
-além das credenciais Google Cloud e das duas migrations de fila_mockups aplicadas.
+além das credenciais Google Cloud e das migrations de fila_mockups aplicadas.
 Resultados de fila ficam no bucket privado, em mockups-gerados/.
 Configurações opcionais: CODEX_CLI_PATH, MOCKUPS_CODEX_MODEL e MOCKUPS_CODEX_TIMEOUT_MS.`;
 

@@ -1156,6 +1156,7 @@ model FilaMockup {
   aplicativoId        String     @map("aplicativo_id") @db.Uuid
   solicitadoPor       String     @map("solicitado_por") @db.Uuid
   status              String     @default("PENDING")
+  observacao          String     @default("")
   trabalhos           Json
   resultados          Json       @default("[]")
   proximaSaida        Int        @default(0) @map("proxima_saida")
