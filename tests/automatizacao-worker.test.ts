@@ -14,6 +14,7 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
     id, aplicativoId, status: "PENDENTE", tipo: "EXECUTAR_PROMPT", tentativa: 0, rodada: 1,
     rotinaId: randomUUID(), reserva: null as string | null, reservaAte: null as Date | null,
     versao: { markdown: "# Entrada imutável" },
+    rotina: { nome: "Piloto" },
   };
   type Tentativa = { id: string; worker: string; status: string; resultado?: string; encerradaEm?: Date };
   const tentativas = new Map<string, Tentativa>();
@@ -53,7 +54,7 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   const operar = (corpo: object, credencial = token) => POST(new Request("https://erp.test/api/interno/automatizacao", {
     method: "POST", headers: { Authorization: `Bearer ${credencial}` }, body: JSON.stringify(corpo),
   }));
-  const reservar = async () => (await (await operar({ acao: "reservar" })).json()).trabalho as { reserva: string; markdown: string };
+  const reservar = async () => (await (await operar({ acao: "reservar" })).json()).trabalho as { reserva: string; markdown: string; rotinaNome: string };
   const finalizar = (reserva: string, desfecho: string, resultado = "resultado") => operar({ acao: "finalizar", reserva, desfecho, resultado });
 
   assert.equal((await operar({ acao: "reservar" }, "outra-credencial")).status, 401);
@@ -63,6 +64,7 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   process.env.AUTOMATIZACAO_WORKERS = JSON.stringify([escopo]);
   const primeira = await reservar();
   assert.equal(primeira.markdown, "# Entrada imutável");
+  assert.equal(primeira.rotinaNome, "Piloto");
   execucao.reservaAte = new Date(0);
   assert.equal((await finalizar(primeira.reserva, "SUCESSO")).status, 409);
   const segunda = await reservar();

@@ -71,7 +71,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       if (!chave) return { trabalho: null };
       const agora = new Date();
       const execucao = await tx.execucaoAutomatizacao.findUniqueOrThrow({
-        where: { id: chave.id }, include: { versao: { select: { markdown: true } } },
+        where: { id: chave.id }, include: { versao: { select: { markdown: true } }, rotina: { select: { nome: true } } },
       });
       if (execucao.reserva) {
         if (execucao.tentativa >= limiteTentativas) {
@@ -92,7 +92,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       await tx.tentativaAutomatizacao.create({
         data: { id: reserva, execucaoId: execucao.id, worker: escopo.id, rodada: execucao.rodada },
       });
-      return { trabalho: { reserva, markdown: execucao.tipo === "TESTE_ROTINA"
+      return { trabalho: { reserva, rotinaNome: execucao.rotina.nome, markdown: execucao.tipo === "TESTE_ROTINA"
         ? 'Retorne exatamente {"resultado":"TESTE_ROTINA_OK"}.' : execucao.versao.markdown } };
     }
 

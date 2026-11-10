@@ -24,6 +24,14 @@ mantém shell desabilitado; o acesso ao browser exige a configuração abaixo.
 
 ## Browser no worker Ubuntu
 
+O worker registra `AGUARDANDO_TAREFA`, `INICIANDO_CODEX`, `EXECUTANDO`,
+`REGISTRANDO_RESULTADO`, `FINALIZADA` e perda de reserva. Durante a execução,
+registra a etapa e o nome da rotina a cada 30 segundos com reserva renovada.
+Esses registros confirmam a atividade do worker, não o avanço das ações do
+modelo no site. Não incluem prompt, resultado, token de reserva ou credenciais.
+O nome vem da API atualizada; workers novos continuam compatíveis com API antiga,
+usando um nome genérico até a publicação do ERP.
+
 Integração opcional por Playwright MCP, sem porta pública. O modo recomendado
 usa um serviço HTTP local separado, com contexto compartilhado; o STDIO anterior
 permanece como compatibilidade e encerra seu navegador junto com cada Codex.

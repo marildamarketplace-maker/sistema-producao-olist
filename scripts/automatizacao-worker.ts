@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
 import { renovarEnquantoValida } from "@/lib/automatizacao/renovacao";
+import { eventoWorker } from "@/lib/automatizacao/log-worker";
 import { ambienteWorkerCodex } from "@/lib/automatizacao/ambiente-worker-codex";
 import { configurarBrowserWorker, promptBrowserWorker, respostaBrowserSchema } from "@/lib/automatizacao/browser-worker";
 import { z } from "zod";
@@ -10,7 +11,7 @@ import { executarCodexCli } from "@/services/image-analysis/executarCodexCli";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 
 const respostaSchema = z.object({ resultado: z.string().trim().min(1).max(8_000).refine((texto) => !texto.includes("\0")) });
-const reservaSchema = z.object({ trabalho: z.object({ reserva: z.uuid(), markdown: z.string() }).nullable() });
+const reservaSchema = z.object({ trabalho: z.object({ reserva: z.uuid(), markdown: z.string(), rotinaNome: z.string().optional() }).nullable() });
 const parar = new AbortController();
 process.once("SIGTERM", () => parar.abort());
 process.once("SIGINT", () => parar.abort());
@@ -41,6 +42,7 @@ async function main() {
     return resposta.json() as Promise<unknown>;
   }
 
+  console.info(eventoWorker("AGUARDANDO_TAREFA"));
   while (!parar.signal.aborted) {
     try {
       const inicioReserva = performance.now();
@@ -49,17 +51,32 @@ async function main() {
         await esperar(5_000, undefined, { signal: parar.signal });
         continue;
       }
-      const { reserva, markdown } = trabalho;
+      const { reserva, markdown, rotinaNome = "Rotina de automatização" } = trabalho;
       const fim = new AbortController();
       const cwd = await mkdtemp(join(tmpdir(), "erp-automatizacao-"));
+      const iniciado = Date.now();
+      let ultimoLog = iniciado;
+      let etapa: "INICIANDO_CODEX" | "EXECUTANDO" | "REGISTRANDO_RESULTADO" = "INICIANDO_CODEX";
+      console.info(eventoWorker(etapa, rotinaNome, iniciado));
       const renovacao = renovarEnquantoValida({
         iniciadaEm: inicioReserva,
-        renovar: async (timeoutMs) => Boolean(await api({ acao: "renovar", reserva }, timeoutMs)),
+        renovar: async (timeoutMs) => {
+          const valida = Boolean(await api({ acao: "renovar", reserva }, timeoutMs));
+          if (valida && Date.now() - ultimoLog >= 30_000) {
+            console.info(eventoWorker(etapa, rotinaNome, iniciado));
+            ultimoLog = Date.now();
+          }
+          return valida;
+        },
         esperar: (ms) => esperar(ms, undefined, { signal: fim.signal }).catch(() => {}),
         agora: () => performance.now(),
         signal: fim.signal,
-      }).then((valida) => { if (!valida) fim.abort(); });
-      const iniciado = Date.now();
+      }).then((valida) => {
+        if (!valida) {
+          console.error(eventoWorker("RESERVA_PERDIDA", rotinaNome, iniciado));
+          fim.abort();
+        }
+      });
       let desfecho = "SUCESSO";
       let resultado: string;
       try {
@@ -68,6 +85,8 @@ async function main() {
           resultado: { type: "string" }, ...(browser ? { concluida: { type: "boolean" } } : {}),
         }, required: browser ? ["resultado", "concluida"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
         const saidaPath = join(cwd, "resultado.json");
+        etapa = "EXECUTANDO";
+        console.info(eventoWorker(etapa, rotinaNome, iniciado));
         await executarCodexCli({
           executable, cwd, timeoutMs: browser ? 900_000 : 300_000, signal: fim.signal,
           env: ambiente,
@@ -99,13 +118,17 @@ async function main() {
       }
       try {
         if (!fim.signal.aborted) {
+          etapa = "REGISTRANDO_RESULTADO";
+          console.info(eventoWorker(etapa, rotinaNome, iniciado));
           const fechamento = { acao: "finalizar", reserva, desfecho, resultado };
           const resposta = await api(fechamento).catch(() => api(fechamento));
-          if (resposta) console.info(JSON.stringify({ tipo: "EXECUTAR_PROMPT", desfecho, duracaoMs: Date.now() - iniciado }));
+          if (resposta) console.info(eventoWorker("FINALIZADA", rotinaNome, iniciado, desfecho));
+          else console.error(eventoWorker("RESERVA_PERDIDA", rotinaNome, iniciado));
         }
       } finally {
         fim.abort();
         await renovacao;
+        console.info(eventoWorker("AGUARDANDO_TAREFA"));
       }
       if (desfecho === "INDISPONIVEL") {
         console.error("Executor Codex indisponível.");
