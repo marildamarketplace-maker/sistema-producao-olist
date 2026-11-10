@@ -1,0 +1,20 @@
+[Unit]
+Description=Navegador persistente da automatizacao Meury
+Wants=network-online.target
+After=network-online.target lightdm.service
+
+[Service]
+Type=simple
+User=operador
+WorkingDirectory=/home/operador/sistema-producao-olist
+Environment=HOME=/home/operador
+EnvironmentFile=/home/operador/.config/meury-worker/browser.env
+ExecStart=/usr/bin/node --import tsx scripts/automatizacao-browser.ts
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

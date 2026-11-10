@@ -20,7 +20,7 @@ async function main() {
   const token = process.env.AUTOMATIZACAO_WORKER_TOKEN;
   const ambiente = ambienteWorkerCodex();
   const browser = configurarBrowserWorker();
-  if (browser) {
+  if (browser?.cli && browser.perfil) {
     await access(browser.cli);
     await mkdir(browser.perfil, { recursive: true, mode: 0o700 });
   }

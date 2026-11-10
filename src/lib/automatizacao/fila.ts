@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizarDestinatariosWhatsapp, prepararDadosNotification } from "@/lib/notification";
 import { z } from "zod";
 import { prazoReservaMs } from "./renovacao";
+import { mensagemWhatsappAutomatizacao } from "./mensagem-whatsapp";
 
 export const operacaoWorker = z.discriminatedUnion("acao", [
   z.object({ acao: z.literal("reservar") }),
@@ -47,8 +48,8 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
   for (const numero of numeros) {
     const notification = await tx.notification.create({
       data: prepararDadosNotification({
-        to: numero, titulo: "Automatização",
-        mensagem: `${rotina.nome}: ${status === "CONCLUIDA" ? "concluída" : "falha final"}. Execução ${execucao.id}.`,
+        to: numero,
+        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, agora),
       }),
     });
     await tx.avisoAutomatizacao.create({

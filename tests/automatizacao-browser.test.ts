@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { configurarBrowserWorker, promptBrowserWorker, respostaBrowserSchema } from "@/lib/automatizacao/browser-worker";
+import { configurarBrowserWorker, configurarServicoBrowser, promptBrowserWorker, respostaBrowserSchema } from "@/lib/automatizacao/browser-worker";
 
 const env = { NODE_ENV: "test", HOME: "/home/operador", PATH: "/usr/bin",
   AUTOMATIZACAO_BROWSER_ENABLED: "true", AUTOMATIZACAO_BROWSER_MCP_CLI: "/opt/mcp/cli.js",
@@ -18,7 +18,7 @@ test("browser opt-in configura MCP persistente sem expor secrets", () => {
   const permitidas = config.argsCodex.find((v) => v.startsWith("mcp_servers.browser.enabled_tools="))!;
   assert.match(permitidas, /browser_navigate/);
   assert.match(permitidas, /browser_click/);
-  assert.doesNotMatch(permitidas, /browser_evaluate|browser_run_code|browser_file_upload|browser_install/);
+  assert.doesNotMatch(permitidas, /browser_close|browser_evaluate|browser_run_code|browser_file_upload|browser_install/);
   assert.doesNotMatch(argumentos, /segredo|no-sandbox|unrestricted/);
 });
 
@@ -35,4 +35,31 @@ test("resultado de browser exige confirmação explícita e preserva pendências
   assert.equal(respostaBrowserSchema.parse({ concluida: false, resultado: "Login necessário" }).concluida, false);
   assert.match(promptBrowserWorker("# Minha habilidade"), /# Minha habilidade/);
   assert.match(promptBrowserWorker("prompt"), /Não repita submissões/);
+  assert.match(promptBrowserWorker("prompt"), /Liste as abas/);
+  assert.match(promptBrowserWorker("prompt"), /Não use browser_close/);
+  assert.match(promptBrowserWorker("prompt"), /execução parcial/);
+});
+
+test("MCP persistente usa só transporte local e não exige display do cliente", () => {
+  const config = configurarBrowserWorker({ NODE_ENV: "test", AUTOMATIZACAO_BROWSER_ENABLED: "true",
+    AUTOMATIZACAO_BROWSER_HEADLESS: "false", AUTOMATIZACAO_BROWSER_MCP_URL: "http://127.0.0.1:8931/mcp" })!;
+  assert.equal(config.cli, undefined);
+  assert.equal(config.perfil, undefined);
+  assert.ok(config.argsCodex.includes('mcp_servers.browser.url="http://127.0.0.1:8931/mcp"'));
+  assert.doesNotMatch(config.argsCodex.join(" "), /browser.command|browser.args|browser.env/);
+  for (const url of ["http://0.0.0.0:8931/mcp", "https://externo.test/mcp", "http://127.0.0.1:8931/", "http://user:senha@127.0.0.1:8931/mcp", "http://127.0.0.1:8931/mcp?token=segredo"]) {
+    assert.throws(() => configurarBrowserWorker({ ...env, AUTOMATIZACAO_BROWSER_MCP_URL: url }));
+  }
+});
+
+test("serviço mantém contexto aberto sem encaminhar secrets do worker", () => {
+  const config = configurarServicoBrowser({ ...env, DISPLAY: ":0", AUTOMATIZACAO_BROWSER_HEADLESS: "false",
+    AUTOMATIZACAO_BROWSER_MCP_URL: "http://127.0.0.1:8931/mcp", AUTOMATIZACAO_WORKER_TOKEN: "segredo",
+    CODEX_API_KEY: "segredo", DATABASE_URL: "segredo" });
+  assert.ok(config.args.includes("--shared-browser-context"));
+  assert.deepEqual(config.args.slice(config.args.indexOf("--idle-timeout"), config.args.indexOf("--idle-timeout") + 2), ["--idle-timeout", "0"]);
+  assert.deepEqual(config.args.slice(config.args.indexOf("--host"), config.args.indexOf("--host") + 2), ["--host", "127.0.0.1"]);
+  assert.doesNotMatch(JSON.stringify(config.env), /segredo/);
+  assert.doesNotMatch(config.args.join(" "), /--headless|--no-sandbox/);
+  assert.equal(config.env.DISPLAY, ":0");
 });

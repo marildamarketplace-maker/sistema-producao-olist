@@ -21,7 +21,10 @@ mantém shell desabilitado; o acesso ao browser exige a configuração abaixo.
 
 ## Browser no worker Ubuntu
 
-Integração opcional por Playwright MCP via STDIO, sem porta pública. Mantém o
+Integração opcional por Playwright MCP, sem porta pública. O modo recomendado
+usa um serviço HTTP local separado, com contexto compartilhado; o STDIO anterior
+permanece como compatibilidade e encerra seu navegador junto com cada Codex.
+Mantém o
 MCP local com `default_tools_approval_mode="approve"` somente para a lista
 explícita de ferramentas de navegação e interação. A política global continua
 `approval_policy="never"`; não habilite aprovações globais nem shell para resolver
@@ -51,7 +54,7 @@ Se faltarem bibliotecas do sistema, um administrador deve executar
 O worker nunca instala pacotes em tempo de execução. Preserve package-lock.json;
 use `npm ci` para reinstalar a mesma versão.
 
-Adicione ao arquivo privado `~/.config/meury-worker/worker.env`:
+Crie `~/.config/meury-worker/browser.env`, com permissão 600, sem tokens do ERP:
 
 ```dotenv
 AUTOMATIZACAO_BROWSER_ENABLED=true
@@ -63,17 +66,47 @@ XAUTHORITY=/home/operador/.Xauthority
 ```
 
 Confirme `DISPLAY` e `XAUTHORITY` no terminal da sessão XFCE; ajuste os caminhos
-caso sejam diferentes. O worker inicia o MCP por execução, que abre a janela
-quando a primeira ferramenta de navegação for chamada. Para autenticar antes,
-pare o worker e, no terminal gráfico, abra o mesmo perfil:
+caso sejam diferentes. Na primeira transição, pare o worker e feche uma única
+vez o Chromium antigo aberto pelo comando `playwright open`, para liberar o perfil.
+Instale o serviço preparado neste repositório (ajuste os caminhos se necessário):
 
 ```sh
-node ~/.local/share/meury-browser/node_modules/playwright/cli.js open --browser chromium --user-data-dir ~/.local/share/meury-browser/profile https://seller.shopee.com.br
+sudo install -m 644 docs/systemd/meury-browser.service /etc/systemd/system/meury-browser.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now meury-browser
 ```
 
-Faça login, feche essa janela e inicie o worker normalmente. Para operação sem
-interface, use `AUTOMATIZACAO_BROWSER_HEADLESS=true`. Sessões ficam no perfil;
-CAPTCHA/MFA precisam de intervenção. Preserve Chromium sandbox, sem `--no-sandbox`.
+No arquivo privado `worker.env`, mantenha token, URL do ERP e versão do Codex e
+adicione:
+
+```dotenv
+AUTOMATIZACAO_BROWSER_ENABLED=true
+AUTOMATIZACAO_BROWSER_MCP_URL=http://127.0.0.1:8931/mcp
+```
+
+Inicie o worker normalmente. Ele conecta ao serviço existente, sem lançar outro
+browser. A primeira navegação abre a janela no XFCE, com o perfil já autenticado.
+O serviço usa `--shared-browser-context` e `--idle-timeout 0`; encerrar uma
+execução do Codex não encerra o serviço. Não abra outro Chromium com esse perfil.
+Para login, pare somente o worker, use a janela que ficou aberta no Compartilhamento
+de Tela e retome o worker após autenticar. Não é necessário fechar o navegador.
+Não inicie dois workers nesse serviço/perfil, nem compartilhe o serviço entre
+aplicativos. O endpoint controla sessões autenticadas e não tem autenticação própria:
+fica exclusivamente em 127.0.0.1, nunca publique ou encaminhe a porta 8931.
+
+`browser_close` é bloqueado. As habilidades listam abas antes de navegar,
+reutilizam uma principal por marketplace e removem apenas duplicatas sem trabalho
+em andamento. Essa organização é conduzida pelo agente, não uma trava do Chromium:
+popups de login e abas criadas manualmente podem coexistir temporariamente.
+Os screenshots automáticos ficam no diretório privado `artefatos` ao lado do
+perfil; são arquivos locais, não anexos publicados no ERP. Faça retenção privada
+conforme necessário. As versões 2 das quatro habilidades foram criadas no Supabase,
+preservando as versões 1. Retentativas existentes preservam a versão original;
+as regras de sessão do wrapper atualizado também se aplicam a elas.
+
+Para operação sem interface, use `AUTOMATIZACAO_BROWSER_HEADLESS=true` no browser.env.
+Sessões ficam no perfil; CAPTCHA/MFA precisam de intervenção. Reinício do serviço,
+fechamento manual ou reboot podem fechar janelas. Preserve Chromium sandbox, sem `--no-sandbox`.
 Timeout de browser: 15 minutos. Não configure systemd para encerrar uma execução
 em andamento antes disso se deseja parada graciosa.
 
