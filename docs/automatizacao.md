@@ -14,8 +14,11 @@ A fila faz uma reserva por vez, renova a cada 15 segundos e expira a reserva em 
 
 O botão **Testar rotina** agora enfileira a habilidade real como `EXECUTAR_PROMPT`,
 inclusive para rotinas pausadas, sem ativar ou alterar o calendário. Usa a versão
-mais recente da habilidade e o fluxo normal de histórico e notificações. Reutiliza
-execução não concluída e exige retry pelo Histórico após falha final. Os antigos
+mais recente da habilidade ao criar uma execução e o fluxo normal de histórico e
+notificações. Não há limite diário. Após falha final, o botão reabre a mesma execução
+com a versão original, preservando tentativas e incrementando a rodada. Se estiver
+pendente ou aguardando retry, antecipa sua disponibilidade para agora. Se estiver
+executando, informa isso sem iniciar outro processo em paralelo. Os antigos
 registros `TESTE_ROTINA` permanecem diagnósticos sintéticos. O executor de prompts
 mantém shell desabilitado; o acesso ao browser exige a configuração abaixo.
 

@@ -76,8 +76,8 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   const terceira = await reservar();
   assert.deepEqual(await (await finalizar(terceira.reserva, "SUCESSO")).json(), { status: "CONCLUIDA" });
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
-  assert.match(notificacoes[0], /Não foi possível confirmar/);
-  assert.match(notificacoes[1], /concluída com sucesso/);
+  assert.match(notificacoes[0], /Não foi possível concluir/);
+  assert.match(notificacoes[1], /Concluída\./);
   assert.ok(notificacoes.every((mensagem) => !mensagem.includes(execucao.id)));
 
   Object.assign(execucao, { tipo: "TESTE_ROTINA", status: "PENDENTE", tentativa: 0 });
