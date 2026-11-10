@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { autorizarDetalheProducao, respostaErroDetalheProducao } from "@/lib/producao-detalhes";
+import { lerEvidenciaBlob, resolverLojaEvidenciaBlob } from "@/services/evidenciaBlobStorageService";
 import { lerGoogleStorageImagemPrivada } from "@/services/googleStorageService";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -18,7 +19,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!producao.evidenciaStoragePath.startsWith(prefixo)) {
       return NextResponse.json({ error: "Evidência indisponível." }, { status: 404 });
     }
-    const imagem = await lerGoogleStorageImagemPrivada(producao.evidenciaBucket, producao.evidenciaStoragePath);
+    const storeId = resolverLojaEvidenciaBlob(producao.evidenciaBucket);
+    if (storeId && !/^[\w-]+\.jpg$/i.test(producao.evidenciaStoragePath.slice(prefixo.length))) {
+      return NextResponse.json({ error: "Evidência indisponível." }, { status: 404 });
+    }
+    const imagem = storeId
+      ? await lerEvidenciaBlob(storeId, producao.evidenciaStoragePath)
+      : await lerGoogleStorageImagemPrivada(producao.evidenciaBucket, producao.evidenciaStoragePath);
+    if (!imagem) return NextResponse.json({ error: "Evidência não encontrada." }, { status: 404 });
     return new Response(imagem, { headers: {
       "Content-Type": "image/jpeg", "Cache-Control": "private, no-store",
       "Content-Disposition": 'inline; filename="evidencia-producao.jpg"',

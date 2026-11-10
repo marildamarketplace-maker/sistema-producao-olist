@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 const app = "00000000-0000-0000-0000-000000000001";
 const id = "00000000-0000-0000-0000-000000000002";
@@ -14,6 +15,7 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
   let somenteLeitura = false;
   let existe = true;
   let temEvidencia = true;
+  let bucketEvidencia = "bucket-privado";
   let caminho = `producao-evidencias/${app}/${id}/foto.jpg`;
   let falharBanco = false;
   let consultas = 0;
@@ -37,7 +39,7 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
         id, dataEntrega: new Date("2026-10-16T00:00:00Z"), createdAt: new Date("2026-10-15T23:00:00Z"),
         status: "concluida", observacaoGeral: "Pedido especial", prioridadeProducao: true,
         periodoInicio: null, periodoFim: null,
-        evidenciaBucket: temEvidencia ? "bucket-privado" : null, evidenciaStoragePath: temEvidencia ? caminho : null,
+        evidenciaBucket: temEvidencia ? bucketEvidencia : null, evidenciaStoragePath: temEvidencia ? caminho : null,
         pedidosFornecedor: [{ pedidoOlistId: "12345", fornecedor: { nome: "Fornecedor de teste" } }],
       };
     } },
@@ -142,6 +144,44 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
     tipoImagem = "text/html";
     assert.equal((await FOTO(request(), contexto())).status, 500);
     tipoImagem = "image/jpeg";
+  });
+  await t.test("lê evidências migradas e novas do Blob privado pelo caminho salvo", async (t) => {
+    // Use o mesmo dispatcher HTTP do SDK, que usa undici diretamente.
+    const blobRequire = createRequire(createRequire(import.meta.url).resolve("@vercel/blob"));
+    const { MockAgent, getGlobalDispatcher, setGlobalDispatcher } = blobRequire("undici");
+    const dispatcherAnterior = getGlobalDispatcher();
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    const ambiente = { storeId: process.env.EVIDENCIAS_BLOB_STORE_ID, oidc: process.env.VERCEL_OIDC_TOKEN };
+    t.after(async () => {
+      setGlobalDispatcher(dispatcherAnterior);
+      await agent.close();
+      if (ambiente.storeId === undefined) delete process.env.EVIDENCIAS_BLOB_STORE_ID;
+      else process.env.EVIDENCIAS_BLOB_STORE_ID = ambiente.storeId;
+      if (ambiente.oidc === undefined) delete process.env.VERCEL_OIDC_TOKEN;
+      else process.env.VERCEL_OIDC_TOKEN = ambiente.oidc;
+    });
+    process.env.EVIDENCIAS_BLOB_STORE_ID = "store_evidencias123";
+    process.env.VERCEL_OIDC_TOKEN = "oidc-ficticio";
+    const loja = agent.get("https://evidencias123.private.blob.vercel-storage.com");
+    const reqBlob = { path: `/${caminho}?cache=0`, headers: { authorization: "Bearer oidc-ficticio" } };
+    loja.intercept(reqBlob).reply(200, Buffer.from([255, 216, 255, 217]), { headers: { "content-type": "image/jpeg" } }).times(2);
+    loja.intercept(reqBlob).reply(404, "");
+    for (const bucket of ["sistema-producao-olist-evidencias", "store_evidencias123"]) {
+      bucketEvidencia = bucket;
+      const foto = await FOTO(request(), contexto());
+      assert.equal(foto.status, 200);
+      assert.match(foto.headers.get("Cache-Control")!, /private, no-store/);
+      assert.equal((await foto.arrayBuffer()).byteLength, 4);
+    }
+    assert.equal((await FOTO(request(), contexto())).status, 404);
+    const original = caminho;
+    caminho = `producao-evidencias/${app}/${id}/../../../outra.jpg`;
+    assert.equal((await FOTO(request(), contexto())).status, 404);
+    caminho = original;
+    bucketEvidencia = "bucket-privado";
+    agent.assertNoPendingInterceptors();
   });
   await t.test("falhas não revelam mensagens privadas do banco", async () => {
     falharBanco = true;

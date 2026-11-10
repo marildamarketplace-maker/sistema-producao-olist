@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 import sharp from "sharp";
 import { normalizarFotoEvidencia, confirmarProducaoComEvidencia } from "../src/lib/producao-evidencia";
 import { MAX_FOTO_EVIDENCIA_BYTES } from "../src/lib/producao-evidencia-contrato";
@@ -50,6 +51,7 @@ test("upload e confirmação preservam vínculo, isolamento e limpeza em caso de
   let uploads = 0;
   let removidos = 0;
   let confirmarChamadas = 0;
+  let bucketEsperado = "bucket-privado-teste";
   const storage = {
     verificarPrivacidade: async (bucket: string) => { assert.equal(bucket, "bucket-privado-teste"); },
     enviar: async (input: { bucket?: string; path: string; buffer: Buffer; contentType: string }) => {
@@ -71,7 +73,7 @@ test("upload e confirmação preservam vínculo, isolamento e limpeza em caso de
       return executar({
         solicitacaoProducao: { findFirst: async () => ({ id: "pedido" }), update: async ({ data }: { data: { evidenciaBucket: string; evidenciaUrl: string; status: string } }) => {
           assert.equal(data.status, "concluida");
-          assert.equal(data.evidenciaBucket, "bucket-privado-teste");
+          assert.equal(data.evidenciaBucket, bucketEsperado);
           assert.match(data.evidenciaUrl, /producao-evidencias/);
         } },
         itemSolicitacaoProducao: { findMany: async () => [{ id: "item", produtoId: "produto", sku: "SKU" }], update: async () => ({}) },
@@ -108,5 +110,48 @@ test("upload e confirmação preservam vínculo, isolamento e limpeza em caso de
     const antes = uploads;
     await assert.rejects(confirmarProducaoComEvidencia(input, { ...storage, verificarPrivacidade: async () => { throw new Error("bucket público"); } }), /público/);
     assert.equal(uploads, antes);
+  });
+  await t.test("grava no Blob privado com OIDC e remove o arquivo em caso de rollback", async (t) => {
+    const blobRequire = createRequire(createRequire(import.meta.url).resolve("@vercel/blob"));
+    const { MockAgent, getGlobalDispatcher, setGlobalDispatcher } = blobRequire("undici");
+    const dispatcherAnterior = getGlobalDispatcher();
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    const env = { store: process.env.EVIDENCIAS_BLOB_STORE_ID, oidc: process.env.VERCEL_OIDC_TOKEN };
+    t.after(async () => {
+      setGlobalDispatcher(dispatcherAnterior);
+      await agent.close();
+      if (env.store === undefined) delete process.env.EVIDENCIAS_BLOB_STORE_ID;
+      else process.env.EVIDENCIAS_BLOB_STORE_ID = env.store;
+      if (env.oidc === undefined) delete process.env.VERCEL_OIDC_TOKEN;
+      else process.env.VERCEL_OIDC_TOKEN = env.oidc;
+    });
+    bucketEsperado = "store_evidencias123";
+    process.env.EVIDENCIAS_BLOB_STORE_ID = bucketEsperado;
+    process.env.VERCEL_OIDC_TOKEN = "oidc-ficticio";
+    const api = agent.get("https://blob.vercel-storage.com");
+    let pathname = "";
+    api.intercept({
+      method: "PUT",
+      path: /^\/\?pathname=/,
+      headers: { authorization: "Bearer oidc-ficticio", "x-vercel-blob-store-id": "evidencias123", "x-vercel-blob-access": "private" },
+    }).reply(200, ({ path }: { path: string }) => {
+      pathname = new URL(path, "https://blob.vercel-storage.com").searchParams.get("pathname")!;
+      assert.match(pathname, /^producao-evidencias\/app\/pedido\/[\w-]+\.jpg$/);
+      return { pathname, url: `https://evidencias123.private.blob.vercel-storage.com/${pathname}` };
+    }).times(2);
+    api.intercept({
+      method: "POST",
+      path: "/delete",
+      body: (body: string) => JSON.parse(body).urls?.[0] === pathname,
+      headers: { authorization: "Bearer oidc-ficticio", "x-vercel-blob-store-id": "evidencias123" },
+    }).reply(200, {});
+    falharTransacao = false;
+    await confirmarProducaoComEvidencia(input);
+    falharTransacao = true;
+    persistida = false;
+    await assert.rejects(confirmarProducaoComEvidencia(input), /conflito/);
+    agent.assertNoPendingInterceptors();
   });
 });
