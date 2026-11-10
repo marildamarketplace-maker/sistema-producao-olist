@@ -5,7 +5,8 @@ import { operacaoWorker, operarFila } from "@/lib/automatizacao/fila";
 
 const credenciais = z.array(z.object({
   id: z.string().min(1).max(80),
-  aplicativoId: z.uuid(),
+  // IDs legados válidos no Postgres não possuem necessariamente versão RFC.
+  aplicativoId: z.guid(),
   tokenSha256: z.string().regex(/^[a-f0-9]{64}$/),
 }));
 

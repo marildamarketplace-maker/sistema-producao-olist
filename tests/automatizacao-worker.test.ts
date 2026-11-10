@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 
 test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => {
-  const aplicativoId = randomUUID();
+  // ID legado usado em produção: aceito pelo Postgres, sem versão RFC.
+  const aplicativoId = "00000000-0000-0000-0000-000000000001";
   const id = randomUUID();
   const token = "credencial-ficticia";
   const escopo = { id: "piloto", aplicativoId, tokenSha256: createHash("sha256").update(token).digest("hex") };
@@ -56,6 +57,10 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   const finalizar = (reserva: string, desfecho: string, resultado = "resultado") => operar({ acao: "finalizar", reserva, desfecho, resultado });
 
   assert.equal((await operar({ acao: "reservar" }, "outra-credencial")).status, 401);
+  assert.equal((await operar({ acao: "diagnostico" })).status, 400);
+  process.env.AUTOMATIZACAO_WORKERS = JSON.stringify([{ ...escopo, aplicativoId: "invalido" }]);
+  assert.equal((await operar({ acao: "diagnostico" })).status, 500);
+  process.env.AUTOMATIZACAO_WORKERS = JSON.stringify([escopo]);
   const primeira = await reservar();
   assert.equal(primeira.markdown, "# Entrada imutável");
   execucao.reservaAte = new Date(0);
