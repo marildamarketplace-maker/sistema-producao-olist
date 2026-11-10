@@ -56,7 +56,7 @@ function Rotinas() {
     setSucesso("");
     try {
       await api(`testar-rotina?id=${id}`, "POST");
-      setSucesso("Teste na fila. Veja o resultado no Histórico.");
+      setSucesso("Execução da habilidade na fila. Se já havia uma em aberto, ela foi mantida. Acompanhe no Histórico.");
     } catch (error) { setErro((error as Error).message); }
     finally { setSalvando(false); }
   }
@@ -102,7 +102,7 @@ function Rotinas() {
       <ul className="flex flex-wrap gap-2 text-sm">{item.horarios.map(({ dia, hora }) => <li key={`${dia}-${hora}`}>{dias[dia]} {hora}</li>)}</ul>
       {usuario?.podeIntervirAutomatizacao && !item.arquivada && <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={secundario} disabled={salvando} onClick={() => void testar(item.id)}>Testar rotina</button>
-        <span className="text-sm">Verifica o worker sem executar a habilidade.</span>
+        <span className="text-sm">Executa a habilidade real agora, mesmo com a rotina pausada. Pode realizar ações externas e enviar WhatsApp.</span>
       </div>}
       {usuario?.podeGerenciarRotinas && !item.arquivada && <div className="flex flex-wrap gap-2">
         <button className={secundario} disabled={salvando} onClick={() => { setForm(item); campoNome.current?.focus(); }}>Editar</button>

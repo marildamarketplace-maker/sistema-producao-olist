@@ -151,11 +151,14 @@ async function alterar(request: Request, contexto: Contexto) {
           FOR UPDATE
         `;
         if (!rotina) throw new ErroHttp(404, "Rotina indisponível.");
-        const teste = await tx.execucaoAutomatizacao.findFirst({
-          where: { aplicativoId, rotinaId, tipo: "TESTE_ROTINA", status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } },
-          select: { id: true },
+        const existente = await tx.execucaoAutomatizacao.findFirst({
+          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } },
+          select: { id: true, status: true },
         });
-        if (teste) return teste;
+        if (existente?.status === "FALHA_FINAL") {
+          throw new ErroHttp(409, "A execução anterior falhou. Retente a mesma execução pelo Histórico.");
+        }
+        if (existente) return { id: existente.id };
         const versao = await tx.versaoHabilidadeAutomatizacao.findFirst({
           where: { aplicativoId, habilidadeId: rotina.habilidadeId, habilidade: { arquivada: false } },
           orderBy: { numero: "desc" }, select: { id: true },
@@ -164,7 +167,7 @@ async function alterar(request: Request, contexto: Contexto) {
         const agora = Date.now();
         return tx.execucaoAutomatizacao.create({
           data: {
-            aplicativoId, rotinaId, tipo: "TESTE_ROTINA", versaoId: versao.id,
+            aplicativoId, rotinaId, tipo: "EXECUTAR_PROMPT", versaoId: versao.id,
             previstoEm: new Date(agora % 60_000 === 0 ? agora + 1 : agora),
           },
           select: { id: true },
