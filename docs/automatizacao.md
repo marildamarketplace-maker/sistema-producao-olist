@@ -17,8 +17,67 @@ inclusive para rotinas pausadas, sem ativar ou alterar o calendário. Usa a vers
 mais recente da habilidade e o fluxo normal de histórico e notificações. Reutiliza
 execução não concluída e exige retry pelo Histórico após falha final. Os antigos
 registros `TESTE_ROTINA` permanecem diagnósticos sintéticos. O executor de prompts
-continua com ferramentas desabilitadas; habilidades de browser exigem integração
-própria antes de conseguirem operar marketplaces.
+mantém shell desabilitado; o acesso ao browser exige a configuração abaixo.
+
+## Browser no worker Ubuntu
+
+Integração opcional por Playwright MCP via STDIO, sem porta pública. Mantém o
+login ChatGPT do CLI e um perfil Chromium persistente por aplicativo. Não acessa
+automaticamente as janelas ou sessões do Firefox já instalado. Use apenas um
+worker por perfil e um usuário Ubuntu dedicado por aplicativo. O MCP é um
+processo confiável com acesso à rede e ao usuário do serviço; o modo read-only
+do Codex não isola o MCP. Não dê sudo ao processo. Páginas não são instruções
+confiáveis. Não há garantia de efeito externo exatamente uma vez: após queda
+da VM/perda de reserva, concilie o marketplace antes de reabrir a execução.
+
+Instale como `operador`, fora do ERP, com versão resolvida gravada no lockfile:
+
+```sh
+mkdir -p ~/.local/share/meury-browser
+cd ~/.local/share/meury-browser
+npm init -y
+npm install --save-exact @playwright/mcp
+node node_modules/playwright/cli.js install chromium
+```
+
+Se faltarem bibliotecas do sistema, um administrador deve executar
+`sudo node /home/operador/.local/share/meury-browser/node_modules/playwright/cli.js install-deps chromium`.
+O worker nunca instala pacotes em tempo de execução. Preserve package-lock.json;
+use `npm ci` para reinstalar a mesma versão.
+
+Adicione ao arquivo privado `~/.config/meury-worker/worker.env`:
+
+```dotenv
+AUTOMATIZACAO_BROWSER_ENABLED=true
+AUTOMATIZACAO_BROWSER_MCP_CLI=/home/operador/.local/share/meury-browser/node_modules/@playwright/mcp/cli.js
+AUTOMATIZACAO_BROWSER_PROFILE=/home/operador/.local/share/meury-browser/profile
+AUTOMATIZACAO_BROWSER_HEADLESS=false
+DISPLAY=:0
+XAUTHORITY=/home/operador/.Xauthority
+```
+
+Confirme `DISPLAY` e `XAUTHORITY` no terminal da sessão XFCE; ajuste os caminhos
+caso sejam diferentes. O worker inicia o MCP por execução, que abre a janela
+quando a primeira ferramenta de navegação for chamada. Para autenticar antes,
+pare o worker e, no terminal gráfico, abra o mesmo perfil:
+
+```sh
+node ~/.local/share/meury-browser/node_modules/playwright/cli.js open --browser chromium --user-data-dir ~/.local/share/meury-browser/profile https://seller.shopee.com.br
+```
+
+Faça login, feche essa janela e inicie o worker normalmente. Para operação sem
+interface, use `AUTOMATIZACAO_BROWSER_HEADLESS=true`. Sessões ficam no perfil;
+CAPTCHA/MFA precisam de intervenção. Preserve Chromium sandbox, sem `--no-sandbox`.
+Timeout de browser: 15 minutos. Não configure systemd para encerrar uma execução
+em andamento antes disso se deseja parada graciosa.
+
+`concluida=false` é falha final com a pendência no Histórico. Erros de browser
+não geram retentativa automática; erros de autenticação do Codex mantêm o
+executor indisponível. O shell, JavaScript arbitrário no browser e upload local
+permanecem desabilitados. Publicação de vídeos exige uma entrega própria para
+acesso controlado a arquivos e compactação; habilitar browser não cobre isso.
+Valide primeiro uma habilidade de navegação somente leitura e depois o piloto
+real com uma conta. Não marque as quatro rotinas ativas apenas por este ajuste.
 
 Use Linux x86 com 2 vCPUs e 4 GiB de RAM. Rode o piloto existente em um ambiente dedicado, com login do Codex para mockups e referências autorizadas.
 
