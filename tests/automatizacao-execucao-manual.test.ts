@@ -9,6 +9,7 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   const usuario = { ativo: true, aplicativoId, podeVisualizarAutomatizacao: true, podeIntervirAutomatizacao: true };
   let encontrada = true, disponivel = true, criadas = 0, locks = 0;
   let existente: { id: string; status: string } | null = null;
+  const atualizacoes: Record<string, unknown>[] = [];
   const tx = {
     $queryRaw: async (_sql: TemplateStringsArray, ...values: string[]) => {
       locks++;
@@ -16,6 +17,15 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
       return encontrada ? [{ habilidadeId }] : [];
     },
     execucaoAutomatizacao: {
+      updateMany: async ({ where, data }: { where: { id: string; aplicativoId: string }; data: Record<string, unknown> }) => {
+        assert.equal(where.id, existente?.id);
+        assert.equal(where.aplicativoId, aplicativoId);
+        assert.ok(data.disponivelEm instanceof Date);
+        assert.ok(!("versaoId" in data));
+        atualizacoes.push(data);
+        if (data.status) existente!.status = String(data.status);
+        return { count: 1 };
+      },
       findFirst: async ({ where }: { where: unknown }) => {
         assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } });
         return existente;
@@ -51,11 +61,25 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   const primeira = await executar();
   assert.equal(primeira.status, 200);
   const resposta = await primeira.json();
-  assert.deepEqual(await (await executar()).json(), resposta);
+  assert.equal(resposta.situacao, "CRIADA");
+  assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "NA_FILA" });
   assert.equal(criadas, 1);
   existente = { id: resposta.id, status: "FALHA_FINAL" };
-  assert.equal((await executar()).status, 409);
+  assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "REENFILEIRADA" });
+  assert.deepEqual(atualizacoes.at(-1)?.rodada, { increment: 1 });
+  assert.equal(atualizacoes.at(-1)?.tentativa, 0);
+  assert.equal(existente.status, "PENDENTE");
+  existente.status = "AGUARDANDO_RETRY";
+  assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "NA_FILA" });
+  existente.status = "EM_EXECUCAO";
+  const alteradas = atualizacoes.length;
+  assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "EM_EXECUCAO" });
+  assert.equal(atualizacoes.length, alteradas);
   assert.equal(criadas, 1);
+  // Concluir uma execução no mesmo dia não impede uma nova solicitação manual.
+  existente = null;
+  assert.equal((await (await executar()).json()).situacao, "CRIADA");
+  assert.equal(criadas, 2);
   existente = null;
   disponivel = false;
   assert.equal((await executar()).status, 409);

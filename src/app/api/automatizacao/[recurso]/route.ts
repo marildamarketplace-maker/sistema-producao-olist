@@ -156,9 +156,20 @@ async function alterar(request: Request, contexto: Contexto) {
           select: { id: true, status: true },
         });
         if (existente?.status === "FALHA_FINAL") {
-          throw new ErroHttp(409, "A execução anterior falhou. Retente a mesma execução pelo Histórico.");
+          await tx.execucaoAutomatizacao.updateMany({
+            where: { id: existente.id, aplicativoId, status: "FALHA_FINAL" },
+            data: { status: "PENDENTE", disponivelEm: new Date(), tentativa: 0, rodada: { increment: 1 } },
+          });
+          return { id: existente.id, situacao: "REENFILEIRADA" };
         }
-        if (existente) return { id: existente.id };
+        if (existente?.status === "EM_EXECUCAO") return { id: existente.id, situacao: "EM_EXECUCAO" };
+        if (existente) {
+          await tx.execucaoAutomatizacao.updateMany({
+            where: { id: existente.id, aplicativoId, status: { in: ["PENDENTE", "AGUARDANDO_RETRY"] } },
+            data: { disponivelEm: new Date() },
+          });
+          return { id: existente.id, situacao: "NA_FILA" };
+        }
         const versao = await tx.versaoHabilidadeAutomatizacao.findFirst({
           where: { aplicativoId, habilidadeId: rotina.habilidadeId, habilidade: { arquivada: false } },
           orderBy: { numero: "desc" }, select: { id: true },
@@ -173,7 +184,7 @@ async function alterar(request: Request, contexto: Contexto) {
           select: { id: true },
         });
       });
-      return Response.json(execucao);
+      return Response.json({ situacao: "CRIADA", ...execucao });
     } else if (recurso === "rotinas") {
       if (!usuario.podeGerenciarRotinas) throw new ErroHttp(403, "Acesso restrito.");
       const revisao = z.string().regex(/^[a-f0-9]{64}$/);

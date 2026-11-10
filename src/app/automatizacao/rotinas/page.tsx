@@ -55,8 +55,12 @@ function Rotinas() {
     setErro("");
     setSucesso("");
     try {
-      await api(`testar-rotina?id=${id}`, "POST");
-      setSucesso("Execução da habilidade na fila. Se já havia uma em aberto, ela foi mantida. Acompanhe no Histórico.");
+      const resposta = await api<{ situacao: string }>(`testar-rotina?id=${id}`, "POST");
+      setSucesso(resposta.situacao === "EM_EXECUCAO"
+        ? "Esta rotina já está executando. Acompanhe no Histórico."
+        : resposta.situacao === "REENFILEIRADA"
+          ? "Execução com falha reenfileirada para agora, preservando a versão original da habilidade. Acompanhe no Histórico."
+          : "Execução na fila para agora. O worker iniciará assim que estiver disponível.");
     } catch (error) { setErro((error as Error).message); }
     finally { setSalvando(false); }
   }

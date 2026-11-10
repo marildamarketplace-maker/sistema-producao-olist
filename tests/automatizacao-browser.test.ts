@@ -37,6 +37,8 @@ test("resultado de browser exige confirmação explícita e preserva pendências
   assert.match(promptBrowserWorker("prompt"), /Não repita submissões/);
   assert.match(promptBrowserWorker("prompt"), /Liste as abas/);
   assert.match(promptBrowserWorker("prompt"), /Não use browser_close/);
+  assert.match(promptBrowserWorker("prompt"), /Mantenha a aba do ERP aberta/);
+  assert.match(promptBrowserWorker("prompt"), /não use dados antigos/);
   assert.match(promptBrowserWorker("prompt"), /execução parcial/);
 });
 
