@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
 import { renovarEnquantoValida } from "@/lib/automatizacao/renovacao";
 import { ambienteWorkerCodex } from "@/lib/automatizacao/ambiente-worker-codex";
+import { configurarBrowserWorker, promptBrowserWorker, respostaBrowserSchema } from "@/lib/automatizacao/browser-worker";
 import { z } from "zod";
 import { executarCodexCli } from "@/services/image-analysis/executarCodexCli";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
@@ -18,6 +19,11 @@ async function main() {
   const destino = new URL("/api/interno/automatizacao", process.env.AUTOMATIZACAO_ERP_URL);
   const token = process.env.AUTOMATIZACAO_WORKER_TOKEN;
   const ambiente = ambienteWorkerCodex();
+  const browser = configurarBrowserWorker();
+  if (browser) {
+    await access(browser.cli);
+    await mkdir(browser.perfil, { recursive: true, mode: 0o700 });
+  }
   const versao = process.env.AUTOMATIZACAO_CODEX_VERSION;
   const executable = process.env.CODEX_CLI_PATH || "codex";
   if (destino.protocol !== "https:" || !token || !versao) throw new Error("CONFIGURACAO");
@@ -58,27 +64,35 @@ async function main() {
       let resultado: string;
       try {
         const schemaPath = join(cwd, "resposta.json");
-        await writeFile(schemaPath, JSON.stringify({ type: "object", properties: { resultado: { type: "string" } }, required: ["resultado"], additionalProperties: false }), { mode: 0o600 });
+        await writeFile(schemaPath, JSON.stringify({ type: "object", properties: {
+          resultado: { type: "string" }, ...(browser ? { concluida: { type: "boolean" } } : {}),
+        }, required: browser ? ["resultado", "concluida"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
         const saidaPath = join(cwd, "resultado.json");
         await executarCodexCli({
-          executable, cwd, timeoutMs: 300_000, signal: fim.signal,
+          executable, cwd, timeoutMs: browser ? 900_000 : 300_000, signal: fim.signal,
           env: ambiente,
           args: [
             "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
             "--color", "never", "--output-schema", schemaPath, "--output-last-message", saidaPath,
             "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
             "-c", 'forced_login_method="chatgpt"',
+            ...(browser?.argsCodex ?? []),
             ...["shell_tool", "unified_exec", "apps", "plugins", "memories", "multi_agent", "image_generation"]
               .flatMap((feature) => ["-c", `features.${feature}=false`]),
             "-",
           ],
-          stdin: markdown,
+          stdin: browser ? promptBrowserWorker(markdown) : markdown,
         });
-        resultado = respostaSchema.parse(JSON.parse(await readFile(saidaPath, "utf8"))).resultado;
+        const resposta = JSON.parse(await readFile(saidaPath, "utf8"));
+        if (browser) {
+          const validada = respostaBrowserSchema.parse(resposta);
+          resultado = validada.resultado;
+          if (!validada.concluida) desfecho = "FALHA";
+        } else resultado = respostaSchema.parse(resposta).resultado;
       } catch (error) {
         const codigo = error instanceof ImageAnalysisProviderError ? error.code : "SAIDA_INVALIDA";
         desfecho = ["AUTHENTICATION_ERROR", "CONFIGURATION_ERROR"].includes(codigo) ? "INDISPONIVEL"
-          : error instanceof ImageAnalysisProviderError && error.retriable ? "TEMPORARIA" : "FALHA";
+          : !browser && error instanceof ImageAnalysisProviderError && error.retriable ? "TEMPORARIA" : "FALHA";
         resultado = codigo;
       } finally {
         await rm(cwd, { force: true, recursive: true }).catch(() => console.error("Falha ao limpar o diretório da execução."));
