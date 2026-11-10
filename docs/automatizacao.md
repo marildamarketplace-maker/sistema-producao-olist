@@ -12,6 +12,14 @@ A fila faz uma reserva por vez, renova a cada 15 segundos e expira a reserva em 
 
 ## Piloto e corte de mockups
 
+O botão **Testar rotina** agora enfileira a habilidade real como `EXECUTAR_PROMPT`,
+inclusive para rotinas pausadas, sem ativar ou alterar o calendário. Usa a versão
+mais recente da habilidade e o fluxo normal de histórico e notificações. Reutiliza
+execução não concluída e exige retry pelo Histórico após falha final. Os antigos
+registros `TESTE_ROTINA` permanecem diagnósticos sintéticos. O executor de prompts
+continua com ferramentas desabilitadas; habilidades de browser exigem integração
+própria antes de conseguirem operar marketplaces.
+
 Use Linux x86 com 2 vCPUs e 4 GiB de RAM. Rode o piloto existente em um ambiente dedicado, com login do Codex para mockups e referências autorizadas.
 
 ```sh
