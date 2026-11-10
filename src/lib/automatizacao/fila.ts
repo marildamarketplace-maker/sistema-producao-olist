@@ -36,7 +36,7 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
       tentativa: indisponivel ? { decrement: 1 } : undefined,
     },
   });
-  if (reabrir) return;
+  if (reabrir || execucao.tipo === "TESTE_ROTINA") return;
   const app = await tx.aplicativo.findUnique({ where: { id: execucao.aplicativoId }, select: { whatsapp: true } });
   let numeros: string[];
   try { numeros = app ? normalizarDestinatariosWhatsapp(app.whatsapp) : []; }
@@ -62,7 +62,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
     if (operacao.acao === "reservar") {
       const [chave] = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM automatizacao_execucao
-        WHERE "aplicativoId" = ${escopo.aplicativoId}::uuid AND tipo = 'EXECUTAR_PROMPT'
+        WHERE "aplicativoId" = ${escopo.aplicativoId}::uuid AND tipo IN ('EXECUTAR_PROMPT', 'TESTE_ROTINA')
         AND ((status IN ('PENDENTE', 'AGUARDANDO_RETRY') AND "disponivelEm" <= now())
           OR (status = 'EM_EXECUCAO' AND "reservaAte" <= now()))
         ORDER BY "disponivelEm", id LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -91,14 +91,15 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       await tx.tentativaAutomatizacao.create({
         data: { id: reserva, execucaoId: execucao.id, worker: escopo.id, rodada: execucao.rodada },
       });
-      return { trabalho: { reserva, markdown: execucao.versao.markdown } };
+      return { trabalho: { reserva, markdown: execucao.tipo === "TESTE_ROTINA"
+        ? 'Retorne exatamente {"resultado":"TESTE_ROTINA_OK"}.' : execucao.versao.markdown } };
     }
 
     const [chave] = await tx.$queryRaw<{ id: string }[]>`
       SELECT e.id FROM automatizacao_execucao e
       JOIN automatizacao_tentativa t ON t."execucaoId" = e.id
       WHERE t.id = ${operacao.reserva}::uuid AND t.worker = ${escopo.id}
-        AND e."aplicativoId" = ${escopo.aplicativoId}::uuid AND e.tipo = 'EXECUTAR_PROMPT'
+        AND e."aplicativoId" = ${escopo.aplicativoId}::uuid AND e.tipo IN ('EXECUTAR_PROMPT', 'TESTE_ROTINA')
       FOR UPDATE OF e
     `;
     if (!chave) return null;
@@ -115,7 +116,9 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       });
       return { ok: true };
     }
-    const status = operacao.desfecho === "SUCESSO" ? "CONCLUIDA"
+    const sucesso = operacao.desfecho === "SUCESSO" &&
+      (execucao.tipo !== "TESTE_ROTINA" || operacao.resultado === "TESTE_ROTINA_OK");
+    const status = sucesso ? "CONCLUIDA"
       : operacao.desfecho === "INDISPONIVEL" ? "INDISPONIVEL"
       : operacao.desfecho === "TEMPORARIA" && execucao.tentativa < limiteTentativas ? "AGUARDANDO_RETRY"
       : "FALHA_FINAL";

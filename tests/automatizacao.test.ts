@@ -67,6 +67,18 @@ test("migration isola o aplicativo e bloqueia próxima ocorrência até sucesso"
   await db.exec("UPDATE automatizacao_execucao SET status = 'CONCLUIDA'");
   await assert.rejects(inserir("2026-11-09T11:00:00Z"), { code: "23505" });
   await inserir("2026-11-10T11:00:00Z");
+  await db.exec(await readFile("prisma/migrations/20261110130000_teste_rotina/migration.sql", "utf8"));
+  const inserirTeste = (data: string) => db.query(
+    'INSERT INTO automatizacao_execucao ("aplicativoId", "rotinaId", "versaoId", "previstoEm", tipo) VALUES ($1, $2, $3, $4, $5)',
+    [app, rotina, versao, data, "TESTE_ROTINA"],
+  );
+  await inserirTeste("2026-11-10T11:00:01Z");
+  await assert.rejects(inserirTeste("2026-11-10T11:00:02Z"), { code: "23505" });
+  await db.exec("UPDATE automatizacao_execucao SET status = 'FALHA_FINAL' WHERE tipo = 'TESTE_ROTINA'");
+  await inserirTeste("2026-11-10T11:00:02Z");
+  await assert.rejects(inserir("2026-11-11T11:00:00Z"), { code: "23505" });
+  await db.exec("UPDATE automatizacao_execucao SET status = 'CONCLUIDA' WHERE tipo = 'EXECUTAR_PROMPT'");
+  await inserir("2026-11-11T11:00:00Z");
   await db.exec("SET ROLE authenticated");
   await assert.rejects(db.query("SELECT * FROM automatizacao_execucao"), { code: "42501" });
 });

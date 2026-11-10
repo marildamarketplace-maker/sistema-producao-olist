@@ -53,7 +53,7 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
     method: "POST", headers: { Authorization: `Bearer ${credencial}` }, body: JSON.stringify(corpo),
   }));
   const reservar = async () => (await (await operar({ acao: "reservar" })).json()).trabalho as { reserva: string; markdown: string };
-  const finalizar = (reserva: string, desfecho: string) => operar({ acao: "finalizar", reserva, desfecho, resultado: "resultado" });
+  const finalizar = (reserva: string, desfecho: string, resultado = "resultado") => operar({ acao: "finalizar", reserva, desfecho, resultado });
 
   assert.equal((await operar({ acao: "reservar" }, "outra-credencial")).status, 401);
   const primeira = await reservar();
@@ -73,4 +73,11 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
   assert.match(notificacoes[0], /falha final/);
   assert.match(notificacoes[1], /concluída/);
+
+  Object.assign(execucao, { tipo: "TESTE_ROTINA", status: "PENDENTE", tentativa: 0 });
+  const teste = await reservar();
+  assert.match(teste.markdown, /TESTE_ROTINA_OK/);
+  assert.doesNotMatch(teste.markdown, /Entrada imutável/);
+  assert.deepEqual(await (await finalizar(teste.reserva, "SUCESSO", "TESTE_ROTINA_OK")).json(), { status: "CONCLUIDA" });
+  assert.equal(notificacoes.length, 2);
 });

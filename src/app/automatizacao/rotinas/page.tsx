@@ -50,6 +50,17 @@ function Rotinas() {
     finally { setSalvando(false); }
   }
 
+  async function testar(id: string) {
+    setSalvando(true);
+    setErro("");
+    setSucesso("");
+    try {
+      await api(`testar-rotina?id=${id}`, "POST");
+      setSucesso("Teste na fila. Veja o resultado no Histórico.");
+    } catch (error) { setErro((error as Error).message); }
+    finally { setSalvando(false); }
+  }
+
   function salvar(evento: FormEvent) {
     evento.preventDefault();
     void alterar(form.id ? "PATCH" : "POST");
@@ -89,6 +100,10 @@ function Rotinas() {
       <h2 className="break-words font-semibold">{item.nome}</h2>
       <p className="break-words text-sm">{habilidades.find((h) => h.id === item.habilidadeId)?.nome} · {item.arquivada ? "Arquivada" : item.ativa ? "Ativa" : "Pausada"}</p>
       <ul className="flex flex-wrap gap-2 text-sm">{item.horarios.map(({ dia, hora }) => <li key={`${dia}-${hora}`}>{dias[dia]} {hora}</li>)}</ul>
+      {usuario?.podeIntervirAutomatizacao && !item.arquivada && <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={secundario} disabled={salvando} onClick={() => void testar(item.id)}>Testar rotina</button>
+        <span className="text-sm">Verifica o worker sem executar a habilidade.</span>
+      </div>}
       {usuario?.podeGerenciarRotinas && !item.arquivada && <div className="flex flex-wrap gap-2">
         <button className={secundario} disabled={salvando} onClick={() => { setForm(item); campoNome.current?.focus(); }}>Editar</button>
         <button className={secundario} disabled={salvando} onClick={() => void alterar("PATCH", item, !item.ativa)}>{item.ativa ? "Pausar" : "Ativar"}</button>

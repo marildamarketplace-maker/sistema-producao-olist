@@ -24,7 +24,7 @@ export async function agendarAutomatizacoes(data = new Date()) {
       if (horarios.elegivel) {
         const previstoEm = horarios.elegivel;
         const bloqueio = await tx.execucaoAutomatizacao.findFirst({
-          where: { aplicativoId, rotinaId, status: { not: "CONCLUIDA" } },
+          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } },
           select: { status: true },
         });
         if (!bloqueio) {

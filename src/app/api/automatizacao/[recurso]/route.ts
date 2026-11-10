@@ -64,7 +64,7 @@ export async function GET(request: Request, contexto: Contexto) {
     if (recurso !== "historico") throw new ErroHttp(404, "Recurso inexistente.");
     const busca = new URL(request.url).searchParams;
     const filtros = z.object({
-      rotinaId: z.uuid().optional(), status: z.enum(statusExecucao).optional(), tipo: z.literal("EXECUTAR_PROMPT").optional(),
+      rotinaId: z.uuid().optional(), status: z.enum(statusExecucao).optional(), tipo: z.enum(["EXECUTAR_PROMPT", "TESTE_ROTINA"]).optional(),
       whatsapp: z.enum(["PENDENTE", "SUCESSO", "ERRO", "NAO_APLICAVEL"]).optional(),
       desde: z.iso.date().optional(), pagina: z.coerce.number().int().min(0).max(1000).default(0),
     }).parse(Object.fromEntries(busca));
@@ -106,7 +106,7 @@ async function alterar(request: Request, contexto: Contexto) {
       : z.uuid().parse(new URL(request.url).searchParams.get("id"));
     const arquivar = request.method === "DELETE";
     let corpo: unknown;
-    if (!arquivar && recurso !== "historico") {
+    if (!arquivar && recurso !== "historico" && recurso !== "testar-rotina") {
       const texto = await lerCorpoLimitado(request, 200_000);
       if (texto === null) throw new ErroHttp(413, "O conteúdo excede o tamanho permitido.");
       corpo = JSON.parse(texto);
@@ -141,6 +141,36 @@ async function alterar(request: Request, contexto: Contexto) {
           });
         }
       });
+    } else if (recurso === "testar-rotina" && request.method === "POST") {
+      if (!usuario.podeIntervirAutomatizacao) throw new ErroHttp(403, "Acesso restrito.");
+      const rotinaId = z.uuid().parse(new URL(request.url).searchParams.get("id"));
+      const execucao = await prisma.$transaction(async (tx) => {
+        const [rotina] = await tx.$queryRaw<{ habilidadeId: string }[]>`
+          SELECT "habilidadeId" FROM automatizacao_rotina
+          WHERE id = ${rotinaId}::uuid AND "aplicativoId" = ${aplicativoId}::uuid AND NOT arquivada
+          FOR UPDATE
+        `;
+        if (!rotina) throw new ErroHttp(404, "Rotina indisponível.");
+        const teste = await tx.execucaoAutomatizacao.findFirst({
+          where: { aplicativoId, rotinaId, tipo: "TESTE_ROTINA", status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } },
+          select: { id: true },
+        });
+        if (teste) return teste;
+        const versao = await tx.versaoHabilidadeAutomatizacao.findFirst({
+          where: { aplicativoId, habilidadeId: rotina.habilidadeId, habilidade: { arquivada: false } },
+          orderBy: { numero: "desc" }, select: { id: true },
+        });
+        if (!versao) throw new ErroHttp(409, "A habilidade da rotina está indisponível.");
+        const agora = Date.now();
+        return tx.execucaoAutomatizacao.create({
+          data: {
+            aplicativoId, rotinaId, tipo: "TESTE_ROTINA", versaoId: versao.id,
+            previstoEm: new Date(agora % 60_000 === 0 ? agora + 1 : agora),
+          },
+          select: { id: true },
+        });
+      });
+      return Response.json(execucao);
     } else if (recurso === "rotinas") {
       if (!usuario.podeGerenciarRotinas) throw new ErroHttp(403, "Acesso restrito.");
       const revisao = z.string().regex(/^[a-f0-9]{64}$/);
@@ -203,7 +233,7 @@ async function alterar(request: Request, contexto: Contexto) {
         return Response.json({ ok: true });
       }
       const atualizada = await prisma.execucaoAutomatizacao.updateMany({
-        where: { id, aplicativoId, status: "FALHA_FINAL" },
+        where: { id, aplicativoId, tipo: { not: "TESTE_ROTINA" }, status: "FALHA_FINAL" },
         data: { status: "PENDENTE", disponivelEm: new Date(), tentativa: 0, rodada: { increment: 1 } },
       });
       if (!atualizada.count) throw new ErroHttp(409, "A execução não está disponível para retentativa.");

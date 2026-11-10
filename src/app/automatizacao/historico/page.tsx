@@ -104,7 +104,7 @@ function HistoricoConteudo() {
     <Feedback {...{ carregando, erro, sucesso }} />
     {!carregando && !historico.execucoes.length && !historico.disparos.length && <p>Nenhum registro encontrado.</p>}
     {historico.execucoes.map((item) => <article className={painel} key={item.id}>
-      <h2 className="break-words font-semibold">{item.rotina.nome}</h2>
+      <h2 className="break-words font-semibold">{item.rotina.nome}{item.tipo === "TESTE_ROTINA" && " · Teste"}</h2>
       <p className="text-sm">{statusLabel[item.status]} · {formato.format(new Date(item.previstoEm))} · Habilidade v{item.versao.numero}</p>
       {item.tentativas.length > 0 && <details>
         <summary className="min-h-11 cursor-pointer py-2 text-sm">Ver tentativas e WhatsApp</summary>
@@ -117,7 +117,7 @@ function HistoricoConteudo() {
           {tentativa.resultado && <pre className="mt-1 whitespace-pre-wrap break-words">{tentativa.resultado}</pre>}
         </li>)}</ul>
       </details>}
-      {usuario?.podeIntervirAutomatizacao && item.status === "FALHA_FINAL" &&
+      {usuario?.podeIntervirAutomatizacao && item.tipo !== "TESTE_ROTINA" && item.status === "FALHA_FINAL" &&
         <button className={secundario} disabled={salvando || carregando} onClick={() => void retentar(item.id)}>Retentar execução</button>}
     </article>)}
     {historico.disparos.length > 0 && <section className={painel}>
