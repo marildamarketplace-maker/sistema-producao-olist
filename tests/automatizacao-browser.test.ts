@@ -14,6 +14,11 @@ test("browser opt-in configura MCP persistente sem expor secrets", () => {
   assert.match(argumentos, /--headless/);
   assert.match(argumentos, /browser_evaluate/);
   assert.match(argumentos, /required=true/);
+  assert.ok(config.argsCodex.includes('mcp_servers.browser.default_tools_approval_mode="approve"'));
+  const permitidas = config.argsCodex.find((v) => v.startsWith("mcp_servers.browser.enabled_tools="))!;
+  assert.match(permitidas, /browser_navigate/);
+  assert.match(permitidas, /browser_click/);
+  assert.doesNotMatch(permitidas, /browser_evaluate|browser_run_code|browser_file_upload|browser_install/);
   assert.doesNotMatch(argumentos, /segredo|no-sandbox|unrestricted/);
 });
 

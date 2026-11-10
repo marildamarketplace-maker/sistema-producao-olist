@@ -16,6 +16,15 @@ export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env)
     "mcp_servers.browser.command": process.execPath,
     "mcp_servers.browser.args": args,
     "mcp_servers.browser.required": true,
+    // O worker não tem operador para responder prompts de aprovação.
+    // Autoriza apenas as ferramentas de interação listadas deste MCP local.
+    "mcp_servers.browser.default_tools_approval_mode": "approve",
+    "mcp_servers.browser.enabled_tools": [
+      "browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_click",
+      "browser_type", "browser_fill_form", "browser_press_key", "browser_select_option",
+      "browser_wait_for", "browser_tabs", "browser_take_screenshot", "browser_handle_dialog",
+      "browser_hover", "browser_drag", "browser_close", "browser_resize",
+    ],
     "mcp_servers.browser.startup_timeout_sec": 60,
     "mcp_servers.browser.tool_timeout_sec": 90,
     // Interação por elementos; sem JavaScript arbitrário nem uploads locais.

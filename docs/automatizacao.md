@@ -22,6 +22,12 @@ mantém shell desabilitado; o acesso ao browser exige a configuração abaixo.
 ## Browser no worker Ubuntu
 
 Integração opcional por Playwright MCP via STDIO, sem porta pública. Mantém o
+MCP local com `default_tools_approval_mode="approve"` somente para a lista
+explícita de ferramentas de navegação e interação. A política global continua
+`approval_policy="never"`; não habilite aprovações globais nem shell para resolver
+bloqueios de ferramentas. O operador autoriza as ações ao cadastrar/disparar a
+habilidade; esse modo pode realizar alterações externas sem confirmação por clique.
+Mantém o
 login ChatGPT do CLI e um perfil Chromium persistente por aplicativo. Não acessa
 automaticamente as janelas ou sessões do Firefox já instalado. Use apenas um
 worker por perfil e um usuário Ubuntu dedicado por aplicativo. O MCP é um
