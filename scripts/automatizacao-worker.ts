@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
 import { renovarEnquantoValida } from "@/lib/automatizacao/renovacao";
+import { ambienteWorkerCodex } from "@/lib/automatizacao/ambiente-worker-codex";
 import { z } from "zod";
-import { ambienteCodexCli, executarCodexCli } from "@/services/image-analysis/executarCodexCli";
+import { executarCodexCli } from "@/services/image-analysis/executarCodexCli";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 
 const respostaSchema = z.object({ resultado: z.string().trim().min(1).max(8_000).refine((texto) => !texto.includes("\0")) });
@@ -16,10 +17,10 @@ process.once("SIGINT", () => parar.abort());
 async function main() {
   const destino = new URL("/api/interno/automatizacao", process.env.AUTOMATIZACAO_ERP_URL);
   const token = process.env.AUTOMATIZACAO_WORKER_TOKEN;
-  const chave = process.env.CODEX_API_KEY;
+  const ambiente = ambienteWorkerCodex();
   const versao = process.env.AUTOMATIZACAO_CODEX_VERSION;
   const executable = process.env.CODEX_CLI_PATH || "codex";
-  if (destino.protocol !== "https:" || !token || !chave || !versao) throw new Error("CONFIGURACAO");
+  if (destino.protocol !== "https:" || !token || !versao) throw new Error("CONFIGURACAO");
   const { stdout } = await executarCodexCli({ executable, args: ["--version"], cwd: tmpdir(), timeoutMs: 10_000 });
   if (stdout.trim().split(/\s+/).at(-1) !== versao) throw new Error("VERSAO_CODEX");
 
@@ -61,11 +62,12 @@ async function main() {
         const saidaPath = join(cwd, "resultado.json");
         await executarCodexCli({
           executable, cwd, timeoutMs: 300_000, signal: fim.signal,
-          env: { ...ambienteCodexCli({ NODE_ENV: "production", PATH: process.env.PATH }), HOME: cwd, CODEX_HOME: cwd, CODEX_API_KEY: chave },
+          env: ambiente,
           args: [
             "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
             "--color", "never", "--output-schema", schemaPath, "--output-last-message", saidaPath,
             "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
+            "-c", 'forced_login_method="chatgpt"',
             ...["shell_tool", "unified_exec", "apps", "plugins", "memories", "multi_agent", "image_generation"]
               .flatMap((feature) => ["-c", `features.${feature}=false`]),
             "-",
