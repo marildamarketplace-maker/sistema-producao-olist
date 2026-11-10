@@ -12,6 +12,10 @@ type UsuarioRow = {
   pode_visualizar_produtos_fornecedor: boolean;
   pode_visualizar_categorias_midia: boolean;
   pode_visualizar_tarefas_midia: boolean;
+  pode_visualizar_automatizacao: boolean;
+  pode_editar_habilidades: boolean;
+  pode_gerenciar_rotinas: boolean;
+  pode_intervir_automatizacao: boolean;
   pode_visualizar_olist_produtos: boolean;
   pode_visualizar_olist_contatos: boolean;
   pode_visualizar_olist_pedidos: boolean;
@@ -78,6 +82,10 @@ export async function GET(request: Request) {
         pode_visualizar_produtos_fornecedor,
         pode_visualizar_categorias_midia,
         pode_visualizar_tarefas_midia,
+        pode_visualizar_automatizacao,
+        pode_editar_habilidades,
+        pode_gerenciar_rotinas,
+        pode_intervir_automatizacao,
         pode_visualizar_olist_produtos,
         pode_visualizar_olist_contatos,
         pode_visualizar_olist_pedidos,
@@ -149,6 +157,10 @@ export async function GET(request: Request) {
     podeVisualizarProdutosFornecedor: Boolean(usuario.pode_visualizar_produtos_fornecedor),
     podeVisualizarCategoriasMidia: Boolean(usuario.pode_visualizar_categorias_midia),
     podeVisualizarTarefasMidia: Boolean(usuario.pode_visualizar_tarefas_midia),
+    podeVisualizarAutomatizacao: Boolean(usuario.pode_visualizar_automatizacao),
+    podeEditarHabilidades: Boolean(usuario.pode_editar_habilidades),
+    podeGerenciarRotinas: Boolean(usuario.pode_gerenciar_rotinas),
+    podeIntervirAutomatizacao: Boolean(usuario.pode_intervir_automatizacao),
     podeVisualizarOlistProdutos: Boolean(usuario.pode_visualizar_olist_produtos),
     podeVisualizarOlistContatos: Boolean(usuario.pode_visualizar_olist_contatos),
     podeVisualizarOlistPedidos: Boolean(usuario.pode_visualizar_olist_pedidos),

@@ -49,12 +49,14 @@ export function executarCodexCli(options: {
   cwd: string;
   timeoutMs: number;
   stdin?: string;
+  env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 }): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const grouped = process.platform !== "win32";
     const child = spawn(options.executable, options.args, {
       cwd: options.cwd,
-      env: ambienteCodexCli(),
+      env: options.env ?? ambienteCodexCli(),
       shell: false,
       detached: grouped,
       windowsHide: true,
@@ -79,6 +81,14 @@ export function executarCodexCli(options: {
       terminate(erroCodexCli("TIMEOUT", "Timeout na análise visual pelo Codex CLI.", true));
     }, options.timeoutMs);
 
+    const abortar = () => terminate(erroCodexCli("TIMEOUT", "A execução perdeu a reserva.", true));
+    options.signal?.addEventListener("abort", abortar, { once: true });
+    if (options.signal?.aborted) abortar();
+    const limpar = () => {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abortar);
+    };
+
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     const collect = (chunk: string, stream: "stdout" | "stderr") => {
@@ -94,11 +104,11 @@ export function executarCodexCli(options: {
     child.stdout.on("data", (chunk: string) => collect(chunk, "stdout"));
     child.stderr.on("data", (chunk: string) => collect(chunk, "stderr"));
     child.once("error", () => {
-      clearTimeout(timeout);
+      limpar();
       reject(erroCodexCli("CONFIGURATION_ERROR", "Não foi possível executar o Codex CLI. Confira a instalação, permissões e CODEX_CLI_PATH."));
     });
     child.once("close", (code) => {
-      clearTimeout(timeout);
+      limpar();
       if (failure) reject(failure);
       else if (code !== 0) reject(classificarFalhaCodexCli(`${stderr}\n${stdout}`));
       else resolve({ stdout, stderr });

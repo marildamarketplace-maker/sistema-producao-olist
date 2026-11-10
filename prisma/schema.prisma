@@ -56,6 +56,7 @@ model Aplicativo {
   turnosProducao            TurnoProducao[]
   usuarios                  Usuario[]
   filaMockups               FilaMockup[]
+  habilidadesAutomatizacao  HabilidadeAutomatizacao[]
 
   @@index([aplicativoPaiId], map: "idx_aplicativo_pai_id")
   @@map("aplicativo")
@@ -185,6 +186,10 @@ model Usuario {
   podeVisualizarOlistFormasPagamento   Boolean                 @default(false) @map("pode_visualizar_olist_formas_pagamento")
   podeVisualizarOlistFormasRecebimento Boolean                 @default(false) @map("pode_visualizar_olist_formas_recebimento")
   podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
+  podeVisualizarAutomatizacao           Boolean                 @default(false) @map("pode_visualizar_automatizacao")
+  podeEditarHabilidades           Boolean                 @default(false) @map("pode_editar_habilidades")
+  podeGerenciarRotinas           Boolean                 @default(false) @map("pode_gerenciar_rotinas")
+  podeIntervirAutomatizacao           Boolean                 @default(false) @map("pode_intervir_automatizacao")
   podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
   podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
@@ -795,6 +800,7 @@ model EstampaCatalogoIa {
 }
 
 model Notification {
+  avisoAutomatizacao AvisoAutomatizacao?
   id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tipo          NotificationType
   to            String             @db.VarChar(30)
@@ -1172,4 +1178,113 @@ model FilaMockup {
   @@index([aplicativoId, proximaTentativaEm, createdAt], map: "fila_mockups_pendentes_idx", where: raw("(status = 'PENDING'::text)"))
   @@index([aplicativoId, reservaAte], map: "fila_mockups_reservas_idx", where: raw("(status = 'PROCESSING'::text)"))
   @@map("fila_mockups")
+}
+
+model HabilidadeAutomatizacao {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String   @db.Uuid
+  nome         String
+  arquivada    Boolean  @default(false)
+  aplicativo   Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
+  versoes      VersaoHabilidadeAutomatizacao[]
+  rotinas      RotinaAutomatizacao[]
+
+  @@unique([aplicativoId, id])
+  @@map("automatizacao_habilidade")
+}
+
+model VersaoHabilidadeAutomatizacao {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String   @db.Uuid
+  habilidadeId String   @db.Uuid
+  numero       Int
+  markdown     String
+  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
+  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
+  execucoes    ExecucaoAutomatizacao[]
+
+  @@unique([aplicativoId, id])
+  @@unique([habilidadeId, numero])
+  @@map("automatizacao_habilidade_versao")
+}
+
+model RotinaAutomatizacao {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String   @db.Uuid
+  habilidadeId String   @db.Uuid
+  nome         String
+  ativa        Boolean  @default(false)
+  arquivada    Boolean  @default(false)
+  horarios     Json
+  cursor       DateTime @default(now()) @db.Timestamptz(6)
+  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
+  execucoes    ExecucaoAutomatizacao[]
+  disparos     DisparoAutomatizacao[]
+
+  @@unique([aplicativoId, id])
+  @@index([ativa, cursor])
+  @@map("automatizacao_rotina")
+}
+
+model DisparoAutomatizacao {
+  aplicativoId String @db.Uuid
+  rotinaId     String @db.Uuid
+  previstoEm   DateTime @db.Timestamptz(6)
+  motivo       String
+  rotina       RotinaAutomatizacao @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
+
+  @@id([aplicativoId, rotinaId, previstoEm])
+  @@map("automatizacao_disparo")
+}
+
+model ExecucaoAutomatizacao {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String   @db.Uuid
+  rotinaId     String   @db.Uuid
+  versaoId     String   @db.Uuid
+  tipo         String   @default("EXECUTAR_PROMPT")
+  status       String   @default("PENDENTE")
+  previstoEm   DateTime @db.Timestamptz(6)
+  disponivelEm DateTime @default(now()) @db.Timestamptz(6)
+  reserva      String?  @db.Uuid
+  reservaAte   DateTime? @db.Timestamptz(6)
+  worker       String?
+  tentativa    Int      @default(0)
+  rodada       Int      @default(1)
+  rotina       RotinaAutomatizacao @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
+  versao       VersaoHabilidadeAutomatizacao @relation(fields: [aplicativoId, versaoId], references: [aplicativoId, id])
+  tentativas   TentativaAutomatizacao[]
+
+  @@unique([aplicativoId, rotinaId, previstoEm])
+  @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(status <> 'CONCLUIDA'::text)"))
+  @@index([aplicativoId, previstoEm])
+  @@index([aplicativoId, tipo, status, disponivelEm])
+  @@map("automatizacao_execucao")
+}
+
+model TentativaAutomatizacao {
+  id          String @id @db.Uuid
+  execucaoId  String @db.Uuid
+  worker      String
+  rodada      Int
+  iniciadaEm  DateTime @default(now()) @db.Timestamptz(6)
+  encerradaEm DateTime? @db.Timestamptz(6)
+  status      String @default("EM_EXECUCAO")
+  resultado   String?
+  execucao    ExecucaoAutomatizacao @relation(fields: [execucaoId], references: [id])
+  avisos      AvisoAutomatizacao[]
+
+  @@index([execucaoId, iniciadaEm])
+  @@map("automatizacao_tentativa")
+}
+
+model AvisoAutomatizacao {
+  tentativaId   String @db.Uuid
+  notificationId String @unique @db.Uuid
+  destinatario   String
+  tentativa      TentativaAutomatizacao @relation(fields: [tentativaId], references: [id])
+  notification   Notification @relation(fields: [notificationId], references: [id])
+
+  @@id([tentativaId, destinatario])
+  @@map("automatizacao_aviso")
 }

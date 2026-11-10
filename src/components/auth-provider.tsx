@@ -38,6 +38,10 @@ type UsuarioAplicativoFallbackResponse = {
   pode_visualizar_produtos_fornecedor: boolean;
   pode_visualizar_categorias_midia: boolean;
   pode_visualizar_tarefas_midia: boolean;
+  pode_visualizar_automatizacao: boolean;
+  pode_editar_habilidades: boolean;
+  pode_gerenciar_rotinas: boolean;
+  pode_intervir_automatizacao: boolean;
   pode_visualizar_olist_produtos: boolean;
   pode_visualizar_olist_contatos: boolean;
   pode_visualizar_olist_pedidos: boolean;
@@ -101,6 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_visualizar_produtos_fornecedor,
         pode_visualizar_categorias_midia,
         pode_visualizar_tarefas_midia,
+        pode_visualizar_automatizacao,
+        pode_editar_habilidades,
+        pode_gerenciar_rotinas,
+        pode_intervir_automatizacao,
         pode_visualizar_olist_produtos,
         pode_visualizar_olist_contatos,
         pode_visualizar_olist_pedidos,
@@ -157,6 +165,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeVisualizarProdutosFornecedor: Boolean(usuarioData.pode_visualizar_produtos_fornecedor),
       podeVisualizarCategoriasMidia: Boolean(usuarioData.pode_visualizar_categorias_midia),
       podeVisualizarTarefasMidia: Boolean(usuarioData.pode_visualizar_tarefas_midia),
+      podeVisualizarAutomatizacao: Boolean(usuarioData.pode_visualizar_automatizacao),
+      podeEditarHabilidades: Boolean(usuarioData.pode_editar_habilidades),
+      podeGerenciarRotinas: Boolean(usuarioData.pode_gerenciar_rotinas),
+      podeIntervirAutomatizacao: Boolean(usuarioData.pode_intervir_automatizacao),
       podeVisualizarOlistProdutos: Boolean(usuarioData.pode_visualizar_olist_produtos),
       podeVisualizarOlistContatos: Boolean(usuarioData.pode_visualizar_olist_contatos),
       podeVisualizarOlistPedidos: Boolean(usuarioData.pode_visualizar_olist_pedidos),

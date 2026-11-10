@@ -3,6 +3,10 @@
   "framework": "nextjs",
   "crons": [
     {
+      "path": "/api/cron/agendar-automatizacao",
+      "schedule": "*/1 * * * *"
+    },
+    {
       "path": "/api/cron/renovar-tokens-olist",
       "schedule": "5 */3 * * *"
     },

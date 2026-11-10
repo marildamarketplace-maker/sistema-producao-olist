@@ -1,3 +1,4 @@
+import { lerCorpoLimitado } from "@/lib/ler-corpo-limitado";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
     const escopo = await autorizarFila(request);
     if (escopo instanceof Response) return escopo;
 
-    const texto = await lerCorpo(request);
+    const texto = await lerCorpoLimitado(request, MAX_CORPO);
     if (texto === null) return erro("O lote excede o tamanho máximo.", 413);
     let corpo: unknown;
     try { corpo = JSON.parse(texto); }
@@ -190,28 +191,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ loteId, quantidade: trabalhos.length }, { status: 201 });
   } catch {
     return erro("Não foi possível salvar o lote na fila. Tente novamente.", 503);
-  }
-}
-
-async function lerCorpo(request: Request) {
-  if (Number(request.headers.get("content-length")) > MAX_CORPO) return null;
-  const reader = request.body?.getReader();
-  if (!reader) return "";
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  let texto = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) return texto + decoder.decode();
-      bytes += value.byteLength;
-      if (bytes > MAX_CORPO) {
-        await reader.cancel();
-        return null;
-      }
-      texto += decoder.decode(value, { stream: true });
-    }
-  } finally {
-    reader.releaseLock();
   }
 }

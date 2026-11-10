@@ -126,6 +126,14 @@ export const menuItems: MenuItem[] = [
     ],
   },
   {
+    label: "Automatização",
+    items: [
+      { label: "Habilidades", href: "/automatizacao/habilidades", permissions: ["podeVisualizarAutomatizacao"] },
+      { label: "Rotinas", href: "/automatizacao/rotinas", permissions: ["podeVisualizarAutomatizacao"] },
+      { label: "Histórico", href: "/automatizacao/historico", permissions: ["podeVisualizarAutomatizacao"] },
+    ],
+  },
+  {
     label: "Controle de mídia",
     items: [
       {
@@ -137,16 +145,6 @@ export const menuItems: MenuItem[] = [
         label: "Produtos",
         href: "/controle-midia/produtos",
         permissions: ["podeVisualizarCategoriasMidia"],
-      },
-      {
-        label: "Categorias",
-        href: "/controle-midia/categorias",
-        permissions: ["podeVisualizarCategoriasMidia"],
-      },
-      {
-        label: "Gestão de Tarefas",
-        href: "/controle-midia/tarefas",
-        permissions: ["podeVisualizarTarefasMidia"],
       },
       {
         label: "Pesquisar estampas",

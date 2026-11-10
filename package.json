@@ -16,7 +16,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts",
     "worker:mockups": "node --import tsx scripts/mockups-worker.ts",
     "worker:estampas": "tsx scripts/estampas-worker.ts",
-    "batch:estampas": "tsx scripts/estampas-batch.ts"
+    "batch:estampas": "tsx scripts/estampas-batch.ts",
+    "worker:automatizacao": "node --import tsx scripts/automatizacao-worker.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
