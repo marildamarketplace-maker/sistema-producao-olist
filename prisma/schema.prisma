@@ -20,6 +20,7 @@ model Aplicativo {
   descricao                 String?
   aplicativoPai             Aplicativo?                   @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict)
   filiais                   Aplicativo[]                  @relation("AplicativoFiliais")
+  habilidadesAutomatizacao  HabilidadeAutomatizacao[]
   baixasEstoqueOlist        BaixaEstoqueOlist[]
   buscasSku                 BuscaSku[]
   categoriasOlist           CategoriaOlist[]
@@ -28,6 +29,7 @@ model Aplicativo {
   configuracoesSistema      ConfiguracaoSistema[]
   controlesBuscaOlist       ControleBuscaOlist[]
   enviosFornecedor          EnvioFornecedor[]
+  filaMockups               FilaMockup[]
   formasPagamentoPlanos     FormaPagamentoOlistPlano[]
   formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
   fornecedores              Fornecedor[]                  @relation("FornecedorOrigem")
@@ -55,8 +57,6 @@ model Aplicativo {
   tarefasMidia              TarefaMidia[]
   turnosProducao            TurnoProducao[]
   usuarios                  Usuario[]
-  filaMockups               FilaMockup[]
-  habilidadesAutomatizacao  HabilidadeAutomatizacao[]
 
   @@index([aplicativoPaiId], map: "idx_aplicativo_pai_id")
   @@map("aplicativo")
@@ -186,14 +186,14 @@ model Usuario {
   podeVisualizarOlistFormasPagamento   Boolean                 @default(false) @map("pode_visualizar_olist_formas_pagamento")
   podeVisualizarOlistFormasRecebimento Boolean                 @default(false) @map("pode_visualizar_olist_formas_recebimento")
   podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
-  podeVisualizarAutomatizacao           Boolean                 @default(false) @map("pode_visualizar_automatizacao")
-  podeEditarHabilidades           Boolean                 @default(false) @map("pode_editar_habilidades")
-  podeGerenciarRotinas           Boolean                 @default(false) @map("pode_gerenciar_rotinas")
-  podeIntervirAutomatizacao           Boolean                 @default(false) @map("pode_intervir_automatizacao")
   podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
   podeVisualizarAnotarSku              Boolean                 @default(false) @map("pode_visualizar_anotar_sku")
   podeGerenciarFilaPedidos             Boolean                 @default(false) @map("pode_gerenciar_fila_pedidos")
   podeSelecionarFilialFornecedor       Boolean                 @default(false) @map("pode_selecionar_filial_fornecedor")
+  podeEditarHabilidades                Boolean                 @default(false) @map("pode_editar_habilidades")
+  podeGerenciarRotinas                 Boolean                 @default(false) @map("pode_gerenciar_rotinas")
+  podeIntervirAutomatizacao            Boolean                 @default(false) @map("pode_intervir_automatizacao")
+  podeVisualizarAutomatizacao          Boolean                 @default(false) @map("pode_visualizar_automatizacao")
   acessosPaginas                       AcessoPaginaUsuario[]
   enviosFornecedor                     EnvioFornecedor[]
   fornecedoresComoVendedor             Fornecedor[]
@@ -772,7 +772,7 @@ model EstampaCatalogoIa {
   padroesTexteis        String[]                 @default([]) @map("padroes_texteis")
   confiancaPadraoTextil Float?                   @map("confianca_padrao_textil")
   searchVector          Unsupported("tsvector")? @map("search_vector")
-  searchVectorArquivo   Unsupported("tsvector") @default(dbgenerated("estampas_gerar_vetor_arquivo(original_filename, original_relative_path, storage_key)")) @map("search_vector_arquivo")
+  searchVectorArquivo   Unsupported("tsvector")  @default(dbgenerated("estampas_gerar_vetor_arquivo(original_filename, original_relative_path, storage_key)")) @map("search_vector_arquivo")
   jobs                  EstampaJob[]
 
   @@unique([codigo, variante, arquivoId], map: "estampas_codigo_variante_arquivo_unique")
@@ -800,20 +800,20 @@ model EstampaCatalogoIa {
 }
 
 model Notification {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo               NotificationType
+  to                 String              @db.VarChar(30)
+  titulo             String
+  mensagem           String
+  data               DateTime            @default(now()) @db.Timestamptz(6)
+  status             NotificationStatus  @default(PENDENTE)
+  tentativas         Int                 @default(0)
+  ultimoErro         String?             @map("ultimo_erro")
+  processandoEm      DateTime?           @map("processando_em") @db.Timestamptz(6)
+  workerId           String?             @map("worker_id") @db.Uuid
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   avisoAutomatizacao AvisoAutomatizacao?
-  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tipo          NotificationType
-  to            String             @db.VarChar(30)
-  titulo        String
-  mensagem      String
-  data          DateTime           @default(now()) @db.Timestamptz(6)
-  status        NotificationStatus @default(PENDENTE)
-  tentativas    Int                @default(0)
-  ultimoErro    String?            @map("ultimo_erro")
-  processandoEm DateTime?          @map("processando_em") @db.Timestamptz(6)
-  workerId      String?            @map("worker_id") @db.Uuid
-  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, data], map: "idx_notification_status_data")
   @@index([processandoEm], map: "idx_notification_processando_em")
@@ -1081,6 +1081,138 @@ model TurnoProducao {
   @@map("turnos_producao")
 }
 
+model FilaMockup {
+  id                 String     @db.Uuid
+  aplicativoId       String     @map("aplicativo_id") @db.Uuid
+  solicitadoPor      String     @map("solicitado_por") @db.Uuid
+  status             String     @default("PENDING")
+  trabalhos          Json
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  proximaSaida       Int        @default(0) @map("proxima_saida")
+  tentativas         Int        @default(0)
+  proximaTentativaEm DateTime   @default(now()) @map("proxima_tentativa_em") @db.Timestamptz(6)
+  reservaId          String?    @map("reserva_id") @db.Uuid
+  reservaAte         DateTime?  @map("reserva_ate") @db.Timestamptz(6)
+  resultados         Json       @default("[]")
+  finalizadoEm       DateTime?  @map("finalizado_em") @db.Timestamptz(6)
+  observacao         String     @default("")
+  aplicativo         Aplicativo @relation(fields: [aplicativoId], references: [id])
+
+  @@id([aplicativoId, solicitadoPor, id])
+  @@index([aplicativoId, proximaTentativaEm, createdAt], map: "fila_mockups_pendentes_idx", where: raw("(status = 'PENDING'::text)"))
+  @@index([aplicativoId, reservaAte], map: "fila_mockups_reservas_idx", where: raw("(status = 'PROCESSING'::text)"))
+  @@map("fila_mockups")
+}
+
+model HabilidadeAutomatizacao {
+  id           String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String                          @db.Uuid
+  nome         String
+  arquivada    Boolean                         @default(false)
+  aplicativo   Aplicativo                      @relation(fields: [aplicativoId], references: [id])
+  versoes      VersaoHabilidadeAutomatizacao[]
+  rotinas      RotinaAutomatizacao[]
+
+  @@unique([aplicativoId, id])
+  @@map("automatizacao_habilidade")
+}
+
+model VersaoHabilidadeAutomatizacao {
+  id           String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String                  @db.Uuid
+  habilidadeId String                  @db.Uuid
+  numero       Int
+  markdown     String
+  criadoEm     DateTime                @default(now()) @db.Timestamptz(6)
+  execucoes    ExecucaoAutomatizacao[]
+  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
+
+  @@unique([aplicativoId, id])
+  @@unique([habilidadeId, numero])
+  @@map("automatizacao_habilidade_versao")
+}
+
+model RotinaAutomatizacao {
+  id           String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String                  @db.Uuid
+  habilidadeId String                  @db.Uuid
+  nome         String
+  ativa        Boolean                 @default(false)
+  arquivada    Boolean                 @default(false)
+  horarios     Json
+  cursor       DateTime                @default(now()) @db.Timestamptz(6)
+  disparos     DisparoAutomatizacao[]
+  execucoes    ExecucaoAutomatizacao?
+  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
+
+  @@unique([aplicativoId, id])
+  @@index([ativa, cursor])
+  @@map("automatizacao_rotina")
+}
+
+model DisparoAutomatizacao {
+  aplicativoId String              @db.Uuid
+  rotinaId     String              @db.Uuid
+  previstoEm   DateTime            @db.Timestamptz(6)
+  motivo       String
+  rotina       RotinaAutomatizacao @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
+
+  @@id([aplicativoId, rotinaId, previstoEm])
+  @@map("automatizacao_disparo")
+}
+
+model ExecucaoAutomatizacao {
+  id           String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String                        @db.Uuid
+  rotinaId     String                        @db.Uuid
+  versaoId     String                        @db.Uuid
+  tipo         String                        @default("EXECUTAR_PROMPT")
+  status       String                        @default("PENDENTE")
+  previstoEm   DateTime                      @db.Timestamptz(6)
+  disponivelEm DateTime                      @default(now()) @db.Timestamptz(6)
+  reserva      String?                       @db.Uuid
+  reservaAte   DateTime?                     @db.Timestamptz(6)
+  worker       String?
+  tentativa    Int                           @default(0)
+  rodada       Int                           @default(1)
+  rotina       RotinaAutomatizacao           @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
+  versao       VersaoHabilidadeAutomatizacao @relation(fields: [aplicativoId, versaoId], references: [aplicativoId, id])
+  tentativas   TentativaAutomatizacao[]
+
+  @@unique([aplicativoId, rotinaId, previstoEm])
+  @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(status <> 'CONCLUIDA'::text)"))
+  @@index([aplicativoId, previstoEm])
+  @@index([aplicativoId, tipo, status, disponivelEm])
+  @@map("automatizacao_execucao")
+}
+
+model TentativaAutomatizacao {
+  id          String                @id @db.Uuid
+  execucaoId  String                @db.Uuid
+  worker      String
+  rodada      Int
+  iniciadaEm  DateTime              @default(now()) @db.Timestamptz(6)
+  encerradaEm DateTime?             @db.Timestamptz(6)
+  status      String                @default("EM_EXECUCAO")
+  resultado   String?
+  avisos      AvisoAutomatizacao[]
+  execucao    ExecucaoAutomatizacao @relation(fields: [execucaoId], references: [id])
+
+  @@index([execucaoId, iniciadaEm])
+  @@map("automatizacao_tentativa")
+}
+
+model AvisoAutomatizacao {
+  tentativaId    String                 @db.Uuid
+  notificationId String                 @unique @db.Uuid
+  destinatario   String
+  notification   Notification           @relation(fields: [notificationId], references: [id])
+  tentativa      TentativaAutomatizacao @relation(fields: [tentativaId], references: [id])
+
+  @@id([tentativaId, destinatario])
+  @@map("automatizacao_aviso")
+}
+
 enum TipoServicoProdutoFornecedor {
   CORTE_LASER
 
@@ -1155,136 +1287,4 @@ enum StatusPedidoFornecedorQueue {
   CANCELADO
 
   @@map("status_pedido_fornecedor_queue")
-}
-
-model FilaMockup {
-  id                  String     @db.Uuid
-  aplicativoId        String     @map("aplicativo_id") @db.Uuid
-  solicitadoPor       String     @map("solicitado_por") @db.Uuid
-  status              String     @default("PENDING")
-  observacao          String     @default("")
-  trabalhos           Json
-  resultados          Json       @default("[]")
-  proximaSaida        Int        @default(0) @map("proxima_saida")
-  tentativas          Int        @default(0)
-  proximaTentativaEm  DateTime   @default(now()) @map("proxima_tentativa_em") @db.Timestamptz(6)
-  reservaId           String?    @map("reserva_id") @db.Uuid
-  reservaAte          DateTime?  @map("reserva_ate") @db.Timestamptz(6)
-  finalizadoEm        DateTime?  @map("finalizado_em") @db.Timestamptz(6)
-  createdAt           DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativo          Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
-
-  @@id([aplicativoId, solicitadoPor, id])
-  @@index([aplicativoId, proximaTentativaEm, createdAt], map: "fila_mockups_pendentes_idx", where: raw("(status = 'PENDING'::text)"))
-  @@index([aplicativoId, reservaAte], map: "fila_mockups_reservas_idx", where: raw("(status = 'PROCESSING'::text)"))
-  @@map("fila_mockups")
-}
-
-model HabilidadeAutomatizacao {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId String   @db.Uuid
-  nome         String
-  arquivada    Boolean  @default(false)
-  aplicativo   Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
-  versoes      VersaoHabilidadeAutomatizacao[]
-  rotinas      RotinaAutomatizacao[]
-
-  @@unique([aplicativoId, id])
-  @@map("automatizacao_habilidade")
-}
-
-model VersaoHabilidadeAutomatizacao {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId String   @db.Uuid
-  habilidadeId String   @db.Uuid
-  numero       Int
-  markdown     String
-  criadoEm     DateTime @default(now()) @db.Timestamptz(6)
-  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
-  execucoes    ExecucaoAutomatizacao[]
-
-  @@unique([aplicativoId, id])
-  @@unique([habilidadeId, numero])
-  @@map("automatizacao_habilidade_versao")
-}
-
-model RotinaAutomatizacao {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId String   @db.Uuid
-  habilidadeId String   @db.Uuid
-  nome         String
-  ativa        Boolean  @default(false)
-  arquivada    Boolean  @default(false)
-  horarios     Json
-  cursor       DateTime @default(now()) @db.Timestamptz(6)
-  habilidade   HabilidadeAutomatizacao @relation(fields: [aplicativoId, habilidadeId], references: [aplicativoId, id])
-  execucoes    ExecucaoAutomatizacao[]
-  disparos     DisparoAutomatizacao[]
-
-  @@unique([aplicativoId, id])
-  @@index([ativa, cursor])
-  @@map("automatizacao_rotina")
-}
-
-model DisparoAutomatizacao {
-  aplicativoId String @db.Uuid
-  rotinaId     String @db.Uuid
-  previstoEm   DateTime @db.Timestamptz(6)
-  motivo       String
-  rotina       RotinaAutomatizacao @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
-
-  @@id([aplicativoId, rotinaId, previstoEm])
-  @@map("automatizacao_disparo")
-}
-
-model ExecucaoAutomatizacao {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId String   @db.Uuid
-  rotinaId     String   @db.Uuid
-  versaoId     String   @db.Uuid
-  tipo         String   @default("EXECUTAR_PROMPT")
-  status       String   @default("PENDENTE")
-  previstoEm   DateTime @db.Timestamptz(6)
-  disponivelEm DateTime @default(now()) @db.Timestamptz(6)
-  reserva      String?  @db.Uuid
-  reservaAte   DateTime? @db.Timestamptz(6)
-  worker       String?
-  tentativa    Int      @default(0)
-  rodada       Int      @default(1)
-  rotina       RotinaAutomatizacao @relation(fields: [aplicativoId, rotinaId], references: [aplicativoId, id])
-  versao       VersaoHabilidadeAutomatizacao @relation(fields: [aplicativoId, versaoId], references: [aplicativoId, id])
-  tentativas   TentativaAutomatizacao[]
-
-  @@unique([aplicativoId, rotinaId, previstoEm])
-  @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(status <> 'CONCLUIDA'::text)"))
-  @@index([aplicativoId, previstoEm])
-  @@index([aplicativoId, tipo, status, disponivelEm])
-  @@map("automatizacao_execucao")
-}
-
-model TentativaAutomatizacao {
-  id          String @id @db.Uuid
-  execucaoId  String @db.Uuid
-  worker      String
-  rodada      Int
-  iniciadaEm  DateTime @default(now()) @db.Timestamptz(6)
-  encerradaEm DateTime? @db.Timestamptz(6)
-  status      String @default("EM_EXECUCAO")
-  resultado   String?
-  execucao    ExecucaoAutomatizacao @relation(fields: [execucaoId], references: [id])
-  avisos      AvisoAutomatizacao[]
-
-  @@index([execucaoId, iniciadaEm])
-  @@map("automatizacao_tentativa")
-}
-
-model AvisoAutomatizacao {
-  tentativaId   String @db.Uuid
-  notificationId String @unique @db.Uuid
-  destinatario   String
-  tentativa      TentativaAutomatizacao @relation(fields: [tentativaId], references: [id])
-  notification   Notification @relation(fields: [notificationId], references: [id])
-
-  @@id([tentativaId, destinatario])
-  @@map("automatizacao_aviso")
 }
