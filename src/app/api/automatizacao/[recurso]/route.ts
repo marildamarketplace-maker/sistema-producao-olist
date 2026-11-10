@@ -17,13 +17,22 @@ async function autorizar(request: Request) {
   if (!token?.startsWith("Bearer ")) throw new ErroHttp(401, "Não autenticado.");
   const { data, error } = await supabaseAdmin.auth.getUser(token.slice(7));
   if (error || !data.user) throw new ErroHttp(401, "Sessão inválida.");
-  const usuario = await prisma.usuario.findUnique({
-    where: { id: data.user.id },
-    select: {
-      ativo: true, aplicativoId: true, podeVisualizarAutomatizacao: true,
-      podeEditarHabilidades: true, podeGerenciarRotinas: true, podeIntervirAutomatizacao: true,
-    },
-  });
+  const select = {
+    ativo: true, aplicativoId: true, podeVisualizarAutomatizacao: true,
+    podeEditarHabilidades: true, podeGerenciarRotinas: true, podeIntervirAutomatizacao: true,
+  } as const;
+  let usuario = await prisma.usuario.findUnique({ where: { id: data.user.id }, select });
+  const email = data.user.email?.trim();
+  if (!usuario && email && data.user.email_confirmed_at) {
+    // Cadastros legados podem ter um UUID diferente do Supabase Auth.
+    // Um e-mail compartilhado por mais de um cadastro exige vínculo explícito.
+    const cadastros = await prisma.usuario.findMany({
+      where: { email: { equals: email, mode: "insensitive" } },
+      select,
+      take: 2,
+    });
+    if (cadastros.length === 1) usuario = cadastros[0];
+  }
   if (!usuario?.ativo || !usuario.podeVisualizarAutomatizacao) throw new ErroHttp(403, "Acesso restrito.");
   return usuario;
 }
