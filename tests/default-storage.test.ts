@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getDefaultStorage } from "../src/services/defaultStorageService";
+import { deleteStoredMedia, getDefaultStorage } from "../src/services/defaultStorageService";
 import {
   deleteGoogleStorageObject,
   getGoogleStorageObjectInfo,
   uploadToGoogleStorage,
 } from "../src/services/googleStorageService";
 
-test("seleciona Google por padrão e rejeita provedores indisponíveis", (t) => {
+import { vercelBlobStorage } from "../src/services/vercelBlobStorageService";
+
+test("seleciona Google por padrão ou Vercel explicitamente", (t) => {
   const original = process.env.STORAGE_DEFAULT_PROVIDER;
   t.after(() => {
     if (original === undefined) delete process.env.STORAGE_DEFAULT_PROVIDER;
@@ -25,8 +27,12 @@ test("seleciona Google por padrão e rejeita provedores indisponíveis", (t) => 
     assert.equal(getDefaultStorage(), storage);
   }
 
-  for (const value of ["vercel", "typo"]) {
-    process.env.STORAGE_DEFAULT_PROVIDER = value;
-    assert.throws(getDefaultStorage, /STORAGE_DEFAULT_PROVIDER/);
-  }
+  process.env.STORAGE_DEFAULT_PROVIDER = "vercel";
+  assert.equal(getDefaultStorage().upload, vercelBlobStorage.upload);
+  process.env.STORAGE_DEFAULT_PROVIDER = "typo";
+  assert.throws(getDefaultStorage, /STORAGE_DEFAULT_PROVIDER/);
+});
+
+test("rejeita exclusão de mídia com origem desconhecida", () => {
+  assert.throws(() => deleteStoredMedia("image.png", "https://example.com/image.png"), /Origem/);
 });

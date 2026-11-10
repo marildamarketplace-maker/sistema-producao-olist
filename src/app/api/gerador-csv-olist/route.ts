@@ -978,8 +978,6 @@ export async function POST(request: Request) {
       }
 
       const outputPath = buildEstampaImagemStoragePath(codigo, index);
-      await getDefaultStorage().deleteObject(outputPath);
-
       const uploadedImage = await getDefaultStorage().upload({
         path: outputPath,
         buffer: Buffer.from(await file.arrayBuffer()),
@@ -2316,8 +2314,6 @@ export async function POST(request: Request) {
       }
 
       const { outputPath } = await buildProdutoMockupStorageInfo(produtoId, mockupIndex);
-      await getDefaultStorage().deleteObject(outputPath);
-
       const uploadedImage = await getDefaultStorage().upload({
         path: outputPath,
         buffer: Buffer.from(base64, "base64"),

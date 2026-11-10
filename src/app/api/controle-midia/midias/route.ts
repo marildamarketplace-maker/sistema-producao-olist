@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { getDefaultStorage } from "@/services/defaultStorageService";
-import { deleteGoogleStorageObject } from "@/services/googleStorageService";
+import { deleteStoredMedia, getDefaultStorage } from "@/services/defaultStorageService";
 
 const TIPOS = new Set(["HOME_PC", "HOME_MOBILE", "CATEGORIA", "STORY", "FEED"]);
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -53,7 +52,7 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: "Mídia não informada." }, { status: 400 });
     const midia = await prisma.midia.findFirst({ where: { id, aplicativoId: usuario.aplicativoId } });
     if (!midia) return NextResponse.json({ error: "Mídia não encontrada." }, { status: 404 });
-    await deleteGoogleStorageObject(midia.storagePath);
+    await deleteStoredMedia(midia.storagePath, midia.arquivoUrl);
     await prisma.midia.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (error) {
