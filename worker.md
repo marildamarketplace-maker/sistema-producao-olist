@@ -1,0 +1,1 @@
+cd ~/sistema-producao-olist && node --env-file="$HOME/.config/meury-worker/worker.env" --import tsx scripts/automatizacao-worker.ts
