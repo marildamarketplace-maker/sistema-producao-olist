@@ -16,7 +16,8 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
     versao: { markdown: "# Entrada imutável" },
     rotina: { nome: "Piloto" },
   };
-  type Tentativa = { id: string; worker: string; status: string; resultado?: string; encerradaEm?: Date };
+  const inicioTentativa = new Date("2026-11-11T01:15:00Z");
+  type Tentativa = { iniciadaEm: Date; id: string; worker: string; status: string; resultado?: string; encerradaEm?: Date };
   const tentativas = new Map<string, Tentativa>();
   const avisos: string[] = [];
   const notificacoes: string[] = [];
@@ -36,7 +37,7 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
       },
     },
     tentativaAutomatizacao: {
-      create: async ({ data }: { data: Tentativa }) => tentativas.set(data.id, { ...data, status: "EM_EXECUCAO" }),
+      create: async ({ data }: { data: Tentativa }) => tentativas.set(data.id, { ...data, iniciadaEm: inicioTentativa, status: "EM_EXECUCAO" }),
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => tentativas.get(where.id),
       update: async ({ where, data }: { where: { id: string }; data: Partial<Tentativa> }) => Object.assign(tentativas.get(where.id)!, data),
     },
@@ -79,6 +80,9 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.deepEqual(await (await finalizar(terceira.reserva, "SUCESSO")).json(), { status: "CONCLUIDA" });
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
   assert.match(notificacoes[0], /Não foi possível concluir/);
+  assert.match(notificacoes[0], /Rotina: Piloto/);
+  assert.match(notificacoes[0], /Execução: 10\/11\/2026, 22:15 \(Brasília\)/);
+  assert.match(notificacoes[0], /Status: ❌ Falha final/);
   assert.match(notificacoes[1], /Concluída\./);
   assert.ok(notificacoes.every((mensagem) => !mensagem.includes(execucao.id)));
 

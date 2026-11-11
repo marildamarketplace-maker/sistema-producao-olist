@@ -1,15 +1,8 @@
-const nomes: Record<string, string> = {
-  "processar-publicar-videos": "Publicação de vídeos",
-  "responder-avaliacoes-marketplaces": "Avaliações dos marketplaces",
-  "shopee-impulsionar-produtos": "Impulsionamento Shopee",
-  "shopee-agendar-transmissao-chat": "Mensagens Shopee",
-};
-
 function nomeLegivel(nome: string) {
   const limpo = nome.replace(/[\r\n\t\u0000-\u001f]/g, " ")
     .replace(/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/gi, "")
     .replace(/[*_~`]/g, "").trim();
-  return nomes[limpo] ?? (limpo.replace(/[-_]+/g, " ").replace(/\s+/g, " ").slice(0, 120) || "Rotina de automatização");
+  return limpo.replace(/\s+/g, " ").slice(0, 120) || "Rotina de automatização";
 }
 
 // Não encaminha a resposta bruta do executor: pode conter dados de clientes ou secrets.
@@ -25,10 +18,12 @@ function motivoFalha(resultado: string) {
 
 export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, resultado: string, data = new Date()) {
   const horario = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
   }).format(data);
+  const nomeRotina = nomeLegivel(nome);
+  const status = sucesso ? "✅ Concluída." : "❌ Falha final.";
   return {
-    titulo: `${sucesso ? "✅" : "⚠️"} ${nomeLegivel(nome)}`,
-    mensagem: `${sucesso ? "Concluída." : motivoFalha(resultado)}\n${horario}`,
+    titulo: `${sucesso ? "✅" : "❌"} ${nomeRotina}`,
+    mensagem: `Rotina: ${nomeRotina}\nExecução: ${horario} (Brasília)\nStatus: ${status}${sucesso ? "" : `\nMotivo: ${motivoFalha(resultado)}`}`,
   };
 }

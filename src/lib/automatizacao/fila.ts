@@ -23,8 +23,9 @@ type Execucao = Awaited<ReturnType<Transacao["execucaoAutomatizacao"]["findUniqu
 const limiteTentativas = 3;
 
 async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status: string, resultado: string, agora: Date) {
-  await tx.tentativaAutomatizacao.update({
+  const tentativa = await tx.tentativaAutomatizacao.update({
     where: { id: reserva }, data: { status, resultado, encerradaEm: agora },
+    select: { iniciadaEm: true },
   });
   const indisponivel = status === "INDISPONIVEL";
   const reabrir = status === "AGUARDANDO_RETRY" || indisponivel;
@@ -49,7 +50,7 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
     const notification = await tx.notification.create({
       data: prepararDadosNotification({
         to: numero,
-        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, agora),
+        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm),
       }),
     });
     await tx.avisoAutomatizacao.create({
