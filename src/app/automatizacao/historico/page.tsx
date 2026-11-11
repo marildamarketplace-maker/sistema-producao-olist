@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Feedback, painel, secundario, TelaAutomatizacao, useAutomatizacaoApi } from "@/components/automatizacao/compartilhado";
 
@@ -12,17 +13,34 @@ type Historico = {
   temMais: boolean;
 };
 type Rotina = { id: string; nome: string };
+type Habilidade = { id: string; nome: string };
 
 export default function HistoricoPage() {
-  return <TelaAutomatizacao titulo="Histórico" descricao="Acompanhe execuções, tentativas e notificações."><HistoricoConteudo /></TelaAutomatizacao>;
+  return <TelaAutomatizacao titulo="Histórico" descricao="Acompanhe execuções, tentativas e notificações."><Suspense fallback={<Feedback carregando />}><HistoricoFiltrosUrl /></Suspense></TelaAutomatizacao>;
 }
 
-function HistoricoConteudo() {
+function HistoricoFiltrosUrl() {
+  const busca = useSearchParams();
+  const router = useRouter();
+  const rotinaId = busca.get("rotinaId") ?? "";
+  const habilidadeId = busca.get("habilidadeId") ?? "";
+  function mudarEscopo(rotina: string, habilidade: string) {
+    const query = new URLSearchParams();
+    if (rotina) query.set("rotinaId", rotina);
+    if (habilidade) query.set("habilidadeId", habilidade);
+    router.replace(`/automatizacao/historico${query.size ? `?${query}` : ""}`, { scroll: false });
+  }
+  return <HistoricoConteudo key={`${rotinaId}:${habilidadeId}`} {...{ rotinaId, habilidadeId, mudarEscopo }} />;
+}
+
+function HistoricoConteudo({ rotinaId, habilidadeId, mudarEscopo }: {
+  rotinaId: string; habilidadeId: string; mudarEscopo: (rotina: string, habilidade: string) => void;
+}) {
   const api = useAutomatizacaoApi();
   const { usuario } = useAuth();
   const [historico, setHistorico] = useState<Historico>({ execucoes: [], disparos: [], temMais: false });
   const [rotinas, setRotinas] = useState<Rotina[]>([]);
-  const [rotinaId, setRotinaId] = useState("");
+  const [habilidades, setHabilidades] = useState<Habilidade[]>([]);
   const [status, setStatus] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [desde, setDesde] = useState("");
@@ -38,6 +56,7 @@ function HistoricoConteudo() {
     setErro("");
     const query = new URLSearchParams({ pagina: String(pagina) });
     if (rotinaId) query.set("rotinaId", rotinaId);
+    if (habilidadeId) query.set("habilidadeId", habilidadeId);
     if (status) query.set("status", status);
     if (whatsapp) query.set("whatsapp", whatsapp);
     if (desde) query.set("desde", desde);
@@ -49,9 +68,15 @@ function HistoricoConteudo() {
     } finally {
       if (consulta === ultimaConsulta.current) setCarregando(false);
     }
-  }, [api, desde, pagina, rotinaId, status, whatsapp]);
+  }, [api, desde, pagina, rotinaId, habilidadeId, status, whatsapp]);
   useEffect(() => { void carregar(); }, [carregar]);
-  useEffect(() => { void api<Rotina[]>("rotinas").then(setRotinas).catch(() => setErro("Não foi possível carregar as rotinas.")); }, [api]);
+  useEffect(() => {
+    let ativa = true;
+    void Promise.all([api<Rotina[]>("rotinas"), api<Habilidade[]>("habilidades")]).then(([listaRotinas, listaHabilidades]) => {
+      if (ativa) { setRotinas(listaRotinas); setHabilidades(listaHabilidades); }
+    }).catch(() => { if (ativa) setErro("Não foi possível carregar os filtros de rotinas e habilidades."); });
+    return () => { ativa = false; };
+  }, [api]);
 
   async function retentar(id: string, reenviar = false) {
     setSalvando(true);
@@ -70,12 +95,15 @@ function HistoricoConteudo() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="font-semibold">Filtros do histórico</h2><p className="mt-1 text-xs text-slate-500">Combine filtros para localizar uma execução.</p></div>
         <div className="flex flex-wrap gap-2">
-          <button className={secundario} disabled={!rotinaId && !status && !whatsapp && !desde} onClick={() => { setRotinaId(""); setStatus(""); setWhatsapp(""); setDesde(""); setPagina(0); }}>Limpar filtros</button>
+          <button className={secundario} disabled={!rotinaId && !habilidadeId && !status && !whatsapp && !desde} onClick={() => { mudarEscopo("", ""); setStatus(""); setWhatsapp(""); setDesde(""); setPagina(0); }}>Limpar filtros</button>
           <button className={secundario} disabled={carregando} onClick={() => void carregar()}>Atualizar</button>
         </div>
       </div>
       <div className="grid items-end gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <label className="min-w-0 text-sm">Rotina<select className="input mt-1 min-h-11 w-full" value={rotinaId} onChange={(e) => { setRotinaId(e.target.value); setPagina(0); }}>
+        <label className="min-w-0 text-sm">Habilidade<select className="input mt-1 min-h-11 w-full" value={habilidadeId} onChange={(e) => mudarEscopo("", e.target.value)}>
+          <option value="">Todas</option>{habilidades.map((habilidade) => <option key={habilidade.id} value={habilidade.id}>{habilidade.nome}</option>)}
+        </select></label>
+        <label className="min-w-0 text-sm">Rotina<select className="input mt-1 min-h-11 w-full" value={rotinaId} onChange={(e) => mudarEscopo(e.target.value, habilidadeId)}>
           <option value="">Todas</option>{rotinas.map((rotina) => <option key={rotina.id} value={rotina.id}>{rotina.nome}</option>)}
         </select></label>
         <label className="text-sm">Situação<select className="input mt-1 min-h-11 w-full" value={status} onChange={(e) => { setStatus(e.target.value); setPagina(0); }}>
@@ -89,6 +117,7 @@ function HistoricoConteudo() {
         </select></label>
       </div>
     </section>
+    {habilidadeId && <p className="break-words text-sm text-slate-600" role="status">Histórico da habilidade: {habilidades.find((item) => item.id === habilidadeId)?.nome ?? habilidadeId}. Inclui todas as versões executadas. Disparos ignorados podem ser consultados pelo filtro de rotina, sem filtro de habilidade.</p>}
     <Feedback {...{ carregando, erro, sucesso }} />
     <section aria-labelledby="execucoes-titulo" aria-busy={carregando} className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-2">

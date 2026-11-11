@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { botao, Feedback, painel, secundario, TelaAutomatizacao, useAutomatizacaoApi } from "@/components/automatizacao/compartilhado";
@@ -104,6 +105,7 @@ function Rotinas() {
       <h2 className="break-words font-semibold">{item.nome}</h2>
       <p className="break-words text-sm">{habilidades.find((h) => h.id === item.habilidadeId)?.nome} · {item.arquivada ? "Arquivada" : item.ativa ? "Ativa" : "Pausada"}</p>
       <ul className="flex flex-wrap gap-2 text-sm">{item.horarios.map(({ dia, hora }) => <li key={`${dia}-${hora}`}>{dias[dia]} {hora}</li>)}</ul>
+      <div className="flex flex-wrap gap-2"><Link className={`${secundario} inline-flex items-center`} href={`/automatizacao/historico?rotinaId=${encodeURIComponent(item.id)}`} aria-label={`Histórico da rotina ${item.nome}`}>Histórico</Link></div>
       {usuario?.podeIntervirAutomatizacao && !item.arquivada && <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={secundario} disabled={salvando} onClick={() => void testar(item.id)}>Testar rotina</button>
         <span className="text-sm">Executa a habilidade real agora, mesmo com a rotina pausada. Pode realizar ações externas e enviar WhatsApp.</span>

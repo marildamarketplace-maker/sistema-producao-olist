@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { botao, Feedback, painel, secundario, TelaAutomatizacao, useAutomatizacaoApi } from "@/components/automatizacao/compartilhado";
@@ -74,6 +75,7 @@ function Habilidades() {
     {lista.map((item) => <article key={item.id} className={painel}>
       <h2 className="break-words font-semibold">{item.nome}</h2>
       <p className="text-sm">Versão {item.versoes[0]?.numero} · {item.arquivada ? "Arquivada" : "Ativa"}</p>
+      <div className="flex flex-wrap gap-2"><Link className={`${secundario} inline-flex items-center`} href={`/automatizacao/historico?habilidadeId=${encodeURIComponent(item.id)}`} aria-label={`Histórico da habilidade ${item.nome}`}>Histórico</Link></div>
       <details><summary className="min-h-11 cursor-pointer py-2 text-sm">Ver prompt</summary>
         <pre className="whitespace-pre-wrap break-words text-sm">{item.versoes[0]?.markdown}</pre>
       </details>

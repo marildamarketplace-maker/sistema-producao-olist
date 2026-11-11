@@ -64,7 +64,7 @@ export async function GET(request: Request, contexto: Contexto) {
     if (recurso !== "historico") throw new ErroHttp(404, "Recurso inexistente.");
     const busca = new URL(request.url).searchParams;
     const filtros = z.object({
-      rotinaId: z.uuid().optional(), status: z.enum(statusExecucao).optional(), tipo: z.enum(["EXECUTAR_PROMPT", "TESTE_ROTINA"]).optional(),
+      rotinaId: z.uuid().optional(), habilidadeId: z.uuid().optional(), status: z.enum(statusExecucao).optional(), tipo: z.enum(["EXECUTAR_PROMPT", "TESTE_ROTINA"]).optional(),
       whatsapp: z.enum(["PENDENTE", "SUCESSO", "ERRO", "NAO_APLICAVEL"]).optional(),
       desde: z.iso.date().optional(), pagina: z.coerce.number().int().min(0).max(1000).default(0),
     }).parse(Object.fromEntries(busca));
@@ -75,7 +75,9 @@ export async function GET(request: Request, contexto: Contexto) {
       : whatsapp ? { some: { avisos: { some: { notification: { status: whatsapp } } } } } : undefined;
     const [execucoes, disparos] = await Promise.all([
       prisma.execucaoAutomatizacao.findMany({
-        where: { aplicativoId, rotinaId: filtros.rotinaId, status: filtros.status, tipo: filtros.tipo, previstoEm: periodo, tentativas: filtroAvisos },
+        where: { aplicativoId, rotinaId: filtros.rotinaId,
+          versao: filtros.habilidadeId ? { habilidadeId: filtros.habilidadeId } : undefined,
+          status: filtros.status, tipo: filtros.tipo, previstoEm: periodo, tentativas: filtroAvisos },
         orderBy: [{ previstoEm: "desc" }, { id: "desc" }], skip: filtros.pagina * 25, take: 26,
         select: {
           id: true, status: true, tipo: true, previstoEm: true, rotina: { select: { nome: true } },
@@ -87,13 +89,14 @@ export async function GET(request: Request, contexto: Contexto) {
           },
         },
       }),
-      prisma.disparoAutomatizacao.findMany({
+      filtros.habilidadeId ? Promise.resolve([]) : prisma.disparoAutomatizacao.findMany({
+        // Disparos ignorados não têm uma versão executada para identificar a habilidade histórica.
         where: { aplicativoId, rotinaId: filtros.rotinaId, previstoEm: periodo, motivo: { not: "ENFILEIRADO" } },
         orderBy: [{ previstoEm: "desc" }, { rotinaId: "asc" }], skip: filtros.pagina * 25, take: 26,
         select: { rotina: { select: { nome: true } }, previstoEm: true, motivo: true },
       }),
     ]);
-    return Response.json({ execucoes: execucoes.slice(0, 25), disparos: disparos.slice(0, 25), temMais: execucoes.length > 25 || disparos.length > 25 });
+    return Response.json({ execucoes: execucoes.slice(0, 25), disparos: filtros.habilidadeId ? [] : disparos.slice(0, 25), temMais: execucoes.length > 25 || (!filtros.habilidadeId && disparos.length > 25) });
   } catch (error) { return erro(error); }
 }
 
