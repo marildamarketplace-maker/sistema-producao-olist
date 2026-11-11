@@ -149,7 +149,7 @@ export const menuItems: MenuItem[] = [
       {
         label: "Pesquisar estampas",
         href: "/controle-midia/estampas",
-        permissions: ["podeVisualizarEstampas", "podeEditarEstampas"],
+        permissions: ["podeVisualizarEstampas", "podeEditarEstampas", "podeCriarMockups"],
       },
       {
         label: "Jobs de IA",

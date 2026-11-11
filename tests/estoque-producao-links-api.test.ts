@@ -16,7 +16,14 @@ test("estoque vincula somente movimentações de produção existentes no mesmo 
   ];
   Object.assign(globalThis, { prisma: {
     usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: "app" }), findUnique: async () => ({ podeVisualizarEstoque: true }) },
-    produto: { findMany: async () => [] },
+    produto: { findMany: async ({ where }: { where: { aplicativoId: string } }) => {
+      assert.equal(where.aplicativoId, "app");
+      return [
+        { id: "p1", sku: "SKU", produtoFornecedorOlist: { quantidadeUsada: "1.2345", produtoFornecedor: { nome: "Tecido", aplicativoId: "app" } } },
+        { id: "p2", sku: "OUTRO", produtoFornecedorOlist: { quantidadeUsada: "2", produtoFornecedor: { nome: "Privado", aplicativoId: "outro-app" } } },
+        { id: "p3", sku: "SEM", produtoFornecedorOlist: null },
+      ];
+    } },
     movimentacaoEstoque: { findMany: async ({ where }: { where: { aplicativoId: string } }) => { assert.equal(where.aplicativoId, "app"); return movimentos; } },
     configuracaoSistema: { findFirst: async () => null },
     solicitacaoProducao: { findMany: async ({ where }: { where: { aplicativoId: string; id: { in: string[] } } }) => {
@@ -32,6 +39,9 @@ test("estoque vincula somente movimentações de produção existentes no mesmo 
   const dados = await response.json();
   assert.deepEqual(dados.movimentacoes.map((mov: { id: string; producao_id: string | null }) => [mov.id, mov.producao_id]), [
     ["confirmacao", "pedido-app"], ["ajuste", "pedido-app"], ["cancelamento", "pedido-app"], ["sem-referencia", null], ["outro-app", null], ["olist", null],
+  ]);
+  assert.deepEqual(dados.produtos.map((produto: { produto_fornecido: unknown }) => produto.produto_fornecido), [
+    { nome: "Tecido", metros_por_unidade: 1.2345 }, null, null,
   ]);
   assert.equal(dados.movimentacoes[0].observacao, "Confirmação - Pedido especial");
   assert.equal(dados.movimentacoes[1].observacao, "Confirmação");

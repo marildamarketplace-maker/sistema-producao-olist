@@ -5,6 +5,7 @@ import { confirmarBaixaEstoqueOlist } from "@/lib/olist";
 
 type ItemBaixaPayload = {
   sku?: unknown;
+  sku_origem?: unknown;
   descricao?: unknown;
   quantidade?: unknown;
   pedido_olist_id?: unknown;
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       periodoFimBusca: typeof body?.periodo_fim_busca === "string" ? body.periodo_fim_busca : null,
       itens: itens.map((item) => ({
         sku: String(item.sku ?? ""),
+        skuOrigem: typeof item.sku_origem === "string" ? item.sku_origem : null,
         quantidade: Number(item.quantidade ?? 0),
         pedidoOlistId: item.pedido_olist_id ? String(item.pedido_olist_id) : null,
         itemOlistId: item.item_olist_id ? String(item.item_olist_id) : null,

@@ -53,9 +53,9 @@ async function autorizarPesquisa(request: Request) {
   const autenticado = await getUsuarioAutenticado(request);
   const usuario = await prisma.usuario.findUnique({
     where: { id: autenticado.id },
-    select: { podeVisualizarEstampas: true, podeEditarEstampas: true },
+    select: { podeVisualizarEstampas: true, podeEditarEstampas: true, podeCriarMockups: true },
   });
-  if (!usuario || (!usuario.podeVisualizarEstampas && !usuario.podeEditarEstampas)) {
+  if (!usuario || (!usuario.podeVisualizarEstampas && !usuario.podeEditarEstampas && !usuario.podeCriarMockups)) {
     throw new Error("Sem permissão para pesquisar estampas.");
   }
 }

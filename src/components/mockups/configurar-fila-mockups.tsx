@@ -29,7 +29,7 @@ export function ConfigurarFilaMockups() {
   const { usuario, session } = useAuth();
   const pesquisa = useSearchParams().toString();
   const voltar = `/controle-midia/estampas${pesquisa ? `?${pesquisa}` : ""}`;
-  const escopo = usuario?.podeEditarEstampas ? `${usuario.aplicativo_id}:${usuario.id}` : null;
+  const escopo = usuario?.podeCriarMockups ? `${usuario.aplicativo_id}:${usuario.id}` : null;
   const selecao = useSelecaoEstampasMockups(escopo);
 
   return (

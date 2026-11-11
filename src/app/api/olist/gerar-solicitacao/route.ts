@@ -3,6 +3,7 @@ import { NecessidadeProducaoError, gerarSolicitacaoPorPedidosOlist } from "@/lib
 import { NenhumItemElegivelOlistError } from "@/lib/olist-errors";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { ComponenteKitOlistError } from "@/lib/componentes-kit-olist";
+import { ComposicaoKitInvalidaError } from "@/lib/kits-estoque";
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof NenhumItemElegivelOlistError) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
-    if (error instanceof ComponenteKitOlistError) {
+    if (error instanceof ComponenteKitOlistError || error instanceof ComposicaoKitInvalidaError) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro inesperado" }, { status: 500 });

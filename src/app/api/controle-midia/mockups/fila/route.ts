@@ -31,9 +31,9 @@ async function autorizarFila(request: Request) {
 
   const usuario = await prisma.usuario.findUnique({
     where: { id: autenticado.id },
-    select: { ativo: true, aplicativoId: true, podeEditarEstampas: true },
+    select: { ativo: true, aplicativoId: true, podeCriarMockups: true },
   });
-  if (!usuario?.ativo || !usuario.podeEditarEstampas) return erro("Sem permissão para acessar a fila de mockups.", 403);
+  if (!usuario?.ativo || !usuario.podeCriarMockups) return erro("Sem permissão para acessar a fila de mockups.", 403);
   return { aplicativoId: usuario.aplicativoId, solicitadoPor: autenticado.id };
 }
 

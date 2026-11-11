@@ -8,6 +8,7 @@ import { FILTROS_DESIGN_PESQUISA } from "@/domain/pesquisa-estampas-design";
 import type { FacetasPesquisaEstampas } from "@/repositories/pesquisa-estampas-repository";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buscarVariantesEstampa } from "@/services/buscarVariantesEstampa";
 import { criarCarregadorPaginasEstampas } from "@/services/carregadorPaginasEstampas";
 import {
   Check,
@@ -71,9 +72,9 @@ const FACETAS_VAZIAS: Facetas = {
 
 export function PesquisaEstampasClient() {
   const { session, usuario } = useAuth();
-  const podeCriarMockups = Boolean(usuario?.podeEditarEstampas);
+  const podeCriarMockups = Boolean(usuario?.podeCriarMockups);
   const { itens: estampasMockup, pronto: selecaoPronta, salvarSelecao } = useSelecaoEstampasMockups(
-    usuario?.podeEditarEstampas ? `${usuario.aplicativo_id}:${usuario.id}` : null,
+    usuario?.podeCriarMockups ? `${usuario.aplicativo_id}:${usuario.id}` : null,
   );
   const [erroSelecao, setErroSelecao] = useState("");
   const router = useRouter();
@@ -96,6 +97,7 @@ export function PesquisaEstampasClient() {
     estadoInicial.ordenacao,
   );
   const [selecionada, setSelecionada] = useState<EstampaPesquisaCatalogo | null>(null);
+  const [codigoVariantes, setCodigoVariantes] = useState<string | null>(null);
   const [imagemAmpliada, setImagemAmpliada] = useState<EstampaPesquisaCatalogo | null>(null);
   const [filtrosAvancadosAbertos, setFiltrosAvancadosAbertos] = useState(false);
   const [carregando, setCarregando] = useState(false);
@@ -165,6 +167,7 @@ export function PesquisaEstampasClient() {
     setPorPagina(estado.porPagina);
     setOrdenacao(estado.ordenacao);
     setSelecionada(null);
+    setCodigoVariantes(null);
     setImagemAmpliada(null);
     const pronta = carregadorPaginas?.obterPronta(criarQueryPesquisaEstampas(
       filtrosUrl, estado.pagina, estado.ordenacao, estado.porPagina,
@@ -296,6 +299,7 @@ export function PesquisaEstampasClient() {
   }
 
   function alternarEstampaMockup(estampa: EstampaPesquisaCatalogo) {
+    if (!podeCriarMockups || !selecaoPronta) return;
     const selecionada = estampasMockup.some(({ id }) => id === estampa.id);
     const selecao = selecionada
       ? estampasMockup.filter(({ id }) => id !== estampa.id)
@@ -476,7 +480,7 @@ export function PesquisaEstampasClient() {
           <EstampaCard
             key={estampa.id}
             estampa={estampa}
-            onAmpliarImagem={() => setImagemAmpliada(estampa)}
+            onVariantes={() => setCodigoVariantes(estampa.codigo)}
             onDetalhes={() => setSelecionada(estampa)}
             selecaoMockup={podeCriarMockups && selecaoPronta ? {
               marcada: estampasMockup.some(({ id }) => id === estampa.id),
@@ -495,7 +499,10 @@ export function PesquisaEstampasClient() {
         </nav>
       )}
 
-      {selecionada && <DetalhesEstampa estampa={selecionada} onClose={() => setSelecionada(null)} />}
+      {codigoVariantes && session?.access_token && <VariantesEstampaModal
+        key={codigoVariantes} codigo={codigoVariantes} token={session.access_token}
+        onClose={() => setCodigoVariantes(null)} onDetalhes={setSelecionada} />}
+      {selecionada && <DetalhesEstampa estampa={selecionada} onClose={() => setSelecionada(null)} onAmpliarImagem={() => setImagemAmpliada(selecionada)} />}
       {imagemAmpliada && <ImagemAmpliadaModal estampa={imagemAmpliada} onClose={() => setImagemAmpliada(null)} />}
     </div>
   );
@@ -668,13 +675,13 @@ function FiltrosAvancadosModal({
 
 function EstampaCard({
   estampa,
-  onAmpliarImagem,
   onDetalhes,
+  onVariantes,
   selecaoMockup,
 }: {
   estampa: EstampaPesquisaCatalogo;
-  onAmpliarImagem: () => void;
   onDetalhes: () => void;
+  onVariantes?: () => void;
   selecaoMockup?: { marcada: boolean; limite: boolean; alternar: () => void };
 }) {
   return (
@@ -683,9 +690,9 @@ function EstampaCard({
       {estampa.previewUrl ? (
         <button
           type="button"
-          onClick={onAmpliarImagem}
-          aria-label={`Ampliar imagem da estampa ${codigoCompleto(estampa)}`}
-          className="group block w-full cursor-zoom-in overflow-hidden bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500"
+          onClick={onDetalhes}
+          aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`}
+          className="group block w-full overflow-hidden bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500"
         >
           <Preview fundo="bg-white" estampa={estampa} className="aspect-square w-full transition-transform duration-200 group-hover:scale-[1.02]" />
         </button>
@@ -719,8 +726,76 @@ function EstampaCard({
           </label>
         )}
         <button type="button" onClick={onDetalhes} aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" aria-hidden="true" /> Ver detalhes</button>
+        {onVariantes && <button type="button" onClick={onVariantes}
+          aria-label={`Ver variantes da estampa ${estampa.codigo}`}
+          className="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Ver variantes</button>}
       </div>
     </article>
+  );
+}
+
+function VariantesEstampaModal({ codigo, token, onClose, onDetalhes }: {
+  codigo: string; token: string; onClose: () => void; onDetalhes: (estampa: EstampaPesquisaCatalogo) => void;
+}) {
+  const modal = useModalFocus(onClose);
+  const [campoVariante, setCampoVariante] = useState("");
+  const [variante, setVariante] = useState("");
+  const [pagina, setPagina] = useState(1);
+  const [tentativa, setTentativa] = useState(0);
+  const [resultado, setResultado] = useState<ResultadoPesquisaEstampasCatalogo | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCarregando(true);
+    setErro(null);
+    setResultado(null);
+    void buscarVariantesEstampa({ codigo, variante, pagina, token, signal: controller.signal })
+      .then((dados) => { if (!controller.signal.aborted) setResultado(dados); })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setErro(cause instanceof Error ? cause.message : "Não foi possível buscar as variantes.");
+      })
+      .finally(() => { if (!controller.signal.aborted) setCarregando(false); });
+    return () => controller.abort();
+  }, [codigo, variante, pagina, token, tentativa]);
+
+  return (
+    <div ref={modal} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="titulo-variantes-estampa"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-2 sm:p-4">
+      <section className="flex max-h-[90dvh] w-full min-w-0 max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 p-4">
+          <div className="min-w-0"><h2 id="titulo-variantes-estampa" className="break-words text-xl font-semibold text-slate-900">Variantes de {codigo}</h2>
+            <p className="mt-1 text-sm text-slate-500">Estampas do mesmo código, sem os demais filtros da pesquisa.</p></div>
+          <button type="button" onClick={onClose} aria-label="Fechar variantes" className="min-h-11 min-w-11 shrink-0 rounded-md border border-slate-300 p-2 text-slate-600 hover:bg-slate-100"><X className="h-4 w-4" aria-hidden="true" /></button>
+        </header>
+        <div className="min-h-0 space-y-4 overflow-y-auto p-4">
+          <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
+            event.preventDefault(); setPagina(1); setVariante(campoVariante.trim()); setTentativa((valor) => valor + 1);
+          }}>
+            <label className="min-w-0 flex-1 text-sm font-medium text-slate-700">Variante exata
+              <input className="input mt-1 min-h-11 w-full" value={campoVariante} onChange={(event) => setCampoVariante(event.target.value)} placeholder="Todas as variantes" />
+            </label>
+            <button type="submit" disabled={carregando} className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Buscar variantes</button>
+            <button type="button" disabled={carregando} onClick={() => { setCampoVariante(""); setVariante(""); setPagina(1); }} className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">Ver todas</button>
+          </form>
+          {carregando && <p role="status" className="text-sm text-slate-600">Buscando variantes…</p>}
+          {erro && <div role="alert" className="text-sm text-red-700"><p>{erro}</p><button type="button" onClick={() => setTentativa((valor) => valor + 1)} className="min-h-11 underline">Tentar novamente</button></div>}
+          {!carregando && resultado && <>
+            <p role="status" className="text-sm text-slate-600">{resultado.total} estampas encontradas.</p>
+            {resultado.estampas.length === 0 && <p className="text-sm text-slate-600">Nenhuma variante encontrada.</p>}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {resultado.estampas.map((estampa) => <EstampaCard key={estampa.id} estampa={estampa} onDetalhes={() => onDetalhes(estampa)} />)}
+            </div>
+            {resultado.totalPaginas > 1 && <nav aria-label="Paginação das variantes" className="flex flex-wrap items-center justify-center gap-3">
+              <button type="button" disabled={pagina <= 1} onClick={() => setPagina((valor) => valor - 1)} className="min-h-11 rounded-md border border-slate-300 px-3 text-sm disabled:opacity-50">Anterior</button>
+              <span className="text-sm text-slate-600">Página {pagina} de {resultado.totalPaginas}</span>
+              <button type="button" disabled={pagina >= resultado.totalPaginas} onClick={() => setPagina((valor) => valor + 1)} className="min-h-11 rounded-md border border-slate-300 px-3 text-sm disabled:opacity-50">Próxima</button>
+            </nav>}
+          </>}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -762,7 +837,7 @@ function ImagemAmpliadaModal({ estampa, onClose }: { estampa: EstampaPesquisaCat
   );
 }
 
-function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalogo; onClose: () => void }) {
+function DetalhesEstampa({ estampa, onClose, onAmpliarImagem }: { estampa: EstampaPesquisaCatalogo; onClose: () => void; onAmpliarImagem: () => void }) {
   const modal = useModalFocus(onClose);
   return (
     <div ref={modal} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label={`Detalhes da estampa ${codigoCompleto(estampa)}`}>
@@ -773,7 +848,13 @@ function DetalhesEstampa({ estampa, onClose }: { estampa: EstampaPesquisaCatalog
         </div>
         {estampa.correspondencia && <div className="mt-4"><CorrespondenciaPesquisa correspondencia={estampa.correspondencia} /></div>}
         <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
-          <Preview estampa={estampa} className="aspect-square w-full rounded-lg" />
+          {estampa.previewUrl ? (
+            <button type="button" onClick={onAmpliarImagem}
+              aria-label={`Ampliar imagem da estampa ${codigoCompleto(estampa)}`}
+              className="self-start overflow-hidden rounded-lg cursor-zoom-in focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500">
+              <Preview estampa={estampa} className="aspect-square w-full" />
+            </button>
+          ) : <Preview estampa={estampa} className="aspect-square w-full rounded-lg" />}
           <dl className="grid min-w-0 content-start gap-4 text-sm sm:grid-cols-2">
             <Detalhe label="Código" valores={[estampa.codigo]} />
             <Detalhe label="Variante" valores={estampa.variante ? [estampa.variante] : []} />

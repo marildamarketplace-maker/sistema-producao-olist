@@ -65,6 +65,7 @@ test("filtros SQL exigem estado identificado e usam parâmetros, incluindo a con
 
 const consultas: Prisma.Sql[] = [];
 let permitir = true;
+let permitirMockups = false;
 let resultadoEstampas: Record<string, unknown>[] = [];
 let totaisEstampas = { total: BigInt(0), completas: BigInt(0), parciais: BigInt(0) };
 // Executa unstable_cache real com armazenamento isolado, sem servidor Next.
@@ -90,7 +91,7 @@ beforeEach(() => {
 Object.assign(globalThis, { prisma: {
   usuario: {
     findFirst: async () => ({ id: "usuario-teste" }),
-    findUnique: async () => ({ podeVisualizarEstampas: permitir, podeEditarEstampas: false }),
+    findUnique: async () => ({ podeVisualizarEstampas: permitir, podeEditarEstampas: false, podeCriarMockups: permitirMockups }),
   },
   $queryRaw(strings: TemplateStringsArray, ...valores: unknown[]) {
     const sql = Prisma.sql(strings, ...valores);
@@ -353,4 +354,17 @@ test("API restaura correspondência mínima do link e rejeita limites inválidos
   const invalida = await GET(new NextRequest("http://localhost/api/estampas/pesquisa?q=cereja&correspondenciaMinima=101", { headers }));
   assert.equal(invalida.status, 400);
   assert.equal(consultas.length, 0);
+});
+
+test("permissão independente de mockups permite pesquisar sem editar estampas", async () => {
+  const { GET } = await import("../src/app/api/estampas/pesquisa/route");
+  const { NextRequest } = await import("next/server");
+  permitir = false;
+  permitirMockups = true;
+  try {
+    const resposta = await GET(new NextRequest("http://localhost/api/estampas/pesquisa?codigo=MV123", {
+      headers: { Authorization: "Bearer token-ficticio" },
+    }));
+    assert.equal(resposta.status, 200);
+  } finally { permitir = true; permitirMockups = false; }
 });

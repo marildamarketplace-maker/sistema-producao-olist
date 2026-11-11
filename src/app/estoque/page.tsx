@@ -6,9 +6,10 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { MovimentacoesEstoqueModal, type MovimentacaoEstoqueResumo } from "@/components/movimentacoes-estoque-modal";
 import { PageHeader } from "@/components/page-header";
+import { gerarSimulacaoMetragemCsv, OPCOES_METRAGEM, type BaseMetragem, type ProdutoMetragem } from "@/lib/estoque-simulacao-metragem";
 import { supabase } from "@/lib/supabase";
 
-type Produto = {
+type Produto = ProdutoMetragem & {
   id: string;
   sku: string;
   imagem_url: string | null;
@@ -70,6 +71,7 @@ export default function EstoquePage() {
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
   const [produtoMovimentacoesAberto, setProdutoMovimentacoesAberto] = useState<LinhaEstoque | null>(null);
   const [metaGeral, setMetaGeral] = useState(0);
+  const [simulacaoAberta, setSimulacaoAberta] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importingProdutos, setImportingProdutos] = useState(false);
@@ -296,6 +298,19 @@ export default function EstoquePage() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function exportarSimulacao(base: BaseMetragem) {
+    const csv = gerarSimulacaoMetragemCsv(linhasOrdenadas, base);
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `estoque-simulacao-metragem-${base}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setSuccessMessage("Simulação exportada com o consumo do cadastro atual. Confira a coluna Situação para identificar pendências.");
   }
 
   function selecionarProduto(produto: Produto) {
@@ -567,6 +582,15 @@ export default function EstoquePage() {
           <h3 className="text-lg font-semibold text-slate-900">
             Posicao de estoque
           </h3>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button
+            type="button"
+            aria-expanded={simulacaoAberta}
+            aria-controls="simulacao-metragem"
+            disabled={loading || linhas.length === 0}
+            onClick={() => setSimulacaoAberta((aberta) => !aberta)}
+            className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 disabled:opacity-40"
+          >Exportar simulação metragem</button>
           <button
             type="button"
             onClick={exportarItensComMovimentacoesCsv}
@@ -575,7 +599,22 @@ export default function EstoquePage() {
           >
             Exportar CSV com movimentacoes
           </button>
+          </div>
         </div>
+        {simulacaoAberta && (
+          <div id="simulacao-metragem" className="mb-4 space-y-3 rounded-md border border-slate-200 p-4">
+            <p className="text-sm text-slate-600">Selecione a quantidade para simular usando o consumo cadastrado atualmente por SKU. Produtos sem consumo válido serão sinalizados no CSV.</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {OPCOES_METRAGEM.map(({ valor, rotulo }) => (
+                <button key={valor} type="button" disabled={loading || linhas.length === 0}
+                  onClick={() => exportarSimulacao(valor)}
+                  className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40">
+                  {rotulo}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {loading ? (
           <p className="text-sm text-slate-600">Carregando estoque...</p>
         ) : linhas.length === 0 ? (

@@ -176,6 +176,7 @@ model Usuario {
   podeVisualizarOlistVendedores        Boolean                 @default(false) @map("pode_visualizar_olist_vendedores")
   vendedorOlistId                      Int?                    @map("vendedor_olist_id")
   podeEditarEstampas                   Boolean                 @default(false) @map("pode_editar_estampas")
+  podeCriarMockups                     Boolean                 @default(false) @map("pode_criar_mockups")
   podeEditarTamanhos                   Boolean                 @default(false) @map("pode_editar_tamanhos")
   podeEditarTiposProduto               Boolean                 @default(false) @map("pode_editar_tipos_produto")
   podeVisualizarEstampas               Boolean                 @default(false) @map("pode_visualizar_estampas")
@@ -1181,7 +1182,7 @@ model ExecucaoAutomatizacao {
 
   @@unique([aplicativoId, rotinaId, previstoEm])
   @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(tipo <> 'TESTE_ROTINA'::text AND status <> 'CONCLUIDA'::text)"))
-  @@unique([aplicativoId, rotinaId], map: "automatizacao_teste_em_aberto", where: raw("(tipo = 'TESTE_ROTINA'::text AND status NOT IN ('CONCLUIDA'::text, 'FALHA_FINAL'::text))"))
+  @@unique([aplicativoId, rotinaId], map: "automatizacao_teste_em_aberto", where: raw("((tipo = 'TESTE_ROTINA'::text) AND (status <> ALL (ARRAY['CONCLUIDA'::text, 'FALHA_FINAL'::text])))"))
   @@index([aplicativoId, previstoEm])
   @@index([aplicativoId, tipo, status, disponivelEm])
   @@map("automatizacao_execucao")

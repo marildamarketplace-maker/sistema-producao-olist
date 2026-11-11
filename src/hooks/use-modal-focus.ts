@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 
+const modaisAbertos: HTMLDivElement[] = [];
+
 /** Mantém a navegação por teclado dentro do diálogo enquanto ele estiver aberto. */
 export function useModalFocus(onClose: () => void) {
   const modal = useRef<HTMLDivElement>(null);
@@ -11,6 +13,7 @@ export function useModalFocus(onClose: () => void) {
   useEffect(() => {
     const root = modal.current;
     if (!root) return;
+    modaisAbertos.push(root);
     const anterior = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -20,6 +23,7 @@ export function useModalFocus(onClose: () => void) {
     (focaveis()[0] ?? root).focus();
 
     function manterFoco(event: KeyboardEvent) {
+      if (modaisAbertos.at(-1) !== root) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close.current();
@@ -45,6 +49,8 @@ export function useModalFocus(onClose: () => void) {
     }
     document.addEventListener("keydown", manterFoco);
     return () => {
+      const indice = modaisAbertos.indexOf(root);
+      if (indice !== -1) modaisAbertos.splice(indice, 1);
       document.removeEventListener("keydown", manterFoco);
       document.body.style.overflow = overflow;
       if (anterior?.isConnected) anterior.focus();

@@ -27,7 +27,7 @@ type ItemBaixaForm = {
   observacao: string;
   produto_cadastrado?: boolean;
   detalhe_pendente?: boolean;
-  sku_editavel?: boolean;
+  sku_origem?: string;
 };
 
 type ResultadoBusca = {
@@ -57,6 +57,8 @@ type ItemBaixaHistorico = {
   id: string;
   baixa_id: string;
   sku: string;
+  sku_origem: string | null;
+  movimentacao_id: string | null;
   quantidade: number;
   pedido_olist_id: string | null;
   item_olist_id: string | null;
@@ -101,6 +103,8 @@ export default function BaixaEstoqueOlistPage() {
   const [itensHistorico, setItensHistorico] = useState<ItemBaixaHistorico[]>([]);
   const [historicoAberto, setHistoricoAberto] = useState<Record<string, boolean>>({});
   const [loadingHistorico, setLoadingHistorico] = useState(true);
+  const [trocaHistorico, setTrocaHistorico] = useState<{ item: ItemBaixaHistorico; sku: string } | null>(null);
+  const [trocandoSku, setTrocandoSku] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dataAtualizacaoBusca, setDataAtualizacaoBusca] = useState("");
@@ -124,7 +128,7 @@ export default function BaixaEstoqueOlistPage() {
       carregarTodasPaginas<ItemBaixaHistorico, { message: string }>(async (inicio, fim) => {
         const { data, error } = await supabase
           .from("itens_baixa_estoque_olist")
-          .select("id, baixa_id, sku, quantidade, pedido_olist_id, item_olist_id, observacao, origem, created_at")
+          .select("id, baixa_id, sku, sku_origem, movimentacao_id, quantidade, pedido_olist_id, item_olist_id, observacao, origem, created_at")
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
           .range(inicio, fim);
@@ -171,7 +175,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   async function buscarPedidosOlist() {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setBuscando(true);
     setMessage(null);
@@ -210,7 +214,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function preencherItensSelecionados(idsSelecionados: string[]) {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     const pedidos = resultadoBusca?.pedidos ?? [];
     const itens = pedidos
@@ -221,15 +225,20 @@ export default function BaixaEstoqueOlistPage() {
           quantidade: String(item.quantidade),
           pedido_olist_id: pedido.id,
           observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
-          sku_editavel: !item.sku.trim(),
+          sku_origem: item.sku_origem ?? item.sku,
         })),
       );
 
-    setItensForm(itens.length ? itens : [{ ...ITEM_INICIAL }]);
+    setItensForm((anteriores) => {
+      const preservados = itens.map((item) => anteriores.find((anterior) =>
+        anterior.pedido_olist_id === item.pedido_olist_id && anterior.item_olist_id === item.item_olist_id,
+      ) ?? item);
+      return preservados.length ? preservados : [{ ...ITEM_INICIAL }];
+    });
   }
 
   function alternarPedido(pedidoId: string) {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     const proximos = pedidosSelecionados.includes(pedidoId)
       ? pedidosSelecionados.filter((id) => id !== pedidoId)
@@ -242,7 +251,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function alternarTodosPedidos() {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     const pedidos = resultadoBusca?.pedidos ?? [];
     const todosSelecionados =
@@ -256,7 +265,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function alterarItem(index: number, patch: Partial<ItemBaixaForm>) {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setItensForm((anteriores) =>
       anteriores.map((item, i) => (i === index ? { ...item, ...patch } : item)),
@@ -264,7 +273,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   async function sincronizarPedidoOlist(index: number) {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     const pedidoId = itensForm[index]?.pedido_olist_id?.trim();
 
@@ -304,7 +313,7 @@ export default function BaixaEstoqueOlistPage() {
       pedido_olist_id: pedido.id,
       observacao: item.observacao || `Baixa automatica Olist ${pedido.id}`,
       detalhe_pendente: false,
-      sku_editavel: !item.sku.trim(),
+      sku_origem: item.sku_origem ?? item.sku,
     }));
 
     setItensForm((anteriores) => {
@@ -339,7 +348,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function adicionarItemManual() {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setModoAtual("manual");
     setPedidosSelecionados([]);
@@ -347,7 +356,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function limparParaManual() {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setModoAtual("manual");
     setPedidosSelecionados([]);
@@ -358,7 +367,7 @@ export default function BaixaEstoqueOlistPage() {
   }
 
   function removerItem(index: number) {
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setItensForm((anteriores) =>
       anteriores.length > 1 ? anteriores.filter((_, i) => i !== index) : anteriores,
@@ -367,7 +376,7 @@ export default function BaixaEstoqueOlistPage() {
 
   async function confirmarBaixa(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!podeSolicitarBaixa) return;
+    if (!podeSolicitarBaixa || salvando || pedidoSincronizando) return;
 
     setSalvando(true);
     setMessage(null);
@@ -375,6 +384,7 @@ export default function BaixaEstoqueOlistPage() {
 
     const itens = itensForm.map((item) => ({
       sku: item.sku.trim(),
+      sku_origem: item.sku_origem?.trim() || null,
       quantidade: Number(item.quantidade),
       pedido_olist_id: item.pedido_olist_id.trim() || null,
       item_olist_id: item.item_olist_id.trim() || null,
@@ -389,33 +399,60 @@ export default function BaixaEstoqueOlistPage() {
       return;
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const resp = await axios.post(
-      "/api/olist/baixa-estoque/confirmar",
-      {
-        origem: modoAtual,
-        observacao: observacaoGeral,
-        periodo_fim_busca: modoAtual === "automatica" ? resultadoBusca?.periodo_fim ?? null : null,
-        itens,
-      },
-      { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
-    );
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await axios.post(
+        "/api/olist/baixa-estoque/confirmar",
+        {
+          origem: modoAtual,
+          observacao: observacaoGeral,
+          periodo_fim_busca: modoAtual === "automatica" ? resultadoBusca?.periodo_fim ?? null : null,
+          itens,
+        },
+        { headers: { Authorization: `Bearer ${session?.access_token ?? ""}` }, validateStatus: () => true },
+      );
 
-    if (resp.status < 200 || resp.status >= 300) {
-      setErrorMessage(`Erro ao confirmar baixa: ${resp.data?.error ?? "erro desconhecido"}`);
+      if (resp.status < 200 || resp.status >= 300) {
+        setErrorMessage(`Erro ao confirmar baixa: ${resp.data?.error ?? "erro desconhecido"}`);
+        return;
+      }
+
+      setMessage(`Baixa registrada com sucesso. Itens baixados: ${resp.data?.itens ?? itens.length}.`);
+      setResultadoBusca(null);
+      setItensForm([{ ...ITEM_INICIAL }]);
+      setPedidosSelecionados([]);
+      setObservacaoGeral("");
+      setModoAtual("manual");
+      setFormBaixaOpen(false);
+      await carregarHistoricoBaixas();
+    } catch {
+      setErrorMessage("Não foi possível confirmar a baixa. Confira sua conexão e tente novamente.");
+    } finally {
       setSalvando(false);
-      return;
     }
+  }
 
-    setMessage(`Baixa registrada com sucesso. Itens baixados: ${resp.data?.itens ?? itens.length}.`);
-    setResultadoBusca(null);
-    setItensForm([{ ...ITEM_INICIAL }]);
-    setPedidosSelecionados([]);
-    setObservacaoGeral("");
-    setModoAtual("manual");
-    setFormBaixaOpen(false);
-    await carregarHistoricoBaixas();
-    setSalvando(false);
+  async function confirmarTrocaHistorico(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trocaHistorico || trocandoSku || !podeSolicitarBaixa) return;
+    setTrocandoSku(true); setErrorMessage(null); setMessage(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const resp = await axios.post("/api/olist/baixa-estoque/trocar-sku", {
+        item_baixa_id: trocaHistorico.item.id,
+        movimentacao_id: trocaHistorico.item.movimentacao_id,
+        sku_anterior: trocaHistorico.item.sku,
+        sku: trocaHistorico.sku.trim(),
+      }, { headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` }, validateStatus: () => true });
+      if (resp.status < 200 || resp.status >= 300) {
+        setErrorMessage(resp.data?.error ?? "Não foi possível trocar o SKU."); return;
+      }
+      setMessage(`SKU trocado: ${trocaHistorico.item.sku} → ${resp.data.sku}. Estoque anterior compensado e nova saída registrada.`);
+      setTrocaHistorico(null);
+      await carregarHistoricoBaixas();
+    } catch {
+      setErrorMessage("Não foi possível confirmar a troca. Recarregue o histórico antes de tentar novamente.");
+    } finally { setTrocandoSku(false); }
   }
 
   return (
@@ -561,6 +598,8 @@ export default function BaixaEstoqueOlistPage() {
 
         {formBaixaOpen && (
         <form className="space-y-4" onSubmit={confirmarBaixa}>
+          <fieldset disabled={salvando || Boolean(pedidoSincronizando)} className="min-w-0 space-y-4">
+          <p className="text-sm text-slate-600">Você pode trocar o SKU antes de confirmar. A troca afeta apenas o estoque; o pedido na Olist permanece inalterado. Sincronizar novamente restaura os itens da Olist.</p>
           <label className="block text-sm text-slate-700">
             Observação geral
             <input
@@ -575,16 +614,18 @@ export default function BaixaEstoqueOlistPage() {
               const itemAutomatico = Boolean(item.pedido_olist_id);
 
               return (
-              <div key={index} className="grid grid-cols-1 gap-3 rounded-md border border-slate-200 p-3 md:grid-cols-6">
+              <div key={index} className="grid min-w-0 grid-cols-1 gap-3 rounded-md border border-slate-200 p-3 lg:grid-cols-2">
                 <label className="text-sm text-slate-700">
                   SKU/referência
                   <input
                     required
-                    disabled={itemAutomatico && !item.sku_editavel}
+                    maxLength={255}
                     value={item.sku}
                     onChange={(event) => alterarItem(index, { sku: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-600"
+                    className="input mt-1 min-h-11 w-full focus-visible:ring-2 focus-visible:ring-slate-400"
                   />
+                  {item.sku_origem && <span className="mt-1 block break-all text-xs text-slate-500">SKU original Olist: {item.sku_origem}</span>}
+                  {item.sku_origem && item.sku.trim() !== item.sku_origem.trim() && <span role="status" className="mt-1 block break-all text-xs text-amber-700">Troca na baixa: {item.sku_origem} → {item.sku || "Informe o novo SKU"}</span>}
                 </label>
                 <label className="text-sm text-slate-700">
                   Quantidade
@@ -626,11 +667,11 @@ export default function BaixaEstoqueOlistPage() {
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
                   />
                 </label>
-                <div className="md:col-span-6 flex justify-end">
+                <div className="flex justify-end lg:col-span-2">
                   <button
                     type="button"
                     onClick={() => removerItem(index)}
-                    className="rounded-md border border-slate-300 px-3 py-1 text-xs text-slate-700"
+                    className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700"
                   >
                     Remover item
                   </button>
@@ -656,16 +697,22 @@ export default function BaixaEstoqueOlistPage() {
               {salvando ? "Confirmando..." : "Confirmar baixa de estoque"}
             </button>
           </div>
+          </fieldset>
         </form>
         )}
 
-        {message && <p className="mt-4 text-sm text-emerald-700">{message}</p>}
-        {errorMessage && <p className="mt-4 text-sm text-red-600">{errorMessage}</p>}
+
       </section>
       )}
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Histórico de confirmações de baixa</h3>
+      {message && <p role="status" className="break-words text-sm text-emerald-700 dark:text-emerald-300">{message}</p>}
+      {errorMessage && <p role="alert" className="break-words text-sm text-red-600">{errorMessage}</p>}
+      <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-slate-900">Histórico de confirmações de baixa</h3>
+          <button type="button" disabled={loadingHistorico || trocandoSku} onClick={() => { setTrocaHistorico(null); void carregarHistoricoBaixas(); }} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-50">Recarregar histórico</button>
+        </div>
+        <p className="mb-4 text-sm text-slate-600">Trocar um SKU confirmado repõe o SKU anterior e baixa a mesma quantidade do novo SKU, sem alterar o pedido na Olist. Itens com retorno registrado não permitem troca.</p>
 
         {loadingHistorico ? (
           <p className="text-sm text-slate-600">Carregando histórico...</p>
@@ -699,7 +746,7 @@ export default function BaixaEstoqueOlistPage() {
                           <button
                             type="button"
                             onClick={() => alternarHistoricoBaixa(baixa.id)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                             disabled={itensBaixa.length === 0}
                             title={aberta ? "Ocultar itens" : "Ver itens"}
                             aria-label={aberta ? "Ocultar itens baixados" : "Ver itens baixados"}
@@ -725,7 +772,23 @@ export default function BaixaEstoqueOlistPage() {
                                 <tbody>
                                   {itensBaixa.map((item) => (
                                     <tr key={item.id} className="border-b border-slate-100 last:border-0">
-                                      <td className="px-3 py-2 font-medium text-slate-700">{item.sku}</td>
+                                      <td className="min-w-64 px-3 py-2 font-medium text-slate-700">
+                                        <span className="break-all">{item.sku}</span>
+                                        {item.sku_origem && item.sku_origem !== item.sku && <span className="mt-1 block break-all text-xs font-normal text-slate-500">SKU original: {item.sku_origem}</span>}
+                                        {podeSolicitarBaixa && trocaHistorico?.item.id !== item.id && <button type="button" disabled={trocandoSku || !item.movimentacao_id} onClick={() => setTrocaHistorico({ item, sku: item.sku })} className="mt-2 block min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-50">Trocar SKU</button>}
+                                        {trocaHistorico?.item.id === item.id && <form onSubmit={confirmarTrocaHistorico} className="mt-3 space-y-3">
+                                          <fieldset disabled={trocandoSku} className="min-w-0 space-y-3">
+                                            <label className="block text-sm">Novo SKU da baixa
+                                              <input autoFocus required maxLength={255} className="input mt-1 min-h-11 w-full focus-visible:ring-2 focus-visible:ring-slate-400" value={trocaHistorico.sku} onChange={(event) => setTrocaHistorico({ ...trocaHistorico, sku: event.target.value })} />
+                                            </label>
+                                            <p className="break-all text-xs font-normal">Repor {item.quantidade} × {item.sku} e baixar {item.quantidade} × {trocaHistorico.sku || "novo SKU"}.</p>
+                                            <div className="flex flex-wrap gap-2">
+                                              <button type="submit" disabled={!trocaHistorico.sku.trim() || trocaHistorico.sku.trim() === item.sku} className="min-h-11 rounded-md bg-slate-900 px-3 py-2 text-sm text-white focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-50">{trocandoSku ? "Trocando…" : "Confirmar troca"}</button>
+                                              <button type="button" onClick={() => setTrocaHistorico(null)} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-slate-400">Cancelar troca</button>
+                                            </div>
+                                          </fieldset>
+                                        </form>}
+                                      </td>
                                       <td className="px-3 py-2 font-semibold text-slate-900">{item.quantidade}</td>
                                       <td className="px-3 py-2 text-slate-700">{item.pedido_olist_id || "-"}</td>
                                       <td className="px-3 py-2 text-slate-700">{item.observacao || "-"}</td>

@@ -31,6 +31,7 @@ type UsuarioRow = {
   pode_editar_tamanhos: boolean;
   pode_visualizar_estampas: boolean;
   pode_editar_estampas: boolean;
+  pode_criar_mockups: boolean;
   pode_visualizar_variantes: boolean;
   pode_editar_variantes: boolean;
   pode_visualizar_baixa: boolean;
@@ -101,6 +102,7 @@ export async function GET(request: Request) {
         pode_editar_tamanhos,
         pode_visualizar_estampas,
         pode_editar_estampas,
+        pode_criar_mockups,
         pode_visualizar_variantes,
         pode_editar_variantes,
         pode_visualizar_baixa,
@@ -176,6 +178,7 @@ export async function GET(request: Request) {
     podeEditarTamanhos: Boolean(usuario.pode_editar_tamanhos),
     podeVisualizarEstampas: Boolean(usuario.pode_visualizar_estampas),
     podeEditarEstampas: Boolean(usuario.pode_editar_estampas),
+    podeCriarMockups: Boolean(usuario.pode_criar_mockups),
     podeVisualizarVariantes: Boolean(usuario.pode_visualizar_variantes),
     podeEditarVariantes: Boolean(usuario.pode_editar_variantes),
     podeVisualizarBaixa: Boolean(usuario.pode_visualizar_baixa),

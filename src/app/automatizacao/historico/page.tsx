@@ -4,32 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { Feedback, painel, secundario, TelaAutomatizacao, useAutomatizacaoApi } from "@/components/automatizacao/compartilhado";
 
-type Execucao = {
-  id: string; status: string; tipo: string; previstoEm: string;
-  rotina: { nome: string }; versao: { numero: number };
-  tentativas: {
-    iniciadaEm: string; encerradaEm: string | null; status: string; resultado: string | null;
-    avisos: { notification: { id: string; status: string } }[];
-  }[];
-};
+import { dataHistorico, HistoricoExecucao, statusLabel, statusWhatsApp, type ExecucaoHistorico } from "@/components/automatizacao/historico-execucao";
+
 type Historico = {
-  execucoes: Execucao[];
+  execucoes: ExecucaoHistorico[];
   disparos: { rotina: { nome: string }; previstoEm: string; motivo: string }[];
   temMais: boolean;
 };
 type Rotina = { id: string; nome: string };
-
-const formato = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
-const statusLabel: Record<string, string> = {
-  PENDENTE: "Pendente", EM_EXECUCAO: "Em execução", AGUARDANDO_RETRY: "Aguardando retentativa",
-  CONCLUIDA: "Concluída", FALHA_FINAL: "Falha final", RESERVA_EXPIRADA: "Reserva expirada",
-  INDISPONIVEL: "Executor indisponível", SOBREPOSICAO: "Execução anterior em aberto",
-  FALHA_ANTERIOR: "Falha anterior bloqueia a rotina", SUPERADO: "Horário mais recente priorizado",
-  ATRASO_AGREGADO: "Janela anterior ignorada por atraso",
-};
-const statusWhatsApp: Record<string, string> = {
-  PENDENTE: "Pendente", SUCESSO: "Aceito pelo provedor", ERRO: "Falha no envio",
-};
 
 export default function HistoricoPage() {
   return <TelaAutomatizacao titulo="Histórico" descricao="Acompanhe execuções, tentativas e notificações."><HistoricoConteudo /></TelaAutomatizacao>;
@@ -85,6 +67,13 @@ function HistoricoConteudo() {
 
   return <div className="space-y-4">
     <section aria-label="Filtros do histórico" className={painel}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="font-semibold">Filtros do histórico</h2><p className="mt-1 text-xs text-slate-500">Combine filtros para localizar uma execução.</p></div>
+        <div className="flex flex-wrap gap-2">
+          <button className={secundario} disabled={!rotinaId && !status && !whatsapp && !desde} onClick={() => { setRotinaId(""); setStatus(""); setWhatsapp(""); setDesde(""); setPagina(0); }}>Limpar filtros</button>
+          <button className={secundario} disabled={carregando} onClick={() => void carregar()}>Atualizar</button>
+        </div>
+      </div>
       <div className="grid items-end gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <label className="min-w-0 text-sm">Rotina<select className="input mt-1 min-h-11 w-full" value={rotinaId} onChange={(e) => { setRotinaId(e.target.value); setPagina(0); }}>
           <option value="">Todas</option>{rotinas.map((rotina) => <option key={rotina.id} value={rotina.id}>{rotina.nome}</option>)}
@@ -98,35 +87,29 @@ function HistoricoConteudo() {
           {Object.entries(statusWhatsApp).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           <option value="NAO_APLICAVEL">Não aplicável</option>
         </select></label>
-        <button className={secundario} disabled={carregando} onClick={() => void carregar()}>Atualizar</button>
       </div>
     </section>
     <Feedback {...{ carregando, erro, sucesso }} />
-    {!carregando && !historico.execucoes.length && !historico.disparos.length && <p>Nenhum registro encontrado.</p>}
-    {historico.execucoes.map((item) => <article className={painel} key={item.id}>
-      <h2 className="break-words font-semibold">{item.rotina.nome}{item.tipo === "TESTE_ROTINA" && " · Teste"}</h2>
-      <p className="text-sm">{statusLabel[item.status]} · {formato.format(new Date(item.previstoEm))} · Habilidade v{item.versao.numero}</p>
-      {item.tentativas.length > 0 && <details>
-        <summary className="min-h-11 cursor-pointer py-2 text-sm">Ver tentativas e WhatsApp</summary>
-        <ul className="space-y-3">{item.tentativas.map((tentativa, indice) => <li key={indice} className="border-t border-slate-200 pt-2 text-sm">
-          <p>{formato.format(new Date(tentativa.iniciadaEm))} · {statusLabel[tentativa.status]}</p>
-          <p>WhatsApp · {tentativa.avisos.length ? tentativa.avisos.map(({ notification }) => statusWhatsApp[notification.status]).join(", ") : "Não aplicável"}</p>
-          {usuario?.podeIntervirAutomatizacao && tentativa.avisos.filter(({ notification }) => notification.status === "ERRO").map(({ notification }, i) =>
-            <button key={notification.id} className={secundario} disabled={salvando || carregando} onClick={() => void retentar(notification.id, true)}>Reenviar aviso {i + 1}</button>
-          )}
-          {tentativa.resultado && <pre className="mt-1 whitespace-pre-wrap break-words">{tentativa.resultado}</pre>}
-        </li>)}</ul>
-      </details>}
-      {usuario?.podeIntervirAutomatizacao && item.tipo !== "TESTE_ROTINA" && item.status === "FALHA_FINAL" &&
-        <button className={secundario} disabled={salvando || carregando} onClick={() => void retentar(item.id)}>Retentar execução</button>}
-    </article>)}
-    {historico.disparos.length > 0 && <section className={painel}>
-      <h2 className="font-semibold">Disparos ignorados</h2>
-      <ul className="space-y-2 text-sm">{historico.disparos.map((item, indice) => <li className="break-words" key={indice}>
-        {formato.format(new Date(item.previstoEm))} · {item.rotina.nome} · {statusLabel[item.motivo]}
+    <section aria-labelledby="execucoes-titulo" aria-busy={carregando} className="min-w-0 space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div><h2 id="execucoes-titulo" className="text-lg font-semibold">Execuções</h2><p className="text-xs text-slate-500">Mais recentes primeiro · horários de Brasília</p></div>
+        <span className="text-sm text-slate-500">{historico.execucoes.length} nesta página</span>
+      </div>
+      {!carregando && !erro && !historico.execucoes.length && <div className={`${painel} text-center`}>
+        <p className="font-medium">Nenhuma execução encontrada</p><p className="text-sm text-slate-500">Ajuste os filtros ou atualize o histórico para consultar novos registros.</p>
+      </div>}
+      {historico.execucoes.map((item) => <HistoricoExecucao key={item.id} item={item} podeIntervir={!!usuario?.podeIntervirAutomatizacao} ocupado={salvando || carregando} onRetentar={(id, reenviar) => void retentar(id, reenviar)} />)}
+    </section>
+    {historico.disparos.length > 0 && <section className={painel} aria-labelledby="disparos-titulo">
+      <div><h2 id="disparos-titulo" className="font-semibold">Disparos ignorados <span className="text-sm font-normal text-slate-500">({historico.disparos.length})</span></h2>
+      <p className="mt-1 text-xs text-slate-500">Horários que não geraram execução e seus motivos. Os filtros de situação e WhatsApp se aplicam somente às execuções.</p></div>
+      <ul className="divide-y divide-slate-200">{historico.disparos.map((item, indice) => <li className="grid min-w-0 gap-2 py-3 text-sm first:pt-0 last:pb-0 lg:grid-cols-3" key={indice}>
+        <span className="break-words font-medium">{item.rotina.nome}</span>
+        <span className="text-slate-500">{dataHistorico(item.previstoEm)}</span>
+        <span className="break-words text-slate-600">{statusLabel[item.motivo] ?? item.motivo}</span>
       </li>)}</ul>
     </section>}
-    <nav aria-label="Paginação do histórico" className="flex flex-wrap items-center gap-2">
+    <nav aria-label="Paginação do histórico" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-4">
       <button className={secundario} disabled={pagina === 0 || carregando} onClick={() => setPagina(pagina - 1)}>Anterior</button>
       <span className="text-sm">Página {pagina + 1}</span>
       <button className={secundario} disabled={!historico.temMais || carregando} onClick={() => setPagina(pagina + 1)}>Próxima</button>

@@ -4,7 +4,7 @@ import { PesquisaEstampasClient } from "@/components/estampas/pesquisa-estampas-
 
 export default function PesquisaEstampasPage() {
   return (
-    <AccessGuard permissions={["podeVisualizarEstampas", "podeEditarEstampas"]}>
+    <AccessGuard permissions={["podeVisualizarEstampas", "podeEditarEstampas", "podeCriarMockups"]}>
       <Suspense fallback={<p className="text-sm text-slate-500">Carregando pesquisa...</p>}>
         <PesquisaEstampasClient />
       </Suspense>

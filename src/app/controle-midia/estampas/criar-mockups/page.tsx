@@ -4,7 +4,7 @@ import { ConfigurarFilaMockups } from "@/components/mockups/configurar-fila-mock
 
 export default function CriarMockupsPage() {
   return (
-    <AccessGuard permissions={["podeEditarEstampas"]}>
+    <AccessGuard permissions={["podeCriarMockups"]}>
       <Suspense fallback={<p role="status" className="text-sm text-slate-600">Carregando configuração…</p>}>
         <ConfigurarFilaMockups />
       </Suspense>

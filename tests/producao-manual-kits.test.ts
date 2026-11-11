@@ -20,6 +20,18 @@ test("kit cadastrado não duplica opções e componentes mantêm IDs reais", () 
 test("produtos individuais preservam seleção normal", () => {
   assert.equal(expandirKitProducaoManual(produtos[0], "2", produtos), null);
 });
+
+test("solicitação manual rejeita composição autorreferente ou repetida", () => {
+  const sku = "KIT1-FORRINHO-MV20170-E";
+  for (const componentes_kit of [
+    [{ sku, quantidade: 1 }],
+    [{ sku: "A", quantidade: 1 }, { sku: "A", quantidade: 1 }],
+  ]) {
+    assert.throws(() => expandirKitProducaoManual(
+      { id: "kit", sku, imagem_url: null, componentes_kit }, "2", produtos,
+    ), /não pode conter/);
+  }
+});
 test("componente ausente ou inativo bloqueia expansão completa", () => {
   const opcoes = montarOpcoesKitsManuais(produtos.slice(0, 1), composicao);
   assert.throws(() => expandirKitProducaoManual(opcoes.find((item) => item.sku === "KIT-AB")!, "2", opcoes), /não está disponível/);
@@ -31,4 +43,11 @@ test("componente que também é kit não vira item individual de produção", ()
 test("quantidade de kits inválida ou com overflow é rejeitada antes de alterar itens", () => {
   const opcoes = montarOpcoesKitsManuais(produtos, composicao), kit = opcoes.find((item) => item.sku === "KIT-AB")!;
   for (const quantidade of ["", "0", "-1", "1.5", "2147483647"]) assert.throws(() => expandirKitProducaoManual(kit, quantidade, opcoes));
+});
+
+test("kit sem associação mantém seleção manual do próprio produto", () => {
+  const produto = { id: "forrinho", sku: "KIT1-FORRINHO-MV20170-E", imagem_url: null };
+  const opcoes = montarOpcoesKitsManuais([produto], []);
+  assert.equal(opcoes[0].id, produto.id);
+  assert.equal(expandirKitProducaoManual(opcoes[0], "3", opcoes), null);
 });

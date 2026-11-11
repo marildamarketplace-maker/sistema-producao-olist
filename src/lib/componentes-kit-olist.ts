@@ -196,35 +196,7 @@ export function expandirDemandasKitsOlist(input: {
       }
       continue;
     }
-    if (!skuEhKitOlist(demanda.sku)) {
-      somarDemanda(demandasExpandidas, demanda);
-      continue;
-    }
-
-    const componentes = extrairComponentesSkuKitOlist(demanda.sku);
-
-    for (const componente of componentes) {
-      const skuComponente = selecionarSkuComponenteKitOlist({
-        skuKit: demanda.sku,
-        variante: componente.variante,
-        skusCandidatos: input.skusCandidatos,
-      });
-      const quantidadePedidos = demanda.quantidade_pedidos * componente.quantidade;
-
-      if (!Number.isSafeInteger(quantidadePedidos) || quantidadePedidos <= 0) {
-        throw new ComponenteKitOlistError(
-          `A quantidade calculada para a variante ${componente.variante} do kit ${demanda.sku} e invalida.`,
-        );
-      }
-
-      somarDemanda(demandasExpandidas, {
-        sku: skuComponente,
-        imagem_url: null,
-        quantidade_pedidos: quantidadePedidos,
-        pedido_olist_ids: demanda.pedido_olist_ids,
-        skus_olist_origem: demanda.skus_olist_origem,
-      });
-    }
+    somarDemanda(demandasExpandidas, demanda);
   }
 
   return demandasExpandidas;

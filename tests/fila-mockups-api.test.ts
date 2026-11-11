@@ -65,7 +65,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   Object.assign(globalThis, { prisma: {
     usuario: {
       findFirst: async () => ({ id: usuarioId, aplicativoId: "tenant-antigo" }),
-      findUnique: async () => ({ ativo: true, aplicativoId: "tenant-correto", podeEditarEstampas: permitido }),
+      findUnique: async () => ({ ativo: true, aplicativoId: "tenant-correto", podeEditarEstampas: true, podeCriarMockups: permitido }),
     },
     estampaCatalogoIa: {
       findMany: async () => [

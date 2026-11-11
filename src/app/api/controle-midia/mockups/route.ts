@@ -31,9 +31,9 @@ async function executar(
     }
     const usuario = await prisma.usuario.findUnique({
       where: { id: autenticado.id },
-      select: { ativo: true, aplicativoId: true, podeVisualizarCategoriasMidia: true, podeEditarEstampas: true },
+      select: { ativo: true, aplicativoId: true, podeVisualizarCategoriasMidia: true, podeCriarMockups: true },
     });
-    if (!usuario?.ativo || !(usuario.podeVisualizarCategoriasMidia || (request.method === "GET" && usuario.podeEditarEstampas))) {
+    if (!usuario?.ativo || !(usuario.podeVisualizarCategoriasMidia || (request.method === "GET" && usuario.podeCriarMockups))) {
       return erro("Sem permissão para acessar os mockups.", 403);
     }
     const bucket = process.env.GOOGLE_CLOUD_MOCKUPS_BUCKET?.trim();

@@ -19,7 +19,13 @@ export async function GET(request: Request) {
       prisma.produto.findMany({
         where: { aplicativoId: autenticado.aplicativoId, ativo: true },
         orderBy: { sku: "asc" },
-        select: { id: true, sku: true, imagemUrl: true, metaEstoque: true },
+        select: {
+          id: true, sku: true, imagemUrl: true, metaEstoque: true,
+          produtoFornecedorOlist: { select: {
+            quantidadeUsada: true,
+            produtoFornecedor: { select: { nome: true, aplicativoId: true } },
+          } },
+        },
       }),
       prisma.movimentacaoEstoque.findMany({
         where: { aplicativoId: autenticado.aplicativoId },
@@ -52,6 +58,12 @@ export async function GET(request: Request) {
     return NextResponse.json({
       produtos: produtos.map((produto) => ({
         id: produto.id, sku: produto.sku, imagem_url: produto.imagemUrl, meta_estoque: produto.metaEstoque,
+        produto_fornecido: produto.produtoFornecedorOlist?.produtoFornecedor.aplicativoId === autenticado.aplicativoId
+          ? {
+              nome: produto.produtoFornecedorOlist.produtoFornecedor.nome,
+              metros_por_unidade: Number(produto.produtoFornecedorOlist.quantidadeUsada),
+            }
+          : null,
       })),
       movimentacoes: movimentacoes.map((movimento) => ({
         id: movimento.id, produto_id: movimento.produtoId, sku: movimento.sku,

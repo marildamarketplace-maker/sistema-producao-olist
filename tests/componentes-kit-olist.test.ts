@@ -140,6 +140,7 @@ test("expande kits, multiplica pedidos e agrega venda individual do componente",
   const resultado = expandirDemandasKitsOlist({
     demandas,
     skusCandidatos: [SKU_LENCO, SKU_PAREO],
+    composicoes: new Map([[SKU_KIT, [{ sku: SKU_LENCO, quantidade: 1 }, { sku: SKU_PAREO, quantidade: 1 }]]]),
   });
 
   assert.deepEqual([...resultado.values()], [
@@ -183,7 +184,7 @@ test("composição cadastrada tem precedência sobre variantes escritas no kit",
 });
 
 test("associação permite kit sem padrão reconhecível e mantém pedidos originais", () => {
-  for (const sku of ["KIT-SEM-PADRAO", "COMBO-ESPECIAL"]) {
+  for (const sku of ["KIT-SEM-PADRAO", "COMBO-ESPECIAL", "KIT1-FORRINHO-MV20170-E"]) {
     const resultado = expandirDemandasKitsOlist({
       demandas: new Map([[sku, demanda(sku)]]), skusCandidatos: [SKU_LENCO, SKU_PAREO],
       composicoes: new Map([[sku, [{ sku: SKU_LENCO, quantidade: 2 }, { sku: SKU_PAREO, quantidade: 1 }]]]),
@@ -195,6 +196,19 @@ test("associação permite kit sem padrão reconhecível e mantém pedidos origi
   }
 });
 
+test("solicitação bloqueia composições explícitas autorreferentes ou repetidas", () => {
+  const sku = "KIT1-FORRINHO-MV20170-E";
+  for (const componentes of [
+    [{ sku, quantidade: 1 }],
+    [{ sku: SKU_LENCO, quantidade: 1 }, { sku: SKU_LENCO, quantidade: 2 }],
+  ]) {
+    assert.throws(() => expandirDemandasKitsOlist({
+      demandas: new Map([[sku, demanda(sku)]]), skusCandidatos: [sku, SKU_LENCO],
+      composicoes: new Map([[sku, componentes]]),
+    }));
+  }
+});
+
 test("componente associado indisponível bloqueia geração sem recorrer ao padrão do SKU", () => {
   assert.throws(() => expandirDemandasKitsOlist({
     demandas: new Map([[SKU_KIT, demanda(SKU_KIT)]]), skusCandidatos: [SKU_LENCO, SKU_PAREO],
@@ -202,12 +216,21 @@ test("componente associado indisponível bloqueia geração sem recorrer ao padr
   }), /não está ativo neste aplicativo/);
 });
 
-test("mistura associação explícita, kit legado e produto individual sem perder demanda", () => {
+test("mistura associação explícita, kit sem associação e produto individual sem perder demanda", () => {
   const resultado = expandirDemandasKitsOlist({
     demandas: new Map([["COMBO", demanda("COMBO", 2)], [SKU_KIT, demanda(SKU_KIT, 1)], [SKU_LENCO, demanda(SKU_LENCO, 4)]]),
     skusCandidatos: [SKU_LENCO, SKU_PAREO],
     composicoes: new Map([["COMBO", [{ sku: SKU_PAREO, quantidade: 3 }]]]),
   });
-  assert.equal(resultado.get(SKU_LENCO)?.quantidade_pedidos, 5);
-  assert.equal(resultado.get(SKU_PAREO)?.quantidade_pedidos, 7);
+  assert.equal(resultado.get(SKU_LENCO)?.quantidade_pedidos, 4);
+  assert.equal(resultado.get(SKU_PAREO)?.quantidade_pedidos, 6);
+  assert.equal(resultado.get(SKU_KIT)?.quantidade_pedidos, 1);
+});
+
+ test("solicitação mantém SKU e demanda do kit sem associação, com ou sem formato legado", () => {
+  for (const sku of ["KIT1-FORRINHO-MV20170-E", SKU_KIT]) {
+    const original = demanda(sku);
+    const resultado = expandirDemandasKitsOlist({ demandas: new Map([[sku, original]]), skusCandidatos: [SKU_LENCO, SKU_PAREO] });
+    assert.deepEqual([...resultado.values()], [original]);
+  }
 });

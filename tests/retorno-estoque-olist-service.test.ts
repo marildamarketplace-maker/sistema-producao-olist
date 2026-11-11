@@ -165,3 +165,14 @@ test("cancelamento de kit valida o SKU vendido e retorna o componente originalme
   assert.equal(a.entradas[0].sku, "SKU");
   assert.equal(a.entradas[0].quantidade, 2);
 });
+
+test("cancelamento após troca de SKU valida vendido e repõe somente o SKU substituto", async () => {
+  const original = "TP/LENCO-MODA-AFRO-C/LASER-TA/70X70-EST/6921-E";
+  const a = ambiente([original, "SKU-2"]);
+  a.baixas[0].skuOrigem = original;
+  assert.equal((await a.service.buscar(app)).pedidos[0].estado, "elegivel");
+  await a.service.confirmar(app, "usuario", a.input());
+  assert.equal(a.entradas.length, 1);
+  assert.equal(a.entradas[0].sku, a.baixas[0].sku);
+  assert.notEqual(a.entradas[0].sku, original);
+});

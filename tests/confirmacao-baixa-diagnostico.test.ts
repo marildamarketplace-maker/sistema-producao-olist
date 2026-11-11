@@ -13,7 +13,7 @@ test("confirmação identifica operação e preserva erro original sem efetuar b
       return [];
     } },
     produto: {
-      findMany: async () => [{ id: "produto", sku: "A" }],
+      findMany: async () => [{ id: "produto", sku: "A" }, { id: "kit", sku: "KIT-PRIVADO" }],
       createMany: async () => { escritas++; },
     },
     itemBaixaEstoqueOlist: { findMany: async () => [] },
@@ -35,16 +35,16 @@ test("confirmação identifica operação e preserva erro original sem efetuar b
   });
   erroConsulta = null;
   await assert.rejects(confirmarBaixaEstoqueOlist(input("KIT-PRIVADO")), (erro) => {
-    assert.equal(diagnosticarErroBaixaEstoqueOlist(erro).operacao, "consultar_composicoes");
-    assert.match(diagnosticarErroBaixaEstoqueOlist(erro).motivo, /SKU do kit não permite inferir/);
-    return true;
-  });
-  assert.equal(transacoes, 0);
-  await assert.rejects(confirmarBaixaEstoqueOlist(input("A")), (erro) => {
     assert.equal(erro, erroLock);
     assert.equal(diagnosticarErroBaixaEstoqueOlist(erro).operacao, "obter_lock");
     return true;
   });
   assert.equal(transacoes, 1);
+  await assert.rejects(confirmarBaixaEstoqueOlist(input("A")), (erro) => {
+    assert.equal(erro, erroLock);
+    assert.equal(diagnosticarErroBaixaEstoqueOlist(erro).operacao, "obter_lock");
+    return true;
+  });
+  assert.equal(transacoes, 2);
   assert.equal(escritas, 0);
 });

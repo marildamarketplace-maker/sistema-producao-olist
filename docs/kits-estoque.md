@@ -2,7 +2,7 @@
 
 Em Produtos → Associação de kits, informe o SKU exato vendido e os SKUs individuais ativos do mesmo aplicativo, com quantidade inteira positiva por kit. O SKU do kit pode ser informado antes de seu cadastro/importação. Componentes precisam estar cadastrados. Não são permitidos componentes duplicados, autorreferência ou kits aninhados.
 
-Exemplo: 3 unidades do kit com A × 2 e B × 1 geram saídas de A × 6 e B × 3, sem saída do SKU do kit. Produtos individuais sem composição seguem o fluxo anterior. SKUs com prefixo KIT sem composição bloqueiam a confirmação inteira antes de qualquer movimentação, com orientação para cadastrar a associação. A regra vale na confirmação manual e no cron Olist. Alterações não recalculam baixas passadas.
+Exemplo: 3 unidades do kit com A × 2 e B × 1 geram saídas de A × 6 e B × 3, sem saída do SKU do kit. Produtos individuais sem composição seguem o fluxo anterior. Sem composição cadastrada, inclusive para SKUs com prefixo KIT, a baixa usa o próprio SKU e a quantidade vendida. Não é gravada uma associação autorreferente nem inferida composição pelo nome do SKU. A regra vale na confirmação manual e no cron Olist. Alterações não recalculam baixas passadas.
 
 Cada componente recebe seu registro de baixa e movimento na mesma transação, preservando pedido/item e SKU original vendido em sku_origem. A confirmação serializa operações concorrentes e verifica novamente se o item já foi baixado. Se a composição mudar durante a preparação, a confirmação é interrompida e deve ser refeita. Retornos de cancelados validam o SKU original com a Olist e devolvem os componentes registrados, sem consultar a composição atual.
 
@@ -22,9 +22,9 @@ Validação automatizada: expansão e limites de quantidade, composição invál
 
 O botão “Gerar solicitação automaticamente” também consulta a mesma associação de kits, sempre no aplicativo da solicitação. A composição cadastrada tem precedência sobre a interpretação das estampas no SKU, inclusive para códigos sem prefixo KIT. Multiplica as quantidades por kit e soma a demanda às vendas individuais e a outros kits do mesmo componente, preservando os pedidos e SKUs de origem.
 
-Sem associação, permanece o reconhecimento legado das variantes pelo SKU. Com associação, um componente inativo ou ausente no aplicativo bloqueia a geração; não há fallback silencioso para outro produto. Os cálculos existentes de estoque disponível, mínimo/meta e produção em andamento continuam sendo aplicados aos componentes resultantes.
+Sem associação, a solicitação mantém o próprio SKU e sua demanda, inclusive quando o nome contém variantes de componentes. O cadastro automático de produtos também inclui esses SKUs. Com associação, um componente inativo ou ausente no aplicativo bloqueia a geração; não há fallback silencioso para outro produto. Os cálculos existentes de estoque disponível, mínimo/meta e produção em andamento continuam sendo aplicados aos componentes resultantes.
 
-Testes adicionais cobrem precedência da associação, kits sem padrão, componente indisponível, mistura com kits legados e vendas individuais. A integração real com Olist/banco não foi executada nesta alteração.
+Testes adicionais cobrem precedência da associação, kits sem padrão, componente indisponível, mistura com kits sem associação e vendas individuais. A integração real com Olist/banco não foi executada nesta alteração.
 
 ## Importação em lote
 

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export class ComposicaoKitInvalidaError extends Error {}
+
 export const composicaoKitSchema = z.object({
   sku: z.string().trim().min(1).max(255),
   componentes: z.array(z.object({
@@ -16,16 +18,22 @@ export const composicaoKitSchema = z.object({
   }
 });
 
-export function expandirItemKit<T extends { sku: string; quantidade: number }>(
+export function expandirItemKit<T extends { sku: string; quantidade: number; skuOrigem?: string | null }>(
   item: T, componentes: { sku: string; quantidade: number }[],
 ): (T & { skuOrigem: string })[] {
-  if (!componentes.length && item.sku.trim().toUpperCase().startsWith("KIT")) {
-    throw new Error(`Kit ${item.sku} sem associação de componentes. Cadastre a composição em Produtos → Associação de kits antes de confirmar a baixa.`);
+  if (componentes.length) {
+    const validacao = composicaoKitSchema.safeParse({
+      sku: item.sku,
+      componentes: componentes.map(({ sku, quantidade }) => ({ sku, quantidade })),
+    });
+    if (!validacao.success) {
+      throw new ComposicaoKitInvalidaError(validacao.error.issues.map((issue) => issue.message).join(" "));
+    }
   }
   if (!Number.isSafeInteger(item.quantidade) || item.quantidade <= 0) throw new Error(`Quantidade inválida para ${item.sku}.`);
   return (componentes.length ? componentes : [{ sku: item.sku, quantidade: 1 }]).map((componente) => {
     const quantidade = item.quantidade * componente.quantidade;
     if (!Number.isSafeInteger(quantidade) || quantidade > 2147483647 || quantidade <= 0) throw new Error(`Quantidade inválida para ${componente.sku}.`);
-    return { ...item, skuOrigem: item.sku, sku: componente.sku, quantidade };
+    return { ...item, skuOrigem: item.skuOrigem || item.sku, sku: componente.sku, quantidade };
   });
 }

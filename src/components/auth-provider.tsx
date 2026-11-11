@@ -57,6 +57,7 @@ type UsuarioAplicativoFallbackResponse = {
   pode_editar_tamanhos: boolean;
   pode_visualizar_estampas: boolean;
   pode_editar_estampas: boolean;
+  pode_criar_mockups: boolean;
   pode_visualizar_variantes: boolean;
   pode_editar_variantes: boolean;
   pode_visualizar_baixa: boolean;
@@ -124,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_editar_tamanhos,
         pode_visualizar_estampas,
         pode_editar_estampas,
+        pode_criar_mockups,
         pode_visualizar_variantes,
         pode_editar_variantes,
         pode_visualizar_baixa,
@@ -184,6 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeEditarTamanhos: Boolean(usuarioData.pode_editar_tamanhos),
       podeVisualizarEstampas: Boolean(usuarioData.pode_visualizar_estampas),
       podeEditarEstampas: Boolean(usuarioData.pode_editar_estampas),
+      podeCriarMockups: Boolean(usuarioData.pode_criar_mockups),
       podeVisualizarVariantes: Boolean(usuarioData.pode_visualizar_variantes),
       podeEditarVariantes: Boolean(usuarioData.pode_editar_variantes),
       podeVisualizarBaixa: Boolean(usuarioData.pode_visualizar_baixa),
