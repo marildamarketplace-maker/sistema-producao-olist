@@ -53,6 +53,14 @@ test("avaliações não dependem do ERP e consulta de estoque fica restrita às 
   assert.doesNotMatch(prompt, /Após o login, recarregue o dashboard e confira SKUs, saldos e prioridades atuais antes de agir/);
 });
 
+test("impulsionamento encerra normalmente por vagas esgotadas sem ocultar envios incertos", () => {
+  const prompt = promptBrowserWorker("# shopee-impulsionar-produtos\nImpulsionar até quatro anúncios conforme vagas disponíveis.");
+  assert.match(prompt, /vagas esgotadas confirmadas na interface são um\nencerramento normal: retorne concluida=true/);
+  assert.match(prompt, /todos os impulsionamentos realizados estejam verificados e não haja envio incerto/);
+  assert.match(prompt, /Uma tarefa com pendências obrigatórias deve retornar concluida=false/);
+  assert.match(prompt, /Se faltar login, MFA, CAPTCHA,[\s\S]*retorne concluida=false/);
+});
+
 test("MCP persistente usa só transporte local e não exige display do cliente", () => {
   const config = configurarBrowserWorker({ NODE_ENV: "test", AUTOMATIZACAO_BROWSER_ENABLED: "true",
     AUTOMATIZACAO_BROWSER_HEADLESS: "false", AUTOMATIZACAO_BROWSER_MCP_URL: "http://127.0.0.1:8931/mcp" })!;

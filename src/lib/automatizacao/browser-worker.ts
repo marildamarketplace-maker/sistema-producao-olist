@@ -102,8 +102,14 @@ arquivo, ferramenta ou autorização, pare e retorne concluida=false com a pend�
 Não tente contornar CAPTCHA. Não repita submissões cujo resultado ficou incerto.
 Não inclua senhas, cookies, tokens nem dados pessoais de clientes no resultado.
 Retorne concluida=true apenas se a tarefa foi concluída e verificada, ou se verificou que não há pendências.
+Respeite os critérios de conclusão da habilidade para operações limitadas às vagas disponíveis.
+No impulsionamento gratuito da Shopee, vagas esgotadas confirmadas na interface são um
+encerramento normal: retorne concluida=true, mesmo com menos anúncios que o máximo solicitado,
+desde que todos os impulsionamentos realizados estejam verificados e não haja envio incerto
+ou outro impedimento real. Informe o total confirmado e o limite atingido, sem tratar candidatos
+não impulsionados por falta de vaga como pendências obrigatórias desta execução.
 Relate sucessos e pendências por canal. Não inclua links Markdown para screenshots locais,
-pois eles não são anexos publicados no ERP. Uma tarefa parcial deve retornar concluida=false.
+pois eles não são anexos publicados no ERP. Uma tarefa com pendências obrigatórias deve retornar concluida=false.
 
 HABILIDADE:
 ${markdown}`;
