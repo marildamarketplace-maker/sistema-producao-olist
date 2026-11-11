@@ -59,9 +59,15 @@ test("serviço mantém contexto aberto sem encaminhar secrets do worker", () => 
     AUTOMATIZACAO_BROWSER_MCP_URL: "http://127.0.0.1:8931/mcp", AUTOMATIZACAO_WORKER_TOKEN: "segredo",
     CODEX_API_KEY: "segredo", DATABASE_URL: "segredo" });
   assert.ok(config.args.includes("--shared-browser-context"));
+  assert.ok(config.args.includes("--cdp-endpoint"));
+  assert.ok(!config.args.includes("--user-data-dir"));
+  assert.ok(config.browserArgs.includes("--remote-debugging-address=127.0.0.1"));
+  assert.ok(config.browserArgs.includes("--remote-debugging-port=9222"));
+  assert.ok(config.browserArgs.includes(`--user-data-dir=${env.AUTOMATIZACAO_BROWSER_PROFILE}`));
   assert.deepEqual(config.args.slice(config.args.indexOf("--idle-timeout"), config.args.indexOf("--idle-timeout") + 2), ["--idle-timeout", "0"]);
   assert.deepEqual(config.args.slice(config.args.indexOf("--host"), config.args.indexOf("--host") + 2), ["--host", "127.0.0.1"]);
   assert.doesNotMatch(JSON.stringify(config.env), /segredo/);
   assert.doesNotMatch(config.args.join(" "), /--headless|--no-sandbox/);
+  assert.doesNotMatch(config.browserArgs.join(" "), /--headless|--no-sandbox/);
   assert.equal(config.env.DISPLAY, ":0");
 });

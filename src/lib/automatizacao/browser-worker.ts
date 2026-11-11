@@ -61,10 +61,14 @@ export function configurarServicoBrowser(source: NodeJS.ProcessEnv = process.env
   const artefatos = join(dirname(perfil), "artefatos");
   return {
     cli, perfil, artefatos,
-    args: [cli, "--browser", "chromium", "--user-data-dir", perfil,
+    cdpUrl: "http://127.0.0.1:9222",
+    browserArgs: ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
+      `--user-data-dir=${perfil}`, "--no-first-run", "--no-default-browser-check",
+      ...(source.AUTOMATIZACAO_BROWSER_HEADLESS === "false" ? [] : ["--headless=new"]),
+      "about:blank"],
+    args: [cli, "--cdp-endpoint", "http://127.0.0.1:9222",
       "--host", "127.0.0.1", "--port", "8931", "--shared-browser-context", "--idle-timeout", "0",
-      "--output-dir", artefatos,
-      ...(source.AUTOMATIZACAO_BROWSER_HEADLESS === "false" ? [] : ["--headless"])],
+      "--output-dir", artefatos],
     env: { NODE_ENV: "production" as const, HOME: source.HOME, PATH: source.PATH,
       ...(source.DISPLAY ? { DISPLAY: source.DISPLAY } : {}),
       ...(source.XAUTHORITY ? { XAUTHORITY: source.XAUTHORITY } : {}) },
