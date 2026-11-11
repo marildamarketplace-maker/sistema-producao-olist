@@ -11,10 +11,6 @@
       "schedule": "5 */3 * * *"
     },
     {
-      "path": "/api/cron/processar-notifications",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/cron/baixa-estoque-olist",
       "schedule": "0 9 * * *"
     },
