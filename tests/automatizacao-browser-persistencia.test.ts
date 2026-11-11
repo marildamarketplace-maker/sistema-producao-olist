@@ -29,15 +29,14 @@ test("Chromium e abas sobrevivem ao último cliente MCP e à reconexão", {
   const browserArgs = config.browserArgs.map((v) => v.startsWith("--remote-debugging-port=")
     ? `--remote-debugging-port=${new URL(cdp).port}` : v);
   const browser = spawn(process.env.MEURY_BROWSER_TEST_CHROME!, browserArgs, { env: config.env, stdio: "ignore" });
-  let mcp: ReturnType<typeof spawn> | undefined;
+  const processos = [browser];
   t.after(async () => {
     const parar = (child: ReturnType<typeof spawn> | undefined) => new Promise<void>((resolve) => {
       if (!child || child.exitCode !== null || child.signalCode) return resolve();
       child.once("exit", () => resolve());
       child.kill("SIGTERM");
     });
-    await parar(mcp);
-    await parar(browser);
+    for (const processo of processos.reverse()) await parar(processo);
     await rm(pasta, { recursive: true, force: true });
   });
   async function aguardar(url: string) {
@@ -50,7 +49,8 @@ test("Chromium e abas sobrevivem ao último cliente MCP e à reconexão", {
   await aguardar(`${cdp}/json/version`);
   const args = config.args.map((v, i, a) => a[i - 1] === "--cdp-endpoint" ? cdp
     : a[i - 1] === "--port" ? String(httpPort) : v);
-  mcp = spawn(process.execPath, args, { cwd: pasta, env: config.env, stdio: "ignore" });
+  const mcp = spawn(process.execPath, args, { cwd: pasta, env: config.env, stdio: "ignore" });
+  processos.push(mcp);
   const endpoint = `http://127.0.0.1:${httpPort}/mcp`;
   await aguardar(endpoint);
   let id = 0;

@@ -33,7 +33,8 @@ O nome vem da API atualizada; workers novos continuam compatíveis com API antig
 usando um nome genérico até a publicação do ERP.
 
 Integração opcional por Playwright MCP, sem porta pública. O modo recomendado
-usa um serviço HTTP local separado, com contexto compartilhado; o STDIO anterior
+usa um Chromium independente e um serviço MCP HTTP local que se conecta por CDP;
+o STDIO anterior
 permanece como compatibilidade e encerra seu navegador junto com cada Codex.
 Mantém o
 MCP local com `default_tools_approval_mode="approve"` somente para a lista
@@ -97,13 +98,20 @@ AUTOMATIZACAO_BROWSER_MCP_URL=http://127.0.0.1:8931/mcp
 
 Inicie o worker normalmente. Ele conecta ao serviço existente, sem lançar outro
 browser. A primeira navegação abre a janela no XFCE, com o perfil já autenticado.
-O serviço usa `--shared-browser-context` e `--idle-timeout 0`; encerrar uma
-execução do Codex não encerra o serviço. Não abra outro Chromium com esse perfil.
+O serviço abre o Chromium antes do MCP, mantendo o processo independente. O MCP
+se conecta via CDP em `127.0.0.1:9222`, e o worker usa MCP em `127.0.0.1:8931`.
+Somente `--shared-browser-context` e `--idle-timeout 0` não bastavam: o MCP pode
+fechar o navegador que criou quando o último cliente desconecta. Com o Chromium
+externo, encerrar o cliente não encerra a janela. Não abra outro Chromium com esse perfil.
 Para login, pare somente o worker, use a janela que ficou aberta no Compartilhamento
 de Tela e retome o worker após autenticar. Não é necessário fechar o navegador.
 Não inicie dois workers nesse serviço/perfil, nem compartilhe o serviço entre
 aplicativos. O endpoint controla sessões autenticadas e não tem autenticação própria:
-fica exclusivamente em 127.0.0.1, nunca publique ou encaminhe a porta 8931.
+fica exclusivamente em 127.0.0.1, nunca publique ou encaminhe as portas 8931/9222.
+Se alguma delas já estiver ocupada, o serviço falha em vez de conectar a outro
+perfil. Após atualizar esse código, reinicie `meury-browser` como root, com o
+worker ocioso/parado. O mesmo perfil e browser.env são preservados. Não precisa
+reinstalar a unit se ela já usa `scripts/automatizacao-browser.ts`.
 
 `browser_close` é bloqueado. As habilidades listam abas antes de navegar,
 reutilizam uma principal por marketplace e removem apenas duplicatas sem trabalho
@@ -118,6 +126,11 @@ as regras de sessão do wrapper atualizado também se aplicam a elas.
 Para operação sem interface, use `AUTOMATIZACAO_BROWSER_HEADLESS=true` no browser.env.
 Sessões ficam no perfil; CAPTCHA/MFA precisam de intervenção. Reinício do serviço,
 fechamento manual ou reboot podem fechar janelas. Preserve Chromium sandbox, sem `--no-sandbox`.
+O teste opcional `tests/automatizacao-browser-persistencia.test.ts` usa
+`MEURY_BROWSER_TEST_CLI` e `MEURY_BROWSER_TEST_CHROME` para validar com browser
+real sem interface: duas sessões MCP consecutivas, desconexão do último cliente
+e preservação dos mesmos IDs de abas. Foi validado no macOS com Chrome e perfil
+temporário; o teste gráfico no XFCE da VM ainda precisa ser feito.
 Timeout de browser: 15 minutos. Não configure systemd para encerrar uma execução
 em andamento antes disso se deseja parada graciosa.
 
