@@ -1,6 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { diagnosticarErroBaixaEstoqueOlist } from "../src/lib/diagnostico-baixa-estoque-olist";
+import { expandirItemKit } from "../src/lib/kits-estoque";
+
+test("erro real de kit sem composição orienta o cadastro sem expor SKU", () => {
+  assert.throws(() => expandirItemKit({ sku: "KIT-PRIVADO", quantidade: 1 }, []), (error) => {
+    const diagnostico = diagnosticarErroBaixaEstoqueOlist(error);
+    assert.equal(diagnostico.motivo, "Kit sem composição cadastrada. Cadastre em Produtos → Associação de kits.");
+    assert.doesNotMatch(JSON.stringify(diagnostico), /PRIVADO/);
+    return true;
+  });
+});
+
+test("reconhece timeout de transação sem registrar a mensagem original", () => {
+  const erro = new Error("Transaction already closed: transaction expired. SQL privado");
+  assert.equal(diagnosticarErroBaixaEstoqueOlist(erro).motivo, "Tempo limite da transação de baixa excedido.");
+});
 
 test("classifica falhas conhecidas sem expor os dados da mensagem", () => {
   for (const [mensagem, motivo] of [

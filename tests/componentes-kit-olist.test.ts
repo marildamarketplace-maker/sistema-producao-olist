@@ -5,11 +5,40 @@ import {
   expandirDemandasKitsOlist,
   extrairComponentesSkuKitOlist,
   selecionarSkuComponenteKitOlist,
+  inferirComposicaoKitEstoque,
 } from "../src/lib/componentes-kit-olist";
 
 const SKU_KIT = "KIT2-AFRO-1/70X70-6921-H-1/150X150-6921-D";
 const SKU_LENCO = "TP/LENCO-MODA-AFRO-C/LASER-TA/70X70-EST/6921-H";
 const SKU_PAREO = "TP/PAREO-AFRO-C/LASER-TA/150X150-EST/6921-D";
+
+test("inferência para baixa resolve componentes e quantidades e agrega repetidos", () => {
+  assert.deepEqual(inferirComposicaoKitEstoque(SKU_KIT, [SKU_LENCO, SKU_PAREO]), [
+    { kitSku: SKU_KIT, sku: SKU_LENCO, quantidade: 1 },
+    { kitSku: SKU_KIT, sku: SKU_PAREO, quantidade: 1 },
+  ]);
+  const kit = "KIT2-AFRO-2/70X70-6921-H-3/70X70-6921-H";
+  assert.deepEqual(inferirComposicaoKitEstoque(kit, [SKU_LENCO]), [
+    { kitSku: kit, sku: SKU_LENCO, quantidade: 5 },
+  ]);
+});
+
+test("baixa usa SKU completo no formato __ antes de considerar a variante", () => {
+  const kit = `KIT__${SKU_LENCO}__${SKU_PAREO}`;
+  assert.deepEqual(inferirComposicaoKitEstoque(kit, [SKU_LENCO, SKU_PAREO, "OUTRO/6921-H"]), [
+    { kitSku: kit, sku: SKU_LENCO, quantidade: 1 },
+    { kitSku: kit, sku: SKU_PAREO, quantidade: 1 },
+  ]);
+});
+
+test("inferência de baixa bloqueia SKU parcial, ausência, ambiguidade e variantes parecidas", () => {
+  for (const kit of ["KIT-SEM-PADRAO", `${SKU_KIT}-LIXO`, `${SKU_KIT}__`, "KIT__", "KIT2-0/70X70-6921-H", "KIT2-1/70X70-6921-H-INVALIDO-1/70X70-6921-D"]) {
+    assert.throws(() => inferirComposicaoKitEstoque(kit, [SKU_LENCO, SKU_PAREO]));
+  }
+  assert.throws(() => inferirComposicaoKitEstoque(SKU_KIT, [SKU_LENCO]));
+  assert.throws(() => inferirComposicaoKitEstoque(SKU_KIT, [SKU_LENCO, SKU_PAREO, "OUTRO/6921-H"]));
+  assert.throws(() => inferirComposicaoKitEstoque(SKU_KIT, ["OUTRO/16921-H", "OUTRO/6921-H1", SKU_PAREO]));
+});
 
 test("extrai variantes e quantidades do SKU legado do kit", () => {
   assert.deepEqual(extrairComponentesSkuKitOlist(SKU_KIT), [

@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import { registrarOperacaoErroBaixa, type OperacaoConfirmacaoBaixa } from "@/lib/diagnostico-baixa-estoque-olist";
 import { expandirItemKit } from "@/lib/kits-estoque";
 ﻿import axios, { AxiosResponse } from "axios";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
@@ -6,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
 import { calcularNecessidadeProducaoOlist } from "@/lib/necessidade-producao-olist";
 import {
+  inferirComposicaoKitEstoque,
   type DemandaProdutoOlist,
   expandirDemandasKitsOlist,
   extrairComponentesSkuKitOlist,
@@ -2057,6 +2060,25 @@ export async function sincronizarPedidoBaixaEstoqueOlist(aplicativoId: string, p
   };
 }
 
+async function resolverComposicoesBaixaEstoque(
+  db: Pick<Prisma.TransactionClient, "componenteKitEstoque" | "produto">,
+  aplicativoId: string,
+  skus: string[],
+) {
+  const cadastradas = await db.componenteKitEstoque.findMany({
+    where: { aplicativoId, kitSku: { in: skus } },
+    select: { kitSku: true, sku: true, quantidade: true },
+  });
+  const semComposicao = [...new Set(skus)].filter((sku) =>
+    skuEhKitOlist(sku) && !cadastradas.some((componente) => componente.kitSku === sku));
+  if (!semComposicao.length) return cadastradas;
+  const ativos = await db.produto.findMany({
+    where: { aplicativoId, ativo: true }, select: { sku: true },
+  });
+  return [...cadastradas, ...semComposicao.flatMap((sku) =>
+    inferirComposicaoKitEstoque(sku, ativos.map((produto) => produto.sku)))];
+}
+
 export async function confirmarBaixaEstoqueOlist(input: {
   aplicativoId: string;
   origem: "automatica" | "manual";
@@ -2064,178 +2086,199 @@ export async function confirmarBaixaEstoqueOlist(input: {
   periodoFimBusca?: string | null;
   itens: ItemBaixaEstoqueInput[];
 }) {
-  if (!input.itens.length) {
-    throw new Error("Informe ao menos um item para baixa.");
-  }
+  let operacao: OperacaoConfirmacaoBaixa = "validar_itens";
+  try {
+    if (!input.itens.length) {
+      throw new Error("Informe ao menos um item para baixa.");
+    }
 
-  const itensOriginais = input.itens.map((item) => ({
-    ...item,
-    sku: item.sku.trim(),
-    pedidoOlistId: item.pedidoOlistId?.trim() || null,
-    itemOlistId: item.itemOlistId?.trim() || null,
-    observacao: item.observacao?.trim() || null,
-  }));
+    const itensOriginais = input.itens.map((item) => ({
+      ...item,
+      sku: item.sku.trim(),
+      pedidoOlistId: item.pedidoOlistId?.trim() || null,
+      itemOlistId: item.itemOlistId?.trim() || null,
+      observacao: item.observacao?.trim() || null,
+    }));
 
-  const composicoes = await prisma.componenteKitEstoque.findMany({ where: {
-    aplicativoId: input.aplicativoId, kitSku: { in: itensOriginais.map((item) => item.sku) },
-  } });
-  const itensNormalizados = itensOriginais.flatMap((item) => expandirItemKit(item,
-    composicoes.filter((componente) => componente.kitSku === item.sku)));
+    operacao = "consultar_composicoes";
+    const composicoes = await resolverComposicoesBaixaEstoque(
+      prisma, input.aplicativoId, itensOriginais.map((item) => item.sku),
+    );
+    operacao = "expandir_kits";
+    const itensNormalizados = itensOriginais.flatMap((item) => expandirItemKit(item,
+      composicoes.filter((componente) => componente.kitSku === item.sku)));
 
-  const skusInformados = itensNormalizados.map((item) => item.sku);
+    const skusInformados = itensNormalizados.map((item) => item.sku);
 
-  if (skusInformados.some((sku) => !sku)) {
-    throw new Error("Todos os itens precisam de SKU/referência.");
-  }
+    if (skusInformados.some((sku) => !sku)) {
+      throw new Error("Todos os itens precisam de SKU/referência.");
+    }
 
-  const skus = [...new Set(skusInformados)];
+    const skus = [...new Set(skusInformados)];
 
-  const produtos = await prisma.produto.findMany({
-    where: { aplicativoId: input.aplicativoId, sku: { in: skus } },
-    select: { id: true, sku: true },
-  });
-  let produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
-  const ausentes = skus.filter((sku) => !produtoPorSku.has(sku));
-
-  if (ausentes.length > 0) {
-    await prisma.produto.createMany({
-      data: ausentes.map((sku) => ({
-        sku,
-        aplicativoId: input.aplicativoId,
-        ativo: true,
-        metaEstoque: null,
-        createdAt: new Date(),
-      })),
-      skipDuplicates: true,
-    });
-
-    const produtosAtualizados = await prisma.produto.findMany({
+    operacao = "consultar_produtos";
+    const produtos = await prisma.produto.findMany({
       where: { aplicativoId: input.aplicativoId, sku: { in: skus } },
       select: { id: true, sku: true },
     });
+    let produtoPorSku = new Map(produtos.map((produto) => [produto.sku, produto]));
+    const ausentes = skus.filter((sku) => !produtoPorSku.has(sku));
 
-    produtoPorSku = new Map(produtosAtualizados.map((produto) => [produto.sku, produto]));
-  }
+    if (ausentes.length > 0) {
+      operacao = "cadastrar_produtos";
+      await prisma.produto.createMany({
+        data: ausentes.map((sku) => ({
+          sku,
+          aplicativoId: input.aplicativoId,
+          ativo: true,
+          metaEstoque: null,
+          createdAt: new Date(),
+        })),
+        skipDuplicates: true,
+      });
 
-  const itensComPedido = itensOriginais.filter((item) => item.pedidoOlistId && item.itemOlistId);
-  const chavesPedidoItem = new Set<string>();
-  const duplicadosNoEnvio = new Set<string>();
+      operacao = "reconsultar_produtos";
+      const produtosAtualizados = await prisma.produto.findMany({
+        where: { aplicativoId: input.aplicativoId, sku: { in: skus } },
+        select: { id: true, sku: true },
+      });
 
-  for (const item of itensComPedido) {
-    const chave = `${item.pedidoOlistId}/${item.itemOlistId}`;
-
-    if (chavesPedidoItem.has(chave)) {
-      duplicadosNoEnvio.add(chave);
+      produtoPorSku = new Map(produtosAtualizados.map((produto) => [produto.sku, produto]));
     }
 
-    chavesPedidoItem.add(chave);
-  }
+    const itensComPedido = itensOriginais.filter((item) => item.pedidoOlistId && item.itemOlistId);
+    const chavesPedidoItem = new Set<string>();
+    const duplicadosNoEnvio = new Set<string>();
 
-  if (duplicadosNoEnvio.size > 0) {
-    throw new Error(`Baixa duplicada na lista enviada para pedido/item: ${[...duplicadosNoEnvio].join(", ")}`);
-  }
+    for (const item of itensComPedido) {
+      const chave = `${item.pedidoOlistId}/${item.itemOlistId}`;
 
-  const baixasExistentes = itensComPedido.length
-    ? await prisma.itemBaixaEstoqueOlist.findMany({
-        where: {
-          OR: itensComPedido.map((item) => ({
-            pedidoOlistId: item.pedidoOlistId,
-            itemOlistId: item.itemOlistId,
-          })),
-        },
-        select: { pedidoOlistId: true, itemOlistId: true },
-      })
-    : [];
-
-  if (baixasExistentes.length > 0) {
-    const repetidos = baixasExistentes
-      .map((item) => `${item.pedidoOlistId}/${item.itemOlistId}`)
-      .join(", ");
-
-    throw new Error(`Baixa duplicada bloqueada para pedido/item: ${repetidos}`);
-  }
-
-  const resultado = await prisma.$transaction(async (tx) => {
-    // Serializa confirmações: um item original só pode ser processado uma vez.
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('baixa-kits-estoque', 0))::text`;
-    const composicoesAtuais = await tx.componenteKitEstoque.findMany({ where: {
-      aplicativoId: input.aplicativoId, kitSku: { in: itensOriginais.map((item) => item.sku) },
-    } });
-    const assinatura = (rows: typeof composicoes) => JSON.stringify(rows.map((row) => [row.kitSku, row.sku, row.quantidade]).sort());
-    if (assinatura(composicoes) !== assinatura(composicoesAtuais)) throw new Error("Composição do kit alterada durante a baixa. Confirme novamente.");
-    const existentes = itensComPedido.length ? await tx.itemBaixaEstoqueOlist.count({ where: {
-      OR: itensComPedido.map((item) => ({ pedidoOlistId: item.pedidoOlistId, itemOlistId: item.itemOlistId })),
-    } }) : 0;
-    if (existentes) throw new Error("Baixa duplicada bloqueada para pedido/item.");
-    const baixa = await tx.baixaEstoqueOlist.create({
-      data: {
-        aplicativoId: input.aplicativoId,
-        origem: input.origem,
-        observacao: input.observacao?.trim() || null,
-      },
-      select: { id: true },
-    });
-
-    for (const item of itensNormalizados) {
-      const produto = produtoPorSku.get(item.sku);
-      const quantidade = Number(item.quantidade);
-
-      if (!produto || Number.isNaN(quantidade) || quantidade <= 0) {
-        throw new Error(`Quantidade inválida para ${item.sku}.`);
+      if (chavesPedidoItem.has(chave)) {
+        duplicadosNoEnvio.add(chave);
       }
 
-      const movimentacao = await tx.movimentacaoEstoque.create({
+      chavesPedidoItem.add(chave);
+    }
+
+    if (duplicadosNoEnvio.size > 0) {
+      throw new Error(`Baixa duplicada na lista enviada para pedido/item: ${[...duplicadosNoEnvio].join(", ")}`);
+    }
+
+    operacao = "verificar_duplicidade";
+    const baixasExistentes = itensComPedido.length
+      ? await prisma.itemBaixaEstoqueOlist.findMany({
+          where: {
+            OR: itensComPedido.map((item) => ({
+              pedidoOlistId: item.pedidoOlistId,
+              itemOlistId: item.itemOlistId,
+            })),
+          },
+          select: { pedidoOlistId: true, itemOlistId: true },
+        })
+      : [];
+
+    if (baixasExistentes.length > 0) {
+      const repetidos = baixasExistentes
+        .map((item) => `${item.pedidoOlistId}/${item.itemOlistId}`)
+        .join(", ");
+
+      throw new Error(`Baixa duplicada bloqueada para pedido/item: ${repetidos}`);
+    }
+
+    operacao = "abrir_transacao";
+    const resultado = await prisma.$transaction(async (tx) => {
+      // Serializa confirmações: um item original só pode ser processado uma vez.
+      operacao = "obter_lock";
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('baixa-kits-estoque', 0))::text`;
+      operacao = "revalidar_composicoes";
+      const composicoesAtuais = await resolverComposicoesBaixaEstoque(
+        tx, input.aplicativoId, itensOriginais.map((item) => item.sku),
+      );
+      const assinatura = (rows: typeof composicoes) => JSON.stringify(rows.map((row) => [row.kitSku, row.sku, row.quantidade]).sort());
+      if (assinatura(composicoes) !== assinatura(composicoesAtuais)) throw new Error("Composição do kit alterada durante a baixa. Confirme novamente.");
+      operacao = "revalidar_duplicidade";
+      const existentes = itensComPedido.length ? await tx.itemBaixaEstoqueOlist.count({ where: {
+        OR: itensComPedido.map((item) => ({ pedidoOlistId: item.pedidoOlistId, itemOlistId: item.itemOlistId })),
+      } }) : 0;
+      if (existentes) throw new Error("Baixa duplicada bloqueada para pedido/item.");
+      operacao = "criar_baixa";
+      const baixa = await tx.baixaEstoqueOlist.create({
         data: {
           aplicativoId: input.aplicativoId,
-          produtoId: produto.id,
-          sku: produto.sku,
-          tipoMovimento: "saida",
-          quantidade,
-          origem: input.origem === "automatica" ? "BAIXA_OLIST" : "BAIXA_MANUAL",
-          referenciaId: baixa.id,
-          observacao:
-            item.observacao ||
-            (item.pedidoOlistId ? `Baixa por pedido Olist ${item.pedidoOlistId}` : "Baixa manual de estoque"),
+          origem: input.origem,
+          observacao: input.observacao?.trim() || null,
         },
         select: { id: true },
       });
 
-      try {
-        await tx.itemBaixaEstoqueOlist.create({
-          data: {
-            aplicativoId: input.aplicativoId,
-            skuOrigem: item.skuOrigem,
-            baixaId: baixa.id,
-            produtoId: produto.id,
-            sku: produto.sku,
-            quantidade,
-            pedidoOlistId: item.pedidoOlistId,
-            itemOlistId: item.itemOlistId,
-            observacao: item.observacao,
-            origem: input.origem,
-            movimentacaoId: movimentacao.id,
-          },
-        });
-      } catch (error) {
-        if (isPrismaUniqueConstraintError(error) && item.pedidoOlistId && item.itemOlistId) {
-          throw new Error(`Baixa duplicada bloqueada para pedido/item: ${item.pedidoOlistId}/${item.itemOlistId}`);
+      for (const item of itensNormalizados) {
+        const produto = produtoPorSku.get(item.sku);
+        const quantidade = Number(item.quantidade);
+
+        if (!produto || Number.isNaN(quantidade) || quantidade <= 0) {
+          throw new Error(`Quantidade inválida para ${item.sku}.`);
         }
 
-        throw error;
+        operacao = "criar_movimentacao";
+        const movimentacao = await tx.movimentacaoEstoque.create({
+          data: {
+            aplicativoId: input.aplicativoId,
+            produtoId: produto.id,
+            sku: produto.sku,
+            tipoMovimento: "saida",
+            quantidade,
+            origem: input.origem === "automatica" ? "BAIXA_OLIST" : "BAIXA_MANUAL",
+            referenciaId: baixa.id,
+            observacao:
+              item.observacao ||
+              (item.pedidoOlistId ? `Baixa por pedido Olist ${item.pedidoOlistId}` : "Baixa manual de estoque"),
+          },
+          select: { id: true },
+        });
+
+        try {
+          operacao = "registrar_item_baixa";
+          await tx.itemBaixaEstoqueOlist.create({
+            data: {
+              aplicativoId: input.aplicativoId,
+              skuOrigem: item.skuOrigem,
+              baixaId: baixa.id,
+              produtoId: produto.id,
+              sku: produto.sku,
+              quantidade,
+              pedidoOlistId: item.pedidoOlistId,
+              itemOlistId: item.itemOlistId,
+              observacao: item.observacao,
+              origem: input.origem,
+              movimentacaoId: movimentacao.id,
+            },
+          });
+        } catch (error) {
+          if (isPrismaUniqueConstraintError(error) && item.pedidoOlistId && item.itemOlistId) {
+            throw new Error(`Baixa duplicada bloqueada para pedido/item: ${item.pedidoOlistId}/${item.itemOlistId}`);
+          }
+
+          throw error;
+        }
       }
+
+      operacao = "confirmar_transacao";
+      return {
+        baixa_id: baixa.id,
+        itens: itensOriginais.length,
+      };
+    }, { maxWait: 10000, timeout: 30000 });
+
+    if (input.origem === "automatica" && input.periodoFimBusca) {
+      operacao = "atualizar_cursor";
+      await concluirBuscaBaixaEstoqueOlist(input.periodoFimBusca);
     }
 
-    return {
-      baixa_id: baixa.id,
-      itens: itensOriginais.length,
-    };
-  }, { maxWait: 10000, timeout: 30000 });
-
-  if (input.origem === "automatica" && input.periodoFimBusca) {
-    await concluirBuscaBaixaEstoqueOlist(input.periodoFimBusca);
+    return resultado;
+  } catch (error) {
+    registrarOperacaoErroBaixa(error, operacao);
+    throw error;
   }
-
-  return resultado;
 }
 
 async function cadastrarProdutosOlistNaoCadastrados(

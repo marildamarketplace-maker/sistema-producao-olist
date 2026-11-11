@@ -114,6 +114,37 @@ export function selecionarSkuComponenteKitOlist(input: {
   return correspondencias[0];
 }
 
+/** Inferência conservadora para estoque: exige leitura integral e candidato único. */
+export function inferirComposicaoKitEstoque(skuKit: string, skusAtivos: readonly string[]) {
+  const sku = skuKit.trim();
+  const falhar = () => new ComponenteKitOlistError(
+    `Nao foi possivel identificar os componentes do kit ${skuKit}. Cadastre a composição em Produtos → Associação de kits.`,
+  );
+  const partes = sku.includes("__") ? sku.split("__").slice(1) : null;
+  if (partes?.some((parte) => !parte.trim())) throw falhar();
+  if (!partes) {
+    // O parser de produção tolera trechos extras; a baixa não pode ignorá-los.
+    if (!/^KIT[^/]*?(?:-\d+\/[^/]*?-\d+-[A-Z0-9]+)+$/i.test(sku)) throw falhar();
+  }
+  const extraidos = extrairComponentesSkuKitOlist(sku);
+  const acumulados = new Map<string, number>();
+  extraidos.forEach((componente, index) => {
+    const exato = partes && skusAtivos.find((candidato) =>
+      !skuEhKitOlist(candidato) && candidato.toUpperCase() === partes[index].trim().toUpperCase());
+    const candidatos = exato ? [exato] : skusAtivos.filter((candidato) => {
+      const variante = candidato.trim().match(/(?:^|[\/-])(\d+-[A-Z0-9]+)$/i)?.[1];
+      return !skuEhKitOlist(candidato) && variante?.toUpperCase() === componente.variante;
+    });
+    const skuComponente = selecionarSkuComponenteKitOlist({
+      skuKit, variante: componente.variante, skusCandidatos: candidatos,
+    });
+    const quantidade = (acumulados.get(skuComponente) ?? 0) + componente.quantidade;
+    if (!Number.isSafeInteger(quantidade) || quantidade > 2147483647) throw falhar();
+    acumulados.set(skuComponente, quantidade);
+  });
+  return [...acumulados].map(([sku, quantidade]) => ({ kitSku: skuKit, sku, quantidade }));
+}
+
 function somarDemanda(
   demandas: Map<string, DemandaProdutoOlist>,
   demanda: DemandaProdutoOlist,
