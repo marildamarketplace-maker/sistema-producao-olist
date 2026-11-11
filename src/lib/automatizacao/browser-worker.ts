@@ -80,11 +80,15 @@ export function promptBrowserWorker(markdown: string) {
 Use este navegador no lugar de referências ao navegador integrado do Codex, Chrome do Mac ou cua.
 Liste as abas com browser_tabs antes de navegar. Reutilize a aba existente de cada marketplace
 (Shopee: seller.shopee.com.br; TikTok Shop: seller-br.tiktok.com; Mercado Livre: mercadolivre.com.br).
-Reutilize também uma única aba do ERP Meuryshop (sistema.meuryshop.com.br).
+Consulte o ERP Meuryshop (sistema.meuryshop.com.br) somente quando a habilidade exigir dados dele.
+Quando necessário, reutilize uma única aba do ERP.
 Mantenha a aba do ERP aberta mesmo após concluir a consulta ou se houver login, MFA ou CAPTCHA.
 Não faça logout nem feche essa aba ao terminar. Deixe o operador autenticar nela sem disputar a sessão.
-Após o login, recarregue o dashboard e confira SKUs, saldos e prioridades atuais antes de agir;
-sem essa verificação, não use dados antigos nem estoque do marketplace como substituto.
+Somente nas habilidades que exigem estoque ou prioridades do ERP, recarregue o dashboard
+e confira SKUs, saldos e prioridades atuais antes das ações que dependem desses dados;
+nesses casos, não use dados antigos nem estoque do marketplace como substituto.
+Responder avaliações não depende de estoque nem de consulta ao ERP. Não bloqueie respostas
+a avaliações por indisponibilidade, login ou ausência de dados no ERP.
 Mantenha uma aba principal por marketplace. Crie somente a que faltar; não abra outra a cada execução.
 Feche apenas abas duplicadas sem formulário, upload ou autenticação em andamento, usando browser_tabs.
 Não use browser_close nem feche a janela, as abas principais ou o navegador ao terminar.

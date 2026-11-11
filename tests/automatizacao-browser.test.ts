@@ -42,6 +42,17 @@ test("resultado de browser exige confirmação explícita e preserva pendências
   assert.match(promptBrowserWorker("prompt"), /execução parcial/);
 });
 
+test("avaliações não dependem do ERP e consulta de estoque fica restrita às habilidades que a exigem", () => {
+  const habilidade = "# responder-avaliacoes-marketplaces\nResponda avaliações pendentes na Shopee e no TikTok Shop.";
+  const prompt = promptBrowserWorker(habilidade);
+  assert.ok(prompt.endsWith(habilidade));
+  assert.match(prompt, /Consulte o ERP Meuryshop[^\n]+somente quando a habilidade exigir dados dele/);
+  assert.match(prompt, /Somente nas habilidades que exigem estoque ou prioridades do ERP/);
+  assert.match(prompt, /Responder avaliações não depende de estoque nem de consulta ao ERP/);
+  assert.match(prompt, /Não bloqueie respostas\na avaliações por indisponibilidade, login ou ausência de dados no ERP/);
+  assert.doesNotMatch(prompt, /Após o login, recarregue o dashboard e confira SKUs, saldos e prioridades atuais antes de agir/);
+});
+
 test("MCP persistente usa só transporte local e não exige display do cliente", () => {
   const config = configurarBrowserWorker({ NODE_ENV: "test", AUTOMATIZACAO_BROWSER_ENABLED: "true",
     AUTOMATIZACAO_BROWSER_HEADLESS: "false", AUTOMATIZACAO_BROWSER_MCP_URL: "http://127.0.0.1:8931/mcp" })!;
