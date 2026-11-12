@@ -17,10 +17,15 @@ test("captura local vira JPEG transportável; rejeita fuga, symlink, arquivo ant
     await writeFile(arquivo, bytes);
     const evidencia = await carregarEvidenciaWorker(arquivo, pasta, Date.now() - 5000);
     assert.equal(evidencia.mimetype, "image/jpeg");
+    const relativa = await carregarEvidenciaWorker("print.png", pasta, Date.now() - 5000);
+    assert.deepEqual(relativa, evidencia);
+    const relativaPonto = await carregarEvidenciaWorker("./print.png", pasta, Date.now() - 5000);
+    assert.deepEqual(relativaPonto, evidencia);
     assert.equal((await sharp(Buffer.from(evidencia.media, "base64")).metadata()).width, 20);
     await assert.rejects(carregarEvidenciaWorker(arquivo, join(pasta, "outra"), 0));
     await symlink('/etc/passwd', join(pasta, 'escape.png'));
     await assert.rejects(carregarEvidenciaWorker(join(pasta, 'escape.png'), pasta, 0), /FORA_DA_PASTA/);
+    await assert.rejects(carregarEvidenciaWorker('escape.png', pasta, 0), /FORA_DA_PASTA/);
     await utimes(arquivo, new Date(0), new Date(0));
     await assert.rejects(carregarEvidenciaWorker(arquivo, pasta, Date.now()), /ANTIGA/);
     assert.equal(imagemWhatsappSchema.safeParse({ media: bytes.toString("base64"), mimetype: "image/jpeg" }).success, false);

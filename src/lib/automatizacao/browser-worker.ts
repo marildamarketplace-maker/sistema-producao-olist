@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 
 export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env) {
@@ -125,10 +125,14 @@ pela ferramenta. Use null se indisponível. Nunca inclua conversas, nomes de com
 credenciais ou base64. Não capture uma tela sensível inteira. O worker transporta o arquivo
 para a notificação; não envie WhatsApp diretamente. Esta extensão do contrato prevalece
 sobre instruções antigas que exigiam apenas resultado/concluida. Não invente caminhos.
-${caminhoEvidencia ? `Para esta execução, use exatamente ${JSON.stringify(caminhoEvidencia)} no parâmetro filename de browser_take_screenshot.
-Retorne esse mesmo caminho em evidencia somente após a ferramenta confirmar o salvamento.
-Não use o diretório temporário padrão do MCP, links Markdown ou URLs file://.
-Se a ferramenta não puder salvar nesse destino, use evidencia=null e informe a limitação.` : ""}
+${caminhoEvidencia ? `Para esta execução, use ${JSON.stringify(basename(caminhoEvidencia))} no parâmetro filename de browser_take_screenshot.
+Esse nome relativo será salvo dentro do output-dir do MCP. O worker resolve nomes relativos
+na pasta de evidências configurada; um caminho relativo é válido, não é motivo para descartar a captura.
+Após a ferramenta confirmar o salvamento de uma captura segura, retorne em evidencia o nome relativo
+${JSON.stringify(basename(caminhoEvidencia))} ou o caminho real informado pela ferramenta.
+O destino absoluto esperado pelo worker é ${JSON.stringify(caminhoEvidencia)}, mas não exija que a ferramenta
+retorne esse formato. Não retorne links Markdown nem URLs file://. Não invente caminhos.
+Use evidencia=null somente se não houver captura segura salva. Não retorne null só por o caminho ser relativo.` : ""}
 HABILIDADE:
 ${markdown}`;
 }

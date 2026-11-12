@@ -105,4 +105,7 @@ test("bloqueio é explícito e incompatível com conclusão", () => {
    assert.ok(prompt.includes(JSON.stringify("/privado/artefatos/tentativa.png")));
    assert.ok(prompt.endsWith("# Escopo"));
    assert.match(prompt, /evidencia=null/);
+   assert.match(prompt, /um caminho relativo é válido/);
+   assert.match(prompt, /Não retorne null só por o caminho ser relativo/);
+   assert.ok(prompt.includes('"tentativa.png" no parâmetro filename'));
  });

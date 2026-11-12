@@ -163,6 +163,9 @@ A retirada das rotas e o descarte físico são fases separadas. As permissões l
 ## Print opcional nas notificações
 
 O worker aceita `evidencia: string | null` na saída do agente de navegador.
+O agente solicita um nome de arquivo relativo por tentativa ao MCP. Caminhos
+relativos retornados pela ferramenta são válidos e resolvidos dentro da pasta
+configurada; não devem levar o agente a descartar uma captura segura.
 O caminho deve apontar para uma captura criada nesta execução dentro da pasta
 privada `artefatos`, ao lado do perfil. Para MCP persistente, configure no ambiente
 do worker `AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR` com o caminho absoluto da pasta
