@@ -1,4 +1,35 @@
-# Atualizar e executar o worker
+# Iniciar e atualizar pela VM
+
+Com o arquivo atualizado na pasta do projeto, execute:
+
+```bash
+cd ~/sistema-producao-olist
+bash iniciar-worker.sh
+```
+
+A cada início, o arquivo valida a branch e o upstream, bloqueia alterações locais
+ou commits que não estão no remoto, executa `git fetch` e `git pull --ff-only` e
+confirma que o checkout corresponde ao upstream. Se o próprio iniciador mudar,
+reabre a nova versão antes de continuar.
+
+Limpa somente `.next`, `.cache`, `.turbo` e `tsconfig.tsbuildinfo` não versionados;
+verifica o cache npm e recria `node_modules` com `npm ci --include=dev` (incluindo
+`prisma generate` do postinstall). Valida as dependências, o processamento JPEG
+e o acesso à pasta de evidências. Qualquer erro impede iniciar o worker.
+
+Preserva configurações existentes de `AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR`; se
+ela não existir, configura a pasta padrão quando disponível. Preserva o perfil
+do navegador, autenticações e prints existentes. Não reinicia o serviço browser,
+não executa migrations, não atualiza o Codex CLI e não publica o ERP.
+
+Encerre primeiro qualquer worker anterior com Ctrl+C quando estiver ocioso. O
+bloqueio do iniciador impede duas instâncias iniciadas por ele, mas não identifica
+um worker aberto manualmente. Mantenha o terminal aberto durante a execução.
+O código precisa estar no remoto e o ERP publicado para que a atualização inclua
+as correções de imagens. O iniciador não envia alterações locais ao Git.
+
+## Procedimento manual alternativo
+
 
 Antes de atualizar a VM, envie as alterações ao repositório remoto e publique o
 ERP com a API e o remetente que suportam imagens. Atualizar somente o worker não
