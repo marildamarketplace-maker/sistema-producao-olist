@@ -53,7 +53,7 @@ test("envelope envia imagem à Z-API; inválido não é enviado como texto nem e
   const notification = { id: "teste", tipo: "WHATSAPP" as const, to: "120363412284116447-group", titulo: "Rotina", data: new Date(), tentativas: 0,
     mensagem: prefixoImagemWhatsapp + JSON.stringify({ media: bytes.toString("base64"), mimetype: "image/png", caption: "Resultado confirmado" }) };
   await enviarNotificationWhatsapp(notification);
-  assert.deepEqual(calls, [{ url: "https://api.test/instance/send-image", data: { phone: notification.to, image: `data:image/png;base64,${bytes.toString("base64")}`, caption: "Resultado confirmado" } }]);
+  assert.deepEqual(calls, [{ url: "https://api.test/instance/send-image", data: { phone: notification.to, image: `data:image/png;base64,${bytes.toString("base64")}`, caption: "Rotina\n\nResultado confirmado" } }]);
   await assert.rejects(enviarNotificationWhatsapp({ ...notification, mensagem: prefixoImagemWhatsapp + '{"media":"SEGREDO"}' }), /Imagem WhatsApp inválida/);
   assert.equal(calls.length, 1);
 });

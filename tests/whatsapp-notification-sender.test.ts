@@ -3,7 +3,7 @@ import test from "node:test";
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
 
 import type { NotificationPendente } from "../src/repositories/notificationRepository";
-import { enviarNotificationWhatsapp } from "../src/services/notification/whatsappNotificationSender";
+import { enviarNotificationWhatsapp, legendaComTituloUnico } from "../src/services/notification/whatsappNotificationSender";
 
 test("envia a notificação de WhatsApp por meio da Z-API", async (context) => {
   const envAnterior = {
@@ -154,5 +154,13 @@ test("envia ID de grupo intacto e rejeita destinatário inválido sem chamar Z-A
   } finally {
     restoreEnv("ZAPI_INSTANCE_API", envAnterior.instanceApi);
     restoreEnv("ZAPI_CLIENT_TOKEN", envAnterior.clientToken);
+  }
+});
+
+
+test("legenda de imagem tem um único título em envelopes novos e legados", () => {
+  const corpo = "12/11 · 15:31\n⚠️ Shopee: CAPTCHA.\n✅ TikTok: sem pendências.";
+  for (const entrada of [corpo, `Avaliar Chats\n\n${corpo}`, `Avaliar Chats\n\nAvaliar Chats\n\n${corpo}`]) {
+    assert.equal(legendaComTituloUnico("Avaliar Chats", entrada), `Avaliar Chats\n\n${corpo}`);
   }
 });

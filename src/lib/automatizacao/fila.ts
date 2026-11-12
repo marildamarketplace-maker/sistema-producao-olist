@@ -55,7 +55,7 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
       data: prepararDadosNotification({
         to: numero,
         ...aviso,
-        mensagem: evidencia ? prefixoImagemWhatsapp + JSON.stringify({ ...evidencia, caption: `${aviso.titulo}\n\n${aviso.mensagem}` }) : aviso.mensagem,
+        mensagem: evidencia ? prefixoImagemWhatsapp + JSON.stringify({ ...evidencia, caption: aviso.mensagem }) : aviso.mensagem,
       }),
     });
     await tx.avisoAutomatizacao.create({
