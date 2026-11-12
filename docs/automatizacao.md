@@ -187,3 +187,16 @@ na VM; configurar a pasta de artefatos e reiniciar somente o serviço worker qua
 ocioso, preservando o serviço browser/perfil autenticado. Não é necessário pausar
 ou recriar rotinas. A primeira validação real deve conferir captura segura, aviso
 único na fila e recebimento da imagem no grupo; testes locais não comprovam entrega.
+
+
+## Resumo do WhatsApp
+
+O resultado completo permanece no histórico. O agente de navegador retorna também
+`resumoWhatsapp` (até 360 caracteres e três linhas), com resultado por canal e ação
+necessária. O worker envia esse campo no fechamento; a API aplica sanitização e o
+mesmo texto compacto ao aviso textual e à legenda da imagem. Título sem a lista de
+marketplaces, data curta em São Paulo e ausência de URLs reduzem a ocupação mobile.
+Workers antigos continuam aceitos: resultados curtos são usados diretamente; os
+longos recebem aviso de conclusão ou falha com orientação para consultar o histórico.
+Não há inferência de contagens nem de fila vazia a partir de texto longo.
+A mudança exige publicação do ERP e atualização/reinício do worker ocioso na VM.

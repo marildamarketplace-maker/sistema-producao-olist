@@ -13,6 +13,7 @@ export const operacaoWorker = z.discriminatedUnion("acao", [
   z.object({
     acao: z.literal("finalizar"), reserva: z.uuid(),
     desfecho: z.enum(["SUCESSO", "FALHA", "TEMPORARIA", "INDISPONIVEL", "BLOQUEADA"]),
+    resumoWhatsapp: z.string().trim().min(1).max(360).optional(),
     evidencia: imagemWhatsappSchema.optional(),
     resultado: z.string().max(8_000).refine((texto) => !texto.includes("\0")),
   }),
@@ -24,7 +25,7 @@ type Execucao = Awaited<ReturnType<Transacao["execucaoAutomatizacao"]["findUniqu
 
 const limiteTentativas = 3;
 
-async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status: string, resultado: string, agora: Date, evidencia?: z.infer<typeof imagemWhatsappSchema>) {
+async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status: string, resultado: string, agora: Date, evidencia?: z.infer<typeof imagemWhatsappSchema>, resumoWhatsapp?: string) {
   const tentativa = await tx.tentativaAutomatizacao.update({
     where: { id: reserva }, data: { status, resultado, encerradaEm: agora },
     select: { iniciadaEm: true },
@@ -48,7 +49,7 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
   const rotina = await tx.rotinaAutomatizacao.findUniqueOrThrow({
     where: { id: execucao.rotinaId }, select: { nome: true },
   });
-  const aviso = mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm, status === "BLOQUEADA");
+  const aviso = mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm, status === "BLOQUEADA", resumoWhatsapp);
   for (const numero of numeros) {
     const notification = await tx.notification.create({
       data: prepararDadosNotification({
@@ -129,7 +130,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       : operacao.desfecho === "INDISPONIVEL" ? "INDISPONIVEL"
       : operacao.desfecho === "TEMPORARIA" && execucao.tentativa < limiteTentativas ? "AGUARDANDO_RETRY"
       : "FALHA_FINAL";
-    await fechar(tx, execucao, operacao.reserva, status, operacao.resultado, agora, operacao.evidencia);
+    await fechar(tx, execucao, operacao.reserva, status, operacao.resultado, agora, operacao.evidencia, operacao.resumoWhatsapp);
     return { status };
   });
 }

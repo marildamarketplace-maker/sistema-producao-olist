@@ -83,12 +83,13 @@ async function main() {
       });
       let desfecho = "SUCESSO";
       let resultado: string;
+      let resumoWhatsapp: string | undefined;
       let evidencia: Awaited<ReturnType<typeof carregarEvidenciaWorker>> | undefined;
       try {
         const schemaPath = join(cwd, "resposta.json");
         await writeFile(schemaPath, JSON.stringify({ type: "object", properties: {
-          resultado: { type: "string" }, ...(browser ? { evidencia: { type: ["string", "null"] }, concluida: { type: "boolean" }, bloqueada: { type: "boolean" } } : {}),
-        }, required: browser ? ["resultado", "concluida", "bloqueada", "evidencia"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
+          resultado: { type: "string" }, ...(browser ? { resumoWhatsapp: { type: "string", minLength: 1, maxLength: 360 }, evidencia: { type: ["string", "null"] }, concluida: { type: "boolean" }, bloqueada: { type: "boolean" } } : {}),
+        }, required: browser ? ["resultado", "concluida", "bloqueada", "evidencia", "resumoWhatsapp"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
         const saidaPath = join(cwd, "resultado.json");
         etapa = "EXECUTANDO";
         console.info(eventoWorker(etapa, rotinaNome, iniciado));
@@ -111,6 +112,7 @@ async function main() {
         if (browser) {
           const validada = respostaBrowserSchema.parse(resposta);
           resultado = validada.resultado;
+          resumoWhatsapp = validada.resumoWhatsapp;
           const raiz = raizEvidencias;
           if (validada.evidencia && raiz) {
             try { evidencia = await carregarEvidenciaWorker(validada.evidencia, raiz, iniciado); }
@@ -132,7 +134,7 @@ async function main() {
         if (!fim.signal.aborted) {
           etapa = "REGISTRANDO_RESULTADO";
           console.info(eventoWorker(etapa, rotinaNome, iniciado));
-          const fechamento = { acao: "finalizar", reserva, desfecho, resultado, ...(evidencia ? { evidencia } : {}) };
+          const fechamento = { acao: "finalizar", reserva, desfecho, resultado, ...(resumoWhatsapp ? { resumoWhatsapp } : {}), ...(evidencia ? { evidencia } : {}) };
           const resposta = await api(fechamento).catch(() => api(fechamento));
           if (resposta) console.info(eventoWorker("FINALIZADA", rotinaNome, iniciado, desfecho));
           else console.error(eventoWorker("RESERVA_PERDIDA", rotinaNome, iniciado));

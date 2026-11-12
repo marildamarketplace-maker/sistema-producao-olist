@@ -2,7 +2,7 @@ function nomeLegivel(nome: string) {
   const limpo = nome.replace(/[\r\n\t\u0000-\u001f]/g, " ")
     .replace(/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/gi, "")
     .replace(/[*_~`]/g, "").trim();
-  return limpo.replace(/\s+/g, " ").slice(0, 120) || "Rotina de automatização";
+  return Array.from(limpo.split("|")[0].replace(/\s+/g, " ").trim()).slice(0, 64).join("") || "Rotina de automatização";
 }
 
 // Códigos internos continuam tendo uma descrição legível para o destinatário.
@@ -34,13 +34,21 @@ function resultadoLegivel(resultado: string, sucesso: boolean) {
   return caracteres.length > 3_000 ? `${caracteres.slice(0, 2_999).join("")}…` : limpo || "Resultado não informado.";
 }
 
-export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, resultado: string, data = new Date(), bloqueada = false) {
+export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, resultado: string, data = new Date(), bloqueada = false, resumoWhatsapp?: string) {
   const horario = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
-  }).format(data);
-  const nomeRotina = nomeLegivel(nome);
+    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).format(data).replace(", ", " · ");
+  // O relatório completo permanece na tentativa; o aviso possui orçamento próprio.
+  const compacto = resultadoLegivel(resumoWhatsapp?.trim() || resultado, sucesso)
+    .replace(/https?:\/\/[^\s]+/gi, "")
+    .split("\n").map((linha) => linha.replace(/\s+/g, " ").trim()).filter(Boolean);
+  let resumo = compacto.join("\n");
+  if (Array.from(resumo).length > 360 || compacto.length > 3) {
+    resumo = sucesso ? "Tarefa concluída. Detalhes no histórico do ERP."
+      : `${bloqueada ? "Intervenção necessária. " : ""}${motivoFalha(resultado)} Veja o histórico do ERP.`;
+  }
   return {
-    titulo: `${bloqueada && !sucesso ? "⚠️" : sucesso ? "✅" : "❌"} ${nomeRotina}${bloqueada && !sucesso ? " | Intervenção necessária" : ""}`,
-    mensagem: `Execução: ${horario}\nResultado: ${resultadoLegivel(resultado, sucesso)}`,
+    titulo: `${bloqueada && !sucesso ? "⚠️" : sucesso ? "✅" : "❌"} ${nomeLegivel(nome)}`,
+    mensagem: `${horario}\n${resumo || "Consulte o histórico do ERP."}`,
   };
 }

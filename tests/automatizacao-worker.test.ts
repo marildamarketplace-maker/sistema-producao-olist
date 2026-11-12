@@ -79,9 +79,9 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   const terceira = await reservar();
   assert.deepEqual(await (await finalizar(terceira.reserva, "SUCESSO")).json(), { status: "CONCLUIDA" });
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
-  assert.match(notificacoes[0], /Resultado: resultado/);
-  assert.match(notificacoes[0], /Execução: 10\/11\/2026, 22:15/);
-  assert.match(notificacoes[1], /Resultado: resultado/);
+  assert.match(notificacoes[0], /resultado/);
+  assert.match(notificacoes[0], /10\/11 · 22:15/);
+  assert.match(notificacoes[1], /resultado/);
   assert.ok(notificacoes.every((mensagem) => !mensagem.includes(execucao.id)));
 
   Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 3 });
@@ -99,14 +99,15 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 4 });
   const comImagem = await reservar();
   const evidencia = { media: Buffer.from([255, 216, 255, 217]).toString("base64"), mimetype: "image/jpeg" };
-  const fechamentoImagem = { acao: "finalizar", reserva: comImagem.reserva, desfecho: "SUCESSO", resultado: "feito", evidencia };
+  const fechamentoImagem = { acao: "finalizar", reserva: comImagem.reserva, desfecho: "SUCESSO", resultado: "feito com detalhes no histórico", resumoWhatsapp: "Shopee: concluído.", evidencia };
   assert.equal((await operar(fechamentoImagem)).status, 200);
   assert.equal((await operar(fechamentoImagem)).status, 200);
   assert.equal(notificacoes.length, 4);
   const envelope = JSON.parse(notificacoes.at(-1)!.slice("whatsapp:image:v1\n".length));
   assert.equal(envelope.media, evidencia.media);
-  assert.match(envelope.caption, /Resultado: feito/);
-  assert.equal(tentativas.get(comImagem.reserva)?.resultado, "feito");
+  assert.match(envelope.caption, /Shopee: concluído/);
+  assert.doesNotMatch(envelope.caption, /detalhes no histórico/);
+  assert.equal(tentativas.get(comImagem.reserva)?.resultado, "feito com detalhes no histórico");
 
   Object.assign(execucao, { tipo: "TESTE_ROTINA", status: "PENDENTE", tentativa: 0 });
   const teste = await reservar();

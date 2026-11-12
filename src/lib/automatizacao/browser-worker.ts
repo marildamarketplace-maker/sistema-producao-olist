@@ -52,6 +52,7 @@ export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env)
 }
 
 export const respostaBrowserSchema = z.object({
+  resumoWhatsapp: z.string().trim().min(1).max(360).optional(),
   evidencia: z.string().max(4096).nullable().optional(),
   concluida: z.boolean(), bloqueada: z.boolean().default(false), resultado: z.string().trim().min(1).max(8_000).refine((v) => !v.includes("\0")),
 }).refine((v) => !(v.concluida && v.bloqueada), { message: "Execução bloqueada não pode estar concluída." });
@@ -118,6 +119,14 @@ ou outro impedimento real. Informe o total confirmado e o limite atingido, sem t
 não impulsionados por falta de vaga como pendências obrigatórias desta execução.
 Relate sucessos e pendências por canal. Não inclua links Markdown para screenshots locais,
 pois eles não são anexos publicados no ERP. Uma tarefa com pendências obrigatórias deve retornar concluida=false.
+
+RESUMO PARA WHATSAPP: retorne também resumoWhatsapp com até 360 caracteres e no máximo
+3 linhas curtas. Uma linha por canal com quantidade/resultado; se houver pendência, inclua a
+próxima ação concreta. Exemplo: "Shopee: 3 respostas; fila vazia.\nTikTok: login necessário.\nAção: autenticar o TikTok."
+Preserve o relatório completo em resultado. Não repita título, data, fuso, confirmação da loja,
+nomes de filtros, URLs, passos executados, abas preservadas ou detalhes técnicos do print no resumo.
+Não invente quantidades nem omita canal bloqueado, resultado incerto ou ação humana necessária.
+Esta extensão de saída prevalece sobre contratos antigos da habilidade.
 
 EVIDÊNCIA OPCIONAL: antes de finalizar, se houver uma área segura sem dados pessoais, capture
 um print com browser_take_screenshot e retorne em evidencia o caminho do arquivo retornado
