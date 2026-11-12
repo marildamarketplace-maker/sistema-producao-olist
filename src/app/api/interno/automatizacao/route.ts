@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const workers = credenciais.parse(JSON.parse(process.env.AUTOMATIZACAO_WORKERS ?? "[]"));
     const escopo = workers.find(({ tokenSha256 }) => timingSafeEqual(hash, Buffer.from(tokenSha256, "hex")));
     if (!escopo) return new Response(null, { status: 401 });
-    const corpo = await lerCorpoLimitado(request, 50_000);
+    const corpo = await lerCorpoLimitado(request, 3_000_000);
     if (corpo === null) return new Response(null, { status: 413 });
     const operacao = operacaoWorker.safeParse(JSON.parse(corpo));
     if (!operacao.success) return new Response(null, { status: 400 });

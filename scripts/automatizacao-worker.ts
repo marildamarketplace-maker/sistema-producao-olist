@@ -1,6 +1,7 @@
+import { carregarEvidenciaWorker } from "@/lib/automatizacao/evidencia-worker";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
 import { renovarEnquantoValida } from "@/lib/automatizacao/renovacao";
 import { eventoWorker } from "@/lib/automatizacao/log-worker";
@@ -79,11 +80,12 @@ async function main() {
       });
       let desfecho = "SUCESSO";
       let resultado: string;
+      let evidencia: Awaited<ReturnType<typeof carregarEvidenciaWorker>> | undefined;
       try {
         const schemaPath = join(cwd, "resposta.json");
         await writeFile(schemaPath, JSON.stringify({ type: "object", properties: {
-          resultado: { type: "string" }, ...(browser ? { concluida: { type: "boolean" }, bloqueada: { type: "boolean" } } : {}),
-        }, required: browser ? ["resultado", "concluida", "bloqueada"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
+          resultado: { type: "string" }, ...(browser ? { evidencia: { type: ["string", "null"] }, concluida: { type: "boolean" }, bloqueada: { type: "boolean" } } : {}),
+        }, required: browser ? ["resultado", "concluida", "bloqueada", "evidencia"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
         const saidaPath = join(cwd, "resultado.json");
         etapa = "EXECUTANDO";
         console.info(eventoWorker(etapa, rotinaNome, iniciado));
@@ -106,6 +108,14 @@ async function main() {
         if (browser) {
           const validada = respostaBrowserSchema.parse(resposta);
           resultado = validada.resultado;
+          const raiz = process.env.AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR ||
+            (process.env.AUTOMATIZACAO_BROWSER_PROFILE ? join(dirname(process.env.AUTOMATIZACAO_BROWSER_PROFILE), "artefatos") : undefined);
+          if (validada.evidencia && raiz) {
+            try { evidencia = await carregarEvidenciaWorker(validada.evidencia, raiz, iniciado); }
+            catch { resultado = `${resultado.slice(0, 7850)}\nPrint de evidência indisponível: arquivo inválido ou inacessível.`; }
+          } else {
+            resultado = `${resultado.slice(0, 7850)}\nPrint de evidência indisponível: ${raiz ? "captura segura não fornecida" : "pasta de artefatos não configurada"}.`;
+          }
           if (!validada.concluida) desfecho = validada.bloqueada ? "BLOQUEADA" : "FALHA";
         } else resultado = respostaSchema.parse(resposta).resultado;
       } catch (error) {
@@ -120,7 +130,7 @@ async function main() {
         if (!fim.signal.aborted) {
           etapa = "REGISTRANDO_RESULTADO";
           console.info(eventoWorker(etapa, rotinaNome, iniciado));
-          const fechamento = { acao: "finalizar", reserva, desfecho, resultado };
+          const fechamento = { acao: "finalizar", reserva, desfecho, resultado, ...(evidencia ? { evidencia } : {}) };
           const resposta = await api(fechamento).catch(() => api(fechamento));
           if (resposta) console.info(eventoWorker("FINALIZADA", rotinaNome, iniciado, desfecho));
           else console.error(eventoWorker("RESERVA_PERDIDA", rotinaNome, iniciado));

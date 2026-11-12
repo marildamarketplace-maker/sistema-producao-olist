@@ -19,6 +19,7 @@ export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env)
   const headless = source.AUTOMATIZACAO_BROWSER_HEADLESS !== "false";
   if (!endpoint && !headless && !source.DISPLAY) throw new Error("Browser visível exige DISPLAY da sessão gráfica.");
   const args = [cli, "--browser", "chromium", "--user-data-dir", perfil,
+    "--output-dir", perfil ? join(dirname(perfil), "artefatos") : undefined,
     ...(headless ? ["--headless"] : [])];
   const configs = {
     ...(endpoint ? { "mcp_servers.browser.url": endpoint } : {
@@ -51,6 +52,7 @@ export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env)
 }
 
 export const respostaBrowserSchema = z.object({
+  evidencia: z.string().max(4096).nullable().optional(),
   concluida: z.boolean(), bloqueada: z.boolean().default(false), resultado: z.string().trim().min(1).max(8_000).refine((v) => !v.includes("\0")),
 }).refine((v) => !(v.concluida && v.bloqueada), { message: "Execução bloqueada não pode estar concluída." });
 
@@ -117,6 +119,12 @@ não impulsionados por falta de vaga como pendências obrigatórias desta execu�
 Relate sucessos e pendências por canal. Não inclua links Markdown para screenshots locais,
 pois eles não são anexos publicados no ERP. Uma tarefa com pendências obrigatórias deve retornar concluida=false.
 
+EVIDÊNCIA OPCIONAL: antes de finalizar, se houver uma área segura sem dados pessoais, capture
+um print com browser_take_screenshot e retorne em evidencia o caminho do arquivo retornado
+pela ferramenta. Use null se indisponível. Nunca inclua conversas, nomes de compradores,
+credenciais ou base64. Não capture uma tela sensível inteira. O worker transporta o arquivo
+para a notificação; não envie WhatsApp diretamente. Esta extensão do contrato prevalece
+sobre instruções antigas que exigiam apenas resultado/concluida. Não invente caminhos.
 HABILIDADE:
 ${markdown}`;
 }

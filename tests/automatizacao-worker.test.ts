@@ -96,10 +96,22 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.deepEqual(await (await finalizar(bloqueada.reserva, "BLOQUEADA", parcial)).json(), { status: "BLOQUEADA" });
   assert.equal(notificacoes.length, 3);
 
+  Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 4 });
+  const comImagem = await reservar();
+  const evidencia = { media: Buffer.from([255, 216, 255, 217]).toString("base64"), mimetype: "image/jpeg" };
+  const fechamentoImagem = { acao: "finalizar", reserva: comImagem.reserva, desfecho: "SUCESSO", resultado: "feito", evidencia };
+  assert.equal((await operar(fechamentoImagem)).status, 200);
+  assert.equal((await operar(fechamentoImagem)).status, 200);
+  assert.equal(notificacoes.length, 4);
+  const envelope = JSON.parse(notificacoes.at(-1)!.slice("whatsapp:image:v1\n".length));
+  assert.equal(envelope.media, evidencia.media);
+  assert.match(envelope.caption, /Resultado: feito/);
+  assert.equal(tentativas.get(comImagem.reserva)?.resultado, "feito");
+
   Object.assign(execucao, { tipo: "TESTE_ROTINA", status: "PENDENTE", tentativa: 0 });
   const teste = await reservar();
   assert.match(teste.markdown, /TESTE_ROTINA_OK/);
   assert.doesNotMatch(teste.markdown, /Entrada imutável/);
   assert.deepEqual(await (await finalizar(teste.reserva, "SUCESSO", "TESTE_ROTINA_OK")).json(), { status: "CONCLUIDA" });
-  assert.equal(notificacoes.length, 3);
+  assert.equal(notificacoes.length, 4);
 });

@@ -159,3 +159,28 @@ A retirada das rotas e o descarte físico são fases separadas. As permissões l
 1. Na homologação, faça um inventário de FKs de entrada, views, funções, triggers, integrações e consumidores externos para `categorias_olist`, `tarefas_midia` e `ocorrencias_tarefas_midia`.
 2. Exporte as três tabelas em formato restaurável do Postgres para armazenamento privado. Restaure em um banco isolado com os pré-requisitos do ERP e compare contagens, chaves e amostras.
 3. Depois de publicar e validar a retirada das páginas e APIs, promova o SQL de `docs/migrations-condicionais/retirada-controle-midia.sql` a uma migration nova, junto à remoção de modelos, tipos e relações correspondentes no Prisma. O SQL exige que dependências remanescentes sejam resolvidas explicitamente. Preserve os arquivos históricos de migration.
+
+## Print opcional nas notificações
+
+O worker aceita `evidencia: string | null` na saída do agente de navegador.
+O caminho deve apontar para uma captura criada nesta execução dentro da pasta
+privada `artefatos`, ao lado do perfil. Para MCP persistente, configure no ambiente
+do worker `AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR` com o caminho absoluto da pasta
+`--output-dir` do serviço browser (mesmo filesystem, acessível pelo usuário do worker).
+Não use URLs nem diretórios compartilhados com usuários não confiáveis.
+A captura deve conter apenas informação não sensível; em chats, não anexar conversas.
+
+O worker valida JPEG/PNG de até 5 MiB e converte para JPEG de até 2 MiB para manter
+o POST autenticado abaixo de 3 MB, inclusive base64. Falta de captura segura ou
+falha de leitura preserva o resultado textual e informa a limitação. O fechamento
+continua idempotente; a imagem acompanha o mesmo aviso, sem notificação adicional.
+A imagem fica no envelope `whatsapp:image:v1` na fila notification, não no resultado
+da tentativa. Trate essa fila como armazenamento privado de evidências.
+O remetente usa `/send-image` da Z-API; mensagens comuns preservam `/send-text`.
+Envelope inválido falha sem transmitir o base64 como texto.
+
+Publicação: atualizar primeiro o ERP (API e remetente), depois o código do worker
+na VM; configurar a pasta de artefatos e reiniciar somente o serviço worker quando
+ocioso, preservando o serviço browser/perfil autenticado. Não é necessário pausar
+ou recriar rotinas. A primeira validação real deve conferir captura segura, aviso
+único na fila e recebimento da imagem no grupo; testes locais não comprovam entrega.

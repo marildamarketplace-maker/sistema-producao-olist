@@ -1,3 +1,4 @@
+import { imagemWhatsappSchema, prefixoImagemWhatsapp } from "@/lib/whatsapp-image";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +13,7 @@ export const operacaoWorker = z.discriminatedUnion("acao", [
   z.object({
     acao: z.literal("finalizar"), reserva: z.uuid(),
     desfecho: z.enum(["SUCESSO", "FALHA", "TEMPORARIA", "INDISPONIVEL", "BLOQUEADA"]),
+    evidencia: imagemWhatsappSchema.optional(),
     resultado: z.string().max(8_000).refine((texto) => !texto.includes("\0")),
   }),
 ]);
@@ -22,7 +24,7 @@ type Execucao = Awaited<ReturnType<Transacao["execucaoAutomatizacao"]["findUniqu
 
 const limiteTentativas = 3;
 
-async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status: string, resultado: string, agora: Date) {
+async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status: string, resultado: string, agora: Date, evidencia?: z.infer<typeof imagemWhatsappSchema>) {
   const tentativa = await tx.tentativaAutomatizacao.update({
     where: { id: reserva }, data: { status, resultado, encerradaEm: agora },
     select: { iniciadaEm: true },
@@ -46,11 +48,13 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
   const rotina = await tx.rotinaAutomatizacao.findUniqueOrThrow({
     where: { id: execucao.rotinaId }, select: { nome: true },
   });
+  const aviso = mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm, status === "BLOQUEADA");
   for (const numero of numeros) {
     const notification = await tx.notification.create({
       data: prepararDadosNotification({
         to: numero,
-        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm, status === "BLOQUEADA"),
+        ...aviso,
+        mensagem: evidencia ? prefixoImagemWhatsapp + JSON.stringify({ ...evidencia, caption: `${aviso.titulo}\n\n${aviso.mensagem}` }) : aviso.mensagem,
       }),
     });
     await tx.avisoAutomatizacao.create({
@@ -125,7 +129,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       : operacao.desfecho === "INDISPONIVEL" ? "INDISPONIVEL"
       : operacao.desfecho === "TEMPORARIA" && execucao.tentativa < limiteTentativas ? "AGUARDANDO_RETRY"
       : "FALHA_FINAL";
-    await fechar(tx, execucao, operacao.reserva, status, operacao.resultado, agora);
+    await fechar(tx, execucao, operacao.reserva, status, operacao.resultado, agora, operacao.evidencia);
     return { status };
   });
 }

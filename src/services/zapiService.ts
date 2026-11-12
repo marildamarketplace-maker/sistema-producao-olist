@@ -4,6 +4,7 @@ import { normalizarDestinatarioWhatsapp } from "@/lib/whatsapp";
 type EnviarMensagemZApiInput = {
   telefone: string;
   mensagem: string;
+  imagem?: { media: string; mimetype: "image/jpeg" | "image/png" };
 };
 
 type EnviarMensagemZApiResponse = {
@@ -17,14 +18,14 @@ export async function enviarMensagemZApi(input: EnviarMensagemZApiInput) {
   const clientToken = getRequiredEnv("ZAPI_CLIENT_TOKEN");
   const telefone = normalizarDestinatarioWhatsapp(input.telefone);
 
-  const endpoint = instanceApi.endsWith("/send-text")
-    ? instanceApi
-    : `${instanceApi}/send-text`;
+  const endpoint = `${instanceApi.replace(/\/send-(?:text|image)$/, "")}/${input.imagem ? "send-image" : "send-text"}`;
   let response: AxiosResponse<unknown>;
   try {
     response = await axios.post(
       endpoint,
-      { phone: telefone, message: input.mensagem },
+      input.imagem
+        ? { phone: telefone, image: `data:${input.imagem.mimetype};base64,${input.imagem.media}`, caption: input.mensagem }
+        : { phone: telefone, message: input.mensagem },
       {
         headers: {
           Accept: "application/json",
@@ -37,7 +38,7 @@ export async function enviarMensagemZApi(input: EnviarMensagemZApiInput) {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status ?? "sem status";
       throw new Error(
-        `Falha no envio Z-API (${status}): ${descreverResposta(error.response?.data ?? error.message)}`,
+        `Falha no envio Z-API (${status}): ${input.imagem ? "falha no envio da imagem" : descreverResposta(error.response?.data ?? error.message)}`,
       );
     }
     throw error;
@@ -46,7 +47,7 @@ export async function enviarMensagemZApi(input: EnviarMensagemZApiInput) {
   const payload = response.data;
   if (!isRespostaEnvioValida(payload)) {
     throw new Error(
-      `A Z-API respondeu ${response.status}, mas não confirmou o envio com zaapId ou messageId: ${descreverResposta(payload)}`,
+      `A Z-API respondeu ${response.status}, mas não confirmou o envio com zaapId ou messageId: ${input.imagem ? "resposta inválida no envio da imagem" : descreverResposta(payload)}`,
     );
   }
 
