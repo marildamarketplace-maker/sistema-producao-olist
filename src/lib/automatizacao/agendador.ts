@@ -24,7 +24,7 @@ export async function agendarAutomatizacoes(data = new Date()) {
       if (horarios.elegivel) {
         const previstoEm = horarios.elegivel;
         const bloqueio = await tx.execucaoAutomatizacao.findFirst({
-          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } },
+          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } },
           select: { status: true },
         });
         if (!bloqueio) {
@@ -32,7 +32,7 @@ export async function agendarAutomatizacoes(data = new Date()) {
             data: { aplicativoId, rotinaId, previstoEm, versaoId: rotina.habilidade.versoes[0].id },
           });
         }
-        disparos.push({ previstoEm, motivo: bloqueio?.status === "FALHA_FINAL" ? "FALHA_ANTERIOR" : bloqueio ? "SOBREPOSICAO" : "ENFILEIRADO" });
+        disparos.push({ previstoEm, motivo: bloqueio ? "SOBREPOSICAO" : "ENFILEIRADO" });
       }
       await tx.disparoAutomatizacao.createMany({
         data: disparos.map((disparo) => ({ ...disparo, aplicativoId, rotinaId })),

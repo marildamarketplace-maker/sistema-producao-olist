@@ -33,7 +33,7 @@ test("recusa horários inválidos e repetidos e inicia rotinas pausadas", () => 
   }).ativa, false);
 });
 
-test("migration isola o aplicativo e bloqueia próxima ocorrência até sucesso", async (t) => {
+test("migrations isolam aplicativo, deduplicam horário e liberam próxima ocorrência após falha", async (t) => {
   const db = criarPostgresMemoria();
   t.after(() => db.close());
   const app = "00000000-0000-4000-8000-000000000001";
@@ -83,6 +83,15 @@ test("migration isola o aplicativo e bloqueia próxima ocorrência até sucesso"
   await assert.rejects(inserir("2026-11-11T11:00:00Z"), { code: "23505" });
   await db.exec("UPDATE automatizacao_execucao SET status = 'CONCLUIDA' WHERE tipo = 'EXECUTAR_PROMPT'");
   await inserir("2026-11-11T11:00:00Z");
+  await db.exec(await readFile("prisma/migrations/20261112204519_falha_automatizacao_por_ocorrencia/migration.sql", "utf8"));
+  await db.exec("UPDATE automatizacao_execucao SET status = 'FALHA_FINAL' WHERE tipo = 'EXECUTAR_PROMPT'");
+  await assert.rejects(inserir("2026-11-11T11:00:00Z"), { code: "23505" });
+  await inserir("2026-11-12T11:00:00Z");
+  for (const status of ["PENDENTE", "AGUARDANDO_RETRY", "EM_EXECUCAO", "BLOQUEADA"]) {
+    await db.query(`UPDATE automatizacao_execucao SET status = $1 WHERE "previstoEm" = '2026-11-12T11:00:00Z'`, [status]);
+    await assert.rejects(inserir("2026-11-12T15:00:00Z"), { code: "23505" });
+    await assert.rejects(db.exec(`UPDATE automatizacao_execucao SET status = 'PENDENTE' WHERE "previstoEm" = '2026-11-11T11:00:00Z'`), { code: "23505" });
+  }
   await db.exec("SET ROLE authenticated");
   await assert.rejects(db.query("SELECT * FROM automatizacao_execucao"), { code: "42501" });
 });

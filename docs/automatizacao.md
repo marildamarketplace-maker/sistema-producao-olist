@@ -6,7 +6,7 @@
 2. Configure o WhatsApp e habilite `NOTIFICAR` para o aplicativo. O cron de agendamento usa `CRON_SECRET` e a mesma infraestrutura dos outros crons da Vercel.
 3. Gere uma credencial aleatória de 256 bits por worker e mantenha a credencial bruta somente na VM. Na Vercel, configure `AUTOMATIZACAO_WORKERS` como uma lista JSON. Cada entrada contém `id` exclusivo, `aplicativoId` e `tokenSha256` em hexadecimal minúsculo. Cada credencial dá acesso somente ao aplicativo indicado e ao executor de prompts. Para revogar a credencial, retire a entrada e publique a configuração.
 4. Na VM Linux, configure `AUTOMATIZACAO_ERP_URL` (HTTPS), `AUTOMATIZACAO_WORKER_TOKEN` e `AUTOMATIZACAO_CODEX_VERSION` com a versão exata do CLI instalado. Use uma conta de serviço dedicada e armazene as variáveis em arquivo de ambiente acessível somente à conta do serviço. Rode `npm run worker:automatizacao` a partir do checkout com as dependências do projeto. Configure o serviço para reiniciar em falha e dar até seis minutos para encerramento gracioso.
-5. Crie uma habilidade de teste e uma rotina com um horário próximo. Confira resultado, tentativa, transição de WhatsApp e recepção. Use dados sintéticos para verificar falha final, bloqueio do horário seguinte e reabertura da mesma execução. A tela de histórico distingue aceite da Z-API e falha de envio.
+5. Crie uma habilidade de teste e uma rotina com um horário próximo. Confira resultado, tentativa, transição de WhatsApp e recepção. Use dados sintéticos para verificar falha final restrita ao próprio horário, execução do horário seguinte e reabertura da mesma execução. A tela de histórico distingue aceite da Z-API e falha de envio.
 
 A fila faz uma reserva por vez, renova a cada 15 segundos e expira a reserva em 60 segundos. Os logs do worker registram duração e desfecho sem copiar prompt ou resultado. Monitore o atraso da fila comparando o instante atual com `disponivelEm` do trabalho elegível mais antigo. A hora da última tentativa e `reservaAte` ajudam no diagnóstico enquanto há trabalho reservado. O worker de prompts usa diretório de trabalho temporário e ferramentas desabilitadas. A autenticação é exclusivamente ChatGPT (`forced_login_method="chatgpt"`), usando a sessão persistida em `CODEX_HOME` ou `~/.codex` do usuário do serviço. API keys não são encaminhadas. O consumo segue os limites da assinatura. Faça `codex login --device-auth` e `codex login status` como o mesmo usuário do serviço antes de iniciar. Proteja o diretório de credenciais e não compartilhe `auth.json`. A sessão pode expirar e exigir novo login.
 
@@ -202,3 +202,12 @@ Workers antigos continuam aceitos: resultados curtos são usados diretamente; os
 longos recebem aviso de conclusão ou falha com orientação para consultar o histórico.
 Não há inferência de contagens nem de fila vazia a partir de texto longo.
 A mudança exige publicação do ERP e atualização/reinício do worker ocioso na VM.
+
+## Falha por ocorrência
+
+O limite de três tentativas pertence à execução de cada horário. `FALHA_FINAL`
+não impede os próximos horários; o histórico e a unicidade por horário permanecem.
+Execuções pendentes, em retry, em andamento ou `BLOQUEADA` continuam impedindo
+sobreposição. `BLOQUEADA` exige intervenção (por exemplo, login ou CAPTCHA).
+Uma retomada manual em conflito com outra execução em aberto retorna HTTP 409.
+Aplique a migration de falha por ocorrência antes de publicar o agendador atualizado.

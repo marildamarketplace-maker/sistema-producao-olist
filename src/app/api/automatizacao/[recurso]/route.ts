@@ -38,6 +38,9 @@ async function autorizar(request: Request) {
 }
 
 function erro(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+    return Response.json({ error: "Já existe uma execução para esse horário ou outra execução em aberto para a rotina." }, { status: 409 });
+  }
   if (error instanceof ErroHttp) return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof z.ZodError || error instanceof SyntaxError) {
     return Response.json({ error: "Revise os campos informados." }, { status: 400 });
@@ -154,8 +157,13 @@ async function alterar(request: Request, contexto: Contexto) {
           FOR UPDATE
         `;
         if (!rotina) throw new ErroHttp(404, "Rotina indisponível.");
-        const existente = await tx.execucaoAutomatizacao.findFirst({
+        const ativa = await tx.execucaoAutomatizacao.findFirst({
+          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } },
+          select: { id: true, status: true },
+        });
+        const existente = ativa ?? await tx.execucaoAutomatizacao.findFirst({
           where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } },
+          orderBy: { previstoEm: "desc" },
           select: { id: true, status: true },
         });
         if (existente && ["FALHA_FINAL", "BLOQUEADA"].includes(existente.status)) {

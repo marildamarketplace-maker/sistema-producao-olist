@@ -7,7 +7,7 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticia";
   const aplicativoId = randomUUID(), rotinaId = randomUUID(), habilidadeId = randomUUID(), versaoId = randomUUID();
   const usuario = { ativo: true, aplicativoId, podeVisualizarAutomatizacao: true, podeIntervirAutomatizacao: true };
-  let encontrada = true, disponivel = true, criadas = 0, locks = 0;
+  let encontrada = true, disponivel = true, criadas = 0, locks = 0, conflito = false;
   let existente: { id: string; status: string } | null = null;
   const atualizacoes: Record<string, unknown>[] = [];
   const tx = {
@@ -27,8 +27,9 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
         return { count: 1 };
       },
       findFirst: async ({ where }: { where: unknown }) => {
-        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } });
-        return existente;
+        const filtro = where as { status: { notIn?: string[] } };
+        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: filtro.status.notIn ? { notIn: ["CONCLUIDA", "FALHA_FINAL"] } : { not: "CONCLUIDA" } });
+        return filtro.status.notIn?.includes(existente?.status ?? "") ? null : existente;
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         criadas++;
@@ -49,7 +50,10 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   };
   Object.assign(globalThis, { prisma: {
     usuario: { findUnique: async () => usuario },
-    $transaction: async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx),
+    $transaction: async (fn: (db: typeof tx) => Promise<unknown>) => {
+      if (conflito) throw { code: "P2002" };
+      return fn(tx);
+    },
   } });
   t.after(() => { Reflect.deleteProperty(globalThis, "prisma"); });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
@@ -86,6 +90,9 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   existente = null;
   disponivel = false;
   assert.equal((await executar()).status, 409);
+  conflito = true;
+  assert.equal((await executar()).status, 409);
+  conflito = false;
   encontrada = false;
   assert.equal((await executar()).status, 404);
   const antes = locks;

@@ -1181,7 +1181,7 @@ model ExecucaoAutomatizacao {
   tentativas   TentativaAutomatizacao[]
 
   @@unique([aplicativoId, rotinaId, previstoEm])
-  @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(tipo <> 'TESTE_ROTINA'::text AND status <> 'CONCLUIDA'::text)"))
+  @@unique([aplicativoId, rotinaId], map: "automatizacao_rotina_bloqueada", where: raw("(tipo <> 'TESTE_ROTINA'::text AND status NOT IN ('CONCLUIDA'::text, 'FALHA_FINAL'::text))"))
   @@unique([aplicativoId, rotinaId], map: "automatizacao_teste_em_aberto", where: raw("((tipo = 'TESTE_ROTINA'::text) AND (status <> ALL (ARRAY['CONCLUIDA'::text, 'FALHA_FINAL'::text])))"))
   @@index([aplicativoId, previstoEm])
   @@index([aplicativoId, tipo, status, disponivelEm])
