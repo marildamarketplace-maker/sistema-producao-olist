@@ -77,7 +77,7 @@ export function configurarServicoBrowser(source: NodeJS.ProcessEnv = process.env
   };
 }
 
-export function promptBrowserWorker(markdown: string) {
+export function promptBrowserWorker(markdown: string, caminhoEvidencia?: string) {
   return `Execute a habilidade abaixo usando as ferramentas MCP browser disponíveis.
 Use este navegador no lugar de referências ao navegador integrado do Codex, Chrome do Mac ou cua.
 Liste as abas com browser_tabs antes de navegar. Reutilize a aba existente de cada marketplace
@@ -125,6 +125,10 @@ pela ferramenta. Use null se indisponível. Nunca inclua conversas, nomes de com
 credenciais ou base64. Não capture uma tela sensível inteira. O worker transporta o arquivo
 para a notificação; não envie WhatsApp diretamente. Esta extensão do contrato prevalece
 sobre instruções antigas que exigiam apenas resultado/concluida. Não invente caminhos.
+${caminhoEvidencia ? `Para esta execução, use exatamente ${JSON.stringify(caminhoEvidencia)} no parâmetro filename de browser_take_screenshot.
+Retorne esse mesmo caminho em evidencia somente após a ferramenta confirmar o salvamento.
+Não use o diretório temporário padrão do MCP, links Markdown ou URLs file://.
+Se a ferramenta não puder salvar nesse destino, use evidencia=null e informe a limitação.` : ""}
 HABILIDADE:
 ${markdown}`;
 }

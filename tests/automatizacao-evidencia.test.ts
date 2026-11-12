@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import axios, { type AxiosResponse } from "axios";
-import { carregarEvidenciaWorker } from "@/lib/automatizacao/evidencia-worker";
+import { carregarEvidenciaWorker, motivoEvidenciaIndisponivel } from "@/lib/automatizacao/evidencia-worker";
 import { imagemWhatsappSchema, prefixoImagemWhatsapp } from "@/lib/whatsapp-image";
 import { enviarNotificationWhatsapp } from "@/services/notification/whatsappNotificationSender";
 
@@ -22,7 +22,7 @@ test("captura local vira JPEG transportável; rejeita fuga, symlink, arquivo ant
     await symlink('/etc/passwd', join(pasta, 'escape.png'));
     await assert.rejects(carregarEvidenciaWorker(join(pasta, 'escape.png'), pasta, 0), /FORA_DA_PASTA/);
     await utimes(arquivo, new Date(0), new Date(0));
-    await assert.rejects(carregarEvidenciaWorker(arquivo, pasta, Date.now()), /INVALIDA/);
+    await assert.rejects(carregarEvidenciaWorker(arquivo, pasta, Date.now()), /ANTIGA/);
     assert.equal(imagemWhatsappSchema.safeParse({ media: bytes.toString("base64"), mimetype: "image/jpeg" }).success, false);
     assert.equal(imagemWhatsappSchema.safeParse({ media: "file:///etc/passwd", mimetype: "image/png" }).success, false);
     assert.equal(imagemWhatsappSchema.safeParse({ media: Buffer.alloc(5 * 1024 * 1024 + 1).toString("base64"), mimetype: "image/png" }).success, false);
@@ -50,3 +50,10 @@ test("envelope envia imagem à Z-API; inválido não é enviado como texto nem e
   await assert.rejects(enviarNotificationWhatsapp({ ...notification, mensagem: prefixoImagemWhatsapp + '{"media":"SEGREDO"}' }), /Imagem WhatsApp inválida/);
   assert.equal(calls.length, 1);
 });
+
+ test("motivos de indisponibilidade não expõem caminhos ou dados do erro", () => {
+   assert.match(motivoEvidenciaIndisponivel(Object.assign(new Error("/privado/segredo"), { code: "ENOENT" })), /não encontrado/);
+   assert.match(motivoEvidenciaIndisponivel(Object.assign(new Error("segredo"), { code: "EACCES" })), /permissão/);
+   assert.match(motivoEvidenciaIndisponivel(new Error("EVIDENCIA_FORA_DA_PASTA")), /fora da pasta/);
+   assert.doesNotMatch(motivoEvidenciaIndisponivel(new Error("segredo")), /segredo/);
+ });

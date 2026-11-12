@@ -1,4 +1,4 @@
-import { carregarEvidenciaWorker } from "@/lib/automatizacao/evidencia-worker";
+import { carregarEvidenciaWorker, motivoEvidenciaIndisponivel } from "@/lib/automatizacao/evidencia-worker";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,6 +56,9 @@ async function main() {
       const fim = new AbortController();
       const cwd = await mkdtemp(join(tmpdir(), "erp-automatizacao-"));
       const iniciado = Date.now();
+      const raizEvidencias = process.env.AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR ||
+        (process.env.AUTOMATIZACAO_BROWSER_PROFILE ? join(dirname(process.env.AUTOMATIZACAO_BROWSER_PROFILE), "artefatos") : undefined);
+      const caminhoEvidencia = raizEvidencias ? join(raizEvidencias, `${reserva}.png`) : undefined;
       let ultimoLog = iniciado;
       let etapa: "INICIANDO_CODEX" | "EXECUTANDO" | "REGISTRANDO_RESULTADO" = "INICIANDO_CODEX";
       console.info(eventoWorker(etapa, rotinaNome, iniciado));
@@ -102,17 +105,16 @@ async function main() {
               .flatMap((feature) => ["-c", `features.${feature}=false`]),
             "-",
           ],
-          stdin: browser ? promptBrowserWorker(markdown) : markdown,
+          stdin: browser ? promptBrowserWorker(markdown, caminhoEvidencia) : markdown,
         });
         const resposta = JSON.parse(await readFile(saidaPath, "utf8"));
         if (browser) {
           const validada = respostaBrowserSchema.parse(resposta);
           resultado = validada.resultado;
-          const raiz = process.env.AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR ||
-            (process.env.AUTOMATIZACAO_BROWSER_PROFILE ? join(dirname(process.env.AUTOMATIZACAO_BROWSER_PROFILE), "artefatos") : undefined);
+          const raiz = raizEvidencias;
           if (validada.evidencia && raiz) {
             try { evidencia = await carregarEvidenciaWorker(validada.evidencia, raiz, iniciado); }
-            catch { resultado = `${resultado.slice(0, 7850)}\nPrint de evidência indisponível: arquivo inválido ou inacessível.`; }
+            catch (error) { resultado = `${resultado.slice(0, 7750)}\nPrint de evidência indisponível: ${motivoEvidenciaIndisponivel(error)}.`; }
           } else {
             resultado = `${resultado.slice(0, 7850)}\nPrint de evidência indisponível: ${raiz ? "captura segura não fornecida" : "pasta de artefatos não configurada"}.`;
           }

@@ -3,6 +3,18 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import sharp from "sharp";
 import { imagemWhatsappSchema } from "@/lib/whatsapp-image";
 
+export function motivoEvidenciaIndisponivel(error: unknown) {
+  const codigo = error instanceof Error ? error.message : "";
+  const sistema = (error as NodeJS.ErrnoException | null)?.code;
+  if (sistema === "ENOENT") return "arquivo ou pasta de evidências não encontrado";
+  if (sistema === "EACCES" || sistema === "EPERM") return "worker sem permissão de leitura da captura";
+  if (codigo === "EVIDENCIA_FORA_DA_PASTA") return "captura fora da pasta de evidências configurada";
+  if (codigo === "EVIDENCIA_ANTIGA") return "captura anterior ao início desta execução";
+  if (codigo === "EVIDENCIA_TAMANHO") return "captura acima de 5 MiB";
+  if (codigo === "EVIDENCIA_ACIMA_DO_LIMITE_DE_TRANSPORTE") return "imagem acima do limite de transporte após conversão";
+  return "arquivo não é uma imagem JPEG/PNG válida ou não pôde ser convertido";
+}
+
 // Somente artefatos locais do MCP; nunca URLs ou arquivos arbitrários do agente.
 export async function carregarEvidenciaWorker(caminho: string, raiz: string, iniciadaEm: number) {
   const base = await realpath(raiz);
@@ -12,7 +24,9 @@ export async function carregarEvidenciaWorker(caminho: string, raiz: string, ini
   const handle = await open(arquivo, "r");
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > 5 * 1024 * 1024 || stat.mtimeMs < iniciadaEm) throw new Error("EVIDENCIA_INVALIDA");
+    if (!stat.isFile()) throw new Error("EVIDENCIA_INVALIDA");
+    if (stat.size > 5 * 1024 * 1024) throw new Error("EVIDENCIA_TAMANHO");
+    if (stat.mtimeMs < iniciadaEm) throw new Error("EVIDENCIA_ANTIGA");
     const bytes = await handle.readFile();
     const mimetype = bytes[0] === 137 ? "image/png" : "image/jpeg";
     imagemWhatsappSchema.parse({ media: bytes.toString("base64"), mimetype });

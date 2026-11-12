@@ -98,3 +98,11 @@ test("bloqueio é explícito e incompatível com conclusão", () => {
   assert.equal(respostaBrowserSchema.parse({ concluida: false, resultado: "erro técnico" }).bloqueada, false);
   assert.match(promptBrowserWorker("habilidade"), /bloqueada=true e concluida=false/);
 });
+
+ test("evidência usa destino explícito por execução sem alterar o escopo da habilidade", () => {
+   const prompt = promptBrowserWorker("# Escopo", "/privado/artefatos/tentativa.png");
+   assert.match(prompt, /filename de browser_take_screenshot/);
+   assert.ok(prompt.includes(JSON.stringify("/privado/artefatos/tentativa.png")));
+   assert.ok(prompt.endsWith("# Escopo"));
+   assert.match(prompt, /evidencia=null/);
+ });
