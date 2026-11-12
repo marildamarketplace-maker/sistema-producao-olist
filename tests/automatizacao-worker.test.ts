@@ -79,17 +79,27 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   const terceira = await reservar();
   assert.deepEqual(await (await finalizar(terceira.reserva, "SUCESSO")).json(), { status: "CONCLUIDA" });
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
-  assert.match(notificacoes[0], /Não foi possível concluir/);
-  assert.match(notificacoes[0], /Rotina: Piloto/);
-  assert.match(notificacoes[0], /Execução: 10\/11\/2026, 22:15 \(Brasília\)/);
-  assert.match(notificacoes[0], /Status: ❌ Falha final/);
-  assert.match(notificacoes[1], /Concluída\./);
+  assert.match(notificacoes[0], /Resultado: resultado/);
+  assert.match(notificacoes[0], /Execução: 10\/11\/2026, 22:15/);
+  assert.match(notificacoes[1], /Resultado: resultado/);
   assert.ok(notificacoes.every((mensagem) => !mensagem.includes(execucao.id)));
+
+  Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 3 });
+  const bloqueada = await reservar();
+  const parcial = "Shopee: análise parcial; CAPTCHA. TikTok: fila vazia.";
+  assert.deepEqual(await (await finalizar(bloqueada.reserva, "BLOQUEADA", parcial)).json(), { status: "BLOQUEADA" });
+  assert.equal(execucao.status, "BLOQUEADA");
+  assert.equal(execucao.reserva, null);
+  assert.equal(tentativas.get(bloqueada.reserva)?.resultado, parcial);
+  assert.equal(avisos.at(-1), bloqueada.reserva);
+  assert.ok(notificacoes.at(-1)?.endsWith(parcial));
+  assert.deepEqual(await (await finalizar(bloqueada.reserva, "BLOQUEADA", parcial)).json(), { status: "BLOQUEADA" });
+  assert.equal(notificacoes.length, 3);
 
   Object.assign(execucao, { tipo: "TESTE_ROTINA", status: "PENDENTE", tentativa: 0 });
   const teste = await reservar();
   assert.match(teste.markdown, /TESTE_ROTINA_OK/);
   assert.doesNotMatch(teste.markdown, /Entrada imutável/);
   assert.deepEqual(await (await finalizar(teste.reserva, "SUCESSO", "TESTE_ROTINA_OK")).json(), { status: "CONCLUIDA" });
-  assert.equal(notificacoes.length, 2);
+  assert.equal(notificacoes.length, 3);
 });

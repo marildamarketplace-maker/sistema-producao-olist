@@ -64,6 +64,10 @@ test("migration isola o aplicativo e bloqueia próxima ocorrência até sucesso"
   await inserir("2026-11-09T11:00:00Z");
   await db.exec("UPDATE automatizacao_execucao SET status = 'FALHA_FINAL'");
   await assert.rejects(inserir("2026-11-10T11:00:00Z"), { code: "23505" });
+  await db.exec("UPDATE automatizacao_execucao SET status = 'BLOQUEADA'");
+  await assert.rejects(inserir("2026-11-10T11:00:00Z"), { code: "23505" });
+  const reservaveis = await db.query("SELECT id FROM automatizacao_execucao WHERE status IN ('PENDENTE', 'AGUARDANDO_RETRY', 'EM_EXECUCAO')");
+  assert.equal(reservaveis.rows.length, 0);
   await db.exec("UPDATE automatizacao_execucao SET status = 'CONCLUIDA'");
   await assert.rejects(inserir("2026-11-09T11:00:00Z"), { code: "23505" });
   await inserir("2026-11-10T11:00:00Z");

@@ -17,7 +17,7 @@ export function dataHistorico(valor: string) {
 }
 
 export const statusLabel: Record<string, string> = {
-  PENDENTE: "Pendente", EM_EXECUCAO: "Em execução", AGUARDANDO_RETRY: "Aguardando retentativa",
+  BLOQUEADA: "Intervenção necessária", PENDENTE: "Pendente", EM_EXECUCAO: "Em execução", AGUARDANDO_RETRY: "Aguardando retentativa",
   CONCLUIDA: "Concluída", FALHA_FINAL: "Falha final", RESERVA_EXPIRADA: "Reserva expirada",
   INDISPONIVEL: "Executor indisponível", SOBREPOSICAO: "Execução anterior em aberto",
   FALHA_ANTERIOR: "Falha anterior bloqueia a rotina", SUPERADO: "Horário mais recente priorizado",
@@ -32,7 +32,7 @@ export function SituacaoHistorico({ status }: { status: string }) {
     ? "bg-emerald-50 text-emerald-700 dark:text-emerald-300"
     : ["FALHA_FINAL", "ERRO", "RESERVA_EXPIRADA"].includes(status)
       ? "bg-red-50 text-red-700"
-      : ["PENDENTE", "AGUARDANDO_RETRY", "EM_EXECUCAO"].includes(status)
+      : ["PENDENTE", "AGUARDANDO_RETRY", "EM_EXECUCAO", "BLOQUEADA"].includes(status)
         ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-700";
   return <span className={`inline-flex max-w-full items-center rounded-md px-2 py-1 text-xs font-medium ${cor}`}>
     {statusLabel[status] ?? statusWhatsApp[status] ?? status}
@@ -57,8 +57,8 @@ export function HistoricoExecucao({ item, podeIntervir, ocupado, onRetentar }: {
         <div><dt className="text-xs text-slate-500">Habilidade</dt><dd className="mt-1">Versão {item.versao.numero}</dd></div>
         <div><dt className="text-xs text-slate-500">Tentativas</dt><dd className="mt-1">{item.tentativas.length || "Ainda não iniciada"}</dd></div>
       </dl>
-      {podeIntervir && item.tipo !== "TESTE_ROTINA" && item.status === "FALHA_FINAL" &&
-        <button className={secundario} disabled={ocupado} onClick={() => onRetentar(item.id)}>Retentar execução</button>}
+      {podeIntervir && item.tipo !== "TESTE_ROTINA" && ["FALHA_FINAL", "BLOQUEADA"].includes(item.status) &&
+        <button className={secundario} disabled={ocupado} onClick={() => onRetentar(item.id)}>{item.status === "BLOQUEADA" ? "Retomar após intervenção" : "Retentar execução"}</button>}
     </div>
     {item.tentativas.length > 0 && <details className="group border-t border-slate-200">
       <summary className="min-h-11 cursor-pointer px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-offset-[-2px]">Ver tentativas, resultados e WhatsApp ({item.tentativas.length})</summary>

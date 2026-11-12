@@ -82,8 +82,8 @@ async function main() {
       try {
         const schemaPath = join(cwd, "resposta.json");
         await writeFile(schemaPath, JSON.stringify({ type: "object", properties: {
-          resultado: { type: "string" }, ...(browser ? { concluida: { type: "boolean" } } : {}),
-        }, required: browser ? ["resultado", "concluida"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
+          resultado: { type: "string" }, ...(browser ? { concluida: { type: "boolean" }, bloqueada: { type: "boolean" } } : {}),
+        }, required: browser ? ["resultado", "concluida", "bloqueada"] : ["resultado"], additionalProperties: false }), { mode: 0o600 });
         const saidaPath = join(cwd, "resultado.json");
         etapa = "EXECUTANDO";
         console.info(eventoWorker(etapa, rotinaNome, iniciado));
@@ -106,7 +106,7 @@ async function main() {
         if (browser) {
           const validada = respostaBrowserSchema.parse(resposta);
           resultado = validada.resultado;
-          if (!validada.concluida) desfecho = "FALHA";
+          if (!validada.concluida) desfecho = validada.bloqueada ? "BLOQUEADA" : "FALHA";
         } else resultado = respostaSchema.parse(resposta).resultado;
       } catch (error) {
         const codigo = error instanceof ImageAnalysisProviderError ? error.code : "SAIDA_INVALIDA";

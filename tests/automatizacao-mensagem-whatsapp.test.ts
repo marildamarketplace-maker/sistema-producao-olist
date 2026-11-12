@@ -62,3 +62,12 @@ test("remove identificadores e controles sem eliminar quebras de linha úteis", 
   assert.match(mensagem, /Canal: concluído\n\[identificador omitido\]/);
   assert.doesNotMatch(mensagem, /00000000|[\u0000\u202e\r]/);
 });
+
+
+test("bloqueio externo usa aviso sem sinalizar erro ou sucesso", () => {
+  const resultado = "Shopee: análise parcial; CAPTCHA. TikTok Shop: sem pendências.";
+  const aviso = mensagemWhatsappAutomatizacao("Avaliar Chats | Shopee e TikTok Shop", false, resultado, new Date("2026-11-12T12:01:00Z"), true);
+  assert.equal(aviso.titulo, "⚠️ Avaliar Chats | Shopee e TikTok Shop | Intervenção necessária");
+  assert.doesNotMatch(aviso.titulo, /❌|✅/);
+  assert.equal(aviso.mensagem, `Execução: 12/11/2026, 09:01\nResultado: ${resultado}`);
+});

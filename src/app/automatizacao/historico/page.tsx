@@ -107,7 +107,7 @@ function HistoricoConteudo({ rotinaId, habilidadeId, mudarEscopo }: {
           <option value="">Todas</option>{rotinas.map((rotina) => <option key={rotina.id} value={rotina.id}>{rotina.nome}</option>)}
         </select></label>
         <label className="text-sm">Situação<select className="input mt-1 min-h-11 w-full" value={status} onChange={(e) => { setStatus(e.target.value); setPagina(0); }}>
-          <option value="">Todas</option>{["PENDENTE", "EM_EXECUCAO", "AGUARDANDO_RETRY", "CONCLUIDA", "FALHA_FINAL"].map((value) => <option key={value} value={value}>{statusLabel[value]}</option>)}
+          <option value="">Todas</option>{["PENDENTE", "EM_EXECUCAO", "AGUARDANDO_RETRY", "CONCLUIDA", "FALHA_FINAL", "BLOQUEADA"].map((value) => <option key={value} value={value}>{statusLabel[value]}</option>)}
         </select></label>
         <label className="min-w-0 text-sm">Desde<input type="date" className="input mt-1 min-h-11 w-full" value={desde} onChange={(e) => { setDesde(e.target.value); setPagina(0); }} /></label>
         <label className="text-sm">WhatsApp<select className="input mt-1 min-h-11 w-full" value={whatsapp} onChange={(e) => { setWhatsapp(e.target.value); setPagina(0); }}>

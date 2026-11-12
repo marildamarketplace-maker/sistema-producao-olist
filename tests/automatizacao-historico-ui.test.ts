@@ -50,3 +50,15 @@ test("tentativas mantêm ordem da API e exibem ausência de encerramento e aviso
   assert.ok(html.includes("Não registrado"));
   assert.ok(html.includes("Não aplicável"));
 });
+
+
+test("bloqueio tem aviso e retomada respeita permissão e operação em andamento", () => {
+  const bloqueada = { ...item, status: "BLOQUEADA", tentativas: [{ ...item.tentativas[0], status: "BLOQUEADA" }] };
+  const html = renderizar(true, false, bloqueada);
+  assert.match(html, /Intervenção necessária/);
+  assert.match(html, /bg-amber-50/);
+  assert.match(html, /Retomar após intervenção/);
+  assert.doesNotMatch(html, /Falha final/);
+  assert.doesNotMatch(renderizar(false, false, bloqueada), /Retomar após intervenção/);
+  assert.match(renderizar(true, true, bloqueada), /disabled="">Retomar após intervenção/);
+});

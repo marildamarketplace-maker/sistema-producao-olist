@@ -69,6 +69,9 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
   assert.deepEqual(atualizacoes.at(-1)?.rodada, { increment: 1 });
   assert.equal(atualizacoes.at(-1)?.tentativa, 0);
   assert.equal(existente.status, "PENDENTE");
+  existente.status = "BLOQUEADA";
+  assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "REENFILEIRADA" });
+  assert.equal(existente.status, "PENDENTE");
   existente.status = "AGUARDANDO_RETRY";
   assert.deepEqual(await (await executar()).json(), { id: resposta.id, situacao: "NA_FILA" });
   existente.status = "EM_EXECUCAO";

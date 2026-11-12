@@ -158,9 +158,9 @@ async function alterar(request: Request, contexto: Contexto) {
           where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { not: "CONCLUIDA" } },
           select: { id: true, status: true },
         });
-        if (existente?.status === "FALHA_FINAL") {
+        if (existente && ["FALHA_FINAL", "BLOQUEADA"].includes(existente.status)) {
           await tx.execucaoAutomatizacao.updateMany({
-            where: { id: existente.id, aplicativoId, status: "FALHA_FINAL" },
+            where: { id: existente.id, aplicativoId, status: { in: ["FALHA_FINAL", "BLOQUEADA"] } },
             data: { status: "PENDENTE", disponivelEm: new Date(), tentativa: 0, rodada: { increment: 1 } },
           });
           return { id: existente.id, situacao: "REENFILEIRADA" };
@@ -250,7 +250,7 @@ async function alterar(request: Request, contexto: Contexto) {
         return Response.json({ ok: true });
       }
       const atualizada = await prisma.execucaoAutomatizacao.updateMany({
-        where: { id, aplicativoId, tipo: { not: "TESTE_ROTINA" }, status: "FALHA_FINAL" },
+        where: { id, aplicativoId, tipo: { not: "TESTE_ROTINA" }, status: { in: ["FALHA_FINAL", "BLOQUEADA"] } },
         data: { status: "PENDENTE", disponivelEm: new Date(), tentativa: 0, rodada: { increment: 1 } },
       });
       if (!atualizada.count) throw new ErroHttp(409, "A execução não está disponível para retentativa.");

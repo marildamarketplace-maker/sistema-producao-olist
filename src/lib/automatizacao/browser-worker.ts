@@ -51,8 +51,8 @@ export function configurarBrowserWorker(source: NodeJS.ProcessEnv = process.env)
 }
 
 export const respostaBrowserSchema = z.object({
-  concluida: z.boolean(), resultado: z.string().trim().min(1).max(8_000).refine((v) => !v.includes("\0")),
-});
+  concluida: z.boolean(), bloqueada: z.boolean().default(false), resultado: z.string().trim().min(1).max(8_000).refine((v) => !v.includes("\0")),
+}).refine((v) => !(v.concluida && v.bloqueada), { message: "Execução bloqueada não pode estar concluída." });
 
 export function configurarServicoBrowser(source: NodeJS.ProcessEnv = process.env) {
   const config = configurarBrowserWorker({ ...source, AUTOMATIZACAO_BROWSER_ENABLED: "true",
@@ -101,6 +101,12 @@ Não alegue sucesso sem verificar o resultado salvo na interface. Se faltar logi
 arquivo, ferramenta ou autorização, pare e retorne concluida=false com a pendência.
 Não tente contornar CAPTCHA. Não repita submissões cujo resultado ficou incerto.
 Não inclua senhas, cookies, tokens nem dados pessoais de clientes no resultado.
+O contrato de saída do executor exige resultado, concluida e bloqueada, inclusive quando a
+habilidade mencionar apenas resultado e concluida. Esta regra de contrato prevalece.
+Retorne bloqueada=true e concluida=false quando login, MFA, CAPTCHA, conta divergente ou outra
+intervenção humana impedir a conclusão. Bloqueio externo não é erro técnico. Relate o progresso
+por canal e o passo necessário para retomar. Para erro técnico, use bloqueada=false e concluida=false.
+Se concluir, use bloqueada=false.
 Retorne concluida=true apenas se a tarefa foi concluída e verificada, ou se verificou que não há pendências.
 Respeite os critérios de conclusão da habilidade para operações limitadas às vagas disponíveis.
 No impulsionamento gratuito da Shopee, vagas esgotadas confirmadas na interface são um

@@ -34,13 +34,13 @@ function resultadoLegivel(resultado: string, sucesso: boolean) {
   return caracteres.length > 3_000 ? `${caracteres.slice(0, 2_999).join("")}…` : limpo || "Resultado não informado.";
 }
 
-export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, resultado: string, data = new Date()) {
+export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, resultado: string, data = new Date(), bloqueada = false) {
   const horario = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
   }).format(data);
   const nomeRotina = nomeLegivel(nome);
   return {
-    titulo: `${sucesso ? "✅" : "❌"} ${nomeRotina}`,
+    titulo: `${bloqueada && !sucesso ? "⚠️" : sucesso ? "✅" : "❌"} ${nomeRotina}${bloqueada && !sucesso ? " | Intervenção necessária" : ""}`,
     mensagem: `Execução: ${horario}\nResultado: ${resultadoLegivel(resultado, sucesso)}`,
   };
 }

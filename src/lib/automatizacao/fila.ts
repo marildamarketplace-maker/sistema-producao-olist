@@ -11,7 +11,7 @@ export const operacaoWorker = z.discriminatedUnion("acao", [
   z.object({ acao: z.literal("renovar"), reserva: z.uuid() }),
   z.object({
     acao: z.literal("finalizar"), reserva: z.uuid(),
-    desfecho: z.enum(["SUCESSO", "FALHA", "TEMPORARIA", "INDISPONIVEL"]),
+    desfecho: z.enum(["SUCESSO", "FALHA", "TEMPORARIA", "INDISPONIVEL", "BLOQUEADA"]),
     resultado: z.string().max(8_000).refine((texto) => !texto.includes("\0")),
   }),
 ]);
@@ -50,7 +50,7 @@ async function fechar(tx: Transacao, execucao: Execucao, reserva: string, status
     const notification = await tx.notification.create({
       data: prepararDadosNotification({
         to: numero,
-        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm),
+        ...mensagemWhatsappAutomatizacao(rotina.nome, status === "CONCLUIDA", resultado, tentativa.iniciadaEm, status === "BLOQUEADA"),
       }),
     });
     await tx.avisoAutomatizacao.create({
@@ -121,6 +121,7 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
     const sucesso = operacao.desfecho === "SUCESSO" &&
       (execucao.tipo !== "TESTE_ROTINA" || operacao.resultado === "TESTE_ROTINA_OK");
     const status = sucesso ? "CONCLUIDA"
+      : operacao.desfecho === "BLOQUEADA" && execucao.tipo !== "TESTE_ROTINA" ? "BLOQUEADA"
       : operacao.desfecho === "INDISPONIVEL" ? "INDISPONIVEL"
       : operacao.desfecho === "TEMPORARIA" && execucao.tentativa < limiteTentativas ? "AGUARDANDO_RETRY"
       : "FALHA_FINAL";

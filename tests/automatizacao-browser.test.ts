@@ -90,3 +90,11 @@ test("serviço mantém contexto aberto sem encaminhar secrets do worker", () => 
   assert.doesNotMatch(config.browserArgs.join(" "), /--headless|--no-sandbox/);
   assert.equal(config.env.DISPLAY, ":0");
 });
+
+
+test("bloqueio é explícito e incompatível com conclusão", () => {
+  assert.equal(respostaBrowserSchema.parse({ concluida: false, bloqueada: true, resultado: "CAPTCHA na Shopee; TikTok concluído." }).bloqueada, true);
+  assert.equal(respostaBrowserSchema.safeParse({ concluida: true, bloqueada: true, resultado: "contraditório" }).success, false);
+  assert.equal(respostaBrowserSchema.parse({ concluida: false, resultado: "erro técnico" }).bloqueada, false);
+  assert.match(promptBrowserWorker("habilidade"), /bloqueada=true e concluida=false/);
+});

@@ -20,4 +20,4 @@ export const rotinaSchema = z.object({
   ativa: z.boolean().default(false),
 });
 
-export const statusExecucao = ["PENDENTE", "EM_EXECUCAO", "AGUARDANDO_RETRY", "CONCLUIDA", "FALHA_FINAL"] as const;
+export const statusExecucao = ["PENDENTE", "EM_EXECUCAO", "AGUARDANDO_RETRY", "CONCLUIDA", "FALHA_FINAL", "BLOQUEADA"] as const;
