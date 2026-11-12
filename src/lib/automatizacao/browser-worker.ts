@@ -121,8 +121,12 @@ Relate sucessos e pendências por canal. Não inclua links Markdown para screens
 pois eles não são anexos publicados no ERP. Uma tarefa com pendências obrigatórias deve retornar concluida=false.
 
 RESUMO PARA WHATSAPP: retorne também resumoWhatsapp com até 360 caracteres e no máximo
-3 linhas curtas. Uma linha por canal com quantidade/resultado; se houver pendência, inclua a
-próxima ação concreta. Exemplo: "Shopee: 3 respostas; fila vazia.\nTikTok: login necessário.\nAção: autenticar o TikTok."
+3 linhas curtas, uma por marketplace do escopo. Comece cada linha com o emoji do resultado
+DAQUELE canal: ✅ sucesso ou ausência de pendências comprovada; ⚠️ parcial, bloqueio,
+pendência ou processamento/revisão; ❌ falha técnica. Sempre inclua nome do canal e motivo
+factual curto. Não use emoji de resultado global, cabeçalho, título repetido ou linha "Ação".
+Exemplo de formato: "⚠️ Shopee: CAPTCHA após 2 tentativas.\n✅ TikTok: sem pendências.\n⚠️ Nuvemshop: login indisponível."
+Informe somente tentativas efetivas; não peça intervenção humana nem espere resposta.
 Preserve o relatório completo em resultado. Não repita título, data, fuso, confirmação da loja,
 nomes de filtros, URLs, passos executados, abas preservadas ou detalhes técnicos do print no resumo.
 Não invente quantidades nem omita canal bloqueado, resultado incerto ou ação humana necessária.

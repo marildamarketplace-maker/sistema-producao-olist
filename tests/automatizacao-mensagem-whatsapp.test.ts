@@ -6,7 +6,7 @@ import { mensagemWhatsappAutomatizacao } from "@/lib/automatizacao/mensagem-what
 
 test("mensagem usa título com rotina e corpo enxuto com execução em Brasília e resultado", () => {
   const mensagem = mensagemWhatsappAutomatizacao("responder-avaliacoes-marketplaces", true, "Shopee: 3 respostas confirmadas; fila vazia. TikTok Shop: 0; fila vazia.", new Date("2026-11-11T01:15:00Z"));
-  assert.equal(mensagem.titulo, "✅ responder-avaliacoes-marketplaces");
+  assert.equal(mensagem.titulo, "responder-avaliacoes-marketplaces");
   assert.equal(mensagem.mensagem, "10/11 · 22:15\nShopee: 3 respostas confirmadas; fila vazia. TikTok Shop: 0; fila vazia.");
 });
 
@@ -15,7 +15,7 @@ test("falha inclui resultado com credenciais e e-mail omitidos", () => {
     "A ferramenta exige aprovação. token=privado cliente@example.com");
   assert.match(mensagem.mensagem, /A ferramenta exige aprovação/);
   assert.doesNotMatch(mensagem.mensagem, /privado|cliente@example.com/);
-  assert.match(mensagem.titulo, /❌ minha-rotina/);
+  assert.match(mensagem.titulo, /^minha-rotina$/);
 });
 
 test("códigos técnicos e UUIDs não são enviados", () => {
@@ -36,7 +36,7 @@ test("nome da rotina é sanitizado e limitado sem interpretar marcação", () =>
   const mensagem = mensagemWhatsappAutomatizacao("*Rotina*\n_Exemplo_ " + "x".repeat(200), true, "");
   assert.ok(mensagem.titulo.length <= 123);
   assert.doesNotMatch(mensagem.titulo, /[\r\n*_]/);
-  assert.ok(mensagem.titulo.startsWith("✅ Rotina Exemplo "));
+  assert.ok(mensagem.titulo.startsWith("Rotina Exemplo "));
   assert.doesNotMatch(mensagem.mensagem, /Rotina:|Status:|Motivo:/);
 });
 
@@ -66,7 +66,7 @@ test("remove identificadores e controles sem eliminar quebras de linha úteis", 
 test("bloqueio externo usa aviso sem sinalizar erro ou sucesso", () => {
   const resultado = "Shopee: análise parcial; CAPTCHA. TikTok Shop: sem pendências.";
   const aviso = mensagemWhatsappAutomatizacao("Avaliar Chats | Shopee e TikTok Shop", false, resultado, new Date("2026-11-12T12:01:00Z"), true);
-  assert.equal(aviso.titulo, "⚠️ Avaliar Chats");
+  assert.equal(aviso.titulo, "Avaliar Chats");
   assert.doesNotMatch(aviso.titulo, /❌|✅/);
   assert.equal(aviso.mensagem, `12/11 · 09:01\n${resultado}`);
 });
@@ -75,7 +75,7 @@ test("usa resumo próprio, sem levar o relatório completo ou links ao WhatsApp"
   const detalhado = "Filtros, identidade da loja e detalhes de verificação. ".repeat(80);
   const resumo = "Shopee: sem pendências.\nTikTok: CAPTCHA.\nAção: concluir verificação no TikTok.";
   const aviso = mensagemWhatsappAutomatizacao("Avaliar Chats | Shopee e TikTok Shop", false, detalhado, new Date("2026-11-12T12:15:00Z"), true, resumo);
-  assert.equal(aviso.titulo, "⚠️ Avaliar Chats");
+  assert.equal(aviso.titulo, "Avaliar Chats");
   assert.equal(aviso.mensagem, `12/11 · 09:15\n${resumo}`);
   assert.ok(Array.from(`${aviso.titulo}\n${aviso.mensagem}`).length < 450);
   assert.doesNotMatch(aviso.mensagem, /Filtros|identidade/);
@@ -85,8 +85,17 @@ test("usa resumo próprio, sem levar o relatório completo ou links ao WhatsApp"
 
 test("relatório antigo longo não esconde bloqueio atrás de truncamento", () => {
   const aviso = mensagemWhatsappAutomatizacao("Ofertas | Shopee e TikTok", false, "Shopee: oferta preservada. ".repeat(60) + "TikTok: CAPTCHA.", new Date(), true);
-  assert.match(aviso.mensagem, /Intervenção necessária/);
+  assert.doesNotMatch(aviso.mensagem, /Intervenção necessária/);
   assert.match(aviso.mensagem, /Verificação de segurança pendente/);
   assert.match(aviso.mensagem, /histórico do ERP/);
   assert.ok(Array.from(aviso.mensagem).length < 360);
+});
+
+
+test("remove cabeçalhos duplicados e preserva os emojis de cada marketplace", () => {
+  const resumo = "⚠️ Avaliar Chats\nAvaliar Chats\n⚠️ Shopee: CAPTCHA.\n✅ TikTok: sem pendências.\n❌ Nuvemshop: erro técnico.";
+  const aviso = mensagemWhatsappAutomatizacao("Avaliar Chats | Shopee, TikTok Shop e Nuvemshop", false, resumo);
+  assert.equal(aviso.titulo, "Avaliar Chats");
+  assert.doesNotMatch(aviso.mensagem, /Avaliar Chats/);
+  assert.match(aviso.mensagem, /⚠️ Shopee: CAPTCHA.\n✅ TikTok: sem pendências.\n❌ Nuvemshop: erro técnico./);
 });

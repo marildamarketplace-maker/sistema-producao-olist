@@ -39,16 +39,19 @@ export function mensagemWhatsappAutomatizacao(nome: string, sucesso: boolean, re
     timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
   }).format(data).replace(", ", " · ");
   // O relatório completo permanece na tentativa; o aviso possui orçamento próprio.
+  const titulo = nomeLegivel(nome);
+  const normalizarTitulo = (texto: string) => texto.replace(/^[✅⚠️❌🚫📩⏳⏭️\s*_~`]+/u, "").replace(/[*_~`]/g, "").trim();
   const compacto = resultadoLegivel(resumoWhatsapp?.trim() || resultado, sucesso)
     .replace(/https?:\/\/[^\s]+/gi, "")
-    .split("\n").map((linha) => linha.replace(/\s+/g, " ").trim()).filter(Boolean);
+    .split("\n").map((linha) => linha.replace(/\s+/g, " ").trim()).filter(Boolean)
+    .filter((linha) => ![titulo, nome.trim()].includes(normalizarTitulo(linha)));
   let resumo = compacto.join("\n");
   if (Array.from(resumo).length > 360 || compacto.length > 3) {
     resumo = sucesso ? "Tarefa concluída. Detalhes no histórico do ERP."
-      : `${bloqueada ? "Intervenção necessária. " : ""}${motivoFalha(resultado)} Veja o histórico do ERP.`;
+      : `${motivoFalha(resultado)} Veja o histórico do ERP.`;
   }
   return {
-    titulo: `${bloqueada && !sucesso ? "⚠️" : sucesso ? "✅" : "❌"} ${nomeLegivel(nome)}`,
+    titulo,
     mensagem: `${horario}\n${resumo || "Consulte o histórico do ERP."}`,
   };
 }
