@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, writeFile, rm, symlink, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import sharp from "sharp";
 import axios, { type AxiosResponse } from "axios";
 import { carregarEvidenciaWorker, motivoEvidenciaIndisponivel } from "@/lib/automatizacao/evidencia-worker";
@@ -21,6 +21,8 @@ test("captura local vira JPEG transportável; rejeita fuga, symlink, arquivo ant
     assert.deepEqual(relativa, evidencia);
     const relativaPonto = await carregarEvidenciaWorker("./print.png", pasta, Date.now() - 5000);
     assert.deepEqual(relativaPonto, evidencia);
+    const relativaWorkspace = await carregarEvidenciaWorker(`${basename(pasta)}/print.png`, pasta, Date.now() - 5000);
+    assert.deepEqual(relativaWorkspace, evidencia);
     assert.equal((await sharp(Buffer.from(evidencia.media, "base64")).metadata()).width, 20);
     await assert.rejects(carregarEvidenciaWorker(arquivo, join(pasta, "outra"), 0));
     await symlink('/etc/passwd', join(pasta, 'escape.png'));

@@ -99,13 +99,13 @@ test("bloqueio é explícito e incompatível com conclusão", () => {
   assert.match(promptBrowserWorker("habilidade"), /bloqueada=true e concluida=false/);
 });
 
- test("evidência usa destino explícito por execução sem alterar o escopo da habilidade", () => {
+ test("captura usa output-dir sem filename explícito e preserva o escopo", () => {
    const prompt = promptBrowserWorker("# Escopo", "/privado/artefatos/tentativa.png");
-   assert.match(prompt, /filename de browser_take_screenshot/);
-   assert.ok(prompt.includes(JSON.stringify("/privado/artefatos/tentativa.png")));
+   assert.match(prompt, /browser_take_screenshot SEM o parâmetro filename/);
+   assert.match(prompt, /output-dir configurado/);
    assert.ok(prompt.endsWith("# Escopo"));
    assert.match(prompt, /evidencia=null/);
-   assert.match(prompt, /um caminho relativo é válido/);
-   assert.match(prompt, /Não retorne null só por o caminho ser relativo/);
-   assert.ok(prompt.includes('"tentativa.png" no parâmetro filename'));
+   assert.match(prompt, /absoluto ou relativo/);
+   assert.match(prompt, /nunca apenas por o caminho ser relativo/);
+   assert.match(prompt, /Não forneça nome explícito relativo/);
  });

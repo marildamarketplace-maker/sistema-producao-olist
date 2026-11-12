@@ -1,5 +1,5 @@
 import { open, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import sharp from "sharp";
 import { imagemWhatsappSchema } from "@/lib/whatsapp-image";
 
@@ -18,9 +18,26 @@ export function motivoEvidenciaIndisponivel(error: unknown) {
 // Somente artefatos locais do MCP; nunca URLs ou arquivos arbitrários do agente.
 export async function carregarEvidenciaWorker(caminho: string, raiz: string, iniciadaEm: number) {
   const base = await realpath(raiz);
-  const arquivo = await realpath(isAbsolute(caminho) ? caminho : resolve(base, caminho));
-  const relativo = relative(base, arquivo);
-  if (!relativo || relativo === ".." || relativo.startsWith(`..${sep}`) || isAbsolute(relativo)) throw new Error("EVIDENCIA_FORA_DA_PASTA");
+  const dentroDaPasta = (arquivo: string) => {
+    const relativo = relative(base, arquivo);
+    return Boolean(relativo) && relativo !== ".." && !relativo.startsWith(`..${sep}`) && !isAbsolute(relativo);
+  };
+  // O MCP pode exibir o caminho relativo ao output-dir, ao seu cwd (pai do
+  // perfil) ou ao workspace do cliente. A raiz permitida permanece a mesma.
+  const candidatos = isAbsolute(caminho) ? [caminho]
+    : [resolve(base, caminho), resolve(dirname(base), caminho), resolve(process.cwd(), caminho)];
+  let arquivo: string | undefined;
+  let erro: unknown = new Error("EVIDENCIA_FORA_DA_PASTA");
+  for (const candidato of new Set(candidatos)) {
+    if (!isAbsolute(caminho) && !dentroDaPasta(candidato)) continue;
+    try {
+      const real = await realpath(candidato);
+      if (!dentroDaPasta(real)) throw new Error("EVIDENCIA_FORA_DA_PASTA");
+      arquivo = real;
+      break;
+    } catch (error) { erro = error; }
+  }
+  if (!arquivo) throw erro;
   const handle = await open(arquivo, "r");
   try {
     const stat = await handle.stat();
