@@ -95,8 +95,10 @@ preparar_e_iniciar() {
   fi
   [[ -f package-lock.json ]] || { printf 'package-lock.json não encontrado.\n'; return 1; }
   npm cache verify
-  # npm ci recria node_modules e executa postinstall (prisma generate).
-  npm ci --include=dev
+  # generate lê o schema local e não conecta ao banco. A configuração do projeto
+  # exige uma URL mesmo assim; use um destino local inoperante só neste comando.
+  # Não carregue nem persista credenciais de banco na VM do worker.
+  POSTGRES_DIRECT_URL='postgresql://worker:worker@127.0.0.1:1/worker_generate_only' npm ci --include=dev
   printf '\n[4/5] Validando a instalação...\n'
   node --env-file="$worker_env" --import tsx --input-type=module -e '
     import sharp from "sharp";

@@ -14,7 +14,10 @@ reabre a nova versão antes de continuar.
 
 Limpa somente `.next`, `.cache`, `.turbo` e `tsconfig.tsbuildinfo` não versionados;
 verifica o cache npm e recria `node_modules` com `npm ci --include=dev` (incluindo
-`prisma generate` do postinstall). Valida as dependências, o processamento JPEG
+`prisma generate` do postinstall). Durante essa instalação, fornece uma URL local
+inoperante em `POSTGRES_DIRECT_URL` somente ao comando npm: a geração do cliente
+usa o schema local, sem conexão ao banco. Não é preciso colocar credenciais de
+banco no `worker.env`. Valida as dependências, o processamento JPEG
 e o acesso à pasta de evidências. Qualquer erro impede iniciar o worker.
 
 Preserva configurações existentes de `AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR`; se

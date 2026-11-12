@@ -31,7 +31,7 @@ async function fixture(t: TestContext) {
   await mkdir(bin);
   const log = join(root, "commands.log"), workerEnv = join(root, "worker.env");
   await writeFile(workerEnv, "AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR=/pasta/configurada\n");
-  await writeFile(join(bin, "npm"), '#!/bin/bash\nprintf "npm %s\\n" "$*" >> "$TEST_LOG"\nif [[ "${TEST_FAIL_NPM:-}" == true ]]; then exit 1; fi\n', { mode: 0o755 });
+  await writeFile(join(bin, "npm"), '#!/bin/bash\nprintf "npm %s\\n" "$*" >> "$TEST_LOG"\nif [[ "$1" == ci && "${POSTGRES_DIRECT_URL:-}" != postgresql://worker:worker@127.0.0.1:1/worker_generate_only ]]; then exit 2; fi\nif [[ "${TEST_FAIL_NPM:-}" == true ]]; then exit 1; fi\n', { mode: 0o755 });
   await writeFile(join(bin, "node"), '#!/bin/bash\nprintf "node\\n" >> "$TEST_LOG"\n', { mode: 0o755 });
   await mkdir(join(projeto, ".next"));
   await writeFile(join(projeto, ".next", "cache"), "regeneravel");
