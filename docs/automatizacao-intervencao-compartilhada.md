@@ -51,6 +51,15 @@ Isso afeta execuções criadas com as novas versões; não modifica execuções 
 O carregamento centralizado e o contexto anterior dependem da publicação do código do ERP.
 Não exigem mudança de contrato ou atualização do worker.
 
+Posteriormente, em 14/11/2026, por solicitação do usuário que fará a publicação do ERP,
+as sete habilidades receberam novas versões sem a cópia do módulo, sem as instruções
+antigas de interagir com CAPTCHA e sem o bloco redundante de encerramento autônomo.
+Cada uma referencia o módulo compartilhado; critérios comerciais, dependências e
+verificações específicas foram preservados. As versões anteriores continuam no histórico.
+Até a publicação do carregamento centralizado, a referência textual não carrega o módulo
+sozinha. Não reaplique o instalador de compatibilidade após essa limpeza, pois ele
+voltaria a distribuir cópias nas habilidades sem marcador.
+
 ## Validação
 
 Testes cobrem composição e substituição do módulo, limite e natureza histórica do contexto,
