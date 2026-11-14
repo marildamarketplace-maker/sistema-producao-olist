@@ -92,6 +92,13 @@ test("migrations isolam aplicativo, deduplicam horário e liberam próxima ocorr
     await assert.rejects(inserir("2026-11-12T15:00:00Z"), { code: "23505" });
     await assert.rejects(db.exec(`UPDATE automatizacao_execucao SET status = 'PENDENTE' WHERE "previstoEm" = '2026-11-11T11:00:00Z'`), { code: "23505" });
   }
+  await db.exec(await readFile("prisma/migrations/20261114140000_bloqueio_automatizacao_por_ocorrencia/migration.sql", "utf8"));
+  await db.exec("UPDATE automatizacao_execucao SET status = 'BLOQUEADA' WHERE tipo = 'EXECUTAR_PROMPT'");
+  await inserir("2026-11-13T11:00:00Z");
+  await assert.rejects(inserir("2026-11-13T15:00:00Z"), { code: "23505" });
+  await assert.rejects(db.exec(`UPDATE automatizacao_execucao SET status = 'PENDENTE' WHERE "previstoEm" = '2026-11-12T11:00:00Z'`), { code: "23505" });
+  await db.exec("UPDATE automatizacao_execucao SET status = 'FALHA_FINAL' WHERE tipo = 'EXECUTAR_PROMPT'");
+  await inserir("2026-11-14T11:00:00Z");
   await db.exec("SET ROLE authenticated");
   await assert.rejects(db.query("SELECT * FROM automatizacao_execucao"), { code: "42501" });
 });

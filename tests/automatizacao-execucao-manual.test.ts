@@ -28,7 +28,7 @@ test("disparo manual executa habilidade real com bloqueio e autorização", asyn
       },
       findFirst: async ({ where }: { where: unknown }) => {
         const filtro = where as { status: { notIn?: string[] } };
-        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: filtro.status.notIn ? { notIn: ["CONCLUIDA", "FALHA_FINAL"] } : { not: "CONCLUIDA" } });
+        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: filtro.status.notIn ? { notIn: ["CONCLUIDA", "FALHA_FINAL", "BLOQUEADA"] } : { not: "CONCLUIDA" } });
         return filtro.status.notIn?.includes(existente?.status ?? "") ? null : existente;
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {

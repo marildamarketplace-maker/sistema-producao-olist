@@ -158,7 +158,7 @@ async function alterar(request: Request, contexto: Contexto) {
         `;
         if (!rotina) throw new ErroHttp(404, "Rotina indisponível.");
         const ativa = await tx.execucaoAutomatizacao.findFirst({
-          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } },
+          where: { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL", "BLOQUEADA"] } },
           select: { id: true, status: true },
         });
         const existente = ativa ?? await tx.execucaoAutomatizacao.findFirst({

@@ -207,7 +207,8 @@ A mudança exige publicação do ERP e atualização/reinício do worker ocioso 
 
 O limite de três tentativas pertence à execução de cada horário. `FALHA_FINAL`
 não impede os próximos horários; o histórico e a unicidade por horário permanecem.
-Execuções pendentes, em retry, em andamento ou `BLOQUEADA` continuam impedindo
-sobreposição. `BLOQUEADA` exige intervenção (por exemplo, login ou CAPTCHA).
+Execuções pendentes, em retry ou em andamento continuam impedindo sobreposição.
+`BLOQUEADA` encerra apenas sua ocorrência e não impede o próximo horário. A causa
+(por exemplo, login ou CAPTCHA) pode exigir intervenção para a próxima execução ter sucesso.
 Uma retomada manual em conflito com outra execução em aberto retorna HTTP 409.
 Aplique a migration de falha por ocorrência antes de publicar o agendador atualizado.

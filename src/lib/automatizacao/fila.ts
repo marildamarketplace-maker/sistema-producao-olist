@@ -6,6 +6,7 @@ import { normalizarDestinatariosWhatsapp, prepararDadosNotification } from "@/li
 import { z } from "zod";
 import { prazoReservaMs } from "./renovacao";
 import { mensagemWhatsappAutomatizacao } from "./mensagem-whatsapp";
+import { comporIntervencao, nomeHabilidadeIntervencao } from "./intervencao-compartilhada";
 
 export const operacaoWorker = z.discriminatedUnion("acao", [
   z.object({ acao: z.literal("reservar") }),
@@ -77,7 +78,10 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       if (!chave) return { trabalho: null };
       const agora = new Date();
       const execucao = await tx.execucaoAutomatizacao.findUniqueOrThrow({
-        where: { id: chave.id }, include: { versao: { select: { markdown: true } }, rotina: { select: { nome: true } } },
+        where: { id: chave.id }, include: {
+          versao: { select: { markdown: true } }, rotina: { select: { nome: true } },
+          tentativas: { where: { resultado: { not: null } }, orderBy: [{ iniciadaEm: "desc" }, { id: "desc" }], take: 1, select: { resultado: true } },
+        },
       });
       if (execucao.reserva) {
         if (execucao.tentativa >= limiteTentativas) {
@@ -98,8 +102,17 @@ export async function operarFila(escopo: Escopo, operacao: z.infer<typeof operac
       await tx.tentativaAutomatizacao.create({
         data: { id: reserva, execucaoId: execucao.id, worker: escopo.id, rodada: execucao.rodada },
       });
-      return { trabalho: { reserva, rotinaNome: execucao.rotina.nome, markdown: execucao.tipo === "TESTE_ROTINA"
-        ? 'Retorne exatamente {"resultado":"TESTE_ROTINA_OK"}.' : execucao.versao.markdown } };
+      let markdown = 'Retorne exatamente {"resultado":"TESTE_ROTINA_OK"}.';
+      if (execucao.tipo !== "TESTE_ROTINA") {
+        const compartilhadas = await tx.habilidadeAutomatizacao.findMany({
+          where: { aplicativoId: escopo.aplicativoId, nome: nomeHabilidadeIntervencao, arquivada: false },
+          take: 2, select: { versoes: { orderBy: { numero: "desc" }, take: 1, select: { markdown: true } } },
+        });
+        // Nome não é chave única: ambiguidade usa o padrão seguro do código.
+        const compartilhada = compartilhadas.length === 1 ? compartilhadas[0].versoes[0]?.markdown : undefined;
+        markdown = comporIntervencao(execucao.versao.markdown, compartilhada, execucao.tentativas[0]?.resultado);
+      }
+      return { trabalho: { reserva, rotinaNome: execucao.rotina.nome, markdown } };
     }
 
     const [chave] = await tx.$queryRaw<{ id: string }[]>`

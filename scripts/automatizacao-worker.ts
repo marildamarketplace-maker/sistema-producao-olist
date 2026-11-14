@@ -49,7 +49,7 @@ async function main() {
       const inicioReserva = performance.now();
       const { trabalho } = reservaSchema.parse(await api({ acao: "reservar" }));
       if (!trabalho) {
-        await esperar(5_000, undefined, { signal: parar.signal });
+        await esperar(60_000, undefined, { signal: parar.signal });
         continue;
       }
       const { reserva, markdown, rotinaNome = "Rotina de automatização" } = trabalho;

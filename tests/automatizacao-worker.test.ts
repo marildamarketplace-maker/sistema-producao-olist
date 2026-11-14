@@ -15,12 +15,14 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
     rotinaId: randomUUID(), reserva: null as string | null, reservaAte: null as Date | null,
     versao: { markdown: "# Entrada imutável" },
     rotina: { nome: "Piloto" },
+    tentativas: [] as { resultado: string }[],
   };
   const inicioTentativa = new Date("2026-11-11T01:15:00Z");
   type Tentativa = { iniciadaEm: Date; id: string; worker: string; status: string; resultado?: string; encerradaEm?: Date };
   const tentativas = new Map<string, Tentativa>();
   const avisos: string[] = [];
   const notificacoes: string[] = [];
+  let compartilhadas: { versoes: { markdown: string }[] }[] = [];
   const tx = {
     $queryRaw: async (sql: TemplateStringsArray, ...valores: string[]) => {
       if (sql.join("").includes("JOIN")) {
@@ -42,6 +44,11 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
       update: async ({ where, data }: { where: { id: string }; data: Partial<Tentativa> }) => Object.assign(tentativas.get(where.id)!, data),
     },
     aplicativo: { findUnique: async () => ({ whatsapp: "5531999999999" }) },
+    habilidadeAutomatizacao: { findMany: async ({ where }: { where: { aplicativoId: string; arquivada: boolean } }) => {
+      assert.equal(where.aplicativoId, aplicativoId);
+      assert.equal(where.arquivada, false);
+      return compartilhadas;
+    } },
     rotinaAutomatizacao: { findUniqueOrThrow: async () => ({ nome: "Piloto" }) },
     notification: { create: async ({ data }: { data: { mensagem: string } }) => {
       notificacoes.push(data.mensagem);
@@ -64,11 +71,15 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.equal((await operar({ acao: "diagnostico" })).status, 500);
   process.env.AUTOMATIZACAO_WORKERS = JSON.stringify([escopo]);
   const primeira = await reservar();
-  assert.equal(primeira.markdown, "# Entrada imutável");
+  assert.ok(primeira.markdown.startsWith("# Entrada imutável"));
+  assert.match(primeira.markdown, /Tratamento compartilhado de CAPTCHA/);
   assert.equal(primeira.rotinaNome, "Piloto");
   execucao.reservaAte = new Date(0);
   assert.equal((await finalizar(primeira.reserva, "SUCESSO")).status, 409);
+  compartilhadas = [{ versoes: [{ markdown: "# Módulo do aplicativo" }] }];
   const segunda = await reservar();
+  assert.match(segunda.markdown, /# Módulo do aplicativo/);
+  assert.doesNotMatch(segunda.markdown, /# Tratamento compartilhado de CAPTCHA/);
   assert.equal(tentativas.get(primeira.reserva)?.status, "RESERVA_EXPIRADA");
   assert.equal((await finalizar(primeira.reserva, "SUCESSO")).status, 409);
   assert.equal((await operar({ acao: "renovar", reserva: segunda.reserva })).status, 200);
@@ -76,7 +87,10 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.deepEqual(await (await finalizar(segunda.reserva, "FALHA")).json(), { status: "FALHA_FINAL" });
 
   Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 2 });
+  compartilhadas = [compartilhadas[0], compartilhadas[0]];
   const terceira = await reservar();
+  assert.match(terceira.markdown, /# Tratamento compartilhado de CAPTCHA/);
+  compartilhadas = [];
   assert.deepEqual(await (await finalizar(terceira.reserva, "SUCESSO")).json(), { status: "CONCLUIDA" });
   assert.deepEqual(avisos, [segunda.reserva, terceira.reserva]);
   assert.match(notificacoes[0], /resultado/);
@@ -95,6 +109,14 @@ test("worker rejeita reserva vencida e deduplica cada fechamento", async (t) => 
   assert.ok(notificacoes.at(-1)?.endsWith(parcial));
   assert.deepEqual(await (await finalizar(bloqueada.reserva, "BLOQUEADA", parcial)).json(), { status: "BLOQUEADA" });
   assert.equal(notificacoes.length, 3);
+
+  execucao.tentativas = [{ resultado: parcial }];
+  Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 4 });
+  const retomada = await reservar();
+  assert.match(retomada.markdown, /CONTEXTO DA TENTATIVA ANTERIOR/);
+  assert.ok(retomada.markdown.includes(JSON.stringify(parcial)));
+  await finalizar(retomada.reserva, "TEMPORARIA", "Reconciliação pendente");
+  execucao.tentativas = [];
 
   Object.assign(execucao, { status: "PENDENTE", tentativa: 0, rodada: 4 });
   const comImagem = await reservar();

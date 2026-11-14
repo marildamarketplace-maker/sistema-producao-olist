@@ -19,7 +19,7 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
     },
     execucaoAutomatizacao: {
       findFirst: async ({ where }: { where: { status: { notIn: string[] } } }) => {
-        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL"] } });
+        assert.deepEqual(where, { aplicativoId, rotinaId, tipo: { not: "TESTE_ROTINA" }, status: { notIn: ["CONCLUIDA", "FALHA_FINAL", "BLOQUEADA"] } });
         return where.status.notIn.includes(anterior) ? null : { status: anterior };
       },
       create: async ({ data }: { data: unknown }) => criadas.push(data),
@@ -32,7 +32,7 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
   for (const status of ["FALHA_FINAL", "CONCLUIDA", "PENDENTE", "AGUARDANDO_RETRY", "EM_EXECUCAO", "BLOQUEADA"]) {
     anterior = status; lida = false; criadas.length = 0; disparos.length = 0;
     assert.equal(await agendarAutomatizacoes(), 1);
-    const liberada = ["FALHA_FINAL", "CONCLUIDA"].includes(status);
+    const liberada = ["FALHA_FINAL", "CONCLUIDA", "BLOQUEADA"].includes(status);
     assert.equal(criadas.length, liberada ? 1 : 0);
     assert.equal(disparos[0].motivo, liberada ? "ENFILEIRADO" : "SOBREPOSICAO");
   }
