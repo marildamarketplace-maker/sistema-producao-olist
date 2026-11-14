@@ -9,6 +9,8 @@ import { PageHeader } from "@/components/page-header";
 import { gerarSimulacaoMetragemCsv, OPCOES_METRAGEM, type BaseMetragem, type ProdutoMetragem } from "@/lib/estoque-simulacao-metragem";
 import { supabase } from "@/lib/supabase";
 
+import { filtrarEstoque, FILTROS_ESTOQUE_INICIAIS, type FiltrosEstoque } from "@/lib/estoque-filtros";
+
 type Produto = ProdutoMetragem & {
   id: string;
   sku: string;
@@ -66,6 +68,7 @@ function formatarCampoCsv(valor: string | number | null | undefined) {
 
 export default function EstoquePage() {
   const { session, usuario } = useAuth();
+  const [filtros, setFiltros] = useState<FiltrosEstoque>(FILTROS_ESTOQUE_INICIAIS);
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
@@ -110,9 +113,13 @@ export default function EstoquePage() {
 
     return lista.slice(0, 12);
   }, [produtoBusca, produtos]);
+  const linhasFiltradas = useMemo(() => filtrarEstoque(linhas, filtros), [linhas, filtros]);
+  const filtrosAtivos = Object.keys(FILTROS_ESTOQUE_INICIAIS).some(
+    (key) => filtros[key as keyof FiltrosEstoque] !== FILTROS_ESTOQUE_INICIAIS[key as keyof FiltrosEstoque],
+  );
   const totaisEstoque = useMemo(
     () =>
-      linhas.reduce(
+      linhasFiltradas.reduce(
         (acc, linha) => ({
           total_entradas: acc.total_entradas + linha.total_entradas,
           total_saidas: acc.total_saidas + linha.total_saidas,
@@ -121,11 +128,11 @@ export default function EstoquePage() {
         }),
         { total_entradas: 0, total_saidas: 0, saldo_atual: 0, qtd_movimentacoes: 0 },
       ),
-    [linhas],
+    [linhasFiltradas],
   );
 
   const linhasOrdenadas = useMemo(() => {
-    return [...linhas].sort((a, b) => {
+    return [...linhasFiltradas].sort((a, b) => {
       let resultado = 0;
 
       if (sortConfig.key === "sku") {
@@ -149,7 +156,7 @@ export default function EstoquePage() {
 
       return sortConfig.direction === "asc" ? resultado : -resultado;
     });
-  }, [linhas, sortConfig]);
+  }, [linhasFiltradas, sortConfig]);
 
   const movimentacoesProdutoAberto = useMemo(() => {
     if (!produtoMovimentacoesAberto) return [];
@@ -587,7 +594,7 @@ export default function EstoquePage() {
             type="button"
             aria-expanded={simulacaoAberta}
             aria-controls="simulacao-metragem"
-            disabled={loading || linhas.length === 0}
+            disabled={loading || totaisEstoque.qtd_movimentacoes === 0}
             onClick={() => setSimulacaoAberta((aberta) => !aberta)}
             className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 disabled:opacity-40"
           >Exportar simulação metragem</button>
@@ -601,12 +608,62 @@ export default function EstoquePage() {
           </button>
           </div>
         </div>
+        <fieldset className="mb-4 min-w-0 rounded-md border border-slate-200 p-4">
+          <legend className="px-1 text-sm font-medium text-slate-900">Filtros do estoque</legend>
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <label className="min-w-0 text-sm text-slate-700">
+              Buscar SKU
+              <input type="search" value={filtros.sku}
+                onChange={(event) => setFiltros((prev) => ({ ...prev, sku: event.target.value }))}
+                placeholder="Digite parte do SKU" className="input mt-1 min-h-11" />
+            </label>
+            <label className="min-w-0 text-sm text-slate-700">
+              Saldo atual
+              <select value={filtros.saldo} className="input mt-1 min-h-11"
+                onChange={(event) => setFiltros((prev) => ({ ...prev, saldo: event.target.value as FiltrosEstoque["saldo"] }))}>
+                <option value="todos">Todos os saldos</option>
+                <option value="positivo">Positivo</option><option value="zero">Zerado</option><option value="negativo">Negativo</option>
+              </select>
+            </label>
+            <label className="min-w-0 text-sm text-slate-700">
+              Meta de estoque
+              <select value={filtros.meta} className="input mt-1 min-h-11"
+                onChange={(event) => setFiltros((prev) => ({ ...prev, meta: event.target.value as FiltrosEstoque["meta"] }))}>
+                <option value="todas">Todas as situações</option><option value="abaixo">Abaixo da meta</option><option value="atingida">Meta atingida ou superada</option>
+              </select>
+            </label>
+            <label className="min-w-0 text-sm text-slate-700">
+              Movimentações
+              <select value={filtros.movimentacoes} className="input mt-1 min-h-11"
+                onChange={(event) => setFiltros((prev) => ({ ...prev, movimentacoes: event.target.value as FiltrosEstoque["movimentacoes"] }))}>
+                <option value="todas">Todos os produtos</option><option value="com">Com movimentações</option><option value="sem">Sem movimentações</option>
+              </select>
+            </label>
+            <label className="min-w-0 text-sm text-slate-700">
+              Imagem
+              <select value={filtros.imagem} className="input mt-1 min-h-11"
+                onChange={(event) => setFiltros((prev) => ({ ...prev, imagem: event.target.value as FiltrosEstoque["imagem"] }))}>
+                <option value="todas">Todas as imagens</option><option value="com">Com imagem</option><option value="sem">Sem imagem</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p role="status" className="text-sm text-slate-600">
+              {loading ? "Carregando estoque..." : `${linhasFiltradas.length} de ${linhas.length} produtos. Totais e exportações consideram os filtros selecionados.`}
+            </p>
+            <button type="button" disabled={!filtrosAtivos}
+              onClick={() => setFiltros(FILTROS_ESTOQUE_INICIAIS)}
+              className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">
+              Limpar filtros
+            </button>
+          </div>
+        </fieldset>
         {simulacaoAberta && (
           <div id="simulacao-metragem" className="mb-4 space-y-3 rounded-md border border-slate-200 p-4">
             <p className="text-sm text-slate-600">Selecione a quantidade para simular usando o consumo cadastrado atualmente por SKU. Produtos sem consumo válido serão sinalizados no CSV.</p>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {OPCOES_METRAGEM.map(({ valor, rotulo }) => (
-                <button key={valor} type="button" disabled={loading || linhas.length === 0}
+                <button key={valor} type="button" disabled={loading || totaisEstoque.qtd_movimentacoes === 0}
                   onClick={() => exportarSimulacao(valor)}
                   className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40">
                   {rotulo}
@@ -617,8 +674,8 @@ export default function EstoquePage() {
         )}
         {loading ? (
           <p className="text-sm text-slate-600">Carregando estoque...</p>
-        ) : linhas.length === 0 ? (
-          <p className="text-sm text-slate-600">Nenhum produto encontrado.</p>
+        ) : linhasFiltradas.length === 0 ? (
+          <p className="text-sm text-slate-600">Nenhum produto encontrado{filtrosAtivos ? " para os filtros selecionados. Altere ou limpe os filtros." : "."}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">

@@ -5,8 +5,10 @@ export const fimIntervencao = "<!-- automatizacao:intervencao-compartilhada:fim 
 export const habilidadeIntervencao = `# Tratamento compartilhado de CAPTCHA, autenticação e retomada
 
 Módulo auxiliar de todas as rotinas de navegador; não é uma rotina comercial independente.
-Aplica-se somente quando um impedimento aparece no fluxo original. Não navegue a outros
-canais nem provoque desafios para testar este módulo. Preserve escopo e limites comerciais.
+O tratamento de impedimentos aplica-se quando eles aparecem no fluxo original; as regras
+de evidência aplicam-se também a sucesso, resultado parcial e ausência de pendências.
+Não navegue a outros canais nem provoque desafios para testar este módulo.
+Preserve escopo e limites comerciais.
 Estas regras substituem instruções antigas de tentar resolver CAPTCHA automaticamente.
 
 ## Detectar e interromper somente o canal afetado
@@ -34,6 +36,35 @@ Estas regras substituem instruções antigas de tentar resolver CAPTCHA automati
   evidencia conforme o contrato do worker. Se não houver, use null e relate a limitação.
   Nunca capture credenciais, QR de autenticação ou dados pessoais. Falta de print não
   apaga o bloqueio nem invalida ações já comprovadas.
+
+## Selecionar evidência relevante
+- Antes de capturar, defina qual afirmação do resultado a imagem comprovará. Use a tela
+  final pertinente à tarefa, com contexto suficiente para identificar canal, item ou campanha
+  e o estado efetivamente salvo. Estas regras prevalecem sobre orientações genéricas de print.
+- Exemplos conforme o escopo: impulsionamento com anúncio e cronômetro ativo; oferta com
+  campanha, período e status salvo; transmissão com data, horário e status agendado; vídeo
+  anexado no anúncio com seu status real; detalhes de produto reabertos com texto persistido.
+  Em avaliações, mostre resposta publicada ou indicador agregado de fila final, somente se
+  puder fazê-lo sem expor comprador ou comentário privado. Não provoque uma ação para obter print.
+- Ausência de pendências: mostre a fila correta após carregar, com filtro e indicador de
+  vazio verificáveis. Dashboard genérico, página inicial, menu, aba errada, carregamento,
+  formulário ainda não salvo ou toast isolado não comprovam conclusão.
+- Em bloqueio ou erro, priorize a mensagem ou área que identifica o impedimento, com
+  contexto do canal e sem credenciais, QR, conversas ou dados pessoais. Não apresente
+  captura de bloqueio como comprovação de sucesso nem capture o desafio para resolvê-lo.
+- Capture depois da verificação na interface, na mesma execução, usando apenas navegação
+  de leitura segura quando necessário. Não repita envio, salvamento ou publicação para
+  recriar a tela. Não use print antigo, imagem fabricada ou captura de outra execução.
+- Se o contrato aceitar uma única evidencia para vários canais, escolha a captura que
+  melhor explica o resultado: primeiro bloqueio, erro ou envio incerto relevante; caso não
+  haja, o resultado principal confirmado. Identifique em resultado o canal, o fato visível
+  e a cobertura limitada do print; uma imagem não comprova automaticamente os demais canais.
+- Antes de retornar o caminho, confira a captura se a ferramenta permitir: conteúdo certo,
+  estado legível, sem área vazia nem informação sensível. Use enquadramento ou captura de
+  elemento quando suportados. Não envie tela inteira sensível por falta dessa ferramenta.
+- Se nenhuma captura for relevante e segura, retorne evidencia=null e informe o motivo
+  concreto. Não substitua por print genérico só para anexar uma imagem. Falta de evidência
+  visual não invalida resultado comprovado por outros meios nem autoriza alegar o não verificado.
 
 ## Encerrar e notificar
 - Se uma pendência obrigatória continuar exigindo intervenção, retorne concluida=false
