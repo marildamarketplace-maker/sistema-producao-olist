@@ -78,6 +78,37 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const estado = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } }); assert.equal(estado.processados, 1); assert.equal(estado.tentativas, 0);
     await repo.agir(escopo, j.id, "cancelar");
   });
+  await t.test("paginação retoma o offset e reconcilia duas situações sem duplicar IDs", async () => {
+    const j = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0", "3"] });
+    const pagina = Array.from({ length: 100 }, (_, i) => String(1000 + i));
+    await repo.pagina(await reserva(), pagina);
+    const segunda = await reserva(); assert.equal(segunda.paginaOffset, 100); assert.equal(segunda.situacaoIndice, 0);
+    await repo.pagina(segunda, ["1100"]);
+    const situacao = await reserva(); assert.equal(situacao.situacaoIndice, 1); assert.equal(situacao.paginaOffset, 0);
+    await repo.pagina(situacao, ["1000", "1101"]);
+    const reconciliacao = await reserva(); assert.equal(reconciliacao.passagem, 1); assert.equal(reconciliacao.situacaoIndice, 0);
+    await repo.pagina(reconciliacao, ["1102"]); await repo.pagina(await reserva(), ["1000"]);
+    const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } });
+    assert.equal(final.encontrados, 103); assert.equal(final.etapa, "DETALHAMENTO");
+    await repo.agir(escopo, j.id, "cancelar");
+  });
+  await t.test("falha durante publicação reverte histórico inteiro e permite nova tentativa", async () => {
+    const j = await nova(); await detalhamento(["800"]);
+    await repo.pedido(await reserva(), "800", [{ sku: "A", quantidade: 3 }], false);
+    await repo.prepararConclusao(await reserva());
+    const r = await reserva(), quantidadeAntes = await db.buscaSku.count();
+    await sql.query(`CREATE FUNCTION rejeitar_item_teste() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'falha controlada'; END $$;
+      CREATE TRIGGER falha_item_teste BEFORE INSERT ON itens_busca_sku FOR EACH ROW EXECUTE FUNCTION rejeitar_item_teste();`);
+    try {
+      await assert.rejects(repo.concluir(r));
+      assert.equal(await db.buscaSku.count(), quantidadeAntes);
+      assert.equal(await db.itemBuscaSku.count({ where: { pedidoOlistId: "800" } }), 0);
+      assert.equal((await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } })).status, "PROCESSANDO");
+    } finally { await sql.query("DROP TRIGGER falha_item_teste ON itens_busca_sku; DROP FUNCTION rejeitar_item_teste();"); }
+    await repo.falhar(r, "Falha temporária", "TESTE", 60_000);
+    assert.equal(await repo.concluir(await reserva()), true);
+    assert.equal(await db.itemBuscaSku.count({ where: { pedidoOlistId: "800" } }), 1);
+  });
   await t.test("checkpoint, deduplicação por pedido, consolidação e exclusão", async () => {
     const anterior = await db.buscaSku.create({ data: { aplicativoId: app, situacoes: ["0"] } });
     await db.itemBuscaSku.create({ data: { buscaId: anterior.id, aplicativoId: app, pedidoOlistId: "1", sku: "A", quantidade: 8 } });

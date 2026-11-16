@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { observacaoMovimentacaoEstoque } from "@/lib/estoque-observacao";
-import { ORIGENS_ESTOQUE_PRODUCAO } from "@/lib/producao-ajustes-estoque";
+import { serializarMovimentacoesEstoque } from "@/lib/estoque-movimentacoes";
 
 export async function GET(request: Request) {
+  let autenticado;
+  try { autenticado = await getUsuarioAutenticado(request); }
+  catch { return NextResponse.json({ error: "Não autenticado." }, { status: 401 }); }
   try {
-    const autenticado = await getUsuarioAutenticado(request);
     const usuario = await prisma.usuario.findUnique({
       where: { id: autenticado.id },
       select: { podeVisualizarEstoque: true, podeEditarEstoque: true },
     });
     if (!usuario || (!usuario.podeVisualizarEstoque && !usuario.podeEditarEstoque)) {
-      throw new Error("Sem permissão para visualizar o estoque.");
+      return NextResponse.json({ error: "Sem permissão para visualizar o estoque." }, { status: 403 });
     }
 
+    const resumo = new URL(request.url).searchParams.get("modo") === "resumo";
+    if (!autenticado.aplicativoId) return NextResponse.json({ error: "Aplicativo não configurado." }, { status: 403 });
     const [produtos, movimentacoes, configuracao] = await Promise.all([
       prisma.produto.findMany({
         where: { aplicativoId: autenticado.aplicativoId, ativo: true },
@@ -27,7 +30,7 @@ export async function GET(request: Request) {
           } },
         },
       }),
-      prisma.movimentacaoEstoque.findMany({
+      resumo ? Promise.resolve([]) : prisma.movimentacaoEstoque.findMany({
         where: { aplicativoId: autenticado.aplicativoId },
         orderBy: { createdAt: "desc" },
         select: {
@@ -41,19 +44,19 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    const solicitacaoIds = [...new Set(movimentacoes.flatMap((movimento) =>
-      ORIGENS_ESTOQUE_PRODUCAO.includes(movimento.origem) && movimento.referenciaId
-        ? [movimento.referenciaId] : [],
-    ))];
-    const solicitacoes = solicitacaoIds.length > 0
-      ? await prisma.solicitacaoProducao.findMany({
-        where: { aplicativoId: autenticado.aplicativoId, id: { in: solicitacaoIds } },
-        select: { id: true, observacaoGeral: true },
-      })
-      : [];
-    const observacoesProducao = new Map(solicitacoes.map((solicitacao) =>
-      [solicitacao.id, solicitacao.observacaoGeral],
-    ));
+    const totais = resumo ? await prisma.movimentacaoEstoque.groupBy({
+      by: ["produtoId", "tipoMovimento"],
+      where: { aplicativoId: autenticado.aplicativoId },
+      _sum: { quantidade: true }, _count: { _all: true },
+    }) : [];
+    const mapa = new Map<string, { produto_id: string; entradas: number; saidas: number; movimentacoes: number }>();
+    for (const total of totais) {
+      const atual = mapa.get(total.produtoId) ?? { produto_id: total.produtoId, entradas: 0, saidas: 0, movimentacoes: 0 };
+      if (total.tipoMovimento === "entrada") atual.entradas += total._sum.quantidade ?? 0;
+      else atual.saidas += total._sum.quantidade ?? 0;
+      atual.movimentacoes += total._count._all;
+      mapa.set(total.produtoId, atual);
+    }
 
     return NextResponse.json({
       produtos: produtos.map((produto) => ({
@@ -65,21 +68,14 @@ export async function GET(request: Request) {
             }
           : null,
       })),
-      movimentacoes: movimentacoes.map((movimento) => ({
-        id: movimento.id, produto_id: movimento.produtoId, sku: movimento.sku,
-        tipo_movimento: movimento.tipoMovimento, quantidade: movimento.quantidade,
-        origem: movimento.origem,
-        producao_id: ORIGENS_ESTOQUE_PRODUCAO.includes(movimento.origem) && movimento.referenciaId && observacoesProducao.has(movimento.referenciaId)
-          ? movimento.referenciaId : null,
-        observacao: observacaoMovimentacaoEstoque(movimento, observacoesProducao),
-        created_at: movimento.createdAt,
-      })),
+      ...(resumo ? { resumo: [...mapa.values()] }
+        : { movimentacoes: await serializarMovimentacoesEstoque(movimentacoes, autenticado.aplicativoId) }),
       metaGeral: Number(configuracao?.valor ?? 0),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar estoque." },
-      { status: 403 },
+      { error: "Erro ao carregar estoque." },
+      { status: 500 },
     );
   }
 }

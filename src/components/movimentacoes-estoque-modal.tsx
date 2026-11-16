@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Paginacao } from "@/components/paginacao";
 import { ExternalLink } from "lucide-react";
 
 export type MovimentacaoEstoqueResumo = {
@@ -15,11 +16,38 @@ export type MovimentacaoEstoqueResumo = {
   producao_id: string | null;
 };
 
-export function MovimentacoesEstoqueModal({ sku, movimentacoes, onFechar }: {
+export function MovimentacoesEstoqueModal({ sku, produtoId, token, onFechar }: {
   sku: string;
-  movimentacoes: MovimentacaoEstoqueResumo[];
+  produtoId: string;
+  token: string;
   onFechar: () => void;
 }) {
+  const [solicitada, setSolicitada] = useState(1);
+  const [tentativa, setTentativa] = useState(0);
+  const [dados, setDados] = useState<{ itens: MovimentacaoEstoqueResumo[]; pagina: number; total: number; totalPaginas: number } | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+  const movimentacoes = dados?.itens ?? [];
+  useEffect(() => {
+    const controller = new AbortController();
+    setCarregando(true);
+    setErro(null);
+    void (async () => {
+      try {
+        const resposta = await fetch(`/api/estoque/movimentacoes?produtoId=${encodeURIComponent(produtoId)}&pagina=${solicitada}`, {
+          headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store",
+        });
+        const json = await resposta.json();
+        if (!resposta.ok) throw new Error(json.error ?? "Erro ao carregar movimentações.");
+        if (!controller.signal.aborted) setDados(json);
+      } catch (error) {
+        if (!controller.signal.aborted) setErro(error instanceof Error ? error.message : "Erro ao carregar movimentações.");
+      } finally {
+        if (!controller.signal.aborted) setCarregando(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [produtoId, token, solicitada, tentativa]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const fecharRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -40,11 +68,13 @@ export function MovimentacoesEstoqueModal({ sku, movimentacoes, onFechar }: {
     <div className="flex min-h-full items-center justify-center">
       <div className="flex max-h-[85dvh] w-full max-w-4xl flex-col rounded-lg bg-white text-slate-900 shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-4 sm:p-5">
-          <div className="min-w-0"><h3 id="titulo-movimentacoes-estoque" className="text-lg font-semibold">Movimentacoes de estoque</h3><p id="descricao-movimentacoes-estoque" className="mt-1 text-sm text-slate-600"><span className="break-all">{sku}</span> - {movimentacoes.length} movimentacoes</p><p className="mt-2 text-xs text-slate-500">Linhas com o ícone de link abrem o pedido de produção em nova aba.</p></div>
+          <div className="min-w-0"><h3 id="titulo-movimentacoes-estoque" className="text-lg font-semibold">Movimentacoes de estoque</h3><p id="descricao-movimentacoes-estoque" className="mt-1 text-sm text-slate-600"><span className="break-all">{sku}</span> - {dados?.total ?? "…"} movimentacoes</p><p className="mt-2 text-xs text-slate-500">Linhas com o ícone de link abrem o pedido de produção em nova aba.</p></div>
           <button ref={fecharRef} type="button" onClick={onFechar} className="min-h-11 shrink-0 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2">Fechar</button>
         </div>
-        <div className="min-h-0 overflow-auto p-4 sm:p-5">
-          {movimentacoes.length === 0 ? <p className="text-sm text-slate-600">Nenhuma movimentacao para este item.</p> : <table className="min-w-full border-collapse text-sm">
+        <div className="min-h-0 overflow-auto p-4 sm:p-5" aria-busy={carregando}>
+          {carregando && <p role="status" className="mb-3 text-sm text-slate-600">Carregando movimentações…</p>}
+          {erro && <div role="alert" className="mb-3 text-sm text-red-700"><p>{erro}</p><button type="button" className="min-h-11 rounded-md border border-slate-300 px-3 py-2 focus-visible:outline focus-visible:outline-2" onClick={() => setTentativa(valor => valor + 1)}>Tentar novamente</button></div>}
+          {movimentacoes.length === 0 ? (!carregando && !erro && <p className="text-sm text-slate-600">Nenhuma movimentacao para este item.</p>) : <table className="min-w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-white"><tr className="border-b border-slate-200 text-left text-slate-600">{["Data", "Tipo", "Quantidade", "Origem", "Observacao"].map((titulo) => <th key={titulo} scope="col" className="p-3">{titulo}</th>)}</tr></thead>
             <tbody>{movimentacoes.map((mov) => {
               const href = mov.producao_id ? `/solicitacoes-producao/${encodeURIComponent(mov.producao_id)}` : null;
@@ -59,6 +89,12 @@ export function MovimentacoesEstoqueModal({ sku, movimentacoes, onFechar }: {
               </tr>;
             })}</tbody>
           </table>}
+        </div>
+        <div className="shrink-0 border-t border-slate-200 p-4 sm:p-5">
+          <Paginacao pagina={dados?.pagina ?? 1} totalPaginas={dados?.totalPaginas ?? 1}
+            carregando={carregando} rotulo="Paginação das movimentações"
+            onAnterior={() => { setSolicitada((dados?.pagina ?? 1) - 1); setTentativa(valor => valor + 1); }}
+            onProxima={() => { setSolicitada((dados?.pagina ?? 1) + 1); setTentativa(valor => valor + 1); }} />
         </div>
       </div>
     </div>

@@ -1,7 +1,18 @@
 Atue como um engenheiro de software sênior trabalhando neste projeto.
 
+## Leitura obrigatória antes de trabalhar com código
+
+Este arquivo é a referência central dos padrões de código deste sistema.
+Consulte-o antes de implementar, corrigir, refatorar, revisar ou projetar código,
+incluindo APIs, interfaces, consultas, scripts, integrações e workers.
+Aplique também as instruções específicas dos diretórios envolvidos, quando existirem.
+
 Antes de propor mudanças, examine a arquitetura, as convenções existentes,
 as instruções do repositório e os testes relacionados ao escopo.
+Confira as alterações locais e preserve o trabalho que já estiver em andamento.
+Sempre avalie o impacto em egress (transferência de dados para fora de um serviço),
+mesmo quando a solicitação não mencionar custos. A profundidade dessa avaliação
+deve ser proporcional à mudança; se não houver impacto, não invente otimizações.
 
 Diretrizes:
 - Preserve os contratos públicos, as regras de negócio e os fluxos existentes.
@@ -23,6 +34,123 @@ Diretrizes:
 - Não atualize dependências ou altere banco de dados sem necessidade no escopo.
 - Diferencie problemas comprovados de hipóteses.
 - Informe limitações da validação e riscos residuais.
+
+## Padrões de código do sistema
+
+- Preserve TypeScript estrito e os contratos de entrada e saída. Evite `any`,
+  coerções sem validação e supressões de erros de tipo para contornar problemas.
+- Siga a organização do módulo alterado. Reutilize componentes em `src/components`,
+  utilitários em `src/lib` e serviços/repositórios existentes quando aplicáveis;
+  não imponha novas camadas a fluxos simples nem reorganize módulos incidentalmente.
+- Mantenha regras de negócio testáveis fora dos componentes de interface e dos
+  handlers HTTP quando a complexidade justificar. Isole dependências externas
+  por interfaces pequenas ou funções injetáveis quando isso beneficiar os testes.
+- Reutilize os clientes compartilhados de banco e integrações. Preserve a separação
+  entre código de servidor e cliente; credenciais privilegiadas nunca vão ao browser.
+- Valide entradas na fronteira da aplicação, usando os validadores existentes
+  (incluindo Zod onde já adotado). Valide limites, filtros, ordenação e paginação
+  no servidor, sem confiar na interface ou nos parâmetros enviados pelo cliente.
+- Reutilize a autenticação existente e verifique permissões no servidor antes de
+  ler ou alterar dados protegidos. Preserve o escopo de usuário/aplicativo nas
+  consultas dos recursos que exigem isolamento.
+- Use consultas parametrizadas. Trate erros esperados com mensagens úteis;
+  não exponha stack traces, SQL, credenciais ou respostas sensíveis de provedores.
+- Em mutações e tarefas assíncronas, preserve atomicidade, idempotência e locks
+  quando aplicáveis. Defina limites de concorrência, timeouts e tentativas;
+  não repita uma operação com efeitos colaterais sem proteção contra duplicidade.
+
+## Tarefas pesadas: priorizar processamento assíncrono
+
+- Antes de implementar, avalie duração, volume de dados, uso de CPU/memória e
+  quantidade de chamadas externas. Operações potencialmente demoradas ou de grande
+  volume devem preferencialmente executar em segundo plano, fora da requisição
+  interativa: importações, exportações grandes, processamento de mídia/IA,
+  sincronizações e ações em lote são exemplos.
+- Reutilize filas, jobs e workers existentes no domínio. Registre o trabalho de
+  forma durável antes de confirmar que foi aceito e garanta que exista um consumidor
+  configurado para executá-lo. Em novas APIs assíncronas, retorne o identificador
+  do job e uma forma de consultar seu estado (por exemplo, HTTP 202 quando cabível).
+  Preserve contratos existentes ou explicite a mudança necessária.
+- `async/await` permite aguardar operações assíncronas, mas não transfere trabalho
+  pesado para segundo plano nem impede que cálculo síncrono bloqueie o event loop.
+  Use workers/processos adequados para carga de CPU; não dependa de promises
+  disparadas sem aguardar, timers ou tarefas apenas em memória após responder HTTP.
+- Divida trabalhos grandes em lotes limitados, com concorrência controlada,
+  timeout, tentativas limitadas e backoff. Preserve idempotência e recuperação
+  após interrupção; uma nova tentativa não pode duplicar os efeitos já concluídos.
+- Na interface, confirme o enfileiramento e permita acompanhar espera, execução,
+  conclusão e falha, com progresso quando mensurável. Evite bloquear a tela durante
+  todo o processamento e preserve o acompanhamento após recarregar a página.
+  Enfileiramento não significa conclusão; só informe sucesso após confirmação.
+- Verifique autorização e escopo também ao executar jobs e consultar seus estados
+  ou resultados. O acompanhamento deve respeitar as regras de egress e polling
+  deste documento.
+- Operações curtas e limitadas podem permanecer síncronas quando isso simplificar
+  o fluxo. Se uma operação potencialmente pesada permanecer na requisição,
+  justifique a escolha e defina limites que controlem duração e consumo.
+
+## Egress e custos operacionais: requisito obrigatório
+
+Considere todo o caminho dos dados: banco → servidor, armazenamento → servidor,
+servidor → navegador e integrações externas. Reduzir apenas o JSON enviado ao
+navegador não reduz o volume já transferido do banco para o servidor.
+
+- **Consultas:** busque somente as colunas necessárias (`select`/projeção explícita).
+  Evite `SELECT *`, relações completas e campos grandes como metadados de IA,
+  históricos, descrições ou binários quando o fluxo não precisa deles.
+- **Listagens:** filtre, ordene e pagine no banco, com limite máximo validado no
+  servidor e ordenação estável. Não carregue o catálogo inteiro para depois
+  filtrar ou paginar em memória/no navegador. Processe exportações em lotes limitados.
+- **Resumos e relações:** use agregações ou verificações de existência no banco
+  quando precisar apenas de totais ou de saber se há registros relacionados.
+  Evite consultas N+1 e chamadas duplicadas para obter a mesma informação.
+- **Carregamento sob demanda:** carregue detalhes, variantes e históricos quando
+  necessários ao fluxo. Uma atualização pontual não deve recarregar toda a base
+  se for possível atualizar ou invalidar apenas os dados afetados com segurança.
+- **Imagens e arquivos:** use miniaturas/previews adequados à exibição, carregamento
+  sob demanda e reaproveitamento de arquivos já disponíveis. Evite downloads
+  repetidos de originais, binários/base64 em listagens e passagem de mídia pelo
+  servidor sem necessidade de autorização ou processamento. Preserve a qualidade
+  dos originais e as regras de acesso; URLs diretas só quando autorizadas.
+- **Cache:** avalie reaproveitamento quando houver leituras repetidas. Defina chave,
+  validade e invalidação; inclua usuário/aplicativo e permissões relevantes quando
+  necessário. Nunca compartilhe dados privados entre usuários nem use cache
+  desatualizado como autoridade para operações críticas, como movimentar estoque.
+- **Polling, cron e workers:** consulte apenas pendências ou alterações, prefira
+  processamento incremental e evite varreduras completas recorrentes. Use intervalos
+  proporcionais à necessidade, backoff em falhas/ociosidade e encerre polling da
+  interface quando não for mais necessário. Preserve os requisitos de atualização.
+- **Retries e integrações:** limite tentativas e concorrência, reutilize resultados
+  válidos e evite repetir downloads ou chamadas pagas sem necessidade. Streaming
+  e paralelismo podem ajudar memória/latência, mas não reduzem por si só o egress.
+- **Avaliação:** para mudanças com impacto relevante, estime volume por resposta,
+  frequência e número de usuários/execuções, considerando cache e tentativas.
+  Diferencie volume transferido, computação e chamadas pagas; custos faturados
+  dependem do provedor/plano. Não afirme economia monetária sem medição ou base atual.
+
+Não comprometa segurança, consistência, regras de negócio ou usabilidade para
+economizar tráfego. Se o fluxo precisar aumentar o consumo, explique o motivo,
+os limites adotados e o trade-off; não crie infraestrutura de cache sem necessidade.
+
+## Validação e entrega de alterações de código
+
+- Defina os comportamentos esperados e os riscos do escopo antes de editar.
+  Use os testes existentes como referência e acrescente regressões relevantes.
+- Para consultas e fluxos com tráfego relevante, verifique limites, projeção dos
+  campos, quantidade de chamadas, paginação e isolamento de cache conforme o risco.
+  `tests/detector-estampas-egress.test.ts` é uma referência existente para consultas.
+- Em fluxos assíncronos, teste aceite, execução e consulta de estado, além de
+  falhas, tentativas esgotadas, duplicidade, recuperação após interrupção e
+  autorização conforme o risco. Valide também o consumidor; apenas enfileirar
+  não comprova o funcionamento completo.
+- Consulte os scripts atuais em `package.json`. Os testes usam `node:test` com
+  `tsx`; execute os testes relacionados e lint/build quando aplicáveis ao escopo.
+  Não execute workers, integrações pagas ou mutações reais apenas para validar código.
+- Antes de entregar, revise o diff e informe o que mudou, quais verificações
+  passaram, limitações e riscos residuais. Em mudanças que afetam transferência
+  de dados, informe também o impacto esperado em egress e o que foi medido.
+- Mudanças exclusivamente documentais exigem revisão do conteúdo e do diff;
+  não exigem executar a aplicação ou sua suíte de testes.
 
 ## Design system e usabilidade
 

@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
         pedidos: [...new Set(busca.itens.map((item) => item.pedidoOlistId))],
         skus,
       },
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return erroRespostaSku(error); }
 }
 

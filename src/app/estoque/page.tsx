@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
-import { MovimentacoesEstoqueModal, type MovimentacaoEstoqueResumo } from "@/components/movimentacoes-estoque-modal";
+import { MovimentacoesEstoqueModal } from "@/components/movimentacoes-estoque-modal";
 import { PageHeader } from "@/components/page-header";
 import { gerarSimulacaoMetragemCsv, OPCOES_METRAGEM, type BaseMetragem, type ProdutoMetragem } from "@/lib/estoque-simulacao-metragem";
 import { supabase } from "@/lib/supabase";
@@ -17,8 +17,6 @@ type Produto = ProdutoMetragem & {
   imagem_url: string | null;
   meta_estoque: number | null;
 };
-
-type Movimentacao = MovimentacaoEstoqueResumo;
 
 type LinhaEstoque = Produto & {
   total_entradas: number;
@@ -71,7 +69,7 @@ export default function EstoquePage() {
   const [filtros, setFiltros] = useState<FiltrosEstoque>(FILTROS_ESTOQUE_INICIAIS);
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
+  const [revisaoHistorico, setRevisaoHistorico] = useState(0);
   const [produtoMovimentacoesAberto, setProdutoMovimentacoesAberto] = useState<LinhaEstoque | null>(null);
   const [metaGeral, setMetaGeral] = useState(0);
   const [simulacaoAberta, setSimulacaoAberta] = useState(false);
@@ -158,43 +156,24 @@ export default function EstoquePage() {
     });
   }, [linhasFiltradas, sortConfig]);
 
-  const movimentacoesProdutoAberto = useMemo(() => {
-    if (!produtoMovimentacoesAberto) return [];
-
-    return movimentacoes.filter((mov) => mov.produto_id === produtoMovimentacoesAberto.id);
-  }, [movimentacoes, produtoMovimentacoesAberto]);
-
   const carregarDados = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
 
     try {
       if (!session?.access_token) throw new Error("Sessão expirada.");
-      const response = await fetch("/api/estoque/dados", {
+      const response = await fetch("/api/estoque/dados?modo=resumo", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const json = await response.json() as {
-        produtos?: Produto[]; movimentacoes?: Movimentacao[]; metaGeral?: number; error?: string;
+        produtos?: Produto[]; resumo?: { produto_id: string; entradas: number; saidas: number; movimentacoes: number }[]; metaGeral?: number; error?: string;
       };
       if (!response.ok) throw new Error(json.error ?? "Erro ao carregar estoque.");
       const listaProdutos = json.produtos ?? [];
-      const listaMovimentacoes = json.movimentacoes ?? [];
+
       const metaGlobal = Number(json.metaGeral ?? 0);
       setMetaGeral(Number.isNaN(metaGlobal) ? 0 : metaGlobal);
-      const mapa = new Map<string, { entradas: number; saidas: number; movimentacoes: number }>();
-
-      listaMovimentacoes.forEach((mov) => {
-      const atual = mapa.get(mov.produto_id) ?? { entradas: 0, saidas: 0, movimentacoes: 0 };
-      atual.movimentacoes += 1;
-
-      if (mov.tipo_movimento === "entrada") {
-        atual.entradas += mov.quantidade;
-      } else {
-        atual.saidas += mov.quantidade;
-      }
-
-      mapa.set(mov.produto_id, atual);
-      });
+      const mapa = new Map((json.resumo ?? []).map(total => [total.produto_id, total]));
 
       const linhasCalculadas: LinhaEstoque[] = listaProdutos.map((produto) => {
       const totais = mapa.get(produto.id) ?? { entradas: 0, saidas: 0, movimentacoes: 0 };
@@ -212,7 +191,7 @@ export default function EstoquePage() {
       });
 
       setProdutos(listaProdutos);
-      setMovimentacoes(listaMovimentacoes);
+      setRevisaoHistorico(valor => valor + 1);
       setLinhas(linhasCalculadas);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erro ao carregar estoque.");
@@ -794,7 +773,9 @@ export default function EstoquePage() {
       {produtoMovimentacoesAberto && (
         <MovimentacoesEstoqueModal
           sku={produtoMovimentacoesAberto.sku}
-          movimentacoes={movimentacoesProdutoAberto}
+          key={`${produtoMovimentacoesAberto.id}:${revisaoHistorico}`}
+          produtoId={produtoMovimentacoesAberto.id}
+          token={session?.access_token ?? ""}
           onFechar={() => setProdutoMovimentacoesAberto(null)}
         />
       )}
