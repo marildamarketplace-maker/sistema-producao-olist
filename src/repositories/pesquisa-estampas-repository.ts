@@ -1,3 +1,5 @@
+import type { ReferenciaFotoEstampa } from "@/domain/referencia-foto-estampa";
+import { criteriosReferenciaFotoSql } from "./referencia-foto-estampa-sql";
 import { CRITERIOS_FLEXIVEIS_ESTAMPAS, validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
 import type { FacetasDesignPesquisa, FiltrosDesignPesquisa } from "@/domain/pesquisa-estampas-design";
 import { filtrosDesignEstampasSql } from "@/repositories/filtros-design-estampas-sql";
@@ -35,6 +37,7 @@ export type StatusPesquisaEstampas =
   (typeof STATUS_PESQUISA_ESTAMPAS)[number];
 
 export type FiltrosSelecaoEstampas = FiltrosDesignPesquisa & {
+  referenciaFoto?: ReferenciaFotoEstampa;
   modoCores?: "TODAS" | "QUALQUER";
   consulta?: string;
   preferencias?: string[];
@@ -134,9 +137,9 @@ export async function pesquisarCatalogoEstampas(filtros: FiltrosPesquisaEstampas
 
 function prepararSelecaoEstampas(filtros: FiltrosSelecaoEstampas) {
   const consulta = normalizarTexto(filtros.consulta);
-  const preferencias = validarPreferenciasPesquisa(filtros.preferencias);
+  const preferencias = validarPreferenciasPesquisa(filtros.referenciaFoto ? [] : filtros.preferencias);
   const obrigatorios = { ...filtros };
-  const adicionais: Array<{ termo: string; teste: Prisma.Sql }> = [];
+  const adicionais = criteriosReferenciaFotoSql(filtros.referenciaFoto);
   for (const campo of preferencias) {
     if (campo === "consulta") continue;
     const valor = filtros[campo];

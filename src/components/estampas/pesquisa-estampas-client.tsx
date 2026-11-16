@@ -1,5 +1,7 @@
 "use client";
 
+import { prepararFotoBuscaVisual } from "@/services/prepararFotoBuscaVisual";
+import { BuscaImagemEstampas } from "./busca-imagem-estampas";
 import { CRITERIOS_FLEXIVEIS_ESTAMPAS } from "@/domain/preferencias-pesquisa-estampas";
 import type { CorrespondenciaEstampa } from "@/domain/consulta-profissional-estampas";
 import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas";
@@ -90,6 +92,9 @@ export function PesquisaEstampasClient() {
   const [carregandoFacetas, setCarregandoFacetas] = useState(false);
   const [erroFacetas, setErroFacetas] = useState<string | null>(null);
   const [tentativaFacetas, setTentativaFacetas] = useState(0);
+  const [fotoPendente, setFotoPendente] = useState<File | null>(null);
+  const [fotoBusca, setFotoBusca] = useState<File | null>(null);
+  const consultaVisual = useRef<string | null>(null);
   const [resultado, setResultado] = useState<ResultadoPesquisaEstampasCatalogo | null>(null);
   const [pagina, setPagina] = useState(estadoInicial.pagina);
   const [porPagina, setPorPagina] = useState(estadoInicial.porPagina);
@@ -117,13 +122,30 @@ export function PesquisaEstampasClient() {
   const buscar = useCallback(async (signal: AbortSignal) => {
     if (!carregadorPaginas || !filtros) return;
     const params = criarQueryPesquisaEstampas(filtros, pagina, ordenacao, porPagina);
-    setCarregando(!carregadorPaginas.obterPronta(params));
+    setCarregando(fotoBusca ? true : !carregadorPaginas.obterPronta(params));
     setErro(null);
     try {
-      const dados = await carregadorPaginas.carregar(params);
+      let dados: ResultadoPesquisaEstampasCatalogo;
+      if (fotoBusca) {
+        const body = new FormData();
+        body.set("parametros", params.toString());
+        if (consultaVisual.current) body.set("consultaId", consultaVisual.current);
+        else body.set("foto", await prepararFotoBuscaVisual(fotoBusca), "referencia.jpg");
+        const response = await fetch("/api/estampas/pesquisa-imagem", {
+          method: "POST", headers: { Authorization: `Bearer ${session?.access_token}` }, body, signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          if (response.status === 410) consultaVisual.current = null;
+          throw new Error(payload.error ?? "Erro ao buscar por imagem.");
+        }
+        if (signal.aborted) return;
+        consultaVisual.current = payload.consultaId;
+        dados = payload;
+      } else dados = await carregadorPaginas.carregar(params);
       if (signal.aborted) return;
       setResultado(dados);
-      if (pagina < dados.totalPaginas) {
+      if (!fotoBusca && pagina < dados.totalPaginas) {
         const proxima = criarQueryPesquisaEstampas(filtros, pagina + 1, ordenacao, porPagina);
         // Prefetch é opcional: falhas não interrompem a página atual e permitem retry ao navegar.
         void carregadorPaginas.carregar(proxima).catch(() => {});
@@ -134,7 +156,7 @@ export function PesquisaEstampasClient() {
     } finally {
       if (!signal.aborted) setCarregando(false);
     }
-  }, [filtros, ordenacao, pagina, porPagina, carregadorPaginas]);
+  }, [filtros, ordenacao, pagina, porPagina, carregadorPaginas, fotoBusca, session?.access_token]);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -160,6 +182,9 @@ export function PesquisaEstampasClient() {
   }, [form.status, session?.access_token, tentativaFacetas]);
 
   useEffect(() => {
+    setFotoBusca(null);
+    setFotoPendente(null);
+    consultaVisual.current = null;
     const estado = lerEstadoUrlPesquisaEstampas(new URLSearchParams(queryAtual));
     const filtrosUrl = copiarFiltrosPesquisaEstampas(estado.filtros);
     setForm(filtrosUrl);
@@ -215,6 +240,18 @@ export function PesquisaEstampasClient() {
   }
 
   function aplicarPesquisa() {
+    if (fotoPendente) {
+      if (fotoPendente !== fotoBusca) consultaVisual.current = null;
+      setFotoBusca(fotoPendente);
+      filtrosAntesDoModal.current = null;
+      setFiltrosAvancadosAbertos(false);
+      setErro(null);
+      setResultado(null);
+      setPagina(1);
+      setOrdenacao("RELEVANCIA");
+      setFiltros({ ...copiarFiltrosPesquisaEstampas(form), preferencias: [] });
+      return;
+    }
     if (!temFiltroPesquisaEstampas(form) && filtrosAvancadosAbertos) {
       filtrosAntesDoModal.current = null;
       limpar();
@@ -249,6 +286,9 @@ export function PesquisaEstampasClient() {
   }
 
   function limpar() {
+    setFotoPendente(null);
+    setFotoBusca(null);
+    consultaVisual.current = null;
     setForm(copiarFiltrosPesquisaEstampas(FILTROS_INICIAIS));
     setFiltros(null);
     setResultado(null);
@@ -267,6 +307,15 @@ export function PesquisaEstampasClient() {
     proximaOrdenacao: OrdenacaoUrlPesquisaEstampas,
     proximoPorPagina = porPagina,
   ) {
+    if (fotoBusca) {
+      setPagina(proximaPagina);
+      setPorPagina(proximoPorPagina);
+      setOrdenacao("RELEVANCIA");
+      setResultado(null);
+      setForm(copiarFiltrosPesquisaEstampas(proximosFiltros));
+      setFiltros({ ...copiarFiltrosPesquisaEstampas(proximosFiltros), preferencias: [] });
+      return;
+    }
     const query = criarQueryPesquisaEstampas(
       proximosFiltros,
       proximaPagina,
@@ -340,6 +389,15 @@ export function PesquisaEstampasClient() {
         </section>
       )}
 
+      <BuscaImagemEstampas token={session?.access_token} foto={fotoPendente} carregando={carregando}
+        onFoto={(foto) => {
+          setFotoPendente(foto);
+          if (!foto) {
+            setFotoBusca(null); consultaVisual.current = null;
+            setResultado(null); setFiltros(null); setErro(null); setCarregando(false); setPagina(1);
+          }
+        }} onBuscar={aplicarPesquisa} />
+
       <form onSubmit={pesquisar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:space-y-5 sm:p-5">
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Pesquisa geral</span>
@@ -366,7 +424,7 @@ export function PesquisaEstampasClient() {
           </button>
           <div className="flex flex-wrap gap-2 sm:gap-3">
           <button type="button" onClick={limpar} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><span className="sm:hidden">Limpar</span><span className="hidden sm:inline">Limpar filtros</span></button>
-          <button type="submit" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Pesquisar</button>
+          <button type="submit" disabled={carregando} className="disabled:opacity-50 inline-flex min-h-11 items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"><Search className="h-4 w-4" /> Pesquisar</button>
           </div>
         </div>
       </form>
@@ -382,7 +440,7 @@ export function PesquisaEstampasClient() {
         />
       )}
 
-      {erro && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
+      {erro && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
 
       {filtros && <div className="flex flex-wrap gap-2" aria-label="Filtros aplicados">
         {chipsFiltros(filtros).map(({ campo, valor, rotulo }) => (
@@ -391,7 +449,7 @@ export function PesquisaEstampasClient() {
             if (campo === "cores") proximos.cores = proximos.cores.filter((cor) => cor !== valor);
             else if (campo === "status") proximos.status = "";
             else Object.assign(proximos, { [campo]: "" });
-            if (temFiltroPesquisaEstampas(proximos)) atualizarUrl(proximos, 1, ordenacao);
+            if (fotoBusca || temFiltroPesquisaEstampas(proximos)) atualizarUrl(proximos, 1, ordenacao);
             else limpar();
           }} className="inline-flex items-center gap-2 min-h-11 sm:min-h-0 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 disabled:opacity-50" aria-label={`Remover ${rotulo}: ${valor}`}>
             {rotulo}: {campo === "status" ? rotulosStatus[valor] : valor} · {filtros.preferencias.includes(campo) && !(campo === "consulta" && extrairReferenciaCodigo(filtros.consulta)) ? "Preferência" : "Obrigatório"}<X className="h-3 w-3" />
@@ -400,6 +458,11 @@ export function PesquisaEstampasClient() {
       </div>}
       {carregando && <p role="status" className="text-sm text-slate-600">Pesquisando estampas...</p>}
 
+      {resultado?.imagem && <p role="status" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+        A foto foi analisada pela mesma IA usada no catálogo. Resultados ordenados pelos atributos identificados:
+        {" "}{resultado.imagem.criterios.join(" · ")}. Esta busca considera motivos, cores e estilo, não comparação visual direta.
+        {" "}Os filtros preenchidos são obrigatórios. A foto não faz parte do link compartilhável.
+      </p>}
       {resultado?.cobertura && filtros && (
         <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" aria-label="Como a consulta foi atendida">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -430,6 +493,7 @@ export function PesquisaEstampasClient() {
             Ordenar por
             <select
               value={ordenacao}
+              disabled={Boolean(fotoBusca)}
               onChange={(event) => {
                 if (filtros) {
                   atualizarUrl(
@@ -441,7 +505,7 @@ export function PesquisaEstampasClient() {
               }}
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
             >
-              <option value="RELEVANCIA">Correspondência e relevância</option>
+              <option value="RELEVANCIA">{fotoBusca ? "Atributos da foto" : "Correspondência e relevância"}</option>
               <option value="RECENTES">Mais recentes</option>
               <option value="CODIGO_ASC">Código crescente</option>
               <option value="CODIGO_DESC">Código decrescente</option>
@@ -450,7 +514,8 @@ export function PesquisaEstampasClient() {
           <button
             type="button"
             onClick={compartilharResultado}
-            disabled={carregando}
+            disabled={carregando || Boolean(fotoBusca)}
+            title={fotoBusca ? "A foto é temporária e não pode ser compartilhada por link." : undefined}
             className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
           >
             {linkCopiado ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
@@ -476,7 +541,7 @@ export function PesquisaEstampasClient() {
       )}
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {resultado?.estampas.map((estampa) => (
+        {!carregando && resultado?.estampas.map((estampa) => (
           <EstampaCard
             key={estampa.id}
             estampa={estampa}

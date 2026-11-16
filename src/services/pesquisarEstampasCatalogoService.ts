@@ -1,3 +1,4 @@
+import type { ReferenciaFotoEstampa } from "@/domain/referencia-foto-estampa";
 import { unstable_cache } from "next/cache";
 import { validarPreferenciasPesquisa } from "@/domain/preferencias-pesquisa-estampas";
 import { planejarConsultaEstampas, type CorrespondenciaEstampa } from "@/domain/consulta-profissional-estampas";
@@ -94,6 +95,7 @@ export type EstampaPesquisaCatalogo = {
 };
 
 export type ResultadoPesquisaEstampasCatalogo = {
+  imagem?: { criterios: string[] };
   estampas: EstampaPesquisaCatalogo[];
   total: number;
   cobertura: { termos: string[]; excluidos: string[]; minima: number; completas: number; parciais: number } | null;
@@ -105,6 +107,7 @@ export type ResultadoPesquisaEstampasCatalogo = {
 
 export async function pesquisarEstampasCatalogo(
   entrada: EntradaPesquisaEstampasCatalogo,
+  referenciaFoto?: ReferenciaFotoEstampa,
 ): Promise<ResultadoPesquisaEstampasCatalogo> {
   const design: FiltrosDesignPesquisa = {};
   for (const { campo } of FILTROS_DESIGN_PESQUISA) {
@@ -115,7 +118,7 @@ export async function pesquisarEstampasCatalogo(
   const modoCores = validarOpcao(entrada.modoCores, ["TODAS", "QUALQUER"] as const, "Modo de cores inválido.") ?? "TODAS";
   const consulta = texto(entrada.consulta, "consulta", 200);
   planejarConsultaEstampas(consulta);
-  const preferencias = validarPreferenciasPesquisa(entrada.preferencias);
+  const preferencias = validarPreferenciasPesquisa(referenciaFoto ? [] : entrada.preferencias);
   const correspondenciaMinima = inteiro(entrada.correspondenciaMinima ?? 1, "correspondenciaMinima", 1, 100);
   const codigo = texto(entrada.codigo, "codigo", 80);
   const variante = texto(entrada.variante, "variante", 40);
@@ -145,7 +148,7 @@ export async function pesquisarEstampasCatalogo(
     "Conteúdo de imagem inválido.",
   );
   const status = validarStatus(entrada.status || "COMPLETED");
-  if (!temFiltroPesquisaEstampas({
+  if (!referenciaFoto && !temFiltroPesquisaEstampas({
     ...design,
     consulta,
     codigo,
@@ -170,9 +173,10 @@ export async function pesquisarEstampasCatalogo(
   const pagina = inteiro(entrada.pagina ?? 1, "pagina", 1, 1_000_000);
   const porPagina = inteiro(entrada.porPagina ?? 24, "porPagina", 1, 60);
   const ordenacao = validarOrdenacao(
-    entrada.ordenacao ?? (consulta || preferencias.some((campo) => campo !== "consulta" && entrada[campo]) ? "RELEVANCIA" : "RECENTES"),
+    referenciaFoto ? "RELEVANCIA" : entrada.ordenacao ?? (consulta || preferencias.some((campo) => campo !== "consulta" && entrada[campo]) ? "RELEVANCIA" : "RECENTES"),
   );
   const filtros: FiltrosSelecaoEstampas = {
+    referenciaFoto,
     ...design,
     modoCores,
     correspondenciaMinima,
@@ -197,10 +201,11 @@ export async function pesquisarEstampasCatalogo(
     somenteAtivas: true,
   };
   const [resultado, totais] = await Promise.all([
-    listarPaginaComCache({ ...filtros, ordenacao, limite: porPagina, offset: (pagina - 1) * porPagina }),
-    contarCatalogoComCache(filtros),
+    (referenciaFoto ? listarPaginaSerializada : listarPaginaComCache)({ ...filtros, ordenacao, limite: porPagina, offset: (pagina - 1) * porPagina }),
+    (referenciaFoto ? contarCatalogoEstampas : contarCatalogoComCache)(filtros),
   ]);
   return {
+    ...(referenciaFoto ? { imagem: { criterios: resultado.criterios } } : {}),
     estampas: resultado.estampas,
     total: totais.total,
     cobertura: resultado.criterios.length ? {
@@ -224,8 +229,7 @@ const contarCatalogoComCache = unstable_cache(
   cachePesquisaEstampas,
 );
 
-const listarPaginaComCache = unstable_cache(
-  async (filtros: FiltrosPesquisaEstampas) => {
+const listarPaginaSerializada = async (filtros: FiltrosPesquisaEstampas) => {
     const resultado = await listarPaginaCatalogoEstampas(filtros);
     return {
       criterios: resultado.criterios,
@@ -247,7 +251,10 @@ const listarPaginaComCache = unstable_cache(
         relevancia: Number(estampa.relevancia),
       })),
     };
-  },
+  };
+
+const listarPaginaComCache = unstable_cache(
+  listarPaginaSerializada,
   ["pesquisa-estampas", "pagina", "v1"],
   cachePesquisaEstampas,
 );
