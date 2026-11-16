@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type BuscaSkuJob } from "@prisma/client";
 import { ErroAnotarSku, ESTADOS_ABERTOS_SKU, type ItemSku } from "@/lib/anotar-sku/contrato";
+import { aplicativoTemJob, CHAVES_JOB, CHAVE_CONFIG_JOB_ANOTAR_SKU } from "@/lib/aplicativo-jobs";
 
 type Tx = Prisma.TransactionClient;
 export type EscopoSku = { id: string; aplicativoId: string; podeVisualizar: boolean };
@@ -12,6 +13,35 @@ export async function travarAplicativoSku(tx: Tx, aplicativoId: string) {
 }
 const aberto = { status: { in: ESTADOS_ABERTOS_SKU } };
 const liberar = { reservaId: null, reservaAte: null };
+
+// O mesmo critério vale para a primeira reserva e para a recuperação após queda.
+// Comparação por chave inteira, ignorando espaços e caixa, como aplicativoTemJob.
+const processamentoPermitido = Prisma.sql`
+  EXISTS (SELECT 1 FROM configuracoes_jobs c WHERE c.chave = ${CHAVE_CONFIG_JOB_ANOTAR_SKU} AND NOT c.pausado)
+  AND EXISTS (
+    SELECT 1 FROM aplicativo a, regexp_split_to_table(coalesce(a.jobs, ''), ',') AS permissao(chave)
+    WHERE a.id = j.aplicativo_id AND upper(btrim(permissao.chave)) = ${CHAVES_JOB.ANOTAR_SKU}
+  )
+`;
+
+async function disponibilidade(db: Pick<Tx, "configuracaoJob" | "aplicativo">, aplicativoId: string) {
+  const [configuracao, aplicativo] = await Promise.all([
+    db.configuracaoJob.findUnique({ where: { chave: CHAVE_CONFIG_JOB_ANOTAR_SKU }, select: { pausado: true } }),
+    db.aplicativo.findUnique({ where: { id: aplicativoId }, select: { jobs: true } }),
+  ]);
+  const permitido = aplicativoTemJob(aplicativo?.jobs, CHAVES_JOB.ANOTAR_SKU);
+  const motivoPausa = !permitido
+    ? "O processamento automático de SKUs não está habilitado para este aplicativo. Solicite a liberação ao administrador."
+    : !configuracao || configuracao.pausado
+      ? "Novas buscas e retomadas estão temporariamente pausadas na configuração do processamento. O histórico continua disponível."
+      : null;
+  return { habilitado: !motivoPausa, motivoPausa, permitido };
+}
+
+async function exigirProcessamentoPermitido(tx: Tx, aplicativoId: string) {
+  const estado = await disponibilidade(tx, aplicativoId);
+  if (!estado.habilitado) throw new ErroAnotarSku(estado.motivoPausa!, estado.permitido ? 503 : 403);
+}
 
 export function criarRepositorioAnotarSku(db: PrismaClient) {
   async function comReserva<T>(r: ReservaSku, executar: (tx: Tx, atual: BuscaSkuJob) => Promise<T>, travarApp = false) {
@@ -32,6 +62,14 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
     } });
   }
   return {
+    async estaPausado() {
+      const configuracao = await db.configuracaoJob.findUnique({ where: { chave: CHAVE_CONFIG_JOB_ANOTAR_SKU }, select: { pausado: true } });
+      return configuracao?.pausado ?? true;
+    },
+    async disponibilidade(aplicativoId: string) {
+      const { habilitado, motivoPausa } = await disponibilidade(db, aplicativoId);
+      return { habilitado, motivoPausa };
+    },
     async criar(escopo: EscopoSku, entrada: { chave: string; situacoes: string[] }) {
       return db.$transaction(async tx => {
         await travarAplicativoSku(tx, escopo.aplicativoId);
@@ -42,6 +80,7 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
           if (JSON.stringify(anterior.situacoes) !== JSON.stringify(entrada.situacoes)) throw new ErroAnotarSku("Esta solicitação já foi utilizada com outras situações. Atualize a página.");
           return anterior;
         }
+        await exigirProcessamentoPermitido(tx, escopo.aplicativoId);
         if (await tx.buscaSkuJob.findFirst({ where: { aplicativoId: escopo.aplicativoId, ...aberto } })) {
           throw new ErroAnotarSku("Já existe uma busca em aberto neste aplicativo. Aguarde, retome ou cancele essa busca.");
         }
@@ -64,6 +103,7 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
         if (!job) throw new ErroAnotarSku("Busca não encontrada.", 404);
         if (acao === "cancelar" && job.status === "CANCELADO") return job;
         if (acao === "retomar" && job.status !== "FALHOU") throw new ErroAnotarSku("Somente buscas com falha podem ser retomadas.");
+        if (acao === "retomar") await exigirProcessamentoPermitido(tx, escopo.aplicativoId);
         if (!ESTADOS_ABERTOS_SKU.includes(job.status)) throw new ErroAnotarSku("Esta busca já foi encerrada.");
         // O UPDATE condicional também protege contra conclusão concorrente pelo worker.
         const atualizado = await tx.buscaSkuJob.updateMany({ where: { id, status: job.status }, data: {
@@ -88,15 +128,15 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
     async reservar(): Promise<ReservaSku | null> {
       const reservaId = randomUUID();
       // Esgotamento após crash conta como falha de operação, não como uma rodada normal do cron.
-      await db.$executeRaw`UPDATE busca_sku_jobs SET status = 'FALHOU', reserva_id = NULL, reserva_ate = NULL,
+      await db.$executeRaw`UPDATE busca_sku_jobs j SET status = 'FALHOU', reserva_id = NULL, reserva_ate = NULL,
         erro = 'O processamento foi interrompido repetidamente. Retome a busca para tentar novamente.',
         erro_codigo = 'RESERVA_EXPIRADA', updated_at = now()
-        WHERE status = 'PROCESSANDO' AND reserva_ate <= now() AND tentativas >= 5`;
+        WHERE status = 'PROCESSANDO' AND reserva_ate <= now() AND tentativas >= 5 AND ${processamentoPermitido}`;
       const rows = await db.$queryRaw<{ id: string }[]>`
         WITH candidato AS (
-          SELECT id FROM busca_sku_jobs
+          SELECT j.id FROM busca_sku_jobs j
           WHERE ((status IN ('PENDENTE', 'AGUARDANDO_RETRY') AND proxima_tentativa_em <= now())
-            OR (status = 'PROCESSANDO' AND reserva_ate <= now())) AND tentativas < 5
+            OR (status = 'PROCESSANDO' AND reserva_ate <= now())) AND tentativas < 5 AND ${processamentoPermitido}
           ORDER BY proxima_tentativa_em, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
         ) UPDATE busca_sku_jobs j SET status = 'PROCESSANDO', reserva_id = ${reservaId}::uuid,
           reserva_ate = now() + interval '180 seconds', tentativas = tentativas + 1, updated_at = now()

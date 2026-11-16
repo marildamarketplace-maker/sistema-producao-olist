@@ -7,13 +7,14 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
-  if (process.env.ANOTAR_SKU_ASYNC_ENABLED !== "true") return NextResponse.json({ pausado: true });
   const prazo = Date.now() + 240_000;
   try {
     const [{ prisma }, { criarRepositorioAnotarSku }, { clienteAnotarSku }, { executarFilaSku }] = await Promise.all([
       import("@/lib/prisma"), import("@/repositories/anotar-sku-repository"), import("@/lib/anotar-sku/olist"), import("@/services/processarAnotarSkuService"),
     ]);
-    const resultado = await executarFilaSku(criarRepositorioAnotarSku(prisma), clienteAnotarSku, { prazo });
+    const repo = criarRepositorioAnotarSku(prisma);
+    if (await repo.estaPausado()) return NextResponse.json({ pausado: true });
+    const resultado = await executarFilaSku(repo, clienteAnotarSku, { prazo });
     console.info("[anotar-sku-cron] Rodada concluída.", resultado);
     return NextResponse.json({ ok: true, ...resultado });
   } catch {

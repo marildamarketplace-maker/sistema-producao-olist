@@ -6,7 +6,6 @@ import { criarRepositorioAnotarSku, type EscopoSku } from "@/repositories/anotar
 import type { BuscaSkuJob } from "@prisma/client";
 
 export const repoSku = criarRepositorioAnotarSku(prisma);
-export const filaSkuHabilitada = () => process.env.ANOTAR_SKU_ASYNC_ENABLED === "true";
 export async function autenticarSku(request: Request, permissao: "read" | "write" | "jobs") {
   let autenticado: Awaited<ReturnType<typeof getUsuarioAutenticado>>;
   try { autenticado = await getUsuarioAutenticado(request); }

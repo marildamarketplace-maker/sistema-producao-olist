@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       select: { podeVisualizarCategoriasMidia: true },
     });
 
-    if (!usuario?.podeVisualizarCategoriasMidia) {
+    if (!autenticado.aplicativoId || !usuario?.podeVisualizarCategoriasMidia) {
       return NextResponse.json({ error: "Sem permissão para consultar o controle de mídia." }, { status: 403 });
     }
 
@@ -27,9 +27,10 @@ export async function GET(request: Request) {
           ativo: true,
         },
       }),
-      prisma.movimentacaoEstoque.findMany({
+      prisma.movimentacaoEstoque.groupBy({
+        by: ["produtoId", "tipoMovimento"],
         where: { aplicativoId: autenticado.aplicativoId },
-        select: { produtoId: true, tipoMovimento: true, quantidade: true },
+        _sum: { quantidade: true },
       }),
       prisma.solicitacaoProducao.findMany({
         where: { aplicativoId: autenticado.aplicativoId, status: "em_producao" },
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
       const sinal = movimentacao.tipoMovimento === "entrada" ? 1 : -1;
       estoquePorProduto.set(
         movimentacao.produtoId,
-        (estoquePorProduto.get(movimentacao.produtoId) ?? 0) + sinal * movimentacao.quantidade,
+        (estoquePorProduto.get(movimentacao.produtoId) ?? 0) + sinal * (movimentacao._sum.quantidade ?? 0),
       );
     }
     const solicitadosPorProduto = new Map(
@@ -87,10 +88,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       produtos: produtosComMidia,
     });
-  } catch (error) {
-    console.error("Erro ao consultar mídias dos produtos:", error);
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao consultar mídias dos produtos." },
+      { error: "Erro ao consultar mídias dos produtos." },
       { status: 500 },
     );
   }
@@ -103,7 +103,7 @@ export async function PATCH(request: Request) {
       where: { id: autenticado.id },
       select: { podeVisualizarCategoriasMidia: true },
     });
-    if (!usuario?.podeVisualizarCategoriasMidia) {
+    if (!autenticado.aplicativoId || !usuario?.podeVisualizarCategoriasMidia) {
       return NextResponse.json({ error: "Sem permissão para atualizar o controle de mídia." }, { status: 403 });
     }
 

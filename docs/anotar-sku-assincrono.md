@@ -2,6 +2,8 @@
 
 A tela registra uma solicitação durável e acompanha seu estado. O cron executa o trabalho sem depender do navegador. O histórico e as exportações CSV, Excel e PDF mantêm o contrato existente; resultados parciais não ficam disponíveis.
 
+As responsabilidades ficam separadas entre contrato/validação, cliente Olist, repositório transacional, serviço de processamento, endpoints e interface. O serviço recebe cliente e repositório por parâmetro, permitindo testar falhas sem serviços externos. As interfaces são específicas deste fluxo; não foi introduzida uma infraestrutura genérica de filas.
+
 ## Fluxo e garantias
 
 1. `POST /api/olist/anotar-sku/jobs` valida sessão, permissão de escrita, situações e chave UUID; retorna `202` com o resumo. O aplicativo vem exclusivamente do usuário autenticado.
@@ -47,7 +49,10 @@ Monitorar respostas do cron, jobs `FALHOU`, reservas expiradas, `proxima_tentati
 ## Validação local
 
 - `node --import tsx --test tests/anotar-sku.test.ts`: validação de entrada, quantidades, retries, perda de reserva e permissões revogadas.
+- `node --import tsx --test tests/anotar-sku-olist.test.ts`: respostas inválidas, paginação, timeout, renovação limitada após 401, classificação HTTP e `Retry-After`, com transporte simulado.
 - `ANOTAR_SKU_TEST_DATABASE_URL=postgresql://.../anotar_sku_test node --import tsx --test tests/anotar-sku-database.test.ts`: banco **local, vazio e descartável**; o teste recusa host remoto e nome inesperado. Aplica a migration sobre as tabelas mínimas do domínio e verifica concorrência com conexões reais, RLS/grants, checkpoints, publicação atômica, API e exportações. Sem a variável, esse teste fica explicitamente ignorado.
 - A validação de interface usa o componente real e o CSS do projeto, com respostas sintéticas locais. Não equivale a integração com Olist, teste em dispositivo físico ou auditoria completa de acessibilidade.
+
+Verificações realizadas em 16/11/2026: testes unitários e PostgreSQL nativo descartável passaram, incluindo rollback de publicação e disputa real entre conexões. No navegador, foram verificadas larguras efetivas de 361, 389, 769, 1280 e 1440px, ausência de overflow da página, tema claro/escuro, áreas de toque, seleção por teclado, contenção/restauração de foco, Escape, retomada, cancelamento, recuperação após recarregar, falta de conexão, histórico vazio e permissões de leitura/escrita separadas. A prévia reservou no desktop a largura da sidebar; não incluiu uma sessão autenticada no shell completo.
 
 Migration, ativação, deploy e validação com Olist de produção são etapas operacionais separadas da implementação local.

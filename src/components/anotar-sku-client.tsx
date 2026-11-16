@@ -61,6 +61,7 @@ function CartaoJob({ job, ocupado, pausado, gerenciar, visualizar, podeVisualiza
 export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }: { token: string; podeEscrever: boolean; podeVisualizar: boolean; escopo: string }) {
   const [selecionadas, setSelecionadas] = useState(["0"]), [jobs, setJobs] = useState<JobSkuResumo[]>([]), [buscas, setBuscas] = useState<Busca[]>([]);
   const [emAberto, setEmAberto] = useState(false), [habilitado, setHabilitado] = useState(false), [carregando, setCarregando] = useState(true), [atualizando, setAtualizando] = useState(false);
+  const [motivoPausa, setMotivoPausa] = useState<string | null>(null);
   const [erroAtualizacao, setErroAtualizacao] = useState<string | null>(null), [erro, setErro] = useState<string | null>(null), [mensagem, setMensagem] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null), [pendente, setPendente] = useState<Pendente | null>(null), [detalhe, setDetalhe] = useState<Detalhe | null>(null);
   const [confirmacao, setConfirmacao] = useState<{ tipo: "cancelar" | "excluir"; id: string } | null>(null), [erroDialogo, setErroDialogo] = useState<string | null>(null), [maisJobs, setMaisJobs] = useState(false);
@@ -85,6 +86,7 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }:
       const payload = await resposta.json(); if (!resposta.ok) throw new Error(payload.error ?? "Não foi possível acompanhar a busca.");
       if (controller.signal.aborted) return;
       setJobs(payload.jobs); setEmAberto(payload.emAberto); setHabilitado(payload.habilitado);
+      setMotivoPausa(payload.motivoPausa ?? null);
       jobsCarregados.current = true;
       const conclusoes = JSON.stringify((payload.jobs as JobSkuResumo[]).filter(j => j.status === "CONCLUIDO").map(j => [j.id, j.buscaId]));
       if (podeVisualizar && (!historicoCarregado.current || recarregarHistorico || conclusoes !== conclusoesAnteriores.current)) {
@@ -149,7 +151,7 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }:
     {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{erro}</p>}
     {mensagem && <p ref={mensagemRef} tabIndex={-1} role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:text-emerald-200">{mensagem}</p>}
     {erroAtualizacao && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><p className="min-w-0 flex-1">{erroAtualizacao} A falha de atualização da tela não cancela uma busca já registrada.</p><button type="button" className={botao} onClick={() => void atualizar(true)} disabled={atualizando}>Tentar atualizar</button></div>}
-    {!carregando && !habilitado && !erroAtualizacao && <p role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Novas buscas e retomadas estão temporariamente pausadas. O histórico continua disponível.</p>}
+    {!carregando && !habilitado && !erroAtualizacao && <p role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{motivoPausa ?? "Novas buscas e retomadas estão temporariamente pausadas. O histórico continua disponível."}</p>}
     <div className="grid items-start gap-6 xl:grid-cols-2">
       {podeEscrever && <section className={`${emAberto ? "order-2" : "order-1"} rounded-lg border border-slate-200 bg-white p-4 sm:p-6 xl:order-1`} aria-labelledby="sku-nova">
         <h2 id="sku-nova" className="text-lg font-semibold text-slate-900">Nova busca</h2><p className="mt-1 text-sm text-slate-600">Escolha as situações dos pedidos. Os já registrados no histórico serão ignorados.</p>

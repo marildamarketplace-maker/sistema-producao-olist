@@ -15,7 +15,9 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   t.after(() => db.$disconnect());
   const [existentes] = await db.$queryRaw<{ total: number }[]>`SELECT count(*)::int AS total FROM pg_tables WHERE schemaname = 'public'`;
   assert.equal(existentes.total, 0, "O banco de teste precisa estar vazio.");
-  await db.$executeRawUnsafe(`CREATE TABLE aplicativo(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), nome text NOT NULL);`);
+  await db.$executeRawUnsafe(`CREATE TABLE aplicativo(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), nome text NOT NULL, jobs text NOT NULL DEFAULT 'ANOTAR_SKU');`);
+  await db.$executeRawUnsafe(`CREATE TABLE configuracoes_jobs(chave text PRIMARY KEY, pausado bool NOT NULL DEFAULT true, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), termos_ignorados_nome_arquivo text[] DEFAULT '{}', variantes_permitidas text[] DEFAULT '{}');`);
+  await db.$executeRawUnsafe(`INSERT INTO configuracoes_jobs(chave,pausado) VALUES ('processar-anotar-sku',false);`);
   await db.$executeRawUnsafe(`CREATE TABLE usuario(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), aplicativo_id uuid NOT NULL REFERENCES aplicativo(id), nome text, email text, ativo bool DEFAULT true,
     pode_escrever_anotar_sku bool DEFAULT true, pode_visualizar_anotar_sku bool DEFAULT true, vendedor_olist_id text, pode_editar_configuracao bool DEFAULT false,
     pode_visualizar_olist_formas_pagamento bool DEFAULT false, pode_visualizar_olist_formas_recebimento bool DEFAULT false);`);
@@ -67,6 +69,46 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const reservas = await Promise.all([repo.reservar(), repo.reservar()]);
     assert.equal(reservas.filter(Boolean).length, 1);
     await repo.agir(escopo, resultados[0].id, "cancelar");
+  });
+  await t.test("configuração ausente/pausada bloqueia criação e reserva; reativação preserva progresso", async () => {
+    const j = await nova(); await detalhamento(["700"]);
+    await db.$executeRaw`DELETE FROM configuracoes_jobs WHERE chave='processar-anotar-sku'`;
+    assert.equal(await repo.estaPausado(), true);
+    assert.equal((await repo.disponibilidade(app)).habilitado, false);
+    assert.equal(await repo.reservar(), null);
+    const repetida = await repo.criar(escopo, { chave: j.chave, situacoes: j.situacoes }); assert.equal(repetida.id, j.id);
+    await repo.agir(escopo, j.id, "cancelar");
+    await assert.rejects(nova(), /pausadas/);
+    await db.$executeRaw`INSERT INTO configuracoes_jobs(chave,pausado) VALUES ('processar-anotar-sku',true)`;
+    await assert.rejects(nova(), /pausadas/);
+    await db.$executeRaw`UPDATE configuracoes_jobs SET pausado=false WHERE chave='processar-anotar-sku'`;
+    const novo = await nova(); await detalhamento(["701"]);
+    const r = await reserva(); await repo.falhar(r, "Falha de teste", "TESTE", null);
+    await db.$executeRaw`UPDATE configuracoes_jobs SET pausado=true WHERE chave='processar-anotar-sku'`;
+    await assert.rejects(repo.agir(escopo, novo.id, "retomar"), /pausadas/);
+    await db.$executeRaw`UPDATE configuracoes_jobs SET pausado=false WHERE chave='processar-anotar-sku'`;
+    await repo.agir(escopo, novo.id, "retomar");
+    const retomado = await reserva(); assert.equal(retomado.encontrados, 1); assert.equal(retomado.etapa, "DETALHAMENTO");
+    await repo.agir(escopo, novo.id, "cancelar");
+  });
+  await t.test("permissão por aplicativo filtra novas reservas e recuperação sem afetar outros apps", async () => {
+    const j = await nova(); const r = await reserva();
+    await db.$executeRaw`UPDATE aplicativo SET jobs='OUTRO_ANOTAR_SKU, ANOTAR_SKU_EXTRA' WHERE id=${app}::uuid`;
+    await db.$executeRaw`UPDATE busca_sku_jobs SET reserva_ate=now()-interval '1 second' WHERE id=${j.id}::uuid`;
+    assert.equal((await repo.disponibilidade(app)).habilitado, false);
+    assert.equal(await repo.reservar(), null);
+    assert.equal((await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } })).tentativas, r.tentativas);
+    const outroEscopo = { id: outroUser, aplicativoId: outroApp, podeVisualizar: true };
+    const outro = await repo.criar(outroEscopo, { chave: crypto.randomUUID(), situacoes: ["0"] });
+    assert.equal((await reserva()).id, outro.id);
+    await repo.agir(outroEscopo, outro.id, "cancelar");
+    await db.$executeRaw`UPDATE aplicativo SET jobs=' NOTIFICAR , anotar_sku , RENOVAR_TOKENS ' WHERE id=${app}::uuid`;
+    assert.equal((await repo.disponibilidade(app)).habilitado, true);
+    assert.equal((await reserva()).id, j.id);
+    await repo.agir(escopo, j.id, "cancelar");
+    await db.$executeRaw`UPDATE aplicativo SET jobs='' WHERE id=${app}::uuid`;
+    await assert.rejects(nova(), /não está habilitado para este aplicativo/);
+    await db.$executeRaw`UPDATE aplicativo SET jobs='ANOTAR_SKU' WHERE id=${app}::uuid`;
   });
   await t.test("retomada após expiração impede gravação do worker anterior", async () => {
     const j = await nova(); await detalhamento(["10"]);
@@ -150,7 +192,9 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   });
   await t.test("API exige sessão/permissão, não expõe reserva e exporta só resultados", async () => {
     Object.assign(globalThis, { prisma: db });
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticio"; process.env.ANOTAR_SKU_ASYNC_ENABLED = "true";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticio";
+    // A antiga variável não deve mais controlar a disponibilidade.
+    process.env.ANOTAR_SKU_ASYNC_ENABLED = "false";
     const { supabaseAdmin } = await import("../src/lib/supabase-admin");
     t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: user, email: "sku@example.test" } }, error: null }));
     const api = await import("../src/app/api/olist/anotar-sku/jobs/route");
@@ -158,6 +202,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const historico = await import("../src/app/api/olist/anotar-sku/route");
     const req = (method = "GET", body?: unknown, token = true) => new Request("https://example.test/api", { method, headers: token ? { Authorization: "Bearer teste" } : {}, ...(body ? { body: JSON.stringify(body) } : {}) });
     assert.equal((await api.GET(req("GET", undefined, false))).status, 401);
+    assert.equal((await (await api.GET(req())).json()).habilitado, true);
     assert.equal((await api.POST(req("POST", { chave: "x", situacoes: ["0"] }))).status, 400);
     const resposta = await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"] })); assert.equal(resposta.status, 202);
     const json = await resposta.json(); assert.equal(json.job.status, "PENDENTE"); assert.equal("reservaId" in json.job, false); assert.equal("solicitadoPor" in json.job, false);
@@ -177,7 +222,14 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     }
     const cron = await import("../src/app/api/cron/processar-anotar-sku/route");
     delete process.env.CRON_SECRET; assert.equal((await cron.GET(req())).status, 401);
-    process.env.CRON_SECRET = "teste"; process.env.ANOTAR_SKU_ASYNC_ENABLED = "false";
+    process.env.CRON_SECRET = "teste";
+    await db.$executeRaw`UPDATE configuracoes_jobs SET pausado=true WHERE chave='processar-anotar-sku'`;
     assert.deepEqual(await (await cron.GET(req())).json(), { pausado: true });
+    assert.equal((await (await api.GET(req())).json()).habilitado, false);
+    await db.$executeRaw`UPDATE configuracoes_jobs SET pausado=false WHERE chave='processar-anotar-sku'`;
+    await db.$executeRaw`UPDATE aplicativo SET jobs='' WHERE id=${app}::uuid`;
+    const estado = await (await api.GET(req())).json(); assert.equal(estado.habilitado, false); assert.match(estado.motivoPausa, /este aplicativo/);
+    assert.equal((await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"] }))).status, 403);
+    assert.deepEqual(await (await cron.GET(req())).json(), { ok: true, progresso: 0, retry: 0, falha: 0, reserva_perdida: 0 });
   });
 });

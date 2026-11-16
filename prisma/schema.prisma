@@ -592,6 +592,7 @@ model BuscaSkuJob {
   @@unique([aplicativoId], map: "busca_sku_job_aberto_unico", where: raw("(status NOT IN ('CONCLUIDO', 'CANCELADO'))"))
   @@index([aplicativoId, createdAt])
   @@index([status, proximaTentativaEm])
+  @@index([reservaAte], map: "busca_sku_jobs_expirados_idx", where: raw("(status = 'PROCESSANDO')"))
   @@map("busca_sku_jobs")
 }
 
