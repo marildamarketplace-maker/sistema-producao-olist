@@ -1,3 +1,5 @@
+import { conflitoHorarios } from "@/lib/automatizacao/conflito-horarios";
+import { horariosSchema } from "@/lib/automatizacao/contrato";
 import { revisaoRotina } from "@/lib/automatizacao/revisao-rotina";
 import { lerCorpoLimitado } from "@/lib/ler-corpo-limitado";
 import { z } from "zod";
@@ -207,6 +209,8 @@ async function alterar(request: Request, contexto: Contexto) {
         : undefined;
 
       await prisma.$transaction(async (tx) => {
+        // Serializa validação + gravação por aplicativo, inclusive entre habilidades distintas.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`automatizacao-horarios:${aplicativoId}`}, 0))::text`;
         // O arquivamento de habilidades e o salvamento de rotinas usam a mesma ordem de locks.
         const habilidadeId = dados?.habilidadeId ?? (status?.ativa && id
           ? (await tx.rotinaAutomatizacao.findFirst({ where: { id, aplicativoId, arquivada: false } }))?.habilidadeId
@@ -228,6 +232,17 @@ async function alterar(request: Request, contexto: Contexto) {
         if (id && !atual[0]) throw new ErroHttp(404, "Rotina indisponível.");
         if (esperada && revisaoRotina(atual[0]) !== esperada) {
           throw new ErroHttp(409, "A rotina mudou. Atualize a lista e abra a edição novamente.");
+        }
+        if (!arquivar && (dados || status?.ativa)) {
+          const horarios = dados?.horarios ?? horariosSchema.parse(atual[0].horarios);
+          const outras = await tx.rotinaAutomatizacao.findMany({
+            where: { aplicativoId, ativa: true, arquivada: false, ...(id ? { id: { not: id } } : {}) },
+            select: { nome: true, horarios: true }, orderBy: { nome: "asc" },
+          });
+          const conflito = conflitoHorarios(horarios, outras.map((rotina) => ({
+            nome: rotina.nome, horarios: horariosSchema.parse(rotina.horarios),
+          })));
+          if (conflito) throw new ErroHttp(409, conflito);
         }
         if (status?.ativa || (!id && dados?.ativa)) {
           const app = await tx.aplicativo.findUniqueOrThrow({ where: { id: aplicativoId }, select: { jobs: true, whatsapp: true } });

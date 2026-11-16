@@ -1,7 +1,8 @@
 "use client";
 
+import { LinkBuscaSku } from "./link-busca-sku";
 import { ModalConfirmacaoProducao } from "@/components/modal-confirmacao-producao";
-import Image, { type ImageLoaderProps } from "next/image";
+import { ImagemItemProducao } from "./imagem-item-producao";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -46,10 +47,6 @@ type RespostaListagem = {
 
 const QUANTIDADE_MAXIMA = 2_147_483_647;
 const TOKEN_SESSION_KEY = "confirmacao_producao_public_token";
-
-function imageLoader({ src }: ImageLoaderProps) {
-  return src;
-}
 
 function formatarData(data: string) {
   const [ano, mes, dia] = data.split("-");
@@ -324,23 +321,9 @@ export function ConfirmacaoEntregaProducaoPublica() {
                       {solicitacao.itens.map((item) => (
                         <article key={item.id} className="p-3">
                           <div className="flex gap-3">
-                            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-100">
-                              {item.imagemUrl ? (
-                                <Image
-                                  loader={imageLoader}
-                                  unoptimized
-                                  src={item.imagemUrl}
-                                  alt=""
-                                  fill
-                                  sizes="56px"
-                                  className="object-cover"
-                                />
-                              ) : (
-                                <span className="flex h-full items-center justify-center text-[10px] text-slate-400">Sem foto</span>
-                              )}
-                            </div>
+                            <ImagemItemProducao key={`${item.id}:${item.imagemUrl}`} compacta sku={item.sku} imagemUrl={item.imagemUrl} token={token} endpoint={`/api/public/confirmacao-entrega-producao/itens/${encodeURIComponent(item.id)}/imagem`} />
                             <div className="min-w-0 flex-1">
-                              <p className="break-words text-sm font-bold text-slate-900">{item.sku}</p>
+                              <div className="flex min-w-0 items-center gap-1"><p className="min-w-0 break-all text-sm font-bold text-slate-900">{item.sku}</p><LinkBuscaSku sku={item.sku} /></div>
                               <p className="mt-0.5 text-xs text-slate-500">
                                 Solicitado: {item.quantidadeSolicitada}
                                 {item.tipoCorte === "LASER" ? " · Corte a laser" : ""}

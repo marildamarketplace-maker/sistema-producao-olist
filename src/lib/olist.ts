@@ -634,6 +634,24 @@ export async function obterEstoqueProdutoOlistApi(aplicativoId: string, produtoI
   return response.data;
 }
 
+/** Consulta somente metadados; não baixa anexos nem expõe o token ao navegador. */
+export async function obterAnexosProdutoOlistApi(aplicativoId: string, produtoId: string): Promise<Array<{ url?: string | null }>> {
+  if (!/^\d+$/.test(produtoId)) throw new Error("ID de produto Olist inválido.");
+  const token = await getValidOlistAccessToken(aplicativoId);
+  const config = await getAplicativoOlistConfig(aplicativoId);
+  const url = new URL(`produtos/${produtoId}/anexos`, normalizarBaseUrl(config.apiBaseUrl));
+  const response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) =>
+    axios.get(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20_000,
+      maxRedirects: 0, validateStatus: () => true,
+    }),
+  );
+  validarRespostaAxiosJsonOrThrow(response);
+  if (response.status === 429) throw new LimiteRequisicoesOlistError(esperaRetryAfter(response));
+  if (response.status !== 200 || !Array.isArray(response.data)) throw new Error("Não foi possível consultar imagens no Olist.");
+  return response.data;
+}
+
 export async function listarProdutosOlistApi(
   aplicativoId: string,
   filtros: FiltrosListagemProdutosOlist,

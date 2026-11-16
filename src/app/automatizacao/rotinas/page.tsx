@@ -87,6 +87,7 @@ function Rotinas() {
           </select></label>
         </div>
         <p className="text-sm">Tipo: Executar prompt · Destino: WhatsApp configurado no aplicativo</p>
+        <p className="text-sm">Use horários de São Paulo com pelo menos 15 minutos de intervalo entre si e em relação às outras rotinas ativas. Essa regra também é conferida ao ativar a rotina.</p>
         {form.horarios.map((item, index) => <div key={index} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
           <label className="text-sm">Dia {index + 1}<select className="input mt-1 min-h-11 w-full" value={item.dia} onChange={(e) => editarHorario(index, { dia: Number(e.target.value) })}>{dias.map((dia, i) => <option key={dia} value={i}>{dia}</option>)}</select></label>
           <label className="text-sm">Horário {index + 1}<input type="time" required className="input mt-1 min-h-11 w-full" value={item.hora} onChange={(e) => editarHorario(index, { hora: e.target.value })} /></label>

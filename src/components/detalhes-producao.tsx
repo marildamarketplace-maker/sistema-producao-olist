@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { ImagemItemProducao } from "./imagem-item-producao";
+import { LinkBuscaSku } from "./link-busca-sku";
 import type { ReactNode } from "react";
 import { ArrowLeft, Camera, Download } from "lucide-react";
 import { PageHeader } from "./page-header";
@@ -9,6 +11,7 @@ import { calcularTotaisProducao } from "@/lib/producao-totais";
 
 type Props = {
   producao: DetalheProducao;
+  imagemToken?: string | null;
   fotoUrl: string | null;
   carregandoFoto: boolean;
   erroFoto: string | null;
@@ -26,14 +29,7 @@ function dataHora(valor: string) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(valor));
 }
 
-function ImagemItem({ item }: { item: DetalheProducao["itens"][number] }) {
-  return item.imagemUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={item.imagemUrl} alt={`Produto ${item.sku}`} loading="lazy" className="h-16 w-16 shrink-0 rounded-md border border-slate-200 object-contain" />
-  ) : <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-slate-100 p-1 text-center text-xs text-slate-500">Sem imagem</span>;
-}
-
-export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens, editorObservacao }: Props) {
+export function DetalhesProducao({ producao, imagemToken, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens, editorObservacao }: Props) {
   const entrega = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${producao.dataEntrega}T00:00:00Z`));
   const solicitada = producao.itens.reduce((total, item) => total + item.quantidadeSolicitada, 0);
   const produzida = producao.itens.reduce((total, item) => total + item.quantidadeProduzida, 0);
@@ -78,7 +74,7 @@ export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, 
         {editorItens ?? (producao.itens.length === 0 ? <p className="text-sm text-slate-600">Nenhum item cadastrado nesta solicitação.</p> : <>
           <div className="space-y-4 sm:hidden">
             {producao.itens.map((item) => <article key={item.id} className="min-w-0 rounded-md border border-slate-200 p-3">
-              <div className="flex items-start gap-3"><ImagemItem item={item} /><h4 className="min-w-0 break-all text-sm font-semibold text-slate-900">{item.sku}</h4></div>
+              <div className="flex items-start gap-3"><ImagemItemProducao key={`${item.id}:${item.imagemUrl}`} sku={item.sku} imagemUrl={item.imagemUrl} token={imagemToken} endpoint={`/api/solicitacoes-producao/${encodeURIComponent(producao.id)}/itens/${encodeURIComponent(item.id)}/imagem`} /><div className="flex min-w-0 flex-1 items-center gap-1"><h4 className="min-w-0 break-all text-sm font-semibold text-slate-900">{item.sku}</h4><LinkBuscaSku sku={item.sku} /></div></div>
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <div><dt className="text-slate-500">Solicitada</dt><dd className="mt-1 font-medium text-slate-900">{item.quantidadeSolicitada}</dd></div>
                 <div><dt className="text-slate-500">Produzida</dt><dd className="mt-1 font-medium text-slate-900">{item.quantidadeProduzida}</dd></div>
@@ -89,7 +85,7 @@ export function DetalhesProducao({ producao, fotoUrl, carregandoFoto, erroFoto, 
           </div>
           <div className="hidden overflow-x-auto sm:block">
             <table className="min-w-full border-collapse text-sm"><thead><tr className="border-b border-slate-200 text-left text-slate-600">{["Produto", "SKU", "Solicitada", "Produzida", "Corte a laser", "Observação"].map((rotulo) => <th key={rotulo} scope="col" className="p-3">{rotulo}</th>)}</tr></thead><tbody>
-              {producao.itens.map((item) => <tr key={item.id} className="border-b border-slate-100 text-slate-700"><td className="p-3"><ImagemItem item={item} /></td><td className="min-w-48 break-all p-3 font-medium">{item.sku}</td><td className="p-3">{item.quantidadeSolicitada}</td><td className="p-3">{item.quantidadeProduzida}</td><td className="p-3">{item.tipoCorte === "LASER" ? "Sim" : "Não"}</td><td className="min-w-48 whitespace-pre-wrap break-words p-3">{item.observacao || "—"}</td></tr>)}
+              {producao.itens.map((item) => <tr key={item.id} className="border-b border-slate-100 text-slate-700"><td className="p-3"><ImagemItemProducao key={`${item.id}:${item.imagemUrl}`} sku={item.sku} imagemUrl={item.imagemUrl} token={imagemToken} endpoint={`/api/solicitacoes-producao/${encodeURIComponent(producao.id)}/itens/${encodeURIComponent(item.id)}/imagem`} /></td><td className="min-w-48 break-all p-3 font-medium"><div className="flex items-center gap-1"><span className="min-w-0">{item.sku}</span><LinkBuscaSku sku={item.sku} /></div></td><td className="p-3">{item.quantidadeSolicitada}</td><td className="p-3">{item.quantidadeProduzida}</td><td className="p-3">{item.tipoCorte === "LASER" ? "Sim" : "Não"}</td><td className="min-w-48 whitespace-pre-wrap break-words p-3">{item.observacao || "—"}</td></tr>)}
             </tbody></table>
           </div>
           <section aria-labelledby="totais-itens-producao" className="mt-6 border-t border-slate-200 pt-5">

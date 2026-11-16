@@ -1,5 +1,28 @@
 # Operação da Automatização
 
+## Intervalo entre rotinas
+
+O cadastro, a edição e a ativação recusam intervalos menores que 15 minutos,
+no calendário semanal de São Paulo, inclusive na passagem da meia-noite e da
+semana. Exatamente 15 minutos é permitido. A comparação considera os próprios
+horários e as outras rotinas ativas não arquivadas do mesmo aplicativo, excluindo
+a rotina em edição. Rotinas pausadas não reservam horário, mas seu cadastro e
+edição também são conferidos contra as ativas; ativá-las exige nova conferência.
+Pausar ou arquivar continua permitido mesmo se houver conflitos legados.
+
+A API mantém autorização e revisão otimista e serializa as gravações de rotinas
+por aplicativo com lock transacional. Escritas diretas no banco não passam por
+essa validação. O intervalo é entre inícios previstos e não garante que uma
+execução longa termine antes da próxima.
+
+Critérios de aceite desktop (1280–1440px) e mobile (360–390px): localizar a regra
+junto aos horários, preencher o formulário, receber mensagem com a rotina e o
+horário conflitantes sem perder os campos, corrigir para pelo menos 15 minutos
+e concluir o salvamento. Mensagens usam o feedback com `role="alert"` existente,
+sem nova largura fixa ou alteração de controles. A validação automatizada cobre
+os limites de horário e os fluxos da API; a conferência visual, teclado, toque e
+os dois temas deve ser executada no ambiente de homologação.
+
 ## Primeira implantação
 
 1. Aplique a migration aditiva em homologação antes de publicar o ERP. Ela adiciona permissões desabilitadas por padrão. Conceda acesso de leitura e as permissões de escrita ou intervenção na administração de usuários.

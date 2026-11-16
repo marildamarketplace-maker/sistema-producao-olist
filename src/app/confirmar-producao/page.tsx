@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ModalConfirmacaoProducao } from "@/components/modal-confirmacao-producao";
+import Link from "next/link";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -44,13 +44,8 @@ export default function ConfirmarProducaoPage() {
   const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
-  const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
-  const [produzidas, setProduzidas] = useState<Record<string, string>>({});
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState("+55 37 8803-2390");
   const [loading, setLoading] = useState(true);
-  const [selecionada, setSelecionada] = useState<Solicitacao | null>(null);
-  const [senha, setSenha] = useState("");
-  const [erroModal, setErroModal] = useState<string | null>(null);
   const operacaoEmAndamento = useRef(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -113,8 +108,6 @@ export default function ConfirmarProducaoPage() {
     setPedidosOlistPorSolicitacao(pedidosAgrupados);
     setItensPorSolicitacao({});
     setItensCarregando({});
-    setSolicitacoesAbertas({});
-    setProduzidas({});
     setLoading(false);
   }, [session?.access_token]);
 
@@ -143,27 +136,7 @@ export default function ConfirmarProducaoPage() {
 
     const itensCarregados = (data as ItemSolicitacao[]) ?? [];
     setItensPorSolicitacao((prev) => ({ ...prev, [solicitacaoId]: itensCarregados }));
-    setProduzidas((prev) => {
-      const proximo = { ...prev };
-
-      itensCarregados.forEach((item) => {
-        proximo[item.id] = proximo[item.id] ?? String(item.quantidade_solicitada ?? 0);
-      });
-
-      return proximo;
-    });
-
     return itensCarregados;
-  }
-
-  async function alternarDetalhesSolicitacao(solicitacaoId: string) {
-    const vaiAbrir = !solicitacoesAbertas[solicitacaoId];
-
-    setSolicitacoesAbertas((prev) => ({ ...prev, [solicitacaoId]: vaiAbrir }));
-
-    if (vaiAbrir) {
-      await carregarItensSolicitacao(solicitacaoId);
-    }
   }
 
   useEffect(() => {
@@ -216,68 +189,24 @@ export default function ConfirmarProducaoPage() {
     if (operacaoEmAndamento.current) return;
     operacaoEmAndamento.current = true;
     setSavingId(solicitacao.id);
+    setMessage(null);
+    // Abre durante o clique para evitar bloqueio de popup após a chamada assíncrona.
+    const novaAba = window.open("about:blank", "_blank");
+    if (novaAba) novaAba.opener = null;
     try {
-      const itens = await carregarItensSolicitacao(solicitacao.id);
-      if (!itens?.length) throw new Error("Solicitação sem itens cadastrados.");
-      const invalido = itens.some((item) => {
-        const quantidade = Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0);
-        return !Number.isSafeInteger(quantidade) || quantidade < 0 || quantidade > 2_147_483_647;
-      });
-      if (invalido) throw new Error("Revise as quantidades antes de continuar.");
-      setMessage(null);
-      setErroModal(null);
-      setSenha("");
-      setSelecionada(solicitacao);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro ao preparar confirmação.");
-    } finally {
-      setSavingId(null);
-      operacaoEmAndamento.current = false;
-    }
-  }
-
-  async function confirmarProducao(foto: File) {
-    if (!selecionada || operacaoEmAndamento.current) return;
-    if (!senha) {
-      setErroModal("Digite a senha para confirmar.");
-      return;
-    }
-    operacaoEmAndamento.current = true;
-    setSavingId(selecionada.id);
-    setErroModal(null);
-    try {
-      const itens = itensPorSolicitacao[selecionada.id] ?? [];
-      const formulario = new FormData();
-      formulario.set("solicitacaoId", selecionada.id);
-      formulario.set("senha", senha);
-      formulario.set("foto", foto);
-      formulario.set("itens", JSON.stringify(itens.map((item) => ({
-        id: item.id,
-        quantidadeProduzida: Number(produzidas[item.id] ?? item.quantidade_solicitada ?? 0),
-      }))));
-      const response = await fetch("/api/solicitacoes-producao/confirmar", {
+      if (!novaAba) throw new Error("Permita a abertura de novas abas para abrir a confirmação.");
+      if (!session?.access_token) throw new Error("Sessão expirada.");
+      const response = await fetch(`/api/solicitacoes-producao/${encodeURIComponent(solicitacao.id)}/link-confirmacao`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
-        },
-        body: formulario,
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
       });
-      const resultado = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(resultado.error ?? "Erro ao confirmar produção.");
-      setSelecionada(null);
-      setSenha("");
-      // Retira imediatamente o pedido confirmado, mesmo se a atualização da lista falhar.
-      setSolicitacoes((atuais) => atuais.filter((item) => item.id !== selecionada.id));
-      try {
-        await carregarDados();
-        setMessage("Solicitação confirmada com sucesso.");
-      } catch {
-        setMessage("Solicitação confirmada. Não foi possível atualizar a lista; recarregue a página.");
-        setLoading(false);
-      }
+      const resultado = await response.json() as { token?: string; error?: string };
+      if (!response.ok || !resultado.token) throw new Error(resultado.error ?? "Não foi possível abrir a confirmação.");
+      novaAba.location.replace(`/confirmar-entrega-producao#token=${encodeURIComponent(resultado.token)}`);
     } catch (error) {
-      setSenha("");
-      setErroModal(error instanceof Error ? error.message : "Erro ao confirmar produção.");
+      novaAba?.close();
+      setMessage(error instanceof Error ? error.message : "Não foi possível abrir a confirmação.");
     } finally {
       setSavingId(null);
       operacaoEmAndamento.current = false;
@@ -301,7 +230,7 @@ export default function ConfirmarProducaoPage() {
           <p className="text-sm text-slate-600">Não há solicitações pendentes de confirmação.</p>
         ) : (
           <p className="text-sm text-slate-600">
-            Todas as solicitações ainda não confirmadas aparecem abaixo, com seus itens abertos.
+            Consulte os itens nos detalhes e confirme as quantidades na tela pública de confirmação.
           </p>
         )}
 
@@ -323,7 +252,6 @@ export default function ConfirmarProducaoPage() {
       {!loading &&
         solicitacoes.map((solicitacao) => {
           const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
-          const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
           const itensJaCarregados = Boolean(itensPorSolicitacao[solicitacao.id]);
           const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
           const saving = savingId === solicitacao.id;
@@ -374,16 +302,15 @@ export default function ConfirmarProducaoPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
-                    disabled={carregandoItens}
-                    className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                    aria-expanded={aberta}
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:justify-end">
+                  <Link
+                    href={`/solicitacoes-producao/${encodeURIComponent(solicitacao.id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-11 items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   >
-                    {aberta ? "Ocultar itens" : carregandoItens ? "Carregando..." : "Ver itens"}
-                  </button>
+                    Ver itens
+                  </Link>
                   <button
                     type="button"
                     onClick={() => cobrarWhatsapp(solicitacao)}
@@ -398,81 +325,14 @@ export default function ConfirmarProducaoPage() {
                     disabled={savingId !== null || carregandoItens}
                     className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
-                    {saving ? "Confirmando..." : "Confirmar produção"}
+                    {saving ? "Abrindo..." : "Confirmar produção"}
                   </button>
                 </div>
               </div>
 
-              {!aberta ? (
-                <p className="text-sm text-slate-600">Abra os itens para conferir os produtos desta solicitação.</p>
-              ) : carregandoItens ? (
-                <p className="text-sm text-slate-600">Carregando itens...</p>
-              ) : itensSolicitacao.length === 0 ? (
-                <p className="text-sm text-slate-600">Solicitação sem itens cadastrados.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-left text-slate-600">
-                        <th className="p-3">Imagem</th>
-                        <th className="p-3">SKU</th>
-                        <th className="p-3">Qtd. solicitada</th>
-                        <th className="p-3">Qtd. produzida</th>
-                        <th className="p-3">Corte a laser</th>
-                        <th className="p-3">Observação</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {itensSolicitacao.map((item) => (
-                        <tr key={item.id} className="border-b border-slate-100">
-                          <td className="p-3">
-                            {item.imagem_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={item.imagem_url} alt={item.sku} className="h-12 w-12 rounded object-cover" />
-                            ) : (
-                              <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-xs text-slate-500">
-                                Sem imagem
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-3 font-medium text-slate-700">{item.sku}</td>
-                          <td className="p-3 text-slate-700">{item.quantidade_solicitada}</td>
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min={0}
-                              value={produzidas[item.id] ?? String(item.quantidade_solicitada ?? 0)}
-                              onChange={(event) =>
-                                setProduzidas((prev) => ({
-                                  ...prev,
-                                  [item.id]: event.target.value,
-                                }))
-                              }
-                              className="w-28 rounded-md border border-slate-300 px-2 py-1"
-                            />
-                          </td>
-                          <td className="p-3 text-slate-700">{item.tipo_corte === "LASER" ? "Sim" : "Não"}</td>
-                          <td className="p-3 text-slate-700">{item.observacao || "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </section>
           );
         })}
-      {selecionada && (
-        <ModalConfirmacaoProducao
-          dataEntregaFormatada={formatarDataEntrega(selecionada.data_entrega)}
-          senha={senha}
-          confirmando={savingId === selecionada.id}
-          erroModal={erroModal}
-          onSenhaChange={setSenha}
-          onFechar={() => { setSelecionada(null); setSenha(""); }}
-          onConfirmar={(foto) => { void confirmarProducao(foto); }}
-        />
-      )}
       </div>
     </AccessGuard>
   );
