@@ -9,7 +9,10 @@ import { ErroAnotarSku } from "@/lib/anotar-sku/contrato";
 export const dynamic = "force-dynamic";
 
 function escaparCsv(value: string | number) {
-  return `"${String(value).replaceAll('"', '""')}"`;
+  const texto = String(value);
+  // Aspas CSV não impedem fórmulas quando o arquivo é aberto em uma planilha.
+  const seguro = typeof value === "string" && /^(?:\s*[=+@-]|[\t\r\n])/.test(texto) ? `'${texto}` : texto;
+  return `"${seguro.replaceAll('"', '""')}"`;
 }
 
 function formatarDataBuscaCsv(data: Date) {
@@ -68,9 +71,9 @@ async function buscarTitulosProdutosPorSku(skus: string[]) {
   ]);
 
   return new Map([
-    ...tiposProduto.map((produto) => [produto.sku, produto.titulo] as const),
-    ...produtosFinais.map((produto) => [produto.skuFinal, produto.tituloFinal] as const),
-  ]);
+    ...tiposProduto.map((produto) => [produto.sku, produto.titulo.trim()] as const),
+    ...produtosFinais.map((produto) => [produto.skuFinal, produto.tituloFinal.trim()] as const),
+  ].filter(([, titulo]) => Boolean(titulo)));
 }
 
 export async function GET(request: NextRequest) {
@@ -107,7 +110,7 @@ export async function GET(request: NextRequest) {
     );
     const skus = skusAgregados.map((item) => ({
       ...item,
-      tituloProduto: titulosPorSku.get(item.sku) ?? null,
+      tituloProduto: titulosPorSku.get(item.sku) || item.tituloProduto?.trim() || null,
     }));
     const dataBusca = formatarDataBuscaCsv(busca.createdAt);
     if (formato === "csv") {

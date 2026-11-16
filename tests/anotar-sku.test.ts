@@ -21,6 +21,14 @@ test("agrega por SKU sem mudar validação de quantidades e detecta overflow", (
   assert.equal(atrasoRetrySku(4, 0, 0), 480_000);
   assert.equal(atrasoRetrySku(1, 900_000, 0), 900_000);
 });
+test("preserva a primeira descrição válida da Olist ao agregar o mesmo SKU", () => {
+  assert.deepEqual(agregarItensSku([
+    { produto: { sku: "A", descricao: " " }, quantidade: 1 },
+    { produto: { sku: "A", descricao: " Lenço estampado " }, quantidade: 2 },
+    { produto: { sku: "A", descricao: "Outra descrição" }, quantidade: 3 },
+    { produto: { sku: "B", descricao: { texto: "inválido" } }, quantidade: 2 },
+  ]), [{ sku: "A", quantidade: 6, tituloProduto: "Lenço estampado" }, { sku: "B", quantidade: 2 }]);
+});
 
 function fixture(etapa = "DETALHAMENTO", tentativas = 1) {
   const r = { id: "job", aplicativoId: "app", solicitadoPor: "user", reservaId: "lease", situacoes: ["0"], situacaoIndice: 0, paginaOffset: 0, etapa, tentativas } as ReservaSku;

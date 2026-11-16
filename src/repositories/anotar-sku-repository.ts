@@ -200,7 +200,8 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
           await tx.$executeRaw`
             INSERT INTO itens_busca_sku (id, busca_id, aplicativo_id, pedido_olist_id, sku, quantidade, titulo_produto)
             SELECT gen_random_uuid(), ${busca.id}::uuid, ${j.aplicativoId}::uuid, p.pedido_olist_id,
-              item->>'sku', (item->>'quantidade')::int, coalesce(po.titulo_final, tp.titulo)
+              item->>'sku', (item->>'quantidade')::int,
+              coalesce(nullif(btrim(po.titulo_final), ''), nullif(btrim(tp.titulo), ''), nullif(btrim(item->>'tituloProduto'), ''))
             FROM busca_sku_job_pedidos p CROSS JOIN LATERAL jsonb_array_elements(p.itens) item
             LEFT JOIN produto_olist po ON po.sku_final = item->>'sku'
             LEFT JOIN tipo_produto tp ON tp.sku = item->>'sku'

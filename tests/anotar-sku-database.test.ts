@@ -39,6 +39,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   await db.$executeRaw`INSERT INTO usuario(id,aplicativo_id,nome,email) VALUES (${user}::uuid,${app}::uuid,'Teste','sku@example.test'), (${outroUser}::uuid,${outroApp}::uuid,'Outro','outro@example.test')`;
   await db.$executeRaw`INSERT INTO tipo_produto(sku,titulo) VALUES ('A','Produto A'), ('B','Produto B')`;
   const repo = criarRepositorioAnotarSku(db), escopo = { id: user, aplicativoId: app, podeVisualizar: true };
+  let buscaComTitulosId = "";
   const nova = () => repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0"] });
   async function reserva(): Promise<ReservaSku> {
     await db.$executeRaw`UPDATE busca_sku_jobs SET proxima_tentativa_em=now()-interval '1 second' WHERE status IN ('PENDENTE','AGUARDANDO_RETRY')`;
@@ -190,6 +191,24 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const j = await nova(); await detalhamento([]); await repo.prepararConclusao(await reserva()); await repo.concluir(await reserva());
     const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } }); assert.equal(final.status, "CONCLUIDO"); assert.equal(final.buscaId, null);
   });
+  await t.test("consolidação salva título final, título do tipo ou descrição da Olist", async () => {
+    await db.$executeRaw`INSERT INTO produto_olist(sku_final,titulo_final) VALUES ('A','Titulo final A'), ('B',' ')`;
+    const j = await nova(); await detalhamento(["950"]);
+    await repo.pedido(await reserva(), "950", [
+      { sku: "A", quantidade: 2, tituloProduto: "Olist A" },
+      { sku: "B", quantidade: 3, tituloProduto: "Olist B" },
+      { sku: "C", quantidade: 4, tituloProduto: "Descricao Olist C" },
+      { sku: "D", quantidade: 5 },
+      { sku: "F", quantidade: 1, tituloProduto: "=1+1" },
+    ], false);
+    await repo.prepararConclusao(await reserva()); await repo.concluir(await reserva());
+    const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } }); assert.ok(final.buscaId); buscaComTitulosId = final.buscaId;
+    const itens = await db.itemBuscaSku.findMany({ where: { buscaId: buscaComTitulosId } });
+    assert.deepEqual(Object.fromEntries(itens.map(i => [i.sku, i.tituloProduto])), { A: "Titulo final A", B: "Produto B", C: "Descricao Olist C", D: null, F: "=1+1" });
+    // A remoção posterior no catálogo não pode apagar o título salvo no resultado.
+    await db.$executeRaw`DELETE FROM produto_olist WHERE sku_final='A'`;
+    await db.$executeRaw`DELETE FROM tipo_produto WHERE sku='A'`;
+  });
   await t.test("API exige sessão/permissão, não expõe reserva e exporta só resultados", async () => {
     Object.assign(globalThis, { prisma: db });
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticio";
@@ -219,6 +238,17 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     for (const formato of ["csv", "xlsx", "pdf"]) {
       const arquivo = await historico.GET(new NextRequest(`https://example.test/api?id=${busca.id}&formato=${formato}`, { headers: { Authorization: "Bearer teste" } }));
       assert.equal(arquivo.status, 200); assert.ok((await arquivo.arrayBuffer()).byteLength > 0);
+    }
+    const comTitulos = await historico.GET(new NextRequest(`https://example.test/api?id=${buscaComTitulosId}`, { headers: { Authorization: "Bearer teste" } }));
+    assert.equal(comTitulos.status, 200);
+    const detalhe = await comTitulos.json();
+    assert.deepEqual(Object.fromEntries(detalhe.busca.skus.map((i: { sku: string; tituloProduto: string | null }) => [i.sku, i.tituloProduto])), { A: "Titulo final A", B: "Produto B", C: "Descricao Olist C", D: null, F: "=1+1" });
+    for (const formato of ["csv", "xlsx", "pdf"]) {
+      const arquivo = await historico.GET(new NextRequest(`https://example.test/api?id=${buscaComTitulosId}&formato=${formato}`, { headers: { Authorization: "Bearer teste" } }));
+      assert.equal(arquivo.status, 200);
+      const conteudo = Buffer.from(await arquivo.arrayBuffer()).toString(formato === "pdf" ? "latin1" : "utf8");
+      for (const titulo of ["Titulo final A", "Produto B", "Descricao Olist C"]) assert.ok(conteudo.includes(titulo), `${formato} deve conter ${titulo}`);
+      if (formato === "csv") assert.ok(conteudo.includes('"F","\'=1+1","1"'), "CSV deve neutralizar fórmulas em títulos");
     }
     const cron = await import("../src/app/api/cron/processar-anotar-sku/route");
     delete process.env.CRON_SECRET; assert.equal((await cron.GET(req())).status, 401);

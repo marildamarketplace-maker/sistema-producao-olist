@@ -14,7 +14,7 @@ export const criarBuscaSkuSchema = z.object({
 }).strict();
 export const acaoBuscaSkuSchema = z.object({ acao: z.enum(["retomar", "cancelar"]) }).strict();
 export const ESTADOS_ABERTOS_SKU = ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY", "FALHOU"];
-export type ItemSku = { sku: string; quantidade: number };
+export type ItemSku = { sku: string; quantidade: number; tituloProduto?: string };
 export type JobSkuResumo = {
   id: string; situacoes: string[]; status: string; etapa: string; passagem: number;
   encontrados: number; processados: number; ignorados: number; tentativas: number;
@@ -35,18 +35,20 @@ export function atrasoRetrySku(tentativa: number, retryAfterMs = 0, aleatorio = 
 
 /** Mantém a regra atual: SKU preenchido e quantidade inteira positiva; soma dentro do pedido. */
 export function agregarItensSku(itens: unknown[]): ItemSku[] {
-  const totais = new Map<string, number>();
+  const totais = new Map<string, ItemSku>();
   for (const valor of itens) {
     if (!valor || typeof valor !== "object") continue;
-    const item = valor as { produto?: { sku?: unknown }; quantidade?: unknown };
+    const item = valor as { produto?: { sku?: unknown; descricao?: unknown }; quantidade?: unknown };
     const sku = String(item.produto?.sku ?? "").trim();
     const quantidade = Number(item.quantidade);
     if (!sku || !Number.isInteger(quantidade) || quantidade <= 0) continue;
-    const total = (totais.get(sku) ?? 0) + quantidade;
+    const atual = totais.get(sku);
+    const total = (atual?.quantidade ?? 0) + quantidade;
     if (!Number.isSafeInteger(total) || total > 2_147_483_647) {
       throw new FalhaConsultaSku("QUANTIDADE_INVALIDA", "A Olist retornou uma quantidade fora do limite permitido.", false);
     }
-    totais.set(sku, total);
+    const tituloProduto = atual?.tituloProduto || (typeof item.produto?.descricao === "string" ? item.produto.descricao.trim() : "");
+    totais.set(sku, { sku, quantidade: total, ...(tituloProduto ? { tituloProduto } : {}) });
   }
-  return [...totais].map(([sku, quantidade]) => ({ sku, quantidade }));
+  return [...totais.values()];
 }

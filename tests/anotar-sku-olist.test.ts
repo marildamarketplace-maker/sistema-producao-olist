@@ -46,7 +46,7 @@ test("cliente Olist da fila: contratos, limites HTTP e classificação de falhas
     let data: unknown = {};
     s.mock.method(axios, "get", async () => ({ status: 200, headers: {}, data }));
     await assert.rejects(clienteAnotarSku.detalhar("app", "42"), FalhaConsultaSku);
-    data = { itens: [{ produto: { sku: "A" }, quantidade: 2 }, { produto: { sku: "A" }, quantidade: 3 }] };
-    assert.deepEqual(await clienteAnotarSku.detalhar("app", "42"), [{ sku: "A", quantidade: 5 }]);
+    data = { itens: [{ produto: { sku: "A", descricao: "Produto da Olist" }, quantidade: 2 }, { produto: { sku: "A" }, quantidade: 3 }] };
+    assert.deepEqual(await clienteAnotarSku.detalhar("app", "42"), [{ sku: "A", quantidade: 5, tituloProduto: "Produto da Olist" }]);
   });
 });
