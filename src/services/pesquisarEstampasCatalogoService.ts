@@ -52,6 +52,7 @@ export type EntradaPesquisaEstampasCatalogo = FiltrosDesignPesquisa & {
 };
 
 export type EstampaPesquisaCatalogo = {
+  temOutrasVariantes: boolean;
   id: string;
   codigo: string;
   variante: string | null;
@@ -255,7 +256,7 @@ const listarPaginaSerializada = async (filtros: FiltrosPesquisaEstampas) => {
 
 const listarPaginaComCache = unstable_cache(
   listarPaginaSerializada,
-  ["pesquisa-estampas", "pagina", "v1"],
+  ["pesquisa-estampas", "pagina", "v2"],
   cachePesquisaEstampas,
 );
 

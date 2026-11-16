@@ -63,6 +63,12 @@ test("SQL limita IDs e pontuações antes de projetar os detalhes, preservando r
   assert.match(selecao, /LIMIT \?\s+OFFSET \?/);
   assert.doesNotMatch(selecao, /ai_metadata|AS "atributosDesign"/);
   assert.match(detalhes, /e.ai_metadata->'response'/);
+  assert.match(detalhes, /EXISTS \([\s\S]*variante.id <> e.id/);
+  assert.match(detalhes, /lower\(variante.codigo\) = lower\(e.codigo\)/);
+  assert.match(detalhes, /lower\(COALESCE\(variante.variante, ''\)\) <> lower\(COALESCE\(e.variante, ''\)\)/);
+  assert.match(detalhes, /variante.is_active = true/);
+  assert.match(detalhes, /variante.processing_status = 'COMPLETED'/);
+  assert.match(detalhes, /AS "temOutrasVariantes"/);
   assert.match(detalhes, /pagina.relevancia AS relevancia/);
   assert.match(detalhes, /pagina.percentual AS "percentualCorrespondencia"/);
   assert.match(detalhes, /INNER JOIN pagina ON pagina.id = e.id/);
@@ -95,6 +101,11 @@ test("PostgreSQL: páginas, empates, percentuais e ordenações preservam a sele
       const esperado = esperados(preferencial, ordenacao);
       assert.deepEqual(resultado.rows.map(r => ({ id: r.id, percentual: r.percentualCorrespondencia })), esperado.slice(offset, offset + 2), `${preferencial}/${ordenacao}/${offset}`);
       for (const row of resultado.rows) {
+        const atual = registros.find(r => String(r.id) === String(row.id))!;
+        assert.equal(row.temOutrasVariantes, registros.some(r => r.id !== atual.id
+          && r.codigo.toLowerCase() === atual.codigo.toLowerCase()
+          && (r.variante ?? "").toLowerCase() !== (atual.variante ?? "").toLowerCase()
+          && r.is_active && r.processing_status === "COMPLETED"));
         assert.equal(row.relevancia, 0);
         assert.equal(row.termosEncontrados.length + row.termosAusentes.length, preferencial ? 2 : 0);
       }

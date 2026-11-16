@@ -68,6 +68,7 @@ export type FiltrosPesquisaEstampas = FiltrosSelecaoEstampas & {
 };
 
 export type EstampaPesquisaRow = {
+  temOutrasVariantes: boolean;
   id: bigint;
   codigo: string;
   variante: string | null;
@@ -208,6 +209,14 @@ export async function listarPaginaCatalogoEstampas(filtros: FiltrosPesquisaEstam
         e.id,
         e.codigo,
         e.variante,
+        EXISTS (
+          SELECT 1 FROM estampas AS variante
+          WHERE lower(variante.codigo) = lower(e.codigo)
+            AND variante.id <> e.id
+            AND lower(COALESCE(variante.variante, '')) <> lower(COALESCE(e.variante, ''))
+            AND variante.is_active = true
+            AND variante.processing_status = 'COMPLETED'
+        ) AS "temOutrasVariantes",
         e.original_filename AS "originalFilename",
         e.original_relative_path AS "originalRelativePath",
         e.storage_key AS "storageKey",

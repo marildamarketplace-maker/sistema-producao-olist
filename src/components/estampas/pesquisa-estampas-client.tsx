@@ -791,7 +791,7 @@ function EstampaCard({
           </label>
         )}
         <button type="button" onClick={onDetalhes} aria-label={`Ver detalhes da estampa ${codigoCompleto(estampa)}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"><Eye className="h-4 w-4" aria-hidden="true" /> Ver detalhes</button>
-        {onVariantes && <button type="button" onClick={onVariantes}
+        {estampa.temOutrasVariantes && onVariantes && <button type="button" onClick={onVariantes}
           aria-label={`Ver variantes da estampa ${estampa.codigo}`}
           className="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Ver variantes</button>}
       </div>
