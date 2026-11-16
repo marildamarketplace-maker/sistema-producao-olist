@@ -8,7 +8,7 @@ import { extrairReferenciaCodigo } from "@/domain/consulta-profissional-estampas
 
 import { FILTROS_DESIGN_PESQUISA } from "@/domain/pesquisa-estampas-design";
 import type { FacetasPesquisaEstampas } from "@/repositories/pesquisa-estampas-repository";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buscarVariantesEstampa } from "@/services/buscarVariantesEstampa";
 import { criarCarregadorPaginasEstampas } from "@/services/carregadorPaginasEstampas";
@@ -389,15 +389,6 @@ export function PesquisaEstampasClient() {
         </section>
       )}
 
-      <BuscaImagemEstampas token={session?.access_token} foto={fotoPendente} carregando={carregando}
-        onFoto={(foto) => {
-          setFotoPendente(foto);
-          if (!foto) {
-            setFotoBusca(null); consultaVisual.current = null;
-            setResultado(null); setFiltros(null); setErro(null); setCarregando(false); setPagina(1);
-          }
-        }} onBuscar={aplicarPesquisa} />
-
       <form onSubmit={pesquisar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:space-y-5 sm:p-5">
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Pesquisa geral</span>
@@ -433,6 +424,21 @@ export function PesquisaEstampasClient() {
         <FiltrosAvancadosModal
           filtros={form}
           facetas={facetas}
+          buscaImagem={
+            <BuscaImagemEstampas
+              token={session?.access_token}
+              foto={fotoPendente}
+              carregando={carregando}
+              onFoto={(foto) => {
+                setFotoPendente(foto);
+                if (!foto) {
+                  setFotoBusca(null); consultaVisual.current = null;
+                  setResultado(null); setFiltros(null); setErro(null); setCarregando(false); setPagina(1);
+                }
+              }}
+              onBuscar={aplicarPesquisa}
+            />
+          }
           onChange={setForm}
           onApply={aplicarPesquisa}
           onClear={() => setForm(copiarFiltrosPesquisaEstampas(FILTROS_INICIAIS))}
@@ -576,6 +582,7 @@ export function PesquisaEstampasClient() {
 function FiltrosAvancadosModal({
   filtros,
   facetas,
+  buscaImagem,
   onChange,
   onApply,
   onClear,
@@ -583,6 +590,7 @@ function FiltrosAvancadosModal({
 }: {
   filtros: Filtros;
   facetas: Facetas;
+  buscaImagem: ReactNode;
   onChange: (filtros: Filtros) => void;
   onApply: () => void;
   onClear: () => void;
@@ -629,6 +637,7 @@ function FiltrosAvancadosModal({
         </header>
 
         <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-6">
+          {buscaImagem}
           <Campo label="Pesquisa geral">
             <input value={filtros.consulta} onChange={(event) => onChange({ ...filtros, consulta: event.target.value })} placeholder='Ex.: cereja amarela · "animal print" · floral -texto' maxLength={200} className={inputClass} />
           </Campo>
