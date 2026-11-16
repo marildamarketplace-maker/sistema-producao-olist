@@ -22,9 +22,12 @@ export async function GET(request: NextRequest) {
   const inicio = Date.now();
   try {
     // Consulta apenas após autenticação; pausado dispensa configuração dos providers.
-    const { processarEstampasEstaPausado, obterConfiguracaoJobEstampas } = await import("@/repositories/configuracao-jobs-repository");
+    const { processarEstampasEstaPausado, obterConfiguracaoJobEstampas, pausarProcessarEstampasPorInatividade } = await import("@/repositories/configuracao-jobs-repository");
     if (await processarEstampasEstaPausado()) {
       return NextResponse.json({ ok: true, pausado: true, motivoParada: "pausado" });
+    }
+    if (await pausarProcessarEstampasPorInatividade()) {
+      return NextResponse.json({ ok: true, pausado: true, motivoParada: "inatividade_24h" });
     }
     if ((process.env.IMAGE_ANALYSIS_PROVIDER?.trim().toLowerCase() || "openai") !== "openai") {
       throw new Error("O cron de estampas exige IMAGE_ANALYSIS_PROVIDER=openai.");

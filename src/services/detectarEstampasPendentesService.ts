@@ -2,7 +2,7 @@ import { varianteEstampaPermitida } from "@/domain/filtro-variante-estampa";
 import { nomeArquivoEstampaDeveSerIgnorado } from "@/domain/filtro-nome-arquivo-estampa";
 import {
   listarEstampasParaVerificarAnalise,
-  type EstampaCatalogo,
+  type EstampaParaVerificarAnalise,
 } from "@/repositories/catalogo-estampas-repository";
 import {
   criarEstampaJobsEmLote,
@@ -25,7 +25,7 @@ export type OpcoesDeteccaoEstampasPendentes = {
   deveContinuar?: () => boolean;
 };
 
-function temPreviewValido(estampa: EstampaCatalogo) {
+function temPreviewValido(estampa: EstampaParaVerificarAnalise) {
   if (!estampa.preview_url?.trim()) return false;
 
   try {
@@ -36,7 +36,7 @@ function temPreviewValido(estampa: EstampaCatalogo) {
   }
 }
 
-function estampaElegivel(estampa: EstampaCatalogo) {
+function estampaElegivel(estampa: EstampaParaVerificarAnalise) {
   return temPreviewValido(estampa) && estampaPrecisaReprocessamento(estampa);
 }
 
@@ -60,6 +60,8 @@ export async function detectarEstampasPendentes(
     const estampas = await listarEstampasParaVerificarAnalise({
       limite: tamanhoLote,
       afterId,
+      variantesPermitidas: options.variantesPermitidas,
+      termosIgnoradosNomeArquivo: options.termosIgnoradosNomeArquivo,
     });
     if (estampas.length === 0) break;
 

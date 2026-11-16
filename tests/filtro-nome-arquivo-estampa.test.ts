@@ -74,6 +74,9 @@ let parametrosClaim: unknown[] = [];
 Object.assign(globalThis, { prisma: {
   estampaCatalogoIa: { findMany: async () => ++lotes === 1 ? linhas : [] },
   async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+    if (strings.join("").includes("FROM estampas AS e")) {
+      return ++lotes === 1 ? linhas.map(row => ({ id: row.id, variante: row.variante, preview_url: row.previewUrl, original_filename: row.originalFilename, original_relative_path: row.originalRelativePath, storage_key: null, content_hash: row.contentHash, ai_processed_hash: row.aiProcessedHash })) : [];
+    }
     if (strings.join("").includes("WITH proximo_job")) {
       parametrosClaim = values;
       return [];

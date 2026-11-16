@@ -1,29 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buscarPedidosOlistPorDataLimite } from "@/lib/olist";
-import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { criarExcelBuscaSku, criarPdfBuscaSku } from "@/lib/exportar-busca-sku";
 
-const SITUACOES_PERMITIDAS = new Set(["8", "0", "3", "4", "1", "7", "5", "6", "2", "9"]);
+import { z } from "zod";
+import { autenticarSku as autenticar, erroRespostaSku, repoSku } from "@/lib/anotar-sku/api";
+import { ErroAnotarSku } from "@/lib/anotar-sku/contrato";
 
-export const maxDuration = 300;
-
-async function autenticar(request: Request, permissao: "read" | "write") {
-  const autenticado = await getUsuarioAutenticado(request);
-  const usuario = await prisma.usuario.findUnique({
-    where: { id: autenticado.id },
-    select: { podeEscreverAnotarSku: true, podeVisualizarAnotarSku: true },
-  });
-
-  const permitido = permissao === "write"
-    ? usuario?.podeEscreverAnotarSku
-    : usuario?.podeVisualizarAnotarSku;
-  if (!permitido) {
-    throw new Error(permissao === "write" ? "Sem permissão para buscar pedidos." : "Sem permissão para visualizar o histórico.");
-  }
-
-  return autenticado;
-}
+export const dynamic = "force-dynamic";
 
 function escaparCsv(value: string | number) {
   return `"${String(value).replaceAll('"', '""')}"`;
@@ -95,6 +78,7 @@ export async function GET(request: NextRequest) {
     const autenticado = await autenticar(request, "read");
     const buscaId = request.nextUrl.searchParams.get("id");
     const formato = request.nextUrl.searchParams.get("formato");
+    if (buscaId && !z.uuid().safeParse(buscaId).success) throw new ErroAnotarSku("Busca inválida.", 400);
 
     if (!buscaId) {
       const buscas = await prisma.buscaSku.findMany({
@@ -108,7 +92,7 @@ export async function GET(request: NextRequest) {
           createdAt: true,
         },
       });
-      return NextResponse.json({ buscas });
+      return NextResponse.json({ buscas }, { headers: { "Cache-Control": "private, no-store" } });
     }
 
     const busca = await prisma.buscaSku.findFirst({
@@ -173,12 +157,7 @@ export async function GET(request: NextRequest) {
         skus,
       },
     });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar as buscas." },
-      { status: 403 },
-    );
-  }
+  } catch (error) { return erroRespostaSku(error); }
 }
 
 export async function DELETE(request: NextRequest) {
@@ -189,102 +168,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Informe a busca que será excluída." }, { status: 400 });
     }
 
-    const resultado = await prisma.buscaSku.deleteMany({
-      where: { id: buscaId, aplicativoId: autenticado.aplicativoId },
-    });
-    if (resultado.count === 0) {
-      return NextResponse.json({ error: "Busca não encontrada." }, { status: 404 });
-    }
+    if (!z.uuid().safeParse(buscaId).success) throw new ErroAnotarSku("Busca inválida.", 400);
+    await repoSku.excluir(autenticado, buscaId);
 
     return NextResponse.json({ excluida: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao excluir a busca." },
-      { status: 500 },
-    );
-  }
+  } catch (error) { return erroRespostaSku(error); }
 }
 
+// Abas antigas precisam atualizar o contrato; nunca interpretar 202 como resultado vazio.
 export async function POST(request: NextRequest) {
   try {
-    const autenticado = await autenticar(request, "write");
-    const body = await request.json();
-    const situacoes: string[] = Array.isArray(body?.situacoes)
-      ? [...new Set<string>(body.situacoes.map((item: unknown) => String(item)).filter((item: string) => SITUACOES_PERMITIDAS.has(item)))]
-      : [];
-    if (situacoes.length === 0) {
-      return NextResponse.json({ error: "Selecione ao menos uma situação." }, { status: 400 });
-    }
-
-    const jaSalvos = await prisma.itemBuscaSku.findMany({
-      where: { aplicativoId: autenticado.aplicativoId },
-      distinct: ["pedidoOlistId"],
-      select: { pedidoOlistId: true },
-    });
-    const idsJaSalvos = new Set(jaSalvos.map((item) => item.pedidoOlistId));
-    const { pedidos: pedidosNovos, pedidosEncontrados } = await buscarPedidosOlistPorDataLimite(
-      autenticado.aplicativoId,
-      null,
-      null,
-      situacoes,
-      idsJaSalvos,
-    );
-    const itens: Array<{ aplicativoId: string; pedidoOlistId: string; sku: string; tituloProduto: string | null; quantidade: number }> = [];
-
-    for (const pedido of pedidosNovos) {
-      const totaisPedido = new Map<string, { tituloProduto: string | null; quantidade: number }>();
-      for (const item of pedido.itens ?? []) {
-        const sku = String(item.produto.sku ?? "").trim();
-        const quantidade = Number(item.quantidade);
-        if (sku && Number.isInteger(quantidade) && quantidade > 0) {
-          const atual = totaisPedido.get(sku);
-          totaisPedido.set(sku, {
-            tituloProduto: atual?.tituloProduto ?? null,
-            quantidade: (atual?.quantidade ?? 0) + quantidade,
-          });
-        }
-      }
-      for (const [sku, dados] of totaisPedido) {
-        itens.push({
-          aplicativoId: autenticado.aplicativoId,
-          pedidoOlistId: String(pedido.id),
-          sku,
-          tituloProduto: dados.tituloProduto,
-          quantidade: dados.quantidade,
-        });
-      }
-    }
-
-    if (itens.length === 0) {
-      return NextResponse.json({ busca: null, pedidosEncontrados, pedidosNovos: 0 });
-    }
-
-    const titulosPorSku = await buscarTitulosProdutosPorSku(
-      itens.map((item) => item.sku),
-    );
-    for (const item of itens) {
-      item.tituloProduto = titulosPorSku.get(item.sku) ?? null;
-    }
-
-    const quantidadeSkus = new Set(itens.map((item) => item.sku)).size;
-    const busca = await prisma.$transaction(async (tx) => {
-      const criada = await tx.buscaSku.create({
-        data: {
-          aplicativoId: autenticado.aplicativoId,
-          situacoes,
-          quantidadePedidos: pedidosNovos.length,
-          quantidadeSkus,
-        },
-      });
-      await tx.itemBuscaSku.createMany({ data: itens.map((item) => ({ ...item, buscaId: criada.id })) });
-      return criada;
-    });
-
-    return NextResponse.json({ busca, pedidosEncontrados, pedidosNovos: pedidosNovos.length });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao salvar a busca." },
-      { status: 500 },
-    );
-  }
+    await autenticar(request, "write");
+    return NextResponse.json({ error: "A busca agora funciona em segundo plano. Atualize a página para continuar." }, { status: 409 });
+  } catch (error) { return erroRespostaSku(error); }
 }

@@ -3,6 +3,10 @@
   "framework": "nextjs",
   "crons": [
     {
+      "path": "/api/cron/processar-anotar-sku",
+      "schedule": "*/1 * * * *"
+    },
+    {
       "path": "/api/cron/agendar-automatizacao",
       "schedule": "*/1 * * * *"
     },

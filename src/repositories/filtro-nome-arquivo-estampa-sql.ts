@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { normalizarTermosIgnoradosNomeArquivo } from "@/domain/filtro-nome-arquivo-estampa";
 
-export function filtroNomeArquivoEstampaSql(termos: readonly string[]) {
+export function filtroNomeArquivoEstampaSql(termos: readonly string[], estampaId: Prisma.Sql = Prisma.sql`estampa_jobs.estampa_id`) {
   const normalizados = normalizarTermosIgnoradosNomeArquivo(termos);
   if (!normalizados.length) return Prisma.empty;
   // Mesmo contrato do filtro de domínio. Termos são parâmetros literais,
@@ -19,7 +19,7 @@ export function filtroNomeArquivoEstampaSql(termos: readonly string[]) {
         )), chr(92), '/'), '^.*/', ''), '[.][^.]*$', ''
       )) AS sem_extensao
     ) AS nome
-    WHERE estampa_filtro.id = estampa_jobs.estampa_id
+    WHERE estampa_filtro.id = ${estampaId}
       AND CASE WHEN termo.valor = '-' THEN right(nome.sem_extensao, 1) = '-'
           ELSE strpos(nome.sem_extensao, termo.valor) > 0 END
   )`;

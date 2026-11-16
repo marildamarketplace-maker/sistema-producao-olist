@@ -23,6 +23,7 @@ model Aplicativo {
   habilidadesAutomatizacao  HabilidadeAutomatizacao[]
   baixasEstoqueOlist        BaixaEstoqueOlist[]
   buscasSku                 BuscaSku[]
+  buscasSkuJobs             BuscaSkuJob[]
   categoriasOlist           CategoriaOlist[]
   componentes_kit_estoque   ComponenteKitEstoque[]
   configsFornecedorFilial   ConfigFornecedorFilial[]
@@ -550,9 +551,62 @@ model BuscaSku {
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   aplicativo        Aplicativo     @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
   itens             ItemBuscaSku[]
+  job               BuscaSkuJob?
 
   @@index([aplicativoId, createdAt], map: "idx_buscas_sku_aplicativo_created_at")
   @@map("buscas_sku")
+}
+
+model BuscaSkuJob {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId       String   @map("aplicativo_id") @db.Uuid
+  solicitadoPor      String   @map("solicitado_por") @db.Uuid
+  chave              String   @db.Uuid
+  situacoes          String[]
+  status             String   @default("PENDENTE")
+  etapa              String   @default("LISTAGEM")
+  situacaoIndice     Int      @default(0) @map("situacao_indice")
+  paginaOffset       Int      @default(0) @map("pagina_offset")
+  passagem           Int      @default(0)
+  encontrados        Int      @default(0)
+  processados        Int      @default(0)
+  ignorados          Int      @default(0)
+  tentativas         Int      @default(0)
+  retomadas          Int      @default(0)
+  erro               String?
+  erroCodigo         String?  @map("erro_codigo")
+  reservaId          String?  @map("reserva_id") @db.Uuid
+  reservaAte         DateTime? @map("reserva_ate") @db.Timestamptz(6)
+  proximaTentativaEm  DateTime @default(now()) @map("proxima_tentativa_em") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  finalizadoEm       DateTime? @map("finalizado_em") @db.Timestamptz(6)
+  buscaId            String?  @unique @map("busca_id") @db.Uuid
+  teveResultado      Boolean  @default(false) @map("teve_resultado")
+  aplicativo         Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict)
+  busca              BuscaSku? @relation(fields: [buscaId], references: [id], onDelete: SetNull)
+  pedidos            BuscaSkuJobPedido[]
+
+  @@unique([aplicativoId, solicitadoPor, chave])
+  @@unique([id, aplicativoId])
+  @@unique([aplicativoId], map: "busca_sku_job_aberto_unico", where: raw("(status NOT IN ('CONCLUIDO', 'CANCELADO'))"))
+  @@index([aplicativoId, createdAt])
+  @@index([status, proximaTentativaEm])
+  @@map("busca_sku_jobs")
+}
+
+model BuscaSkuJobPedido {
+  jobId          String @map("job_id") @db.Uuid
+  aplicativoId   String @map("aplicativo_id") @db.Uuid
+  pedidoOlistId  String @map("pedido_olist_id")
+  processado     Boolean @default(false)
+  ignorado       Boolean @default(false)
+  itens          Json @default("[]")
+  job            BuscaSkuJob @relation(fields: [jobId, aplicativoId], references: [id, aplicativoId], onDelete: Cascade)
+
+  @@id([jobId, pedidoOlistId])
+  @@index([jobId, processado, pedidoOlistId])
+  @@map("busca_sku_job_pedidos")
 }
 
 model ItemBuscaSku {

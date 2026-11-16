@@ -8,7 +8,7 @@ import { GET, maxDuration } from "../src/app/api/cron/processar-estampas/route";
 let configuracaoPausa: { pausado: boolean } | null = { pausado: false };
 let leiturasConfiguracao = 0;
 let erroConfiguracao = false;
-Object.assign(globalThis, { prisma: { configuracaoJob: {
+Object.assign(globalThis, { prisma: { $queryRaw: async () => [{ inativa: false }], configuracaoJob: {
   async findUnique(args: unknown) {
     leiturasConfiguracao++;
     assert.deepEqual(args, { where: { chave: "processar-estampas" }, select: { pausado: true } });

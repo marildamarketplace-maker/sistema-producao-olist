@@ -1,3 +1,5 @@
+import { filtroNomeArquivoEstampaSql } from "./filtro-nome-arquivo-estampa-sql";
+import { filtroVarianteEstampaSql } from "./filtro-variante-estampa-sql";
 import { Prisma, type EstampaCatalogoIa } from "@prisma/client";
 import {
   ROTULOS_CONTEUDO_IMAGEM_ESTAMPA,
@@ -179,14 +181,37 @@ export async function listarEstampasPorProcessingStatus(processingStatus: Proces
   if (!Number.isInteger(offset) || offset < 0) throw new Error("offset deve ser um inteiro maior ou igual a zero.");
   return (await prisma.estampaCatalogoIa.findMany({ where: { processingStatus }, orderBy: { id: "asc" }, skip: offset, take: limite })).map(paraCatalogo);
 }
-export async function listarEstampasParaVerificarAnalise(options: { limite?: number; afterId?: string } = {}) {
+// Projeção específica do detector: não transfere descrições, metadados ou taxonomia.
+export type EstampaParaVerificarAnalise = Pick<EstampaCatalogo,
+  "id" | "variante" | "preview_url" | "original_filename" | "original_relative_path" |
+  "storage_key" | "content_hash" | "ai_processed_hash">;
+
+export async function listarEstampasParaVerificarAnalise(options: {
+  limite?: number; afterId?: string; variantesPermitidas?: readonly string[];
+  termosIgnoradosNomeArquivo?: readonly string[];
+} = {}): Promise<EstampaParaVerificarAnalise[]> {
   const limite = options.limite ?? 200;
   if (!Number.isInteger(limite) || limite <= 0 || limite > 1000) throw new Error("limite deve ser um inteiro entre 1 e 1000.");
-  const rows = await prisma.estampaCatalogoIa.findMany({ where: {
-    processingStatus: "PENDING", contentHash: { not: null },
-    ...(options.afterId ? { id: { gt: idCatalogo(options.afterId) } } : {}),
-  }, orderBy: { id: "asc" }, take: limite });
-  return rows.map(paraCatalogo);
+  const cursor = options.afterId ? Prisma.sql`AND e.id > ${idCatalogo(options.afterId)}` : Prisma.empty;
+  const rows = await prisma.$queryRaw<Array<Omit<EstampaParaVerificarAnalise, "id"> & { id: bigint }>>`
+    SELECT e.id, e.variante, e.preview_url, e.original_filename, e.original_relative_path,
+           e.storage_key, e.content_hash, e.ai_processed_hash
+    FROM estampas AS e
+    WHERE e.processing_status = 'PENDING'
+      AND NULLIF(btrim(e.content_hash), '') IS NOT NULL
+      AND btrim(e.content_hash) IS DISTINCT FROM NULLIF(btrim(e.ai_processed_hash), '')
+      AND NULLIF(btrim(e.preview_url), '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM estampa_jobs AS job
+        WHERE job.estampa_id = e.id AND job.tipo = 'AI_ANALYSIS'::"TipoJobEstampa"
+          AND job.status <> 'COMPLETED'::"StatusJobEstampa"
+      )
+      ${cursor}
+      ${filtroNomeArquivoEstampaSql(options.termosIgnoradosNomeArquivo ?? [], Prisma.sql`e.id`)}
+      ${filtroVarianteEstampaSql(options.variantesPermitidas ?? [], Prisma.sql`e.id`)}
+    ORDER BY e.id ASC LIMIT ${limite}
+  `;
+  return rows.map(row => ({ ...row, id: row.id.toString() }));
 }
 
 export async function atualizarEstampa(id: string, atualizacao: AtualizacaoEstampaCatalogo, options: { contentHashEsperado?: string } = {}) {
