@@ -1,4 +1,4 @@
-import { montarOpcoesKitsManuais } from "@/lib/producao-manual-kits";
+import { carregarOpcoesProdutos, carregarOpcoesProdutosEdicao } from "@/services/opcoes-produtos";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -14,50 +14,15 @@ export async function GET(request: Request) {
       throw new Error("Sem permissão para consultar produtos.");
     }
 
-    const [produtos, tiposProduto, tamanhos] = await Promise.all([
-      prisma.produto.findMany({
-        where: { aplicativoId: autenticado.aplicativoId, ativo: true },
-        orderBy: { sku: "asc" },
-        select: { id: true, sku: true, imagemUrl: true },
-      }),
-      prisma.tipoProduto.findMany({
-        orderBy: { titulo: "asc" },
-        select: { id: true, sku: true, titulo: true },
-      }),
-      prisma.tamanho.findMany({
-        orderBy: { titulo: "asc" },
-        select: { id: true, sku: true, titulo: true },
-      }),
-    ]);
-
-    const produtosBase = produtos.map((produto) => ({
-      id: produto.id, sku: produto.sku, imagem_url: produto.imagemUrl,
-    }));
-    const incluirKits = new URL(request.url).searchParams.get("incluir_kits") === "1";
-    const composicoes = incluirKits ? await prisma.componenteKitEstoque.findMany({
-      where: { aplicativoId: autenticado.aplicativoId! },
-      select: { kitSku: true, sku: true, quantidade: true },
-    }) : [];
-    return NextResponse.json({
-      produtos: incluirKits ? montarOpcoesKitsManuais(produtosBase, composicoes) : produtos.map((produto) => ({
-        id: produto.id,
-        sku: produto.sku,
-        imagem_url: produto.imagemUrl,
-      })),
-      tiposProduto: tiposProduto.map((tipo) => ({
-        id: tipo.id,
-        codigo: tipo.sku,
-        nome: tipo.titulo,
-      })),
-      tamanhos: tamanhos.map((tamanho) => ({
-        id: tamanho.id,
-        codigo: tamanho.sku,
-        descricao: tamanho.titulo,
-      })),
-    });
-  } catch (error) {
+    if (!autenticado.aplicativoId) return NextResponse.json({ error: "Aplicativo não configurado." }, { status: 403 });
+    const params = new URL(request.url).searchParams;
+    const dados = params.get("perfil") === "edicao"
+      ? await carregarOpcoesProdutosEdicao(autenticado.aplicativoId)
+      : await carregarOpcoesProdutos(autenticado.aplicativoId, params.get("incluir_kits") === "1");
+    return NextResponse.json(dados, { headers: { "Cache-Control": "private, no-store" } });
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao carregar produtos." },
+      { error: "Erro ao carregar produtos." },
       { status: 403 },
     );
   }

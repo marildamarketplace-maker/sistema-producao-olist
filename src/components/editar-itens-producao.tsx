@@ -6,7 +6,7 @@ import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
 import { tipoCorteDoSku } from "@/lib/producao-tipo-corte";
 import { importarItensProducao } from "@/lib/importar-itens-producao";
 
-type Produto = { id: string; sku: string; imagem_url: string | null };
+type Produto = { id: string; sku: string };
 type Linha = { chave: string; id: string | null; produtoId: string; sku: string; solicitada: string; produzida: string; tipoCorte?: string | null; observacao?: string | null };
 type Props = { producao: DetalheProducao; token: string; onCancelar: () => void; onSalvo: () => void; onRecarregar: () => void };
 
@@ -31,7 +31,7 @@ export function EditarItensProducao({ producao, token, onCancelar, onSalvo, onRe
     setCarregandoProdutos(true); setErroProdutos(null);
     void (async () => {
       try {
-        const response = await fetch("/api/produtos/opcoes", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+        const response = await fetch("/api/produtos/opcoes?perfil=edicao", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
         const dados = await response.json() as { produtos?: Produto[]; error?: string };
         if (!response.ok) throw new Error(dados.error ?? "Não foi possível carregar os produtos.");
         if (!controller.signal.aborted) setProdutos(dados.produtos ?? []);
