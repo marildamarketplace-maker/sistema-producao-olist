@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type BuscaSkuJob } from "@prisma/client";
 import { ErroAnotarSku, ESTADOS_ABERTOS_SKU, type ItemSku } from "@/lib/anotar-sku/contrato";
 import { aplicativoTemJob, CHAVES_JOB, CHAVE_CONFIG_JOB_ANOTAR_SKU } from "@/lib/aplicativo-jobs";
+import { LIMITE_PEDIDOS_SKU, type PaginaPedidosSku } from "@/lib/anotar-sku/pedidos";
 
 type Tx = Prisma.TransactionClient;
 export type EscopoSku = { id: string; aplicativoId: string; podeVisualizar: boolean };
@@ -62,6 +63,22 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
     } });
   }
   return {
+    async pedidosPorSku(escopo: EscopoSku, buscaId: string, sku: string, cursor?: string): Promise<PaginaPedidosSku> {
+      if (!escopo.podeVisualizar) throw new ErroAnotarSku("Você não tem permissão para esta operação.", 403);
+      const busca = await db.buscaSku.findFirst({
+        where: { id: buscaId, aplicativoId: escopo.aplicativoId }, select: { id: true },
+      });
+      if (!busca) throw new ErroAnotarSku("Busca não encontrada.", 404);
+      // Um SKU tem no máximo um item por pedido/aplicativo. O histórico é imutável,
+      // e o cursor por ID permite continuar sem baixar todos os vínculos da busca.
+      const itens = await db.itemBuscaSku.findMany({
+        where: { buscaId, aplicativoId: escopo.aplicativoId, sku, ...(cursor ? { pedidoOlistId: { gt: cursor } } : {}) },
+        select: { pedidoOlistId: true, quantidade: true },
+        orderBy: { pedidoOlistId: "asc" }, take: LIMITE_PEDIDOS_SKU + 1,
+      });
+      const pedidos = itens.slice(0, LIMITE_PEDIDOS_SKU).map(item => ({ id: item.pedidoOlistId, quantidade: item.quantidade }));
+      return { pedidos, proximoCursor: itens.length > LIMITE_PEDIDOS_SKU ? pedidos.at(-1)!.id : null };
+    },
     async estaPausado() {
       const configuracao = await db.configuracaoJob.findUnique({ where: { chave: CHAVE_CONFIG_JOB_ANOTAR_SKU }, select: { pausado: true } });
       return configuracao?.pausado ?? true;

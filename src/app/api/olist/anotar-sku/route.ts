@@ -100,7 +100,13 @@ export async function GET(request: NextRequest) {
 
     const busca = await prisma.buscaSku.findFirst({
       where: { id: buscaId, aplicativoId: autenticado.aplicativoId },
-      include: { itens: { orderBy: [{ pedidoOlistId: "asc" }, { sku: "asc" }] } },
+      select: {
+        id: true, situacoes: true, quantidadePedidos: true, quantidadeSkus: true, createdAt: true,
+        itens: {
+          orderBy: [{ pedidoOlistId: "asc" }, { sku: "asc" }],
+          select: { pedidoOlistId: true, sku: true, tituloProduto: true, quantidade: true },
+        },
+      },
     });
     if (!busca) return NextResponse.json({ error: "Busca não encontrada." }, { status: 404 });
 

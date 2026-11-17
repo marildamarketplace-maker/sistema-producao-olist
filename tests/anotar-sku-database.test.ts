@@ -11,7 +11,9 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   const endereco = new URL(url!);
   assert.ok(["localhost", "127.0.0.1"].includes(endereco.hostname));
   assert.match(endereco.pathname, /^\/anotar_sku_test/);
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url!, max: 8, options: "-c timezone=UTC" }) });
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url!, max: 8, options: "-c timezone=UTC" }), log: [{ emit: "event", level: "query" }] });
+  const consultas: string[] = [];
+  db.$on("query", evento => consultas.push(evento.query));
   t.after(() => db.$disconnect());
   const [existentes] = await db.$queryRaw<{ total: number }[]>`SELECT count(*)::int AS total FROM pg_tables WHERE schemaname = 'public'`;
   assert.equal(existentes.total, 0, "O banco de teste precisa estar vazio.");
@@ -261,5 +263,55 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const estado = await (await api.GET(req())).json(); assert.equal(estado.habilitado, false); assert.match(estado.motivoPausa, /este aplicativo/);
     assert.equal((await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"] }))).status, 403);
     assert.deepEqual(await (await cron.GET(req())).json(), { ok: true, progresso: 0, retry: 0, falha: 0, reserva_perdida: 0 });
+  });
+  await t.test("pedidos por SKU: paginação limitada, quantidades, projeção e isolamento", async () => {
+    const { GET } = await import("../src/app/api/olist/anotar-sku/[id]/pedidos/route");
+    const { NextRequest } = await import("next/server");
+    const sku = "AUDITORIA / azul & verde + 90x90";
+    const busca = await db.buscaSku.create({ data: { aplicativoId: app, situacoes: ["0"] } });
+    const outraBusca = await db.buscaSku.create({ data: { aplicativoId: app, situacoes: ["0"] } });
+    const buscaOutroApp = await db.buscaSku.create({ data: { aplicativoId: outroApp, situacoes: ["0"] } });
+    const pedidos = Array.from({ length: 53 }, (_, i) => ({ id: String(710000 + i), quantidade: i % 3 + 1 }));
+    await db.itemBuscaSku.createMany({ data: [
+      ...pedidos.map(p => ({ buscaId: busca.id, aplicativoId: app, pedidoOlistId: p.id, sku, quantidade: p.quantidade })),
+      { buscaId: busca.id, aplicativoId: app, pedidoOlistId: "999991", sku: "OUTRO SKU", quantidade: 99 },
+      { buscaId: outraBusca.id, aplicativoId: app, pedidoOlistId: "999992", sku, quantidade: 99 },
+      { buscaId: buscaOutroApp.id, aplicativoId: outroApp, pedidoOlistId: "710000", sku, quantidade: 99 },
+    ] });
+    consultas.length = 0;
+    const primeira = await repo.pedidosPorSku(escopo, busca.id, sku);
+    assert.deepEqual(primeira.pedidos, pedidos.slice(0, 50));
+    assert.equal(primeira.proximoCursor, pedidos[49].id);
+    assert.equal(consultas.length, 2, "Uma verificação da busca e uma página de itens, sem N+1");
+    assert.match(consultas[1], /LIMIT/);
+    assert.doesNotMatch(consultas[1], /titulo_produto|created_at/, "Não transfere títulos ou metadados para listar IDs");
+    assert.ok(Buffer.byteLength(JSON.stringify(primeira)) < 3_000, "Página de 50 IDs deve ser pequena");
+    const consultar = (id = busca.id, parametros: Record<string, string> = { sku }, autenticado = true) => GET(
+      new NextRequest(`https://example.test/api?${new URLSearchParams(parametros)}`, { headers: autenticado ? { Authorization: "Bearer teste" } : {} }),
+      { params: Promise.resolve({ id }) },
+    );
+    const resposta = await consultar();
+    assert.equal(resposta.status, 200);
+    assert.equal(resposta.headers.get("Cache-Control"), "private, no-store");
+    assert.deepEqual(await resposta.json(), primeira);
+    const segunda = await (await consultar(busca.id, { sku, cursor: primeira.proximoCursor! })).json();
+    assert.deepEqual(segunda, { pedidos: pedidos.slice(50), proximoCursor: null });
+    assert.deepEqual(await (await consultar(busca.id, { sku, cursor: pedidos.at(-1)!.id })).json(), { pedidos: [], proximoCursor: null });
+    assert.deepEqual(await (await consultar(busca.id, { sku: "inexistente" })).json(), { pedidos: [], proximoCursor: null });
+    assert.equal((await consultar(buscaOutroApp.id)).status, 404);
+    assert.equal((await consultar(crypto.randomUUID())).status, 404);
+    assert.equal((await consultar("invalido")).status, 400);
+    const parametrosInvalidos: Record<string, string>[] = [{}, { sku: "" }, { sku: "x".repeat(513) }, { sku, cursor: "" }, { sku, cursor: "x".repeat(129) }];
+    for (const parametros of parametrosInvalidos) {
+      assert.equal((await consultar(busca.id, parametros)).status, 400);
+    }
+    assert.equal((await consultar(busca.id, { sku }, false)).status, 401);
+    await assert.rejects(repo.pedidosPorSku({ ...escopo, podeVisualizar: false }, busca.id, sku), /permissão/);
+    try {
+      await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=false WHERE id=${user}::uuid`;
+      assert.equal((await consultar()).status, 403, "Permissão de escrita não concede leitura");
+      await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=true, ativo=false WHERE id=${user}::uuid`;
+      assert.equal((await consultar()).status, 401, "Usuário inativo não possui sessão válida");
+    } finally { await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=true, ativo=true WHERE id=${user}::uuid`; }
   });
 });
