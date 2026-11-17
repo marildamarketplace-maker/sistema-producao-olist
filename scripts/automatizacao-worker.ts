@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
 import { renovarEnquantoValida } from "@/lib/automatizacao/renovacao";
 import { eventoWorker } from "@/lib/automatizacao/log-worker";
+import { criarClienteFilaWorker, ErroComunicacaoFila } from "@/lib/automatizacao/cliente-fila-worker";
+import { detalharFalhaExecucaoWorker } from "@/lib/automatizacao/falha-execucao-worker";
 import { ambienteWorkerCodex } from "@/lib/automatizacao/ambiente-worker-codex";
 import { configurarBrowserWorker, promptBrowserWorker, respostaBrowserSchema } from "@/lib/automatizacao/browser-worker";
 import { z } from "zod";
@@ -32,16 +34,7 @@ async function main() {
   const { stdout } = await executarCodexCli({ executable, args: ["--version"], cwd: tmpdir(), timeoutMs: 10_000 });
   if (stdout.trim().split(/\s+/).at(-1) !== versao) throw new Error("VERSAO_CODEX");
 
-  async function api(corpo: { acao: string; [campo: string]: unknown }, timeoutMs = 10_000) {
-    const resposta = await fetch(destino, {
-      method: "POST", redirect: "error",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(corpo), signal: AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs))),
-    });
-    if (resposta.status === 409 || (corpo.acao === "renovar" && [401, 403].includes(resposta.status))) return null;
-    if (!resposta.ok) throw new Error("API");
-    return resposta.json() as Promise<unknown>;
-  }
+  const api = criarClienteFilaWorker({ destino, token, registrarFalha: (evento) => console.error(evento) });
 
   console.info(eventoWorker("AGUARDANDO_TAREFA"));
   while (!parar.signal.aborted) {
@@ -123,10 +116,13 @@ async function main() {
           if (!validada.concluida) desfecho = validada.bloqueada ? "BLOQUEADA" : "FALHA";
         } else resultado = respostaSchema.parse(resposta).resultado;
       } catch (error) {
-        const codigo = error instanceof ImageAnalysisProviderError ? error.code : "SAIDA_INVALIDA";
+        const falha = detalharFalhaExecucaoWorker(error);
+        const { codigo } = falha;
         desfecho = ["AUTHENTICATION_ERROR", "CONFIGURATION_ERROR"].includes(codigo) ? "INDISPONIVEL"
           : !browser && error instanceof ImageAnalysisProviderError && error.retriable ? "TEMPORARIA" : "FALHA";
-        resultado = codigo;
+        resultado = falha.resultado;
+        resumoWhatsapp = falha.resumoWhatsapp;
+        console.error(eventoWorker("FALHA_EXECUTOR", rotinaNome, iniciado, desfecho, falha));
       } finally {
         await rm(cwd, { force: true, recursive: true }).catch(() => console.error("Falha ao limpar o diretório da execução."));
       }
@@ -148,9 +144,13 @@ async function main() {
         console.error("Executor Codex indisponível.");
         await esperar(60_000, undefined, { signal: parar.signal });
       }
-    } catch {
+    } catch (error) {
       if (!parar.signal.aborted) {
-        console.error("Falha de comunicação com a fila.");
+        if (!(error instanceof ErroComunicacaoFila)) {
+          console.error(error instanceof z.ZodError
+            ? "Resposta da fila fora do contrato esperado."
+            : "Falha local no processamento da tarefa; dados da exceção omitidos.");
+        }
         await esperar(10_000, undefined, { signal: parar.signal }).catch(() => {});
       }
     }

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
+import { diagnosticarSaidaCodex, diagnosticoCodexSchema, type DiagnosticoCodex } from "./diagnosticoCodexCli";
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
@@ -21,8 +22,9 @@ export function erroCodexCli(
   code: ImageAnalysisProviderError["code"],
   message: string,
   retriable = false,
+  diagnostico?: DiagnosticoCodex,
 ) {
-  return new ImageAnalysisProviderError(message, { code, provider: "codex-local", retriable });
+  return new ImageAnalysisProviderError(message, { code, provider: "codex-local", retriable, details: diagnostico });
 }
 
 // As mensagens do processo servem apenas para classificação: nunca são copiadas
@@ -40,7 +42,7 @@ export function classificarFalhaCodexCli(message: string) {
   if (/Error:.*(?:operation not permitted|permission denied|read-only (?:database|file system))/i.test(message)) {
     return erroCodexCli("CONFIGURATION_ERROR", "O sistema bloqueou a inicialização do Codex CLI. Confira as permissões do processo e o acesso ao diretório do Codex.");
   }
-  return erroCodexCli("PROVIDER_TEMPORARY_ERROR", "O Codex CLI não concluiu a análise; o job seguirá o backoff do worker.", true);
+  return erroCodexCli("PROVIDER_TEMPORARY_ERROR", "O Codex CLI não concluiu a análise; o job seguirá o backoff do worker.", true, diagnosticarSaidaCodex(message));
 }
 
 export function executarCodexCli(options: {
@@ -78,10 +80,10 @@ export function executarCodexCli(options: {
       }
     };
     const timeout = setTimeout(() => {
-      terminate(erroCodexCli("TIMEOUT", "Timeout na análise visual pelo Codex CLI.", true));
+      terminate(erroCodexCli("TIMEOUT", "Timeout na análise visual pelo Codex CLI.", true, { motivo: "TEMPO_LIMITE" }));
     }, options.timeoutMs);
 
-    const abortar = () => terminate(erroCodexCli("TIMEOUT", "A execução perdeu a reserva.", true));
+    const abortar = () => terminate(erroCodexCli("TIMEOUT", "A execução perdeu a reserva.", true, { motivo: "RESERVA_PERDIDA" }));
     options.signal?.addEventListener("abort", abortar, { once: true });
     if (options.signal?.aborted) abortar();
     const limpar = () => {
@@ -95,7 +97,7 @@ export function executarCodexCli(options: {
       if (failure) return;
       outputBytes += Buffer.byteLength(chunk);
       if (outputBytes > MAX_OUTPUT_BYTES) {
-        terminate(erroCodexCli("INVALID_RESPONSE", "Saída do Codex CLI excedeu o limite de 2 MiB."));
+        terminate(erroCodexCli("INVALID_RESPONSE", "Saída do Codex CLI excedeu o limite de 2 MiB.", false, { motivo: "SAIDA_EXCESSIVA" }));
         return;
       }
       if (stream === "stdout") stdout += chunk;
@@ -103,20 +105,27 @@ export function executarCodexCli(options: {
     };
     child.stdout.on("data", (chunk: string) => collect(chunk, "stdout"));
     child.stderr.on("data", (chunk: string) => collect(chunk, "stderr"));
-    child.once("error", () => {
+    child.once("error", (error: NodeJS.ErrnoException) => {
       limpar();
-      reject(erroCodexCli("CONFIGURATION_ERROR", "Não foi possível executar o Codex CLI. Confira a instalação, permissões e CODEX_CLI_PATH."));
+      reject(erroCodexCli("CONFIGURATION_ERROR", "Não foi possível executar o Codex CLI. Confira a instalação, permissões e CODEX_CLI_PATH.", false, {
+        motivo: error.code === "ENOENT" ? "EXECUTAVEL_AUSENTE" : error.code === "EACCES" ? "PERMISSAO_NEGADA" : "INICIALIZACAO_FALHOU",
+      }));
     });
-    child.once("close", (code) => {
+    child.once("close", (code, signal) => {
       limpar();
-      if (failure) reject(failure);
-      else if (code !== 0) reject(classificarFalhaCodexCli(`${stderr}\n${stdout}`));
-      else resolve({ stdout, stderr });
+      const error = failure ?? (code !== 0 ? classificarFalhaCodexCli(`${stderr}\n${stdout}`) : undefined);
+      if (!error) { resolve({ stdout, stderr }); return; }
+      const detalhe = diagnosticoCodexSchema.safeParse(error.details);
+      const sinal = diagnosticoCodexSchema.shape.sinal.safeParse(signal ?? undefined);
+      reject(erroCodexCli(error.code, error.message, error.retriable, {
+        ...(detalhe.success ? detalhe.data : diagnosticarSaidaCodex(`${stderr}\n${stdout}`)),
+        codigoSaida: code, ...(sinal.success && sinal.data ? { sinal: sinal.data } : {}),
+      }));
     });
     child.stdin.on("error", (error: NodeJS.ErrnoException) => {
       // EPIPE é esperado quando o CLI encerra antes de ler o prompt.
       if (error.code !== "EPIPE") {
-        terminate(erroCodexCli("PROVIDER_TEMPORARY_ERROR", "Falha ao enviar o prompt ao Codex CLI.", true));
+        terminate(erroCodexCli("PROVIDER_TEMPORARY_ERROR", "Falha ao enviar o prompt ao Codex CLI.", true, { motivo: "ENVIO_PROMPT_FALHOU" }));
       }
     });
     child.stdin.end(options.stdin ?? "");

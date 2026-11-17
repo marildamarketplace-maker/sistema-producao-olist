@@ -57,6 +57,46 @@ os dois temas deve ser executada no ambiente de homologação.
 
 A fila faz uma reserva por vez, renova a cada 15 segundos e expira a reserva em 60 segundos. Os logs do worker registram duração e desfecho sem copiar prompt ou resultado. Monitore o atraso da fila comparando o instante atual com `disponivelEm` do trabalho elegível mais antigo. A hora da última tentativa e `reservaAte` ajudam no diagnóstico enquanto há trabalho reservado. O worker de prompts usa diretório de trabalho temporário e ferramentas desabilitadas. A autenticação é exclusivamente ChatGPT (`forced_login_method="chatgpt"`), usando a sessão persistida em `CODEX_HOME` ou `~/.codex` do usuário do serviço. API keys não são encaminhadas. O consumo segue os limites da assinatura. Faça `codex login --device-auth` e `codex login status` como o mesmo usuário do serviço antes de iniciar. Proteja o diretório de credenciais e não compartilhe `auth.json`. A sessão pode expirar e exigir novo login.
 
+## Diagnóstico de falhas do worker
+
+`FINALIZADA` indica que o resultado foi registrado; confira `desfecho` para saber
+se houve sucesso. `PROVIDER_TEMPORARY_ERROR` é uma classificação genérica do
+executor e não comprova indisponibilidade do provedor. Com browser habilitado,
+uma falha técnica continua terminal: não repetimos automaticamente uma ação no
+marketplace cujo efeito pode ter ocorrido antes da falha.
+
+O worker registra `FALHA_API_FILA` com ação, status HTTP, duração, formato da
+resposta e identificador Vercel quando reconhecido. Distingue 401, 403, 409,
+falhas de transporte e JSON inválido, inclusive durante o heartbeat. Nenhuma
+resposta de erro, URL, token, reserva ou corpo de requisição é copiado ao log.
+O campo `desafioVercel` indica apenas se o cabeçalho de desafio foi recebido;
+sua ausência não exclui outros bloqueios de acesso.
+
+Falhas do subprocesso geram `FALHA_EXECUTOR`, com código, motivo reconhecido,
+código de saída e sinal quando disponíveis. O histórico recebe uma descrição
+fixa e o WhatsApp um resumo legível. Há distinção entre MCP indisponível, schema
+recusado, DNS, conexão, certificado, timeout e interrupção por reserva. Essa
+classificação usa padrões da saída, não comprova causa raiz; erros desconhecidos
+continuam explicitamente não classificados. A saída bruta é descartada porque
+pode conter prompts, dados de páginas e credenciais.
+
+Para investigar uma falha nova, correlacione `FALHA_EXECUTOR` com os eventos
+`FALHA_API_FILA` e a tentativa no ERP. O primeiro heartbeat ocorre em 15 segundos,
+enquanto a reserva vale 60 segundos; uma recusa de posse/autorização interrompe
+imediatamente, e erros de transporte mantêm as tentativas dentro do prazo.
+Os “OK” do `iniciar-worker.sh` validam dependências e evidências, sem comprovar
+conectividade Codex/MCP. Confira também o serviço do navegador na VM; não basta
+reinstalar dependências. Um aviso de URI externa não suportada no desktop precisa
+ser correlacionado com a falha, não presumido como causa do executor.
+
+Esta melhoria exige atualizar e reiniciar o worker na VM. Não exige migration
+nem alteração do contrato da API; não recupera detalhes descartados das tentativas
+antigas. Não acrescenta chamadas à API/banco, polling nem retries. Acrescenta apenas
+metadados curtos em falhas e um texto curto ao resultado já persistido/notificado.
+Validação local com requisições e subprocessos simulados não comprova o fluxo
+real na VM. Antes de retentar uma rotina, confira possíveis efeitos parciais no
+marketplace.
+
 ## Piloto e corte de mockups
 
 O botão **Testar rotina** agora enfileira a habilidade real como `EXECUTAR_PROMPT`,

@@ -8,7 +8,7 @@ import test, { type TestContext } from "node:test";
 import { lerOpcoesEstampasWorker } from "../src/config/imageAnalysisProvider";
 import { CodexLocalImageAnalysisProvider } from "../src/services/image-analysis/CodexLocalImageAnalysisProvider";
 import { ImageAnalysisProviderError } from "../src/services/image-analysis/ImageAnalysisProviderError";
-import { ambienteCodexCli } from "../src/services/image-analysis/executarCodexCli";
+import { ambienteCodexCli, executarCodexCli } from "../src/services/image-analysis/executarCodexCli";
 import { criarImageAnalysisProvider } from "../src/services/image-analysis/imageAnalysisProviderFactory";
 import { OpenAIImageAnalysisProvider } from "../src/services/image-analysis/OpenAIImageAnalysisProvider";
 import type { ImageAnalysisInput } from "../src/services/image-analysis/ImageAnalysisProvider";
@@ -134,9 +134,46 @@ for (const scenario of [
 test("timeout encerra o processo e limpa o diretório", async (t) => {
   const f = await fixture(t, { mode: "timeout" });
   const provider = new CodexLocalImageAnalysisProvider({ executable: f.executable, model: "test", timeoutMs: 700 });
-  await assert.rejects(provider.analyzeImage(input), erro("TIMEOUT", true));
+  await assert.rejects(provider.analyzeImage(input), (error: unknown) => {
+    assert.ok(error instanceof ImageAnalysisProviderError);
+    assert.equal(error.code, "TIMEOUT");
+    assert.equal(error.retriable, true);
+    assert.deepEqual(error.details, { motivo: "TEMPO_LIMITE", codigoSaida: null, sinal: "SIGKILL" });
+    return true;
+  });
   for (const snapshot of await f.snapshots()) await assert.rejects(access(snapshot.cwd));
 });
+
+test("cancelamento por reserva tem diagnóstico distinto de timeout do executor", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(executarCodexCli({
+    executable: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
+    cwd: tmpdir(), timeoutMs: 5_000, signal: controller.signal,
+  }), (error: unknown) => {
+    assert.ok(error instanceof ImageAnalysisProviderError);
+    assert.equal(error.code, "TIMEOUT");
+    assert.deepEqual(error.details, { motivo: "RESERVA_PERDIDA", codigoSaida: null, sinal: "SIGKILL" });
+    return true;
+  });
+});
+
+for (const [message, motivo] of [
+  ["MCP client for browser failed to start: connection refused SECRET_TEST", "MCP_INDISPONIVEL"],
+  ["invalid_json_schema: schema rejected SECRET_TEST", "ESQUEMA_REJEITADO"],
+] as const) {
+  test(`subprocesso preserva diagnóstico ${motivo} sem copiar stderr`, async (t) => {
+    const f = await fixture(t, { mode: "exit", error: message });
+    await assert.rejects(f.provider.analyzeImage(input), (error: unknown) => {
+      assert.ok(error instanceof ImageAnalysisProviderError);
+      assert.equal(error.code, "PROVIDER_TEMPORARY_ERROR");
+      assert.equal(error.retriable, true);
+      assert.deepEqual(error.details, { motivo, codigoSaida: 1 });
+      assert.doesNotMatch(JSON.stringify(error), /SECRET_TEST/);
+      return true;
+    });
+  });
+}
 
 test("preflight rejeita CLI antigo, login ausente e API key", async (t) => {
   const old = await fixture(t, { oldVersion: true });
