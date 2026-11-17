@@ -64,7 +64,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
         ...Array.from({ length: 20 }, (_, n) => ({ configuracaoId: config.id, aplicativoId: a, entidade: "CONTATO", remoteId: `outra-execucao-${n}`, ultimaExecucaoId: outra.id, verificadoEm: agora, metadadosJson: { completo: true } })),
         { configuracaoId: config.id, aplicativoId: a, entidade: "CONTATO", remoteId: "futuro", ultimaExecucaoId: e.id, verificadoEm: new Date(agora.getTime() + 3_600_000), metadadosJson: { completo: true } },
       ] });
-      await sql.query("VACUUM (ANALYZE) olist_sync_estado");
+      await sql.query("ANALYZE olist_sync_estado");
       const query = consultaValidacoesRecentesSync(config.id, e.id, new Date(agora.getTime() - 1_800_000), agora);
       const [contagem] = await db.$queryRaw<Array<{ total: number }>>(query);
       assert.equal(contagem.total, 60, "A janela deve contar os timestamps com o fuso correto");
@@ -73,10 +73,13 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
         const [contagemFuso] = await tx.$queryRaw<Array<{ total: number }>>(query);
         assert.equal(contagemFuso.total, 60, `A mesma janela deve funcionar no fuso ${fuso}`);
       });
-      const plano = await db.$queryRaw<Array<{ "QUERY PLAN": Array<{ Plan: unknown; "Execution Time": number }> }>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`);
-      assert.match(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /olist_sync_estado_previsao_idx/);
-      assert.doesNotMatch(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /Seq Scan/);
-      t.diagnostic(`Previsão: 50060 observações, 60 recentes; consulta agregada ${plano[0]["QUERY PLAN"][0]["Execution Time"]}ms em PostgreSQL local.`);
+      for (const cenario of ["recém-gravadas", "após vacuum"]) {
+        if (cenario === "após vacuum") await sql.query("VACUUM (ANALYZE) olist_sync_estado");
+        const plano = await db.$queryRaw<Array<{ "QUERY PLAN": Array<{ Plan: unknown; "Execution Time": number }> }>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`);
+        assert.match(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /olist_sync_estado_previsao_idx/);
+        assert.doesNotMatch(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /Seq Scan/);
+        t.diagnostic(`Previsão: 50060 observações ${cenario}, 60 recentes; agregação ${plano[0]["QUERY PLAN"][0]["Execution Time"]}ms em PostgreSQL local.`);
+      }
       const response = await api.GET(req("GET", ["previsao"]), contexto(["previsao"]));
       assert.equal(response.status, 200);const body = await response.json();
       assert.equal(body.previsao.estado, "ESTIMADA", JSON.stringify(body.previsao));

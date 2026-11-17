@@ -145,6 +145,8 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.equal(body.previsao.porMinuto, 10);assert.equal(body.previsao.restantes, 600);
     assert.equal(Date.parse(body.previsao.terminoPrevisto) - Date.parse(body.previsao.calculadoEm), 3_600_000);
     assert.equal(chamadasDe("$queryRaw").length, 1);assert.equal(chamadasDe("olistSyncEstado.findMany").length, 0);
+    assert.deepEqual(chamadasDe("olistSyncConfiguracao.findUnique")[0].args.select,
+      { id: true, ativo: true, aplicativoPai: { select: { jobs: true } } }, "A previsão não lê participantes, políticas ou prontidão");
     assert.doesNotMatch(JSON.stringify(body), /Criptograf|metadados|token|cpfCnpj/);
   });
   await t.test("sem execução ativa, listagem incompleta e job pausado não contam o catálogo", async () => {
@@ -162,6 +164,27 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     reset();handlers["olistSyncExecucao.findMany"] = () => [];handlers["olistSyncExecucao.count"] = () => 0;
     for (const caminho of ["resumo", "execucoes", `execucoes/${EXECUCAO}`]) await GET(request(caminho), contexto(caminho));
     assert.equal(chamadasDe("$queryRaw").length, 0);
+  });
+  await t.test("leitura concluída e execução nova dispensam a contagem da janela", async () => {
+    for (const [iniciadaEm, contadoresJson, estado] of [
+      [new Date(Date.now() - 3_600_000), { listados: 100, analisados: 100 }, "LEITURA_CONCLUIDA"],
+      [new Date(Date.now() - 20_000), { listados: 100, analisados: 5 }, "AMOSTRA_INSUFICIENTE"],
+      [null, { listados: 100, analisados: 0 }, "AMOSTRA_INSUFICIENTE"],
+    ] as const) {
+      reset();handlers["olistSyncExecucao.findFirst"] = () => ({ ...execucao, iniciadaEm, contadoresJson, etapas: [{ fase: "DETALHAR", status: "PENDENTE" }] });
+      const response = await GET(request("previsao"), contexto("previsao"));
+      assert.equal(response.status, 200);assert.equal((await response.json()).previsao.estado, estado);
+      assert.equal(chamadasDe("$queryRaw").length, 0);
+    }
+  });
+  await t.test("pai sem liberação e filhos não disparam consultas adicionais de previsão", async () => {
+    reset();handlers["olistSyncConfiguracao.findUnique"] = () => ({ ...configuracao(), ativo: false });
+    handlers["olistSyncExecucao.findFirst"] = () => ({ ...execucao, iniciadaEm: agora, etapas: [] });
+    assert.equal((await (await GET(request("previsao"), contexto("previsao"))).json()).previsao.estado, "PAUSADA");
+    assert.equal(chamadasDe("configuracaoJob.findUnique").length, 0);assert.equal(chamadasDe("$queryRaw").length, 0);
+    reset();usuarioApp = FILHO;
+    assert.equal((await GET(request("previsao"), contexto("previsao"))).status, 403);
+    assert.equal(chamadasDe("olistSyncExecucao.findFirst").length, 0);assert.equal(chamadasDe("$queryRaw").length, 0);
   });
 
   await t.test("reauditar exige executar além de resolver e não registra decisão sem ambas", async () => {

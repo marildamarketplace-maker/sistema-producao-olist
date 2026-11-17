@@ -67,6 +67,7 @@ export async function GET(request:Request,contexto:Contexto) {
       const listagemPendente=e.etapas.length===0 || e.etapas.length>200 || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
       const previa=calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
         validadosNaJanela:0,listagemPendente,pausada});
+      // Os demais estados já são conhecidos sem contar observações recentes.
       if(previa.estado!=="SEM_RITMO")return json({previsao:previa});
       const inicio=inicioJanelaPrevisaoSync(agora,e.iniciadaEm);
       const recentes=await contarValidacoesRecentesSync(prisma,config.id,e.id,inicio,agora);
