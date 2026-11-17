@@ -4,6 +4,7 @@ import { test } from "node:test";
 test("agendador libera falhas anteriores e preserva bloqueios e exclusão por rotina", async (t) => {
   const rotinaId = "rotina", aplicativoId = "app";
   let anterior = "FALHA_FINAL", lida = false;
+  let mensal = false;
   const criadas: unknown[] = [], disparos: { motivo: string }[] = [];
   const tx = {
     $queryRaw: async () => lida ? [] : (lida = true, [{ id: rotinaId }]),
@@ -20,7 +21,9 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
         });
         const agora = new Date();
         return { id: rotinaId, aplicativoId, cursor: new Date(agora.getTime() - 60_000),
-          horarios: [{ dia: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short" }).format(agora)),
+          horarios: [{ ...(mensal
+            ? { diaMes: Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", day: "numeric" }).format(agora)) }
+            : { dia: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short" }).format(agora)) }),
             hora: new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(agora) }],
           habilidade: { versoes: [{ id: "versao" }] } };
       },
@@ -46,4 +49,8 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
     if (liberada) assert.equal((criadas[0] as { versaoId: string }).versaoId, "versao");
     assert.equal(disparos[0].motivo, liberada ? "ENFILEIRADO" : "SOBREPOSICAO");
   }
+  mensal = true; anterior = "CONCLUIDA"; lida = false; criadas.length = 0; disparos.length = 0;
+  assert.equal(await agendarAutomatizacoes(), 1);
+  assert.equal(criadas.length, 1);
+  assert.equal(disparos[0].motivo, "ENFILEIRADO");
 });

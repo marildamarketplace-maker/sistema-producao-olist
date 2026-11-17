@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
+import type { HorarioRotina } from "@/lib/automatizacao/contrato";
 import { botao, Feedback, painel, secundario, TelaAutomatizacao, useAutomatizacaoApi } from "@/components/automatizacao/compartilhado";
 
 const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 const horarioNovo = { dia: 1, hora: "08:00" };
-const vazio = { id: "", revisao: "", nome: "", habilidadeId: "", ativa: false, horarios: [horarioNovo] };
+const vazio = { id: "", revisao: "", nome: "", habilidadeId: "", ativa: false, horarios: [horarioNovo] as HorarioRotina[] };
 type Rotina = typeof vazio & { arquivada: boolean };
 type Habilidade = { id: string; nome: string; arquivada: boolean };
 
 export default function RotinasPage() {
-  return <TelaAutomatizacao titulo="Rotinas" descricao="Programe execuções semanais no horário de São Paulo."><Rotinas /></TelaAutomatizacao>;
+  return <TelaAutomatizacao titulo="Rotinas" descricao="Programe execuções semanais ou mensais no horário de São Paulo."><Rotinas /></TelaAutomatizacao>;
 }
 
 function Rotinas() {
@@ -71,8 +72,8 @@ function Rotinas() {
     void alterar(form.id ? "PATCH" : "POST");
   }
 
-  function editarHorario(index: number, parcial: Partial<typeof horarioNovo>) {
-    setForm({ ...form, horarios: form.horarios.map((item, i) => i === index ? { ...item, ...parcial } : item) });
+  function editarHorario(index: number, horario: HorarioRotina) {
+    setForm({ ...form, horarios: form.horarios.map((item, i) => i === index ? horario : item) });
   }
 
   return <div className="space-y-4">
@@ -88,9 +89,15 @@ function Rotinas() {
         </div>
         <p className="text-sm">Tipo: Executar prompt · Destino: WhatsApp configurado no aplicativo</p>
         <p className="text-sm">Use horários de São Paulo com pelo menos 15 minutos de intervalo entre si e em relação às outras rotinas ativas. Essa regra também é conferida ao ativar a rotina.</p>
-        {form.horarios.map((item, index) => <div key={index} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <label className="text-sm">Dia {index + 1}<select className="input mt-1 min-h-11 w-full" value={item.dia} onChange={(e) => editarHorario(index, { dia: Number(e.target.value) })}>{dias.map((dia, i) => <option key={dia} value={i}>{dia}</option>)}</select></label>
-          <label className="text-sm">Horário {index + 1}<input type="time" required className="input mt-1 min-h-11 w-full" value={item.hora} onChange={(e) => editarHorario(index, { hora: e.target.value })} /></label>
+        <p className="text-sm">Na agenda mensal, o dia escolhido só executa nos meses em que existe. Por exemplo, dia 31 não executa em fevereiro.</p>
+        {form.horarios.map((item, index) => <div key={index} className="grid items-end gap-2 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto]">
+          <label className="min-w-0 text-sm">Frequência {index + 1}<select className="input mt-1 min-h-11 w-full" value={"diaMes" in item ? "mensal" : "semanal"} onChange={(e) => editarHorario(index, e.target.value === "mensal" ? { diaMes: 1, hora: item.hora } : { dia: 1, hora: item.hora })}>
+            <option value="semanal">Semanal</option><option value="mensal">Mensal</option>
+          </select></label>
+          {"diaMes" in item
+            ? <label className="min-w-0 text-sm">Dia do mês {index + 1}<select className="input mt-1 min-h-11 w-full" value={item.diaMes} onChange={(e) => editarHorario(index, { diaMes: Number(e.target.value), hora: item.hora })}>{Array.from({ length: 31 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select></label>
+            : <label className="min-w-0 text-sm">Dia da semana {index + 1}<select className="input mt-1 min-h-11 w-full" value={item.dia} onChange={(e) => editarHorario(index, { dia: Number(e.target.value), hora: item.hora })}>{dias.map((dia, i) => <option key={dia} value={i}>{dia}</option>)}</select></label>}
+          <label className="min-w-0 text-sm">Horário {index + 1}<input type="time" required className="input mt-1 min-h-11 w-full" value={item.hora} onChange={(e) => editarHorario(index, { ...item, hora: e.target.value })} /></label>
           <button type="button" className={secundario} disabled={form.horarios.length === 1} onClick={() => setForm({ ...form, horarios: form.horarios.filter((_, i) => i !== index) })}>Remover horário {index + 1}</button>
         </div>)}
         <button type="button" className={secundario} disabled={form.horarios.length >= 56} onClick={() => setForm({ ...form, horarios: [...form.horarios, horarioNovo] })}>Adicionar horário</button>
@@ -105,7 +112,7 @@ function Rotinas() {
     {rotinas.map((item) => <article key={item.id} className={painel}>
       <h2 className="break-words font-semibold">{item.nome}</h2>
       <p className="break-words text-sm">{habilidades.find((h) => h.id === item.habilidadeId)?.nome} · {item.arquivada ? "Arquivada" : item.ativa ? "Ativa" : "Pausada"}</p>
-      <ul className="flex flex-wrap gap-2 text-sm">{item.horarios.map(({ dia, hora }) => <li key={`${dia}-${hora}`}>{dias[dia]} {hora}</li>)}</ul>
+      <ul className="flex flex-wrap gap-2 text-sm">{item.horarios.map((horario) => <li key={`${"diaMes" in horario ? `mes-${horario.diaMes}` : `semana-${horario.dia}`}-${horario.hora}`}>{"diaMes" in horario ? `Todo mês, dia ${horario.diaMes}` : dias[horario.dia]} às {horario.hora}</li>)}</ul>
       <div className="flex flex-wrap gap-2"><Link className={`${secundario} inline-flex items-center`} href={`/automatizacao/historico?rotinaId=${encodeURIComponent(item.id)}`} aria-label={`Histórico da rotina ${item.nome}`}>Histórico</Link></div>
       {usuario?.podeIntervirAutomatizacao && !item.arquivada && <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={secundario} disabled={salvando} onClick={() => void testar(item.id)}>Testar rotina</button>

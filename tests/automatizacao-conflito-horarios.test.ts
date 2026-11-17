@@ -68,6 +68,10 @@ test("API bloqueia criação, edição e ativação; preserva pausa, autorizaç�
   assert.equal(gravadas, 0);
   assert.equal((await chamar("PATCH", { ativa: false, revisao: dados.revisao }, `?id=${id}&acao=status`)).status, 200);
   assert.equal((await chamar("POST", { ...dados, horarios: [horario(1, "08:15")] })).status, 200);
+  assert.equal((await chamar("POST", { ...dados, horarios: [{ diaMes: 1, hora: "08:14" }] })).status, 409);
+  assert.equal((await chamar("POST", { ...dados, horarios: [{ diaMes: 1, hora: "11:00" }] })).status, 200);
+  assert.equal((await chamar("PATCH", { ...dados, horarios: [{ diaMes: 1, hora: "11:00" }] }, `?id=${id}`)).status, 200);
+  assert.equal((await chamar("POST", { ...dados, horarios: [{ diaMes: 32, hora: "11:00" }] })).status, 400);
   outras = [];
   assert.equal((await chamar("POST", { ...dados, horarios: [horario(1, "08:00"), horario(1, "08:10")] })).status, 409);
   assert.equal((await chamar("POST", dados)).status, 200);
