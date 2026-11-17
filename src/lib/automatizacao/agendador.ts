@@ -15,7 +15,12 @@ export async function agendarAutomatizacoes(data = new Date()) {
       if (!chave) return false;
       const rotina = await tx.rotinaAutomatizacao.findUniqueOrThrow({
         where: { id: chave.id },
-        include: { habilidade: { include: { versoes: { orderBy: { numero: "desc" }, take: 1 } } } },
+        select: {
+          id: true, aplicativoId: true, horarios: true, cursor: true,
+          habilidade: { select: {
+            versoes: { orderBy: { numero: "desc" }, take: 1, select: { id: true } },
+          } },
+        },
       });
       const { aplicativoId, id: rotinaId } = rotina;
       const horarios = calcularDisparos(horariosSchema.parse(rotina.horarios), rotina.cursor, agora);

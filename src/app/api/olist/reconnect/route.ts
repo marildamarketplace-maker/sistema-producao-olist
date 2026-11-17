@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { assinarContextoOlist, COOKIE_CONTEXTO_OLIST } from "@/lib/olist-oauth-contexto";
 
 export async function POST(request: Request) {
   try {
@@ -8,6 +9,7 @@ export async function POST(request: Request) {
     if (!usuario.podeEditarConfiguracao) {
       return NextResponse.json({ error: "Sem permissão para reconectar a Olist." }, { status: 403 });
     }
+    const contexto = assinarContextoOlist(usuario.aplicativoId, usuario.id);
     const existente = await prisma.integracaoOlistToken.findFirst({
     where: { aplicativoId: usuario.aplicativoId, provider: "olist" }, select: { id: true },
   });
@@ -26,6 +28,9 @@ export async function POST(request: Request) {
     }
 
     const response = NextResponse.json({ login_url: "/api/olist/login" });
+    response.cookies.set(COOKIE_CONTEXTO_OLIST, contexto, {
+      httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/api/olist", maxAge: 60 * 10,
+    });
     response.cookies.set("olist_aplicativo_id", usuario.aplicativoId, {
       httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/api/olist", maxAge: 60 * 15,
     });

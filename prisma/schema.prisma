@@ -58,6 +58,8 @@ model Aplicativo {
   tarefasMidia              TarefaMidia[]
   turnosProducao            TurnoProducao[]
   usuarios                  Usuario[]
+  sincronizacaoOlist        OlistSyncConfiguracao?
+  participacoesOlistSync    OlistSyncParticipante[]
 
   @@index([aplicativoPaiId], map: "idx_aplicativo_pai_id")
   @@map("aplicativo")
@@ -196,6 +198,10 @@ model Usuario {
   podeGerenciarRotinas                 Boolean                 @default(false) @map("pode_gerenciar_rotinas")
   podeIntervirAutomatizacao            Boolean                 @default(false) @map("pode_intervir_automatizacao")
   podeVisualizarAutomatizacao          Boolean                 @default(false) @map("pode_visualizar_automatizacao")
+  podeVisualizarSincronizacaoOlist     Boolean @default(false) @map("pode_visualizar_sincronizacao_olist")
+  podeExecutarSincronizacaoOlist       Boolean @default(false) @map("pode_executar_sincronizacao_olist")
+  podeResolverSincronizacaoOlist       Boolean @default(false) @map("pode_resolver_sincronizacao_olist")
+  podeConfigurarSincronizacaoOlist     Boolean @default(false) @map("pode_configurar_sincronizacao_olist")
   acessosPaginas                       AcessoPaginaUsuario[]
   enviosFornecedor                     EnvioFornecedor[]
   fornecedoresComoVendedor             Fornecedor[]
@@ -1344,4 +1350,252 @@ enum StatusPedidoFornecedorQueue {
   CANCELADO
 
   @@map("status_pedido_fornecedor_queue")
+}
+
+// O pai administra; somente os participantes filhos representam contas Olist.
+model OlistSyncConfiguracao {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoPaiId String @unique @map("aplicativo_pai_id") @db.Uuid
+  ativo Boolean @default(false)
+  aplicativosBloqueados String[] @default([]) @map("aplicativos_bloqueados") @db.Uuid
+  entidades String[] @default(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"])
+  versao Int @default(1)
+  politicasJson Json @default("{}") @map("politicas_json")
+  readinessJson Json @default("{}") @map("readiness_json")
+  horaDiaria String @default("02:00") @map("hora_diaria") @db.VarChar(5)
+  timezone String @default("America/Sao_Paulo")
+  proximaExecucaoEm DateTime? @map("proxima_execucao_em") @db.Timestamptz(6)
+  ultimaLimpezaEm DateTime? @map("ultima_limpeza_em") @db.Timestamptz(6)
+  autorizadoPor String? @map("autorizado_por") @db.Uuid
+  limiteAlteracoes Int @default(100) @map("limite_alteracoes")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  aplicativoPai Aplicativo @relation(fields:[aplicativoPaiId], references:[id], onDelete:Restrict)
+  participantes OlistSyncParticipante[]
+  registros OlistSyncRegistro[]
+  estados OlistSyncEstado[]
+  execucoes OlistSyncExecucao[]
+  operacoes OlistSyncOperacao[]
+  pendencias OlistSyncPendencia[]
+  eventos OlistSyncEvento[]
+
+  @@index([ativo, proximaExecucaoEm])
+  @@map("olist_sync_configuracao")
+}
+
+model OlistSyncParticipante {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  habilitado Boolean @default(false)
+  contaIdentidade String? @map("conta_identidade")
+  proximaChamadaEm DateTime? @map("proxima_chamada_em") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  aplicativo Aplicativo @relation(fields:[aplicativoId], references:[id], onDelete:Restrict)
+  estados OlistSyncEstado[]
+  pendencias OlistSyncPendencia[]
+
+  @@unique([configuracaoId, aplicativoId])
+  @@index([aplicativoId, habilitado])
+  @@map("olist_sync_participante")
+}
+
+model OlistSyncRegistro {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  entidade String
+  chave String
+  nome String?
+  hashesBaseJson Json @default("{}") @map("hashes_base_json")
+  revisao Int @default(1)
+  aplicativoOrigemId String? @map("aplicativo_origem_id") @db.Uuid
+  registroOlistOrigemId String? @map("registro_olist_origem_id")
+  origemTipo String @default("DESCONHECIDA") @map("origem_tipo")
+  origemRegistradaEm DateTime? @map("origem_registrada_em") @db.Timestamptz(6)
+  origemRegistradaPor String? @map("origem_registrada_por") @db.Uuid
+  origemExecucaoId String? @map("origem_execucao_id") @db.Uuid
+  origemMotivo String? @map("origem_motivo") @db.VarChar(1000)
+  ultimaFonteAppId String? @map("ultima_fonte_app_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  estados OlistSyncEstado[]
+  operacoes OlistSyncOperacao[]
+  pendencias OlistSyncPendencia[]
+  eventos OlistSyncEvento[]
+
+  @@unique([configuracaoId, entidade, chave])
+  @@unique([id, configuracaoId])
+  @@index([configuracaoId, entidade, id])
+  @@index([configuracaoId, aplicativoOrigemId, id])
+  @@map("olist_sync_registro")
+}
+
+model OlistSyncEstado {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  registroId String? @map("registro_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  entidade String
+  remoteId String @map("remote_id")
+  chave String?
+  nome String?
+  situacaoRemota String? @map("situacao_remota")
+  status String @default("NAO_VERIFICADO")
+  hashesJson Json @default("{}") @map("hashes_json")
+  metadadosJson Json @default("{}") @map("metadados_json")
+  dadosCriptografados String? @map("dados_criptografados")
+  ultimaExecucaoId String? @map("ultima_execucao_id") @db.Uuid
+  verificadoEm DateTime? @map("verificado_em") @db.Timestamptz(6)
+  revisaoAplicada Int? @map("revisao_aplicada")
+  ultimaFonteAppId String? @map("ultima_fonte_app_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  participante OlistSyncParticipante @relation(fields:[configuracaoId, aplicativoId], references:[configuracaoId, aplicativoId], onDelete:Restrict)
+  registro OlistSyncRegistro? @relation(fields:[registroId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+
+  @@unique([aplicativoId, entidade, remoteId])
+  @@unique([registroId, aplicativoId])
+  @@index([configuracaoId, entidade, chave])
+  @@index([configuracaoId, status, id])
+  @@index([ultimaExecucaoId])
+  @@map("olist_sync_estado")
+}
+
+model OlistSyncExecucao {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  chaveIdempotencia String @map("chave_idempotencia") @db.Uuid
+  modo String
+  origem String @default("MANUAL")
+  completa Boolean @default(true)
+  status String @default("PENDENTE")
+  versaoConfiguracao Int @map("versao_configuracao")
+  solicitadoPor String? @map("solicitado_por") @db.Uuid
+  iniciadaEm DateTime? @map("iniciada_em") @db.Timestamptz(6)
+  finalizadaEm DateTime? @map("finalizada_em") @db.Timestamptz(6)
+  cancelamentoSolicitado Boolean @default(false) @map("cancelamento_solicitado")
+  contadoresJson Json @default("{}") @map("contadores_json")
+  erroCodigo String? @map("erro_codigo")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  etapas OlistSyncEtapa[]
+  operacoes OlistSyncOperacao[]
+  pendencias OlistSyncPendencia[]
+  eventos OlistSyncEvento[]
+
+  @@unique([configuracaoId], map: "olist_sync_execucao_ativa_unica", where: raw("(status IN ('PENDENTE', 'AUDITANDO', 'APLICANDO', 'AGUARDANDO_RETRY'))"))
+  @@unique([configuracaoId, chaveIdempotencia])
+  @@index([configuracaoId, createdAt, id])
+  @@index([status, finalizadaEm])
+  @@map("olist_sync_execucao")
+}
+
+model OlistSyncEtapa {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  execucaoId String @map("execucao_id") @db.Uuid
+  entidade String
+  aplicativoId String? @map("aplicativo_id") @db.Uuid
+  fase String
+  status String @default("PENDENTE")
+  cursorJson Json @default("{}") @map("cursor_json")
+  tentativas Int @default(0)
+  disponivelEm DateTime @default(now()) @map("disponivel_em") @db.Timestamptz(6)
+  leaseToken String? @map("lease_token") @db.Uuid
+  leaseAte DateTime? @map("lease_ate") @db.Timestamptz(6)
+  erroCodigo String? @map("erro_codigo")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  execucao OlistSyncExecucao @relation(fields:[execucaoId], references:[id], onDelete:Cascade)
+
+  @@unique([execucaoId, entidade, fase], map: "olist_sync_etapa_grupo_unica", where: raw("(aplicativo_id IS NULL)"))
+  @@unique([execucaoId, entidade, aplicativoId, fase])
+  @@index([status, disponivelEm, id])
+  @@index([status, leaseAte])
+  @@map("olist_sync_etapa")
+}
+
+model OlistSyncOperacao {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  registroId String @map("registro_id") @db.Uuid
+  execucaoId String? @map("execucao_id") @db.Uuid
+  sourceAppId String @map("source_app_id") @db.Uuid
+  destinoAppId String @map("destino_app_id") @db.Uuid
+  acao String
+  revisao Int
+  status String @default("PROPOSTA")
+  precondicoesJson Json @default("{}") @map("precondicoes_json")
+  payloadCriptografado String? @map("payload_criptografado")
+  resultadoCriptografado String? @map("resultado_criptografado")
+  remoteId String? @map("remote_id")
+  tentativas Int @default(0)
+  erroCodigo String? @map("erro_codigo")
+  confirmadaEm DateTime? @map("confirmada_em") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  registro OlistSyncRegistro @relation(fields:[registroId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+  execucao OlistSyncExecucao? @relation(fields:[execucaoId], references:[id], onDelete:SetNull)
+
+  @@unique([registroId, destinoAppId, revisao, acao])
+  @@index([configuracaoId, status, id])
+  @@index([execucaoId, status])
+  @@index([status, updatedAt])
+  @@map("olist_sync_operacao")
+}
+
+model OlistSyncPendencia {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  registroId String? @map("registro_id") @db.Uuid
+  aplicativoId String? @map("aplicativo_id") @db.Uuid
+  execucaoId String? @map("execucao_id") @db.Uuid
+  entidade String
+  tipo String
+  severidade String
+  status String @default("AGUARDANDO_REVISAO")
+  versao Int @default(1)
+  chaveDedupe String @map("chave_dedupe")
+  detalhesCriptografados String? @map("detalhes_criptografados")
+  decisaoJson Json @default("{}") @map("decisao_json")
+  motivo String? @db.VarChar(1000)
+  decididoPor String? @map("decidido_por") @db.Uuid
+  decididoEm DateTime? @map("decidido_em") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  participante OlistSyncParticipante? @relation(fields:[configuracaoId, aplicativoId], references:[configuracaoId, aplicativoId], onDelete:Restrict)
+  registro OlistSyncRegistro? @relation(fields:[registroId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+  execucao OlistSyncExecucao? @relation(fields:[execucaoId], references:[id], onDelete:SetNull)
+
+  @@unique([configuracaoId, chaveDedupe])
+  @@index([configuracaoId, status, severidade, id])
+  @@index([configuracaoId, aplicativoId, createdAt, id], map: "olist_sync_pendencia_empresa_criacao_idx")
+  @@index([execucaoId])
+  @@index([status, decididoEm])
+  @@map("olist_sync_pendencia")
+}
+
+model OlistSyncEvento {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  execucaoId String? @map("execucao_id") @db.Uuid
+  registroId String? @map("registro_id") @db.Uuid
+  tipo String
+  usuarioId String? @map("usuario_id") @db.Uuid
+  metadadosJson Json @default("{}") @map("metadados_json")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  execucao OlistSyncExecucao? @relation(fields:[execucaoId], references:[id], onDelete:SetNull)
+  registro OlistSyncRegistro? @relation(fields:[registroId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+
+  @@index([configuracaoId, createdAt, id])
+  @@index([execucaoId])
+  @@index([tipo, createdAt])
+  @@map("olist_sync_evento")
 }

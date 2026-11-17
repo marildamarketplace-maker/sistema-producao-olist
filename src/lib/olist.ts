@@ -829,6 +829,7 @@ async function renovarTokenComRefresh(aplicativoId: string, refreshToken: string
       client_secret: clientSecret,
     }),
     {
+      timeout: 20_000,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },

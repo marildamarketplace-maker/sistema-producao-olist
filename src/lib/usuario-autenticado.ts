@@ -11,26 +11,29 @@ export async function getUsuarioAutenticado(request: Request) {
   const email = authUser?.email;
   if (authError || !authUser || !email) throw new Error("Token de autenticação inválido.");
 
-  const usuario = await prisma.usuario.findFirst({
-    where: {
-      ativo: true,
-      OR: [
-        { id: authUser.id },
-        { email: { equals: email.trim(), mode: "insensitive" } },
-      ],
-    },
-    select: {
+  const select = {
       id: true,
+      ativo: true,
       aplicativoId: true,
       vendedorOlistId: true,
       podeEditarConfiguracao: true,
       podeVisualizarOlistFormasPagamento: true,
       podeVisualizarOlistFormasRecebimento: true,
-    },
-  });
+    } as const;
+  // O UUID autenticado tem precedência. E-mails repetidos em tenants diferentes
+  // nunca podem escolher arbitrariamente o primeiro cadastro.
+  let usuario = await prisma.usuario.findFirst({ where: { id: authUser.id }, select });
+  if (usuario?.ativo === false) throw new Error("Token vinculado a um usuário desativado.");
+  if (!usuario && authUser.email_confirmed_at) {
+    const candidatos = await prisma.usuario.findMany({
+      where: { ativo: true, email: { equals: email.trim(), mode: "insensitive" } },
+      select, take: 2,
+    });
+    if (candidatos.length === 1) usuario = candidatos[0];
+  }
 
   if (!usuario) {
-    throw new Error(`Usuário ${email.trim()} sem cadastro ativo no banco da aplicação.`);
+    throw new Error("Token sem vínculo inequívoco com um usuário ativo da aplicação.");
   }
   return usuario;
 }

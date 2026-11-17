@@ -108,6 +108,7 @@ export const menuItems: MenuItem[] = [
       { label: "Formas de pagamento", href: "/olist/formas-pagamento", permissions: ["podeVisualizarOlistFormasPagamento"] },
       { label: "Formas de recebimento", href: "/olist/formas-recebimento", permissions: ["podeVisualizarOlistFormasRecebimento"] },
       { label: "Vendedores", href: "/olist/vendedores", permissions: ["podeVisualizarOlistVendedores"] },
+      { label: "Sincronização entre empresas", href: "/olist/sincronizacao", permissions: ["podeVisualizarSincronizacaoOlist"] },
     ],
   },
   {

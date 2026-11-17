@@ -15,6 +15,10 @@ export const permissionKeys = [
   "podeVisualizarOlistVendedores",
   "podeVisualizarOlistFormasPagamento",
   "podeVisualizarOlistFormasRecebimento",
+  "podeVisualizarSincronizacaoOlist",
+  "podeExecutarSincronizacaoOlist",
+  "podeResolverSincronizacaoOlist",
+  "podeConfigurarSincronizacaoOlist",
   "podeVisualizarEstoque",
   "podeEditarEstoque",
   "podeVisualizarTiposProduto",
@@ -62,6 +66,10 @@ export const permissionLabels: Record<PermissionKey, string> = {
   podeVisualizarOlistVendedores: "Visualizar vendedores da Olist",
   podeVisualizarOlistFormasPagamento: "Visualizar formas de pagamento da Olist",
   podeVisualizarOlistFormasRecebimento: "Visualizar formas de recebimento da Olist",
+  podeVisualizarSincronizacaoOlist: "Visualizar sincronização Olist (aplicativo pai)",
+  podeExecutarSincronizacaoOlist: "Executar sincronização Olist (aplicativo pai)",
+  podeResolverSincronizacaoOlist: "Resolver divergências e declarar origem Olist (aplicativo pai)",
+  podeConfigurarSincronizacaoOlist: "Configurar sincronização Olist (aplicativo pai)",
   podeVisualizarEstoque: "Visualizar estoque",
   podeEditarEstoque: "Editar estoque",
   podeVisualizarTiposProduto: "Visualizar tipos de produto",
@@ -95,4 +103,20 @@ export function hasAnyPermission(
   if (permissions.length === 0) return true;
 
   return permissions.some((permission) => Boolean(usuario?.[permission]));
+}
+
+export const syncPermissionKeys = [
+  "podeVisualizarSincronizacaoOlist", "podeExecutarSincronizacaoOlist",
+  "podeResolverSincronizacaoOlist", "podeConfigurarSincronizacaoOlist",
+] as const satisfies readonly PermissionKey[];
+
+export function permissoesSincronizacaoParaAplicativo(
+  usuario: Partial<PermissionSet>, aplicativoAdministraGrupo: boolean,
+): Pick<PermissionSet, (typeof syncPermissionKeys)[number]> {
+  return {
+    podeVisualizarSincronizacaoOlist: aplicativoAdministraGrupo && usuario.podeVisualizarSincronizacaoOlist === true,
+    podeExecutarSincronizacaoOlist: aplicativoAdministraGrupo && usuario.podeExecutarSincronizacaoOlist === true,
+    podeResolverSincronizacaoOlist: aplicativoAdministraGrupo && usuario.podeResolverSincronizacaoOlist === true,
+    podeConfigurarSincronizacaoOlist: aplicativoAdministraGrupo && usuario.podeConfigurarSincronizacaoOlist === true,
+  };
 }

@@ -8,7 +8,16 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
   const tx = {
     $queryRaw: async () => lida ? [] : (lida = true, [{ id: rotinaId }]),
     rotinaAutomatizacao: {
-      findUniqueOrThrow: async () => {
+      findUniqueOrThrow: async (args: unknown) => {
+        assert.deepEqual(args, {
+          where: { id: rotinaId },
+          select: {
+            id: true, aplicativoId: true, horarios: true, cursor: true,
+            habilidade: { select: {
+              versoes: { orderBy: { numero: "desc" }, take: 1, select: { id: true } },
+            } },
+          },
+        });
         const agora = new Date();
         return { id: rotinaId, aplicativoId, cursor: new Date(agora.getTime() - 60_000),
           horarios: [{ dia: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short" }).format(agora)),
@@ -34,6 +43,7 @@ test("agendador libera falhas anteriores e preserva bloqueios e exclusão por ro
     assert.equal(await agendarAutomatizacoes(), 1);
     const liberada = ["FALHA_FINAL", "CONCLUIDA", "BLOQUEADA"].includes(status);
     assert.equal(criadas.length, liberada ? 1 : 0);
+    if (liberada) assert.equal((criadas[0] as { versaoId: string }).versaoId, "versao");
     assert.equal(disparos[0].motivo, liberada ? "ENFILEIRADO" : "SOBREPOSICAO");
   }
 });

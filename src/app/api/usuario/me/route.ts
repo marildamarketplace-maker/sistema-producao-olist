@@ -1,198 +1,40 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import {
+  permissionKeys, permissoesSincronizacaoParaAplicativo, syncPermissionKeys,
+  type PermissionKey, type PermissionSet,
+} from "@/lib/permissions";
 
-type UsuarioRow = {
-  id: string;
-  nome: string;
-  email: string;
-  aplicativo_id: string;
-  vendedor_olist_id: number | null;
-  pode_visualizar_dashboard: boolean;
-  pode_visualizar_fornecedores: boolean;
-  pode_visualizar_produtos_fornecedor: boolean;
-  pode_visualizar_categorias_midia: boolean;
-  pode_visualizar_tarefas_midia: boolean;
-  pode_visualizar_automatizacao: boolean;
-  pode_editar_habilidades: boolean;
-  pode_gerenciar_rotinas: boolean;
-  pode_intervir_automatizacao: boolean;
-  pode_visualizar_olist_produtos: boolean;
-  pode_visualizar_olist_contatos: boolean;
-  pode_visualizar_olist_pedidos: boolean;
-  pode_criar_olist_pedido: boolean;
-  pode_visualizar_olist_vendedores: boolean;
-  pode_visualizar_olist_formas_pagamento: boolean;
-  pode_visualizar_olist_formas_recebimento: boolean;
-  pode_visualizar_estoque: boolean;
-  pode_editar_estoque: boolean;
-  pode_visualizar_tipos_produto: boolean;
-  pode_editar_tipos_produto: boolean;
-  pode_visualizar_tamanhos: boolean;
-  pode_editar_tamanhos: boolean;
-  pode_visualizar_estampas: boolean;
-  pode_editar_estampas: boolean;
-  pode_criar_mockups: boolean;
-  pode_visualizar_variantes: boolean;
-  pode_editar_variantes: boolean;
-  pode_visualizar_baixa: boolean;
-  pode_solicitar_baixa: boolean;
-  pode_visualizar_devolucao: boolean;
-  pode_solicitar_devolucao: boolean;
-  pode_solicitar_producao: boolean;
-  pode_visualizar_producao: boolean;
-  pode_confirmar_producao: boolean;
-  pode_escrever_anotar_sku: boolean;
-  pode_visualizar_anotar_sku: boolean;
-  pode_visualizar_configuracao: boolean;
-  pode_editar_configuracao: boolean;
-  pode_gerenciar_fila_pedidos: boolean;
-  pode_selecionar_filial_fornecedor: boolean;
-};
-
-type AplicativoRow = {
-  nome: string;
-};
+const selectPermissoes = Object.fromEntries(permissionKeys.map((chave) => [chave, true])) as Record<PermissionKey, true>;
+const selectUsuario = {
+  id: true, nome: true, email: true, aplicativoId: true, vendedorOlistId: true,
+  aplicativo: { select: { nome: true } }, ...selectPermissoes,
+} satisfies Prisma.UsuarioSelect;
 
 export async function GET(request: Request) {
-  const authorization = request.headers.get("authorization");
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null;
-
-  if (!token) {
-    return NextResponse.json({ error: "Token de autenticação ausente." }, { status: 401 });
+  try {
+    const autenticado = await getUsuarioAutenticado(request);
+    const usuario = await prisma.usuario.findUnique({ where: { id: autenticado.id }, select: selectUsuario });
+    if (!usuario) return NextResponse.json({ error: "Usuário sem cadastro ativo neste aplicativo." }, { status: 403 });
+    const permissoes = Object.fromEntries(permissionKeys.map((chave) => [chave, usuario[chave] === true])) as PermissionSet;
+    // A configuração identifica a autoridade do grupo. Ser filho ou ter flags isoladas não concede acesso.
+    const grupo = syncPermissionKeys.some((chave) => permissoes[chave])
+      ? await prisma.olistSyncConfiguracao.findUnique({
+        where: { aplicativoPaiId: usuario.aplicativoId }, select: { id: true },
+      })
+      : null;
+    const aplicativoAdministraSincronizacaoOlist = grupo !== null;
+    return NextResponse.json({
+      id: usuario.id, nome: usuario.nome, email: usuario.email, aplicativo_id: usuario.aplicativoId,
+      vendedorOlistId: usuario.vendedorOlistId, aplicativo: usuario.aplicativo,
+      aplicativoAdministraSincronizacaoOlist,
+      ...permissoes,
+      ...permissoesSincronizacaoParaAplicativo(permissoes, aplicativoAdministraSincronizacaoOlist),
+    }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    const autenticacao = error instanceof Error && /Token de autenticação/.test(error.message);
+    return NextResponse.json({ error: autenticacao ? error.message : "Não foi possível validar o acesso ao aplicativo." }, { status: autenticacao ? 401 : 403 });
   }
-
-  const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
-  const email = authData.user?.email;
-
-  if (authError || !email) {
-    return NextResponse.json({ error: "Token de autenticação inválido." }, { status: 401 });
-  }
-
-  const emailNormalizado = email.trim();
-  const { data: usuarioData, error: usuarioError } = await supabaseAdmin
-    .from("usuario")
-    .select(
-      `
-        id,
-        nome,
-        email,
-        aplicativo_id,
-        vendedor_olist_id,
-        pode_visualizar_dashboard,
-        pode_visualizar_fornecedores,
-        pode_visualizar_produtos_fornecedor,
-        pode_visualizar_categorias_midia,
-        pode_visualizar_tarefas_midia,
-        pode_visualizar_automatizacao,
-        pode_editar_habilidades,
-        pode_gerenciar_rotinas,
-        pode_intervir_automatizacao,
-        pode_visualizar_olist_produtos,
-        pode_visualizar_olist_contatos,
-        pode_visualizar_olist_pedidos,
-        pode_criar_olist_pedido,
-        pode_visualizar_olist_vendedores,
-        pode_visualizar_olist_formas_pagamento,
-        pode_visualizar_olist_formas_recebimento,
-        pode_visualizar_estoque,
-        pode_editar_estoque,
-        pode_visualizar_tipos_produto,
-        pode_editar_tipos_produto,
-        pode_visualizar_tamanhos,
-        pode_editar_tamanhos,
-        pode_visualizar_estampas,
-        pode_editar_estampas,
-        pode_criar_mockups,
-        pode_visualizar_variantes,
-        pode_editar_variantes,
-        pode_visualizar_baixa,
-        pode_solicitar_baixa,
-        pode_visualizar_devolucao,
-        pode_solicitar_devolucao,
-        pode_solicitar_producao,
-        pode_visualizar_producao,
-        pode_confirmar_producao,
-        pode_escrever_anotar_sku,
-        pode_visualizar_anotar_sku,
-        pode_visualizar_configuracao,
-        pode_gerenciar_fila_pedidos,
-        pode_selecionar_filial_fornecedor,
-        pode_editar_configuracao
-      `,
-    )
-    .ilike("email", emailNormalizado)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
-
-  if (usuarioError) {
-    return NextResponse.json(
-      { error: `Erro ao validar acesso: ${usuarioError.message}` },
-      { status: 500 },
-    );
-  }
-
-  if (!usuarioData) {
-    return NextResponse.json(
-      { error: "Usuário autenticado, mas sem cadastro ativo neste aplicativo." },
-      { status: 403 },
-    );
-  }
-
-  const usuario = usuarioData as UsuarioRow;
-  const { data: aplicativoData } = await supabaseAdmin
-    .from("aplicativo")
-    .select("nome")
-    .eq("id", usuario.aplicativo_id)
-    .maybeSingle();
-  const aplicativo = aplicativoData as AplicativoRow | null;
-
-  return NextResponse.json({
-    id: usuario.id,
-    nome: usuario.nome,
-    email: usuario.email,
-    aplicativo_id: usuario.aplicativo_id,
-    vendedorOlistId: usuario.vendedor_olist_id,
-    aplicativo: aplicativo ? { nome: aplicativo.nome } : null,
-    podeVisualizarDashboard: Boolean(usuario.pode_visualizar_dashboard),
-    podeVisualizarFornecedores: Boolean(usuario.pode_visualizar_fornecedores),
-    podeVisualizarProdutosFornecedor: Boolean(usuario.pode_visualizar_produtos_fornecedor),
-    podeVisualizarCategoriasMidia: Boolean(usuario.pode_visualizar_categorias_midia),
-    podeVisualizarTarefasMidia: Boolean(usuario.pode_visualizar_tarefas_midia),
-    podeVisualizarAutomatizacao: Boolean(usuario.pode_visualizar_automatizacao),
-    podeEditarHabilidades: Boolean(usuario.pode_editar_habilidades),
-    podeGerenciarRotinas: Boolean(usuario.pode_gerenciar_rotinas),
-    podeIntervirAutomatizacao: Boolean(usuario.pode_intervir_automatizacao),
-    podeVisualizarOlistProdutos: Boolean(usuario.pode_visualizar_olist_produtos),
-    podeVisualizarOlistContatos: Boolean(usuario.pode_visualizar_olist_contatos),
-    podeVisualizarOlistPedidos: Boolean(usuario.pode_visualizar_olist_pedidos),
-    podeCriarOlistPedido: Boolean(usuario.pode_criar_olist_pedido),
-    podeVisualizarOlistVendedores: Boolean(usuario.pode_visualizar_olist_vendedores),
-    podeVisualizarOlistFormasPagamento: Boolean(usuario.pode_visualizar_olist_formas_pagamento),
-    podeVisualizarOlistFormasRecebimento: Boolean(usuario.pode_visualizar_olist_formas_recebimento),
-    podeVisualizarEstoque: Boolean(usuario.pode_visualizar_estoque),
-    podeEditarEstoque: Boolean(usuario.pode_editar_estoque),
-    podeVisualizarTiposProduto: Boolean(usuario.pode_visualizar_tipos_produto),
-    podeEditarTiposProduto: Boolean(usuario.pode_editar_tipos_produto),
-    podeVisualizarTamanhos: Boolean(usuario.pode_visualizar_tamanhos),
-    podeEditarTamanhos: Boolean(usuario.pode_editar_tamanhos),
-    podeVisualizarEstampas: Boolean(usuario.pode_visualizar_estampas),
-    podeEditarEstampas: Boolean(usuario.pode_editar_estampas),
-    podeCriarMockups: Boolean(usuario.pode_criar_mockups),
-    podeVisualizarVariantes: Boolean(usuario.pode_visualizar_variantes),
-    podeEditarVariantes: Boolean(usuario.pode_editar_variantes),
-    podeVisualizarBaixa: Boolean(usuario.pode_visualizar_baixa),
-    podeSolicitarBaixa: Boolean(usuario.pode_solicitar_baixa),
-    podeVisualizarDevolucao: Boolean(usuario.pode_visualizar_devolucao),
-    podeSolicitarDevolucao: Boolean(usuario.pode_solicitar_devolucao),
-    podeSolicitarProducao: Boolean(usuario.pode_solicitar_producao),
-    podeVisualizarProducao: Boolean(usuario.pode_visualizar_producao),
-    podeConfirmarProducao: Boolean(usuario.pode_confirmar_producao),
-    podeEscreverAnotarSku: Boolean(usuario.pode_escrever_anotar_sku),
-    podeVisualizarAnotarSku: Boolean(usuario.pode_visualizar_anotar_sku),
-    podeVisualizarConfiguracao: Boolean(usuario.pode_visualizar_configuracao),
-    podeEditarConfiguracao: Boolean(usuario.pode_editar_configuracao),
-    podeGerenciarFilaPedidos: Boolean(usuario.pode_gerenciar_fila_pedidos),
-    podeSelecionarFilialFornecedor: Boolean(usuario.pode_selecionar_filial_fornecedor),
-  });
 }

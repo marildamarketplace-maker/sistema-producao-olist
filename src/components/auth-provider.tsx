@@ -12,6 +12,7 @@ type UsuarioAplicativo = {
   email: string;
   aplicativo_id: string;
   vendedorOlistId: number | null;
+  aplicativoAdministraSincronizacaoOlist?: boolean;
   aplicativo?: {
     nome: string;
   } | null;
@@ -162,6 +163,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       aplicativo_id: usuarioData.aplicativo_id,
       vendedorOlistId: usuarioData.vendedor_olist_id,
       aplicativo,
+      // Acesso entre empresas exige confirmação do servidor; o fallback não o concede.
+      aplicativoAdministraSincronizacaoOlist: false,
+      podeVisualizarSincronizacaoOlist: false,
+      podeExecutarSincronizacaoOlist: false,
+      podeResolverSincronizacaoOlist: false,
+      podeConfigurarSincronizacaoOlist: false,
       podeVisualizarDashboard: Boolean(usuarioData.pode_visualizar_dashboard),
       podeVisualizarFornecedores: Boolean(usuarioData.pode_visualizar_fornecedores),
       podeVisualizarProdutosFornecedor: Boolean(usuarioData.pode_visualizar_produtos_fornecedor),

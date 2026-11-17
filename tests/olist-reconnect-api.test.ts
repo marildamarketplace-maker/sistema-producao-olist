@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 test("reconnect valida autenticação e permissão antes de alterar tokens da conta", async (t) => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
+  process.env.OLIST_OAUTH_STATE_SECRET = "segredo-exclusivo-de-teste-com-32-caracteres";
   let permitido = false;
   let tokenValido = true;
   let consultas = 0;

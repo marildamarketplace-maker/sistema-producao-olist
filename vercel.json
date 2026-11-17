@@ -33,6 +33,10 @@
     {
       "path": "/api/cron/auditoria-estoque-referencias",
       "schedule": "0 12 * * 1"
+    },
+    {
+      "path": "/api/cron/sincronizacao-olist",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

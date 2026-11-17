@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAplicativoOlistConfig, getOlistRedirectUri } from "@/lib/aplicativo";
+import { COOKIE_CONTEXTO_OLIST, verificarContextoOlist } from "@/lib/olist-oauth-contexto";
 
 export async function GET(req: NextRequest) {
-  const aplicativoId = req.cookies.get("olist_aplicativo_id")?.value;
+  const contexto = verificarContextoOlist(req.cookies.get(COOKIE_CONTEXTO_OLIST)?.value);
+  const aplicativoId = contexto?.aplicativoId;
   if (!aplicativoId) return NextResponse.json({ error: "Aplicativo não identificado." }, { status: 401 });
   const olistConfig = await getAplicativoOlistConfig(aplicativoId);
   const clientId = olistConfig.clientId;
@@ -18,8 +20,7 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("scope", "openid");
 
-  const providedState = new URL(req.url).searchParams.get("state");
-  const state = providedState ?? crypto.randomUUID();
+  const state = contexto.state;
   url.searchParams.set("state", state);
 
   const response = NextResponse.redirect(url.toString());
