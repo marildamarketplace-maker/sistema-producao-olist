@@ -7,7 +7,7 @@ import { criarCriptografiaSync, serializarCanonico } from "@/lib/olist-sync/crip
 import { avaliarReplicas, gerarHashesCampos, inferirOrigem, prepararPayload } from "@/lib/olist-sync/dominio";
 import { FalhaSync, type ClienteSync, type CamposSync, type JsonValue, type ObservacaoRemota, type ReplicaComparacao } from "@/lib/olist-sync/contrato";
 import { entidadeSync, hashesJson, objetoJson, observacaoProtegida, proximoHorarioSync, prazoRetrySync } from "@/lib/olist-sync/validacao";
-import { cotaDaRespostaSync, esperaAuditoriaSync, type CotaLeituraSync } from "@/lib/olist-sync/ritmo";
+import { cotaDaRespostaSync, proximaLeituraAuditoriaSync, type CotaLeituraSync } from "@/lib/olist-sync/ritmo";
 
 type Tx = Prisma.TransactionClient;
 type Repo = ReturnType<typeof criarOlistSyncRepository>;
@@ -96,8 +96,10 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     }
     finally {
       // Escrita inclui uma leitura de identidade com a mesma credencial: 6s + 12s.
-      const intervalo=auditoria?esperaAuditoriaSync(cota,limitada,retryAfterMs):escrita?18_000:identidadeVinculada?12_000:6_000;
-      const proxima=Math.max(agora().getTime(),(auditoria&&(cota||limitada)?agora().getTime():inicio)+intervalo,agora().getTime()+retryAfterMs);
+      const respostaEm=agora().getTime();
+      const intervalo=escrita?18_000:identidadeVinculada?12_000:6_000;
+      const proxima=auditoria?proximaLeituraAuditoriaSync(inicio,respostaEm,cota,limitada,retryAfterMs)
+        :Math.max(respostaEm,inicio+intervalo,respostaEm+retryAfterMs);
       await repo.comReserva(r,async(tx,atual)=>{
         await tx.olistSyncParticipante.updateMany({where:{configuracaoId:config.id,aplicativoId:app},data:{proximaChamadaEm:new Date(proxima)}});
         if(auditoria && cota)await tx.olistSyncEtapa.update({where:{id:r.id},data:{cursorJson:{...objetoJson(atual.cursorJson),cotaLeitura:{...cota,observadaEm:agora().toISOString()}}},select:{id:true}});

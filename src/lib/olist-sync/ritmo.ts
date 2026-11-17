@@ -2,6 +2,8 @@
 export type CotaLeituraSync = { limite: number; restante: number; resetSegundos: number };
 export const INTERVALO_AUDITORIA_MS = 2_000;
 
+const reservaLeitura = (cota: CotaLeituraSync) => Math.max(1, Math.ceil(cota.limite * 0.1));
+
 export function interpretarCotaSync(limite: unknown, restante: unknown, reset: unknown): CotaLeituraSync | null {
   const numero = (valor: unknown) => typeof valor === "number" ? valor : typeof valor === "string" && /^\d+(?:\.\d+)?$/.test(valor) ? Number(valor) : NaN;
   const l = numero(limite), r = numero(restante), s = numero(reset);
@@ -20,7 +22,7 @@ export function cotaDaRespostaSync(resposta: unknown): CotaLeituraSync | null {
 export function esperaAuditoriaSync(cota: CotaLeituraSync | null, limitada = false, retryAfterMs = 0): number {
   let intervalo = INTERVALO_AUDITORIA_MS;
   if (cota) {
-    const reserva = Math.max(1, Math.ceil(cota.limite * 0.1));
+    const reserva = reservaLeitura(cota);
     const disponivel = cota.restante - reserva;
     intervalo = Math.max(intervalo, Math.ceil(120_000 / cota.limite), disponivel > 0
       ? Math.ceil(cota.resetSegundos * 1_000 / disponivel)
@@ -28,4 +30,16 @@ export function esperaAuditoriaSync(cota: CotaLeituraSync | null, limitada = fal
   }
   if (limitada) intervalo = Math.max(intervalo, 60_000, (cota?.resetSegundos ?? 0) * 1_000 + 250);
   return Math.max(intervalo, Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : 0);
+}
+
+/** Cadência entre inícios; restrições de saldo/reset e Retry-After valem após a resposta. */
+export function proximaLeituraAuditoriaSync(inicio: number, respostaEm: number, cota: CotaLeituraSync | null,
+  limitada = false, retryAfterMs = 0): number {
+  const intervalo = esperaAuditoriaSync(cota, limitada);
+  const cadencia = Math.max(INTERVALO_AUDITORIA_MS, cota ? Math.ceil(120_000 / cota.limite) : 0);
+  const saldoReservado = cota !== null && cota.restante <= reservaLeitura(cota);
+  // Não desconta latência de uma restrição anunciada apenas na resposta.
+  const referencia = limitada || saldoReservado || intervalo > cadencia ? respostaEm : inicio;
+  return Math.max(respostaEm, referencia + intervalo,
+    respostaEm + (Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : 0));
 }

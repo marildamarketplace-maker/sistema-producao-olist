@@ -675,6 +675,31 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.ok(participante.proximaChamadaEm!.getTime()>=agora+40_250);
     const antes=chamadas.length;await passo();assert.equal(chamadas.length,antes);
   });
+  for(const latencia of [1_500,3_500])await t.test(`retoma detalhes com headers e latência de ${latencia}ms sem acrescentar 2s por resposta`,async()=>{
+    await reset();
+    const quantidade=latencia===1_500?32:12;
+    for(let i=0;i<quantidade;i++)contas.get(a)!.set(String(10+i),produto(10+i,`LATENCIA-${i}`));
+    const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>await db.olistSyncEstado.count({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}})===1,"primeiro detalhe persistido pela versão anterior");
+    const salvo=await db.olistSyncEstado.findFirstOrThrow({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}});
+    const horarios:number[]=[];
+    chamadas.length=0;
+    responder=async(r,app)=>{
+      if(app!==a||!/\/produtos\/\d+$/.test(new URL(r.url).pathname))return;
+      horarios.push(agora);agora+=latencia;
+      return {status:200,dados:contas.get(app)!.get(new URL(r.url).pathname.split("/").at(-1)!),
+        cotaLeitura:{limite:60,restante:59-horarios.length,resetSegundos:Math.max(0,60-horarios.length*2)}};
+    };
+    const resultado=await servico.executar(agora+240_000);
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(horarios.length,quantidade-1);assert.ok(resultado.etapas>=quantidade-1);
+    for(let i=1;i<horarios.length;i++)assert.equal(horarios[i]-horarios[i-1],Math.max(2_000,latencia));
+    assert.equal((await db.olistSyncEstado.findUniqueOrThrow({where:{id:salvo.id}})).dadosCriptografados,salvo.dadosCriptografados);
+    assert.ok(!chamadas.some(r=>r.url.endsWith("/info")||new URL(r.url).pathname.endsWith("/produtos")));
+    assert.equal(escritas().length,0);
+    const contadores=(await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).contadoresJson;
+    assert.deepEqual(contadores,{listados:quantidade,analisados:quantidade});
+  });
   await t.test("429 na auditoria mantém checkpoint e a conta bloqueada pelo Retry-After",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar("AUDITAR");
     await avancarAte(async()=>await db.olistSyncEtapa.count({where:{execucaoId:e.id,fase:"DETALHAR"}})===2,"listagem encerrada");
