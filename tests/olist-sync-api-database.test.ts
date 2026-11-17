@@ -48,6 +48,8 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
   });
   await t.test("previsão agrega só validações completas recentes e usa índice em 50 mil observações", async () => {
     const agora = new Date();
+    const paiAnterior = await db.aplicativo.findUniqueOrThrow({ where: { id: pai }, select: { jobs: true } });
+    await db.aplicativo.update({ where: { id: pai }, data: { jobs: "AUDITAR_SINCRONIZACAO_OLIST" } });
     const e = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "AUDITANDO",
       versaoConfiguracao: 1, iniciadaEm: new Date(agora.getTime() - 3_600_000), contadoresJson: { listados: 50_100, analisados: 50_060 } } });
     const outra = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "CONCLUIDA", versaoConfiguracao: 1 } });
@@ -77,6 +79,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
       const pausada = await (await api.GET(req("GET", ["previsao"]), contexto(["previsao"]))).json();
       assert.equal(pausada.previsao.estado, "PAUSADA");assert.equal(pausada.previsao.terminoPrevisto, null);
     } finally {
+      await db.aplicativo.update({ where: { id: pai }, data: { jobs: paiAnterior.jobs } });
       await db.configuracaoJob.update({ where: { chave: "auditar-sincronizacao-olist" }, data: { pausado: false } });
       await db.olistSyncEstado.deleteMany({ where: { ultimaExecucaoId: { in: [e.id, outra.id] } } });
       await db.olistSyncExecucao.deleteMany({ where: { id: { in: [e.id, outra.id] } } });
