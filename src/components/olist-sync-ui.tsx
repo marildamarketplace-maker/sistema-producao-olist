@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import {
   ORIGENS_SYNC_LABEL, textoValorSync,
-  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto,
+  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto, type PrevisaoValidacaoSyncDto,
 } from "@/lib/olist-sync/api-contract";
 
 export const syncButton = "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50";
@@ -26,6 +26,26 @@ export function duracaoSync(iniciadoEm: string | null, finalizadoEm: string | nu
   if (segundos < 60) return `${segundos}s`;
   if (segundos < 3600) return `${Math.floor(segundos / 60)}min ${segundos % 60}s`;
   return `${Math.floor(segundos / 3600)}h ${Math.floor(segundos % 3600 / 60)}min`;
+}
+
+export function PrevisaoValidacaoSync({ previsao, falhou }: { previsao: PrevisaoValidacaoSyncDto | null; falhou: boolean }) {
+  const mensagens = {
+    SEM_RITMO: "Sem validações nos últimos 30 minutos; previsão indisponível.",
+    AMOSTRA_INSUFICIENTE: "Aguardando uma amostra de pelo menos 5 validações e 1 minuto de execução.",
+    LISTANDO: "Aguardando o fim da listagem para conhecer o total de cadastros.",
+    LEITURA_CONCLUIDA: "Leitura concluída; aguardando as demais etapas da execução.",
+    PAUSADA: "Auditoria pausada ou desabilitada; previsão indisponível.",
+  };
+  return <div className="mt-3 space-y-1 text-sm text-slate-600">
+    {previsao?.terminoPrevisto ? <p>Fim previsto da validação: <time className="font-medium text-slate-900" dateTime={previsao.terminoPrevisto}>{dataSync(previsao.terminoPrevisto)}</time></p>
+      : <p>{previsao && previsao.estado !== "ESTIMADA" ? mensagens[previsao.estado]
+        : falhou ? "Não foi possível consultar a previsão. Tente Atualizar novamente." : "Previsão indisponível. Clique em Atualizar para consultar."}</p>}
+    {previsao && <p className="text-xs text-slate-500">
+      {previsao.porMinuto !== null && <>{previsao.porMinuto.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} validações/min · {previsao.validadosNaJanela.toLocaleString("pt-BR")} na janela de até 30 min · </>}
+      Calculada em {dataSync(previsao.calculadoEm)}. Atualizada somente ao carregar a página ou clicar em Atualizar.
+    </p>}
+    <p className="text-xs text-slate-500">Estimativa da leitura dos cadastros; comparação e aplicação podem levar tempo adicional.</p>
+  </div>;
 }
 
 const STATUS: Record<string, string> = {

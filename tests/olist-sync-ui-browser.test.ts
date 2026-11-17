@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { setTimeout as aguardar } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
@@ -53,7 +54,7 @@ async function ate(condicao: () => Promise<boolean>, mensagem: string, limite = 
   assert.fail(mensagem);
 }
 
-test("UI real: polling atualiza o detalhe final e encerra consultas", { skip: chrome ? false : "Chrome/Chromium não está instalado; configure OLIST_SYNC_TEST_CHROME_PATH", timeout: 30_000 }, async t => {
+test("UI real: previsão manual e polling atualizam sem consultas extras", { skip: chrome ? false : "Chrome/Chromium não está instalado; configure OLIST_SYNC_TEST_CHROME_PATH", timeout: 45_000 }, async t => {
   const pasta = await mkdtemp(path.join(tmpdir(), "olist-sync-ui-test-"));
   const conexao: { cdp?: ChromeDevTools } = {};
   const navegador = spawn(chrome!, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update", "--disable-features=MediaRouter", "--remote-debugging-port=0", `--user-data-dir=${path.join(pasta, "profile")}`, "about:blank"], { stdio: "ignore" });
@@ -74,7 +75,8 @@ test("UI real: polling atualiza o detalhe final e encerra consultas", { skip: ch
       builder.onLoad({ filter: /.*/, namespace: "teste-local" }, () => ({ contents: 'export const useAuth = () => ({session:{access_token:"teste-local"},usuario:{podeVisualizarSincronizacaoOlist:true,podeExecutarSincronizacaoOlist:true,podeResolverSincronizacaoOlist:true,podeConfigurarSincronizacaoOlist:true}});', loader: "js" }));
     } }],
   });
-  await writeFile(path.join(pasta, "index.html"), '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Teste local Olist</title><body><div id="root"></div><script src="./app.js"></script></body></html>');
+  await promisify(execFile)(process.execPath, [path.join(raiz, "node_modules/tailwindcss/lib/cli.js"), "-i", path.join(raiz, "src/app/globals.css"), "-o", path.join(pasta, "style.css"), "--minify"], { cwd: raiz });
+  await writeFile(path.join(pasta, "index.html"), '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="./style.css"><title>Teste local Olist</title><body><div id="root"></div><script src="./app.js"></script></body></html>');
   const portaArquivo = path.join(pasta, "profile/DevToolsActivePort");
   await ate(async () => {
     if (falhaNavegador) throw falhaNavegador;
@@ -94,14 +96,25 @@ test("UI real: polling atualiza o detalhe final e encerra consultas", { skip: ch
   });
   const cdp = new ChromeDevTools(socket); conexao.cdp = cdp;
   await cdp.pedir("Page.enable");
-  for (const largura of [390, 1280]) {
-    await t.test(`regressão P2: conclusão aparece no diálogo e na lista em ${largura}px`, async () => {
+  for (const largura of [390, 1280]) for (const tema of ["claro", "escuro"]) {
+    await t.test(`previsão manual e conclusão em ${largura}px, tema ${tema}`, async () => {
       const navegadorLocal = cdp;
       await navegadorLocal.pedir("Emulation.setDeviceMetricsOverride", { width: largura, height: 900, deviceScaleFactor: 1, mobile: largura < 600 });
-      await navegadorLocal.pedir("Page.navigate", { url: `${pathToFileURL(path.join(pasta, "index.html")).href}?viewport=${largura}` });
+      await navegadorLocal.pedir("Page.navigate", { url: `${pathToFileURL(path.join(pasta, "index.html")).href}?viewport=${largura}&tema=${tema}` });
       await ate(() => navegadorLocal.avaliar<boolean>('!!window.olistSyncTeste && [...document.querySelectorAll("button")].some(b => b.textContent === "Execuções")'), "Painel não carregou");
+      await navegadorLocal.avaliar(`document.documentElement.classList.toggle("dark", ${tema === "escuro"})`);
       await navegadorLocal.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Execuções").click()');
       await ate(() => navegadorLocal.avaliar<boolean>('[...document.querySelectorAll("button")].some(b => b.textContent === "Detalhes" && !b.disabled)'), "Lista não carregou");
+      await ate(() => navegadorLocal.avaliar<boolean>('document.querySelector("article")?.textContent.includes("Fim previsto da validação") ?? false'), "Previsão não apareceu no card");
+      assert.equal(await navegadorLocal.avaliar('document.documentElement.scrollWidth <= innerWidth'), true, "Previsão não deve criar overflow da página");
+      const captura = await navegadorLocal.pedir("Page.captureScreenshot", { format: "png" });
+      await writeFile(path.join(tmpdir(), `olist-previsao-${largura}-${tema}.png`), Buffer.from(String(captura.data), "base64"));
+      assert.equal(await navegadorLocal.avaliar('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length'), 1);
+      await aguardar(180);
+      assert.equal(await navegadorLocal.avaliar('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length'), 1, "Polling não pode consultar a previsão");
+      await navegadorLocal.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Atualizar").click()');
+      await ate(() => navegadorLocal.avaliar<boolean>('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length === 2'), "Atualizar não renovou a previsão");
+      await ate(() => navegadorLocal.avaliar<boolean>('[...document.querySelectorAll("button")].some(b => b.textContent === "Detalhes" && !b.disabled)'), "Lista não recarregou");
       await navegadorLocal.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Detalhes").click()');
       await ate(() => navegadorLocal.avaliar<boolean>('document.querySelector("[role=dialog]")?.textContent.includes("Auditando") ?? false'), "Detalhe ativo não abriu");
       await navegadorLocal.avaliar("window.olistSyncTeste.concluir()");
@@ -111,6 +124,8 @@ test("UI real: polling atualiza o detalhe final e encerra consultas", { skip: ch
       assert.match(resultado.dialogo, /Concluída/, `O resumo terminou, mas o detalhe não atualizou; consulta final abortada=${resultado.abortado}`);
       assert.equal(resultado.cancelamento, false, "Uma execução concluída não pode oferecer cancelamento");
       assert.equal(resultado.listaConcluida, true, "A lista deve refletir a execução concluída");
+      assert.equal(await navegadorLocal.avaliar('document.querySelector("article")?.textContent.includes("Fim previsto da validação") ?? false'), false, "Execução concluída não conserva a previsão antiga");
+      assert.equal(await navegadorLocal.avaliar('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length'), 2, "Conclusão e modal não podem consultar a previsão");
       await aguardar(200);
       assert.equal(await navegadorLocal.avaliar("window.olistSyncTeste.chamadas.length"), resultado.chamadas, "Polling precisa encerrar após a conclusão");
     });

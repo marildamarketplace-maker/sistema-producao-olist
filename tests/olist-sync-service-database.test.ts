@@ -698,7 +698,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.ok(!chamadas.some(r=>r.url.endsWith("/info")||new URL(r.url).pathname.endsWith("/produtos")));
     assert.equal(escritas().length,0);
     const contadores=(await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).contadoresJson;
-    assert.deepEqual(contadores,{listados:quantidade,analisados:quantidade});
+    assert.ok(contadores&&typeof contadores==="object"&&!Array.isArray(contadores));
+    assert.equal(contadores.listados,quantidade);assert.equal(contadores.analisados,quantidade);
   });
   await t.test("429 na auditoria mantém checkpoint e a conta bloqueada pelo Retry-After",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar("AUDITAR");

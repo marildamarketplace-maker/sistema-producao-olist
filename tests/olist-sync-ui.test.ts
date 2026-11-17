@@ -5,10 +5,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { permissionKeys, permissoesSincronizacaoParaAplicativo } from "../src/lib/permissions";
 import { paginasPermitidas } from "../src/lib/navigation";
 import { execucaoSyncAtiva, intervaloPollingSync, textoValorSync, type PendenciaSyncDetalheDto, type RegistroSyncDto } from "../src/lib/olist-sync/api-contract";
-import { ComparacaoSync, OrigemSync, PaginacaoSync } from "../src/components/olist-sync-ui";
+import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync } from "../src/components/olist-sync-ui";
+import { calcularPrevisaoValidacaoSync } from "../src/lib/olist-sync/previsao";
 import { DecisaoSyncDialog, ExecutarSyncDialog } from "../src/components/olist-sync-decisoes";
 
 const todas = { podeVisualizarSincronizacaoOlist: true, podeExecutarSincronizacaoOlist: true, podeResolverSincronizacaoOlist: true, podeConfigurarSincronizacaoOlist: true };
+
+test("previsão informa data local, amostra e limite da estimativa sem depender de cor", () => {
+  const previsao = calcularPrevisaoValidacaoSync({ execucaoId: "execucao", agora: new Date("2026-11-17T21:00:00Z"), iniciadaEm: new Date("2026-11-17T12:00:00Z"),
+    contadores: { listados: 1000, analisados: 400 }, validadosNaJanela: 300, pausada: false, listagemPendente: false });
+  const html = renderToStaticMarkup(React.createElement(PrevisaoValidacaoSync, { previsao, falhou: false }));
+  assert.match(html, /Fim previsto da validação/);assert.match(html, /17\/11\/2026/);assert.match(html, /19:00:00/);
+  assert.match(html, /10 validações\/min/);assert.match(html, /300 na janela de até 30 min/);
+  assert.match(html, /datetime="2026-11-17T22:00:00.000Z"/i);
+  assert.match(html, /comparação e aplicação podem levar tempo adicional/i);
+  const erro = renderToStaticMarkup(React.createElement(PrevisaoValidacaoSync, { previsao: null, falhou: true }));
+  assert.match(erro, /Tente Atualizar novamente/);assert.doesNotMatch(erro, /<time/);
+});
 
 test("sincronização exige permissão específica do aplicativo pai e não expande administração global", () => {
   for (const chave of Object.keys(todas)) assert.ok(permissionKeys.includes(chave as keyof typeof todas));

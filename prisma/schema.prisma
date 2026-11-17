@@ -1462,6 +1462,7 @@ model OlistSyncEstado {
   @@index([configuracaoId, entidade, chave])
   @@index([configuracaoId, status, id])
   @@index([ultimaExecucaoId])
+  @@index([configuracaoId, ultimaExecucaoId, verificadoEm], map: "olist_sync_estado_previsao_idx", where: raw("(metadados_json @> '{\"completo\": true}'::jsonb)"))
   @@map("olist_sync_estado")
 }
 

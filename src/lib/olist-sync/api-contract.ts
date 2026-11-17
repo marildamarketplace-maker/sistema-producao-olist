@@ -55,6 +55,17 @@ export type EtapaSyncDto = {
   disponivelEm: string;
 };
 export type ExecucaoSyncDetalheDto = ExecucaoSyncDto & { etapas: EtapaSyncDto[] };
+export type PrevisaoValidacaoSyncDto = {
+  execucaoId: string;
+  calculadoEm: string;
+  janelaInicio: string;
+  janelaFim: string;
+  validadosNaJanela: number;
+  restantes: number;
+  porMinuto: number | null;
+  terminoPrevisto: string | null;
+  estado: "ESTIMADA" | "SEM_RITMO" | "AMOSTRA_INSUFICIENTE" | "LISTANDO" | "LEITURA_CONCLUIDA" | "PAUSADA";
+};
 export type ResumoSyncDto = {
   sincronizados: number;
   divergentes: number;

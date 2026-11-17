@@ -41,7 +41,10 @@ function delegate(nome: string) {
   return Object.fromEntries(["findUnique", "findUniqueOrThrow", "findFirst", "findMany", "count", "groupBy", "create", "createMany", "update", "updateMany", "upsert"].map((op) => [op, metodo(`${nome}.${op}`)]));
 }
 const db: Record<string, unknown> = Object.fromEntries(["usuario", "aplicativo", "configuracaoJob", "olistSyncConfiguracao", "olistSyncParticipante", "olistSyncRegistro", "olistSyncEstado", "olistSyncExecucao", "olistSyncEtapa", "olistSyncOperacao", "olistSyncPendencia", "olistSyncEvento"].map((nome) => [nome, delegate(nome)]));
-db.$queryRaw = async () => [];
+db.$queryRaw = async (...args: unknown[]) => {
+  const entrada = { query: args[0] }; chamadas.push({ metodo: "$queryRaw", args: entrada });
+  return handlers["$queryRaw"]?.(entrada) ?? [];
+};
 db.$transaction = async (run: (tx: unknown) => Promise<unknown>) => run(db);
 Object.assign(globalThis, { prisma: db });
 
@@ -110,7 +113,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
 
   await t.test("revogar visualização bloqueia leitura e todas as mutações apesar das flags específicas", async () => {
     reset(); permissao.podeVisualizarSincronizacaoOlist = false;
-    for (const recurso of ["configuracao", "resumo", "registros", "pendencias", "execucoes"]) {
+    for (const recurso of ["configuracao", "resumo", "registros", "pendencias", "execucoes", "previsao"]) {
       assert.equal((await GET(request(recurso), contexto(recurso))).status, 403, recurso);
     }
     for (const operacao of operacoesProtegidas) {
@@ -119,6 +122,46 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     }
     assert.equal(chamadasDe("olistSyncRegistro.findMany").length, 0);
     assert.equal(chamadas.filter(c => /\.(create|createMany|update|updateMany|upsert)$/.test(c.metodo)).length, 0);
+  });
+
+  await t.test("previsão consulta uma linha agregada isolada ao pai e à execução ativa", async () => {
+    reset();
+    handlers["olistSyncExecucao.findFirst"] = ({ where, select }) => {
+      assert.equal(objeto(where).configuracaoId, GRUPO);
+      assert.deepEqual(objeto(objeto(where).status).in, ["PENDENTE", "AUDITANDO", "AGUARDANDO_RETRY"]);
+      assert.equal(objeto(select).etapas && objeto(objeto(select).etapas).take, 201);
+      return { ...execucao, status: "AUDITANDO", iniciadaEm: new Date(Date.now() - 3_600_000),
+        contadoresJson: { listados: 1_000, analisados: 400 }, etapas: [{ fase: "DETALHAR", status: "PENDENTE" }] };
+    };
+    handlers["$queryRaw"] = ({ query }) => {
+      const valores = objeto(query).values as unknown[];
+      assert.equal(valores[0], GRUPO);assert.equal(valores[1], EXECUCAO);
+      assert.equal((valores[3] as Date).getTime() - (valores[2] as Date).getTime(), 30 * 60_000);
+      return [{ total: 300 }];
+    };
+    const response = await GET(request("previsao?janela=9999&configuracaoId=externo"), contexto("previsao"));
+    assert.equal(response.status, 200);assert.equal(response.headers.get("cache-control"), "private, no-store");
+    const body = await response.json();
+    assert.equal(body.previsao.porMinuto, 10);assert.equal(body.previsao.restantes, 600);
+    assert.equal(Date.parse(body.previsao.terminoPrevisto) - Date.parse(body.previsao.calculadoEm), 3_600_000);
+    assert.equal(chamadasDe("$queryRaw").length, 1);assert.equal(chamadasDe("olistSyncEstado.findMany").length, 0);
+    assert.doesNotMatch(JSON.stringify(body), /Criptograf|metadados|token|cpfCnpj/);
+  });
+  await t.test("sem execução ativa, listagem incompleta e job pausado não contam o catálogo", async () => {
+    reset();
+    assert.deepEqual(await (await GET(request("previsao"), contexto("previsao"))).json(), { previsao: null });
+    for (const [fase, pausado, estado] of [["LISTAR", false, "LISTANDO"], ["DETALHAR", true, "PAUSADA"]] as const) {
+      handlers["olistSyncExecucao.findFirst"] = () => ({ ...execucao, iniciadaEm: new Date(Date.now() - 3_600_000), contadoresJson: { listados: 10, analisados: 1 }, etapas: [{ fase, status: "PENDENTE" }] });
+      handlers["configuracaoJob.findUnique"] = () => ({ pausado });
+      const response = await GET(request("previsao"), contexto("previsao"));
+      assert.equal((await response.json()).previsao.estado, estado);
+    }
+    assert.equal(chamadasDe("$queryRaw").length, 0);
+  });
+  await t.test("polling do resumo e consultas de detalhes/lista não calculam previsão", async () => {
+    reset();handlers["olistSyncExecucao.findMany"] = () => [];handlers["olistSyncExecucao.count"] = () => 0;
+    for (const caminho of ["resumo", "execucoes", `execucoes/${EXECUCAO}`]) await GET(request(caminho), contexto(caminho));
+    assert.equal(chamadasDe("$queryRaw").length, 0);
   });
 
   await t.test("reauditar exige executar além de resolver e não registra decisão sem ambas", async () => {

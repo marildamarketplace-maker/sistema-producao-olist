@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { consultaValidacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
 import { criarCriptografiaSync } from "../src/lib/olist-sync/cripto";
@@ -24,6 +25,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
   await sql.query("INSERT INTO aplicativo(id,nome) VALUES ($1,'Pai'),($2,'Externo')",[pai,externo]);
   await sql.query("INSERT INTO aplicativo(id,nome,aplicativo_pai_id) VALUES ($1,'A',$4),($2,'B',$4),($3,'Matriz',$4)",[a,b,matriz,pai]);
   await sql.query(await readFile(new URL("../prisma/migrations/20261116000100_olist_sync_multiempresa/migration.sql",import.meta.url),"utf8"));
+  await sql.query(await readFile(new URL("../prisma/migrations/20261117000200_olist_sync_previsao/migration.sql",import.meta.url),"utf8"));
   const usuario=randomUUID(),usuarioFilho=randomUUID();
   await sql.query("INSERT INTO usuario(id,aplicativo_id,pode_visualizar_sincronizacao_olist,pode_configurar_sincronizacao_olist,pode_executar_sincronizacao_olist,pode_resolver_sincronizacao_olist) VALUES ($1,$2,true,true,true,true),($3,$4,true,true,true,true)",[usuario,pai,usuarioFilho,a]);
   const config=await db.olistSyncConfiguracao.findUniqueOrThrow({where:{aplicativoPaiId:pai}});
@@ -43,6 +45,42 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
     assert.equal((await api.GET(new Request("https://example.test"),contexto(["resumo"]))).status,401);
     assert.equal((await api.GET(req("GET",["resumo"],undefined,usuarioFilho),contexto(["resumo"]))).status,403);
     const response=await api.GET(req("GET",["resumo"]),contexto(["resumo"]));assert.equal(response.status,200);assert.equal(response.headers.get("cache-control"),"private, no-store");
+  });
+  await t.test("previsão agrega só validações completas recentes e usa índice em 50 mil observações", async () => {
+    const agora = new Date();
+    const e = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "AUDITANDO",
+      versaoConfiguracao: 1, iniciadaEm: new Date(agora.getTime() - 3_600_000), contadoresJson: { listados: 50_100, analisados: 50_060 } } });
+    const outra = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "CONCLUIDA", versaoConfiguracao: 1 } });
+    try {
+      await db.olistSyncEtapa.create({ data: { execucaoId: e.id, aplicativoId: a, entidade: "CONTATO", fase: "DETALHAR" } });
+      await sql.query(`INSERT INTO olist_sync_estado (id,configuracao_id,aplicativo_id,entidade,remote_id,metadados_json,ultima_execucao_id,verificado_em)
+        SELECT gen_random_uuid(),$1,$2,'CONTATO','previsao-'||n,'{"completo":true}'::jsonb,$3,
+          CASE WHEN n<=60 THEN $4::timestamptz-interval '10 minutes' ELSE $4::timestamptz-interval '2 hours' END
+        FROM generate_series(1,50060) n`, [config.id, a, e.id, agora]);
+      await db.olistSyncEstado.createMany({ data: [
+        ...Array.from({ length: 20 }, (_, n) => ({ configuracaoId: config.id, aplicativoId: a, entidade: "CONTATO", remoteId: `parcial-${n}`, ultimaExecucaoId: e.id, verificadoEm: agora, metadadosJson: { completo: false } })),
+        ...Array.from({ length: 20 }, (_, n) => ({ configuracaoId: config.id, aplicativoId: a, entidade: "CONTATO", remoteId: `outra-execucao-${n}`, ultimaExecucaoId: outra.id, verificadoEm: agora, metadadosJson: { completo: true } })),
+        { configuracaoId: config.id, aplicativoId: a, entidade: "CONTATO", remoteId: "futuro", ultimaExecucaoId: e.id, verificadoEm: new Date(agora.getTime() + 3_600_000), metadadosJson: { completo: true } },
+      ] });
+      await sql.query("VACUUM (ANALYZE) olist_sync_estado");
+      const query = consultaValidacoesRecentesSync(config.id, e.id, new Date(agora.getTime() - 1_800_000), agora);
+      const plano = await db.$queryRaw<Array<{ "QUERY PLAN": Array<{ Plan: unknown; "Execution Time": number }> }>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`);
+      assert.match(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /olist_sync_estado_previsao_idx/);
+      assert.doesNotMatch(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /Seq Scan/);
+      t.diagnostic(`Previsão: 50060 observações, 60 recentes; consulta agregada ${plano[0]["QUERY PLAN"][0]["Execution Time"]}ms em PostgreSQL local.`);
+      const response = await api.GET(req("GET", ["previsao"]), contexto(["previsao"]));
+      assert.equal(response.status, 200);const body = await response.json();
+      assert.equal(body.previsao.validadosNaJanela, 60);assert.equal(body.previsao.porMinuto, 2);assert.equal(body.previsao.restantes, 40);
+      assert.equal(Date.parse(body.previsao.terminoPrevisto) - Date.parse(body.previsao.calculadoEm), 1_200_000);
+      assert.equal((await api.GET(req("GET", ["previsao"], undefined, usuarioFilho), contexto(["previsao"]))).status, 403);
+      await db.configuracaoJob.update({ where: { chave: "auditar-sincronizacao-olist" }, data: { pausado: true } });
+      const pausada = await (await api.GET(req("GET", ["previsao"]), contexto(["previsao"]))).json();
+      assert.equal(pausada.previsao.estado, "PAUSADA");assert.equal(pausada.previsao.terminoPrevisto, null);
+    } finally {
+      await db.configuracaoJob.update({ where: { chave: "auditar-sincronizacao-olist" }, data: { pausado: false } });
+      await db.olistSyncEstado.deleteMany({ where: { ultimaExecucaoId: { in: [e.id, outra.id] } } });
+      await db.olistSyncExecucao.deleteMany({ where: { id: { in: [e.id, outra.id] } } });
+    }
   });
   await t.test("origem declarada pode referenciar matriz excluída e preserva idempotência",async()=>{
     const registro=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"PRODUTO",chave:"ORIGEM-API"}});

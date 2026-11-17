@@ -12,6 +12,8 @@ import { FalhaSync } from "@/lib/olist-sync/contrato";
 import { configuracaoSchema, decisaoSchema, execucaoSchema, filtrosSchema, objetoJson, observacaoProtegida, origemSchema, proximoHorarioSync } from "@/lib/olist-sync/validacao";
 
 import { declararOrigemSync, resolverPendenciaSync } from "@/services/olist-sync-review-service";
+import { contarValidacoesRecentesSync } from "@/repositories/olist-sync-previsao-repository";
+import { calcularPrevisaoValidacaoSync, inicioJanelaPrevisaoSync } from "@/lib/olist-sync/previsao";
 
 export const dynamic="force-dynamic";
 type Contexto={params:Promise<{recurso?:string[]}>};
@@ -53,6 +55,19 @@ export async function GET(request:Request,contexto:Contexto) {
     if(id)z.uuid().parse(id);
     const filtros=filtrosSchema.parse(Object.fromEntries(new URL(request.url).searchParams));
     const pagina={skip:filtros.offset,take:filtros.limit};
+    if(recurso==="previsao" && !id) {
+      const agora=new Date();
+      const e=await prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:["PENDENTE","AUDITANDO","AGUARDANDO_RETRY"]},modo:{in:["AUDITAR","AUDITAR_E_APLICAR"]}},
+        select:{id:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:201}}});
+      if(!e)return json({previsao:null});
+      const job=await prisma.configuracaoJob.findUnique({where:{chave:JOBS_SYNC.auditar.chave},select:{pausado:true}});
+      const pausada=!config.ativo || !job || job.pausado || !aplicativoTemJob(config.aplicativoPai.jobs,JOBS_SYNC.auditar.flag);
+      const listagemPendente=e.etapas.length===0 || e.etapas.length>200 || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
+      const inicio=inicioJanelaPrevisaoSync(agora,e.iniciadaEm);
+      const recentes=pausada||listagemPendente||!e.iniciadaEm?0:await contarValidacoesRecentesSync(prisma,config.id,e.id,inicio,agora);
+      return json({previsao:calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
+        validadosNaJanela:recentes,listagemPendente,pausada})});
+    }
     if(recurso==="configuracao") {
       const [pai,filhos,jobs]=await Promise.all([
         prisma.aplicativo.findUniqueOrThrow({where:{id:config.aplicativoPaiId},select:{nome:true}}),

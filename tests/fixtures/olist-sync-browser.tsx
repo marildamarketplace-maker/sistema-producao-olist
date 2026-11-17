@@ -36,6 +36,9 @@ window.fetch = async (input, init) => {
   window.olistSyncTeste.chamadas.push(recurso);
   const atual: ExecucaoSyncDetalheDto = { ...execucao, status: concluida ? "CONCLUIDA" : "AUDITANDO", finalizadoEm: concluida ? "2026-11-16T12:01:00Z" : null };
   if (recurso === "configuracao") return Response.json(configuracao);
+  if (recurso === "previsao") return Response.json({ previsao: { execucaoId: id, calculadoEm: "2026-11-17T21:00:00Z",
+    janelaInicio: "2026-11-17T20:30:00Z", janelaFim: "2026-11-17T21:00:00Z", validadosNaJanela: 600, restantes: 1000,
+    porMinuto: 20, terminoPrevisto: "2026-11-17T21:50:00Z", estado: "ESTIMADA" } });
   if (recurso === "resumo") {
     const resumo: ResumoSyncDto = { sincronizados: 1, divergentes: 0, pendencias: 0, erros: 0, ultimaExecucao: atual, execucaoAtiva: concluida ? null : atual };
     return Response.json(resumo);
