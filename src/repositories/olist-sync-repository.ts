@@ -275,7 +275,10 @@ export function criarOlistSyncRepository(db: PrismaClient) {
     },
     async salvarCheckpoint(entrada: { etapaId: string; leaseToken: string; cursor: Prisma.InputJsonValue; status?: string; contadores?: Prisma.InputJsonObject; disponivelEm?: Date; fase?: string }) {
       return comReserva({ id: entrada.etapaId, leaseToken: entrada.leaseToken }, async (tx, atual) => {
-        await tx.olistSyncEtapa.update({ where: { id: atual.id }, data: { ...liberacao, cursorJson: entrada.cursor, status: atual.execucao.cancelamentoSolicitado ? "CANCELADA" : entrada.status ?? "PENDENTE",
+        const anterior=atual.cursorJson, cursor=entrada.cursor;
+        const cota=anterior && typeof anterior==="object" && !Array.isArray(anterior) ? anterior.cotaLeitura : undefined;
+        const checkpoint=cota && cursor && typeof cursor==="object" && !Array.isArray(cursor) ? {...cursor,cotaLeitura:cota} : cursor;
+        await tx.olistSyncEtapa.update({ where: { id: atual.id }, data: { ...liberacao, cursorJson: checkpoint, status: atual.execucao.cancelamentoSolicitado ? "CANCELADA" : entrada.status ?? "PENDENTE",
           tentativas: 0, erroCodigo: null, disponivelEm: entrada.disponivelEm ?? new Date(), ...(entrada.fase ? { fase: entrada.fase } : {}) }, select: { id: true } });
         if (entrada.contadores) await tx.olistSyncExecucao.update({ where: { id: atual.execucaoId }, data: { contadoresJson: entrada.contadores }, select: { id: true } });
         return true;

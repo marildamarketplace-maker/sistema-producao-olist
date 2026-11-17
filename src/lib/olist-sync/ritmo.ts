@@ -1,0 +1,31 @@
+/** Somente metadados públicos de cota; nunca recebe tokens ou payloads do ERP. */
+export type CotaLeituraSync = { limite: number; restante: number; resetSegundos: number };
+export const INTERVALO_AUDITORIA_MS = 2_000;
+
+export function interpretarCotaSync(limite: unknown, restante: unknown, reset: unknown): CotaLeituraSync | null {
+  const numero = (valor: unknown) => typeof valor === "number" ? valor : typeof valor === "string" && /^\d+(?:\.\d+)?$/.test(valor) ? Number(valor) : NaN;
+  const l = numero(limite), r = numero(restante), s = numero(reset);
+  if (!Number.isSafeInteger(l) || l < 1 || l > 100_000 || !Number.isSafeInteger(r) || r < 0 || r > l || !Number.isFinite(s) || s < 0 || s > 86_400) return null;
+  return { limite: l, restante: r, resetSegundos: s };
+}
+
+export function cotaDaRespostaSync(resposta: unknown): CotaLeituraSync | null {
+  if (!resposta || typeof resposta !== "object" || !("cotaLeitura" in resposta)) return null;
+  const cota = resposta.cotaLeitura;
+  if (!cota || typeof cota !== "object" || !("limite" in cota) || !("restante" in cota) || !("resetSegundos" in cota)) return null;
+  return interpretarCotaSync(cota.limite, cota.restante, cota.resetSegundos);
+}
+
+/** Teto de 30/min e até metade da cota anunciada. Reserva 10% para outros usos. */
+export function esperaAuditoriaSync(cota: CotaLeituraSync | null, limitada = false, retryAfterMs = 0): number {
+  let intervalo = INTERVALO_AUDITORIA_MS;
+  if (cota) {
+    const reserva = Math.max(1, Math.ceil(cota.limite * 0.1));
+    const disponivel = cota.restante - reserva;
+    intervalo = Math.max(intervalo, Math.ceil(120_000 / cota.limite), disponivel > 0
+      ? Math.ceil(cota.resetSegundos * 1_000 / disponivel)
+      : Math.ceil(cota.resetSegundos * 1_000) + 250);
+  }
+  if (limitada) intervalo = Math.max(intervalo, 60_000, (cota?.resetSegundos ?? 0) * 1_000 + 250);
+  return Math.max(intervalo, Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : 0);
+}

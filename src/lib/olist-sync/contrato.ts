@@ -1,3 +1,5 @@
+import type { CotaLeituraSync } from "./ritmo";
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type CamposSync = Record<string, JsonValue>;
 export type EntidadeSync = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR";
@@ -5,6 +7,8 @@ export type EntidadeSync = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR
 export const ENTIDADES_SYNC: readonly EntidadeSync[] = ["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"];
 
 export interface ObservacaoRemota {
+  /** Metadado de transporte; não compõe conteúdo, hashes ou ciphertext. */
+  cotaLeitura?: CotaLeituraSync;
   id: string;
   chave: string | null;
   nome: string;
@@ -20,6 +24,7 @@ export interface ObservacaoRemota {
 }
 
 export interface PaginaSync {
+  cotaLeitura?: CotaLeituraSync;
   itens: ObservacaoRemota[];
   total: number | null;
 }
@@ -33,6 +38,7 @@ export interface OpcoesListagemSync {
 }
 
 export interface IdentidadeContaSync {
+  cotaLeitura?: CotaLeituraSync;
   documento: string;
   nome: string;
 }
@@ -75,6 +81,7 @@ export class FalhaSync extends Error {
     public readonly inconclusivo = false,
     public readonly status: number | null = null,
     public readonly retryAfterMs = 0,
+    public readonly cotaLeitura?: CotaLeituraSync,
   ) {
     super(mensagem);
     this.name = "FalhaSync";

@@ -643,13 +643,57 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       for(const app of extras)docs.delete(app);
     }
   });
+  await t.test("30/min retoma auditoria antiga sem relistar nem repetir detalhes já persistidos",async()=>{
+    await reset();for(let i=0;i<12;i++)contas.get(a)!.set(String(100+i),produto(100+i,`SKU-${i}`,`Produto ${i}`));
+    const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>await db.olistSyncEstado.count({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}})===1,"um detalhe foi persistido");
+    const salvo=await db.olistSyncEstado.findFirstOrThrow({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}});
+    assert.deepEqual((await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:e.id,aplicativoId:a}})).cursorJson,{});
+    await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:a}},data:{proximaChamadaEm:new Date(agora+6_000)}});
+    chamadas.length=0;
+    const horarios:number[]=[];
+    interceptar=async(r,app)=>{if(app===a&&/\/produtos\/\d+$/.test(new URL(r.url).pathname))horarios.push(agora);};
+    const consumidor=criarServicoOlistSync(db,cliente,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+    await consumidor.executar(agora+240_000);
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(chamadas.filter(r=>/\/produtos\/\d+$/.test(new URL(r.url).pathname)).length,11);
+    assert.ok(!chamadas.some(r=>new URL(r.url).pathname.endsWith("/produtos")||r.url.endsWith("/info")));
+    assert.equal((await db.olistSyncEstado.findUniqueOrThrow({where:{id:salvo.id}})).dadosCriptografados,salvo.dadosCriptografados);
+    for(let i=1;i<horarios.length;i++)assert.ok(horarios[i]-horarios[i-1]>=2_000&&horarios[i]-horarios[i-1]<6_000);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,status:{not:"CONCLUIDA"}}}),0);
+    assert.equal(escritas().length,0);
+  });
+  await t.test("headers persistem a cota e adiam a próxima leitura sem perder o detalhe",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar("AUDITAR");
+    responder=async(r,app)=>app===a&&new URL(r.url).pathname.endsWith("/produtos/10")
+      ? {status:200,dados:contas.get(a)!.get("10"),cotaLeitura:{limite:60,restante:2,resetSegundos:40}}:undefined;
+    await avancarAte(async()=>await db.olistSyncEstado.count({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}})===1,"detalhe com cota reduzida");
+    const etapa=await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:e.id,aplicativoId:a}});
+    const cursor=etapa.cursorJson as {cotaLeitura:{limite:number;restante:number}};
+    assert.equal(cursor.cotaLeitura.limite,60);assert.equal(cursor.cotaLeitura.restante,2);
+    const participante=await db.olistSyncParticipante.findUniqueOrThrow({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:a}}});
+    assert.ok(participante.proximaChamadaEm!.getTime()>=agora+40_250);
+    const antes=chamadas.length;await passo();assert.equal(chamadas.length,antes);
+  });
+  await t.test("429 na auditoria mantém checkpoint e a conta bloqueada pelo Retry-After",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>await db.olistSyncEtapa.count({where:{execucaoId:e.id,fase:"DETALHAR"}})===2,"listagem encerrada");
+    responder=async(r,app)=>app===a&&new URL(r.url).pathname.endsWith("/produtos/10")
+      ? {status:429,dados:{},retryAfter:"180",cotaLeitura:{limite:60,restante:0,resetSegundos:60}}:undefined;
+    await avancarAte(async()=>await db.olistSyncEtapa.count({where:{execucaoId:e.id,erroCodigo:"OLIST_429"}})>0,"429 registrado");
+    const participante=await db.olistSyncParticipante.findUniqueOrThrow({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:a}}});
+    assert.ok(participante.proximaChamadaEm!.getTime()>=agora+180_000);
+    assert.equal(await db.olistSyncEstado.count({where:{ultimaExecucaoId:e.id,metadadosJson:{path:["completo"],equals:true}}}),0);
+    responder=null;agora+=180_001;await terminar(e.id);
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA_COM_PENDENCIAS");assert.equal(escritas().length,0);
+  });
   await t.test("dois schedulers para o mesmo horário criam uma única execução durável",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{proximaExecucaoEm:new Date(agora-60_000)}});
     await Promise.all([servico.agendar(),servico.agendar()]);assert.equal(await db.olistSyncExecucao.count(),1);
     assert.ok((await db.olistSyncConfiguracao.findUniqueOrThrow({where:{id:config.id}})).proximaExecucaoEm!.getTime()>agora);
     assert.equal(escritas().length,0);
   });
-  await t.test("uma invocação atravessa as janelas de 6/12 segundos sem aumentar a taxa",async()=>{
+  await t.test("uma invocação audita a 30/min e preserva as janelas de aplicação",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar();
     const esperas:number[]=[],horarios:{app:string;metodo:string;quando:number}[]=[];
     interceptar=async(r,app)=>{horarios.push({app,metodo:r.metodo,quando:agora});};
@@ -660,7 +704,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.ok(esperas.every(ms=>ms>0&&ms<=12_000));
     for(const app of [a,b]) {
       const conta=horarios.filter(h=>h.app===app);
-      for(let i=1;i<conta.length;i++)assert.ok(conta[i].quando-conta[i-1].quando>=(conta[i-1].metodo==="GET"?6_000:12_000),"Preserva o intervalo da conta entre consultas/escritas.");
+      for(let i=1;i<conta.length;i++)assert.ok(conta[i].quando-conta[i-1].quando>=(conta[i-1].metodo==="GET"?2_000:12_000),"Preserva o intervalo da conta entre consultas/escritas.");
     }
   });
   await t.test("pausar durante a espera encerra a invocação sem polling nem nova chamada",async()=>{

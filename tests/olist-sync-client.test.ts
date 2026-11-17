@@ -496,3 +496,14 @@ test("guard da consulta bloqueia o recurso e preserva falha tipada ou sanitiza e
     assert.equal(m.chamadas.length, 1);
   }
 });
+
+test("leituras transportam somente números da cota e 429 mantém reset e Retry-After", async () => {
+  const cotaLeitura = { limite: 60, restante: 42, resetSegundos: 20 };
+  const m = mock([{ status: 200, dados: pagina(), cotaLeitura }, { status: 200, dados: produto, cotaLeitura },
+    { status: 200, dados: { cpfCnpj: "04252011000110", razaoSocial: "Conta" }, cotaLeitura }]);
+  assert.deepEqual((await m.cliente.listar("a", "PRODUTO", { offset: 0, limit: 100 })).cotaLeitura, cotaLeitura);
+  assert.deepEqual((await m.cliente.detalhar("a", "PRODUTO", "100")).cotaLeitura, cotaLeitura);
+  assert.deepEqual((await m.cliente.identidadeConta("a")).cotaLeitura, cotaLeitura);
+  const limitado = mock([{ status: 429, dados: {}, retryAfter: "90", cotaLeitura: { ...cotaLeitura, restante: 0 } }]);
+  await assert.rejects(limitado.cliente.detalhar("a", "PRODUTO", "100"), error => error instanceof FalhaSync && error.status === 429 && error.retryAfterMs === 90_000 && error.cotaLeitura?.restante === 0);
+});

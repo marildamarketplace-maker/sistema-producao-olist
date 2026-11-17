@@ -5,6 +5,7 @@ import {
 } from "./contrato";
 import { identificadorRemoto, normalizarDocumento, observarRegistro, prepararImagens, prepararPayload, prepararVariacao } from "./dominio";
 import { serializarCanonico } from "./cripto";
+import { cotaDaRespostaSync, interpretarCotaSync, type CotaLeituraSync } from "./ritmo";
 
 const RECURSOS = { PRODUTO: "produtos", CONTATO: "contatos", FORMA_PAGAMENTO: "formas-pagamento", VENDEDOR: "vendedores" } as const;
 const MAXIMO_RESPOSTA = 2 * 1024 * 1024;
@@ -20,6 +21,7 @@ export interface RespostaHttpSync {
   status: number;
   dados: unknown;
   retryAfter?: string | number;
+  cotaLeitura?: CotaLeituraSync;
 }
 export interface DependenciasClienteSync {
   configurar(aplicativoId: string): Promise<{ apiBaseUrl: string }>;
@@ -45,7 +47,8 @@ const dependenciasPadrao: DependenciasClienteSync = {
       validateStatus: () => true,
     });
     const retryAfter: unknown = resposta.headers["retry-after"];
-    return { status: resposta.status, dados: resposta.data, retryAfter: typeof retryAfter === "string" || typeof retryAfter === "number" ? retryAfter : undefined };
+    const cota = interpretarCotaSync(resposta.headers["x-ratelimit-limit"], resposta.headers["x-ratelimit-remaining"], resposta.headers["x-ratelimit-reset"]);
+    return { status: resposta.status, dados: resposta.data, retryAfter: typeof retryAfter === "string" || typeof retryAfter === "number" ? retryAfter : undefined, ...(cota ? { cotaLeitura: cota } : {}) };
   },
 };
 
@@ -125,7 +128,7 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
       const autenticacao = resposta.status === 401 || resposta.status === 403;
       throw new FalhaSync(inconclusivo ? "MUTACAO_INCONCLUSIVA" : `OLIST_${resposta.status}`,
         inconclusivo ? "O resultado da alteração precisa ser reconciliado antes de outra tentativa." : autenticacao ? "Reconecte a integração Olist antes de continuar." : "A Olist não concluiu a solicitação.",
-        temporaria && !inconclusivo, inconclusivo, resposta.status, retryAfterSync(resposta.retryAfter));
+        temporaria && !inconclusivo, inconclusivo, resposta.status, retryAfterSync(resposta.retryAfter), cotaDaRespostaSync(resposta) ?? undefined);
     }
     if (resposta.status === 202) throw new FalhaSync("MUTACAO_INCONCLUSIVA", "A Olist ainda não confirmou a conclusão da solicitação.", false, metodo !== "GET", resposta.status);
     return resposta;
@@ -210,7 +213,8 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
         parametros[entidade === "PRODUTO" ? "dataAlteracao" : "dataAtualizacao"] = opcoes.desde;
       }
       const resposta = await requisitar(aplicativoId, "GET", caminho, parametros);
-      return interpretarPagina(entidade, resposta.dados, opcoes.limit);
+      const cota = cotaDaRespostaSync(resposta);
+      return { ...interpretarPagina(entidade, resposta.dados, opcoes.limit), ...(cota ? { cotaLeitura: cota } : {}) };
     },
     async buscarPorChave(aplicativoId, entidade, chave, opcoes) {
       const caminho = caminhoEntidade(entidade);
@@ -228,11 +232,13 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
       const resposta = await requisitar(aplicativoId, "GET", caminho, {}, undefined, opcoes);
       const observacao = observarRegistro(entidade, resposta.dados, { completo: true });
       if (observacao.id !== identificadorRemoto(id)) return contratoInvalido();
-      return observacao;
+      const cota = cotaDaRespostaSync(resposta);
+      return { ...observacao, ...(cota ? { cotaLeitura: cota } : {}) };
     },
     async identidadeConta(aplicativoId) {
       const resposta = await requisitar(aplicativoId, "GET", "info");
-      return interpretarIdentidade(resposta.dados);
+      const cota = cotaDaRespostaSync(resposta);
+      return { ...interpretarIdentidade(resposta.dados), ...(cota ? { cotaLeitura: cota } : {}) };
     },
     async criar(aplicativoId, entidade, payload, opcoes) {
       const caminho = caminhoEntidade(entidade);
