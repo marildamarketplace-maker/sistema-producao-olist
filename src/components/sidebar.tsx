@@ -9,10 +9,23 @@ import { useAuth } from "@/components/auth-provider";
 import { menuItems, type MenuItem, type MenuLink } from "@/lib/navigation";
 import { hasAnyPermission } from "@/lib/permissions";
 import { useTheme } from "@/components/theme-provider";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 
+function MenuMobile({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const ref = useModalFocus(onClose);
+  return (
+    <div className="fixed inset-0 z-40 md:hidden">
+      <div className="absolute inset-0 bg-slate-950/40" onClick={onClose} aria-hidden="true" />
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="Menu principal" tabIndex={-1}
+        className="relative flex h-full w-80 max-w-[85vw] flex-col overflow-y-auto bg-white p-6 shadow-xl">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export function Sidebar() {
-  const { usuario, user, signOut } = useAuth();
+  const { usuario, user, signOut, signingOut, signOutError } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
@@ -21,6 +34,15 @@ export function Sidebar() {
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const fecharNoDesktop = () => { if (desktop.matches) setIsOpen(false); };
+    fecharNoDesktop();
+    desktop.addEventListener("change", fecharNoDesktop);
+    return () => desktop.removeEventListener("change", fecharNoDesktop);
+  }, [isOpen]);
 
   function isActive(href: string) {
     return pathname === href;
@@ -111,11 +133,14 @@ export function Sidebar() {
         <button
           type="button"
           onClick={signOut}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+          disabled={signingOut}
+          aria-busy={signingOut}
+          className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-wait disabled:opacity-60"
         >
           <LogOut className="h-4 w-4" aria-hidden="true" />
-          Sair
+          {signingOut ? "Saindo…" : "Sair"}
         </button>
+        {signOutError && <p role="alert" className="mt-3 text-sm text-red-700">{signOutError}</p>}
       </div>
     </>
   );
@@ -129,7 +154,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
           aria-label="Abrir menu"
           aria-expanded={isOpen}
         >
@@ -138,25 +163,17 @@ export function Sidebar() {
       </header>
 
       {isOpen ? (
-        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
+        <MenuMobile onClose={() => setIsOpen(false)}>
           <button
             type="button"
-            className="absolute inset-0 h-full w-full bg-slate-950/40"
-            aria-label="Fechar menu"
             onClick={() => setIsOpen(false)}
-          />
-          <aside className="relative flex h-full w-80 max-w-[85vw] flex-col overflow-hidden bg-white p-6 shadow-xl">
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
-              aria-label="Fechar menu"
-            >
-              <X className="h-5 w-5" aria-hidden="true" />
-            </button>
-            {renderSidebarContent()}
-          </aside>
-        </div>
+            className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            aria-label="Fechar menu"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+          {renderSidebarContent()}
+        </MenuMobile>
       ) : null}
 
       <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white p-6 md:flex">

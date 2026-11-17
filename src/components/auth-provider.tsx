@@ -1,7 +1,7 @@
 "use client";
 
 import type { Session, User } from "@supabase/supabase-js";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { PermissionSet } from "@/lib/permissions";
@@ -24,6 +24,8 @@ type AuthContextValue = {
   usuario: UsuarioAplicativo | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  signingOut: boolean;
+  signOutError: string | null;
   refreshUsuario: () => Promise<void>;
 };
 
@@ -92,6 +94,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [usuario, setUsuario] = useState<UsuarioAplicativo | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const signOutInFlight = useRef(false);
+  // Invalidam respostas que pertencem a uma sessão ou consulta anterior.
+  const authRevision = useRef(0);
+  const usuarioRequest = useRef(0);
+  const invalidarConsultas = useCallback(() => {
+    authRevision.current++;
+    usuarioRequest.current++;
+  }, []);
 
   const carregarUsuarioFallback = useCallback(async (email: string) => {
     const { data, error } = await supabase
@@ -213,35 +225,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const carregarUsuario = useCallback(async (nextSession: Session | null) => {
+    if (signOutInFlight.current) return;
+    const revision = authRevision.current;
+    const request = ++usuarioRequest.current;
+    const atual = () => revision === authRevision.current && request === usuarioRequest.current;
     if (!nextSession?.user.email || !nextSession.access_token) {
       setUsuario(null);
       setAccessMessage("Não foi possível identificar o e-mail do usuário autenticado.");
       return;
     }
 
-    const resp = await fetch("/api/usuario/me", {
-      headers: {
-        Authorization: `Bearer ${nextSession.access_token}`,
-      },
-    });
-    const json = await resp.json();
+    try {
+      const resp = await fetch("/api/usuario/me", {
+        headers: {
+          Authorization: `Bearer ${nextSession.access_token}`,
+        },
+      });
+      const json = await resp.json();
+      if (!atual()) return;
 
-    if (!resp.ok) {
-      const usuarioFallback = await carregarUsuarioFallback(nextSession.user.email);
+      if (!resp.ok) {
+        const usuarioFallback = await carregarUsuarioFallback(nextSession.user.email);
+        if (!atual()) return;
 
-      if (usuarioFallback) {
-        setUsuario(usuarioFallback);
-        setAccessMessage(null);
+        if (usuarioFallback) {
+          setUsuario(usuarioFallback);
+          setAccessMessage(null);
+          return;
+        }
+
+        setUsuario(null);
+        setAccessMessage(json.error ?? "Erro ao validar acesso.");
         return;
       }
 
+      setUsuario(json as UsuarioAplicativo);
+      setAccessMessage(null);
+    } catch {
+      if (!atual()) return;
       setUsuario(null);
-      setAccessMessage(json.error ?? "Erro ao validar acesso.");
-      return;
+      setAccessMessage("Não foi possível validar seu acesso. Verifique sua conexão e tente novamente.");
     }
-
-    setUsuario(json as UsuarioAplicativo);
-    setAccessMessage(null);
   }, [carregarUsuarioFallback]);
 
   const refreshUsuario = useCallback(async () => {
@@ -249,20 +273,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [carregarUsuario, session]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setUsuario(null);
-    router.replace("/login");
-  }, [router]);
+    if (signOutInFlight.current) return;
+    signOutInFlight.current = true;
+    invalidarConsultas();
+    setSigningOut(true);
+    setSignOutError(null);
+    try {
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) throw error;
+      invalidarConsultas();
+      setSession(null);
+      setUsuario(null);
+      setAccessMessage(null);
+      setLoading(false);
+      router.replace("/login");
+    } catch {
+      setSignOutError("Não foi possível sair. Verifique sua conexão e tente novamente.");
+    } finally {
+      signOutInFlight.current = false;
+      setSigningOut(false);
+    }
+  }, [invalidarConsultas, router]);
 
   useEffect(() => {
     let mounted = true;
 
     async function carregarSessao() {
+      const revision = authRevision.current;
       setLoading(true);
       const { data } = await supabase.auth.getSession();
 
-      if (!mounted) return;
+      if (!mounted || revision !== authRevision.current) return;
 
       setSession(data.session);
       if (data.session) {
@@ -272,7 +313,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAccessMessage(null);
       }
 
-      if (!mounted) return;
+      if (!mounted || revision !== authRevision.current) return;
       setLoading(false);
     }
 
@@ -281,10 +322,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted || (signOutInFlight.current && nextSession)) return;
+      const revision = ++authRevision.current;
       setSession(nextSession);
       if (nextSession) {
-        carregarUsuario(nextSession).finally(() => setLoading(false));
+        carregarUsuario(nextSession).finally(() => {
+          if (mounted && revision === authRevision.current) setLoading(false);
+        });
       } else {
+        usuarioRequest.current++;
         setUsuario(null);
         setAccessMessage(null);
         setLoading(false);
@@ -293,9 +339,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
+      invalidarConsultas();
       subscription.unsubscribe();
     };
-  }, [carregarUsuario]);
+  }, [carregarUsuario, invalidarConsultas]);
 
   useEffect(() => {
     if (loading) return;
@@ -319,9 +366,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       usuario,
       loading,
       signOut,
+      signingOut,
+      signOutError,
       refreshUsuario,
     }),
-    [loading, refreshUsuario, session, signOut, usuario],
+    [loading, refreshUsuario, session, signOut, signingOut, signOutError, usuario],
   );
 
   if (loading && !isPublicPath(pathname)) {
@@ -341,10 +390,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={signOut}
-            className="mt-5 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+            disabled={signingOut}
+            aria-busy={signingOut}
+            className="mt-5 min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-wait disabled:opacity-60"
           >
-            Sair
+            {signingOut ? "Saindo…" : "Sair"}
           </button>
+          {signOutError && <p role="alert" className="mt-3 text-sm text-red-700">{signOutError}</p>}
         </div>
       </div>
     );
