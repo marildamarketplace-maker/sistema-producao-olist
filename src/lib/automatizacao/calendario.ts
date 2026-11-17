@@ -3,7 +3,7 @@ import type { horariosSchema } from "./contrato";
 
 const minutoMs = 60_000;
 const formatador = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "America/Sao_Paulo", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "America/Sao_Paulo", weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const dias = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -17,7 +17,9 @@ export function calcularDisparos(horarios: z.infer<typeof horariosSchema>, curso
   for (let instante = Math.max(minutoAtual(cursor).getTime() + minutoMs, limite); instante <= agora.getTime(); instante += minutoMs) {
     const data = new Date(instante);
     const partes = Object.fromEntries(formatador.formatToParts(data).map(({ type, value }) => [type, value]));
-    if (horarios.some(({ dia, hora }) => dias[dia] === partes.weekday && hora === `${partes.hour}:${partes.minute}`)) {
+    if (horarios.some((item) =>
+      ("dia" in item ? dias[item.dia] === partes.weekday : item.diaMes === Number(partes.day)) &&
+      item.hora === `${partes.hour}:${partes.minute}`)) {
       previstos.push(data);
     }
   }

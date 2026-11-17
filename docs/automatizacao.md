@@ -1,5 +1,29 @@
 # Operação da Automatização
 
+## Agendas semanais e mensais
+
+Cada horário usa `{ "dia": 0..6, "hora": "HH:mm" }` para a semana (domingo = 0)
+ou `{ "diaMes": 1..31, "hora": "HH:mm" }` para execução mensal. Os dois campos de
+dia não podem coexistir no mesmo horário. Datas e horas usam `America/Sao_Paulo`.
+Dias inexistentes são ignorados, sem antecipação: dia 31 não executa em fevereiro.
+Agendas semanais existentes permanecem compatíveis e não há mudança de schema.
+
+A tela de rotinas permite selecionar a frequência por horário. A API valida
+criação, edição e ativação com o contrato compartilhado. A proteção de 15 minutos
+considera viradas de mês e semana; ao comparar mensal com semanal, protege qualquer
+dia da semana em que a data mensal possa cair. Isso pode reservar o mesmo horário
+semanal em outros meses, evitando uma colisão futura.
+
+O agendador reutiliza a fila, os locks, a versão da habilidade e o histórico existentes.
+Mantém a janela de recuperação de 15 minutos: indisponibilidade maior no horário
+agendado exige conferir o histórico e executar manualmente se necessário. Não há
+polling novo nem consultas adicionais por rotina; o payload acrescenta apenas o
+campo de dia mensal em substituição ao dia semanal.
+
+Critérios de interface: escolher frequência e dia, preservar a hora ao alternar,
+salvar/editar e identificar o calendário no cartão em desktop e mobile. Verificar
+foco de teclado, controles de toque, erro recuperável, textos longos e ambos os temas.
+
 ## Intervalo entre rotinas
 
 O cadastro, a edição e a ativação recusam intervalos menores que 15 minutos,

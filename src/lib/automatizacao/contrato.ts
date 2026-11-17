@@ -1,10 +1,18 @@
 import { z } from "zod";
 
-export const horariosSchema = z.array(z.object({
+const horaSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+const horarioSchema = z.union([z.object({
   dia: z.number().int().min(0).max(6),
-  hora: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
-})).min(1).max(56).refine(
-  (horarios) => new Set(horarios.map(({ dia, hora }) => `${dia}:${hora}`)).size === horarios.length,
+  hora: horaSchema,
+}).strict(), z.object({
+  diaMes: z.number().int().min(1).max(31),
+  hora: horaSchema,
+}).strict()]);
+
+export type HorarioRotina = z.infer<typeof horarioSchema>;
+
+export const horariosSchema = z.array(horarioSchema).min(1).max(56).refine(
+  (horarios) => new Set(horarios.map((item) => `${"dia" in item ? `semana:${item.dia}` : `mes:${item.diaMes}`}:${item.hora}`)).size === horarios.length,
   "Remova os horários duplicados.",
 );
 
