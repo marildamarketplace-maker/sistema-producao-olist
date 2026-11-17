@@ -208,6 +208,16 @@ Os resultados abaixo registram a cobertura disponível na primeira entrega; não
 - Não houve aplicação da migration, publicação da aplicação, consulta de contas Olist ou sincronização em produção. A confirmação funcional no ERP depende do piloto após implantação.
 
 
+## Previsão manual do término da leitura
+
+O card da execução mostra a data/hora prevista em `America/Sao_Paulo`, a taxa de validações e o horário do cálculo. `GET /api/olist/sincronizacao/previsao` é chamado somente ao carregar a página e pelo botão Atualizar. Troca de aba, paginação, abertura de detalhes, polling e conclusão da execução não fazem essa consulta. O endpoint preserva a autorização do aplicativo pai e responde com `private, no-store`.
+
+O ritmo é a quantidade de observações completas da execução nos últimos 30 minutos dividida pelo tempo da janela; para execuções novas, a janela começa no início da execução. Restante = listados − analisados. A previsão cobre o fim da leitura completa, sem prometer o horário final de comparação, aplicação ou resolução humana. Listagem incompleta, pausa, ausência de progresso ou amostra menor que cinco validações/um minuto exibem uma explicação em vez de uma data.
+
+Aplicar `prisma/migrations/20261117000200_olist_sync_previsao/migration.sql` antes de publicar. Ela acrescenta somente um índice parcial sobre grupo, execução e horário, para observações completas. A consulta parametrizada retorna uma linha agregada, sem transferir payloads ou carregar o catálogo no servidor; usa UTC explícito nos parâmetros e funciona também em sessões PostgreSQL com fuso de São Paulo. Não exige nova tabela, histórico, job ou gravação de amostras, e aproveita timestamps já existentes da execução em andamento. O índice acrescenta manutenção às gravações das observações completas.
+
+Validação local: 172 testes sem banco e 121 com PostgreSQL descartável aprovados, sem ignorados (incluem agrupadores). O plano usou o índice sem varredura sequencial em 50.060 observações; a agregação levou entre 0,01 e 0,03ms no banco local aquecido, sem medir latência total da API ou custos de produção. Chrome verificou 390/1280px nos temas claro/escuro com CSS da aplicação, sem overflow e sem consultas da previsão no polling. Viewport emulado não representa teste em dispositivo real. Build, TypeScript, lint e validação Prisma passaram. Nenhuma migration ou publicação em produção foi executada nesta validação.
+
 ## Ajuste de auditoria para 30 leituras/minuto
 
 A alteração é independente da sincronização incremental e não modifica schema, versão da configuração, identidade, offset, conteúdo observado ou contadores existentes. O consumidor aceita os checkpoints anteriores: estados completos continuam fora da seleção de detalhamento e a listagem não é reiniciada. Uma janela de espera já gravada pela versão anterior continua sendo respeitada.

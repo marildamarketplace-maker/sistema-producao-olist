@@ -38,9 +38,9 @@ test("contadores malformados e relógio anterior ao início não produzem Infini
 test("consulta é parametrizada, agregada, isolada e usa o predicado do índice parcial", () => {
   const inicio = new Date(agora.getTime() - 30 * 60_000);
   const query = consultaValidacoesRecentesSync("grupo", "execucao", inicio, agora);
-  assert.deepEqual(query.values, ["grupo", "execucao", inicio, agora]);
+  assert.deepEqual(query.values, ["grupo", "execucao", inicio.toISOString(), agora.toISOString()]);
   assert.match(query.text, /count\(\*\)::int/);assert.match(query.text, /configuracao_id = \$1::uuid/);
-  assert.match(query.text, /ultima_execucao_id = \$2::uuid/);assert.match(query.text, /verificado_em > \$3 AND verificado_em <= \$4/);
+  assert.match(query.text, /ultima_execucao_id = \$2::uuid/);assert.match(query.text, /verificado_em > \$3::timestamptz AND verificado_em <= \$4::timestamptz/);
   assert.match(query.text, /metadados_json @> '\{"completo":true\}'::jsonb/);
   assert.doesNotMatch(query.text, /dados_criptografados|SELECT \*|JOIN/i);
 });

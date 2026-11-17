@@ -25,17 +25,19 @@ function execucaoDto(e:{id:string;modo:string;status:string;origem:string;create
   return {id:e.id,modo:e.modo,status:e.status,origem:e.origem,criadoEm:e.createdAt,iniciadoEm:e.iniciadaEm,finalizadoEm:e.finalizadaEm,contadores:e.contadoresJson};
 }
 const pendenciaDto=(p:Prisma.OlistSyncPendenciaGetPayload<{select:typeof selectPendencia}>)=>({id:p.id,registroId:p.registroId,entidade:p.entidade,tipo:p.tipo,severidade:p.severidade,status:p.status,versao:p.versao,criadoEm:p.createdAt,resumo:p.tipo.replaceAll("_"," ")});
-async function escopo(request:Request,permissao:"visualizar"|"executar"|"resolver"|"configurar") {
+type PermissaoSync="visualizar"|"executar"|"resolver"|"configurar";
+async function escopoComConfiguracao<T>(request:Request,permissao:PermissaoSync,obterConfiguracao:(aplicativoPaiId:string)=>Promise<T|null>) {
   let usuario;
   try{usuario=await getUsuarioAutenticado(request);}catch{throw new ErroRepositorioSync("Sessão inválida ou expirada.",401);}
   const [permissoes,config]=await Promise.all([
     prisma.usuario.findUnique({where:{id:usuario.id},select:{podeVisualizarSincronizacaoOlist:true,podeExecutarSincronizacaoOlist:true,podeResolverSincronizacaoOlist:true,podeConfigurarSincronizacaoOlist:true}}),
-    repo.obterConfiguracao(usuario.aplicativoId),
+    obterConfiguracao(usuario.aplicativoId),
   ]);
   const permitido=permissao==="visualizar"?permissoes?.podeVisualizarSincronizacaoOlist:permissao==="executar"?permissoes?.podeExecutarSincronizacaoOlist:permissao==="resolver"?permissoes?.podeResolverSincronizacaoOlist:permissoes?.podeConfigurarSincronizacaoOlist;
   if(!config || !permissoes?.podeVisualizarSincronizacaoOlist || !permitido)throw new ErroRepositorioSync("Acesso restrito aos administradores autorizados do aplicativo pai.",403);
   return {usuario,config};
 }
+const escopo=(request:Request,permissao:PermissaoSync)=>escopoComConfiguracao(request,permissao,repo.obterConfiguracao);
 function respostaErro(error:unknown) {
   if(error instanceof ErroRepositorioSync)return json({error:error.message},{status:error.status});
   if(error instanceof z.ZodError)return json({error:"Dados inválidos. Revise os campos e limites enviados."},{status:400});
@@ -50,24 +52,31 @@ async function corpo(request:Request):Promise<unknown> {
 
 export async function GET(request:Request,contexto:Contexto) {
   try{
-    const {config}=await escopo(request,"visualizar"), caminho=(await contexto.params).recurso??["resumo"];
+    const caminho=(await contexto.params).recurso??["resumo"];
     const [recurso,id]=caminho;
-    if(id)z.uuid().parse(id);
-    const filtros=filtrosSchema.parse(Object.fromEntries(new URL(request.url).searchParams));
-    const pagina={skip:filtros.offset,take:filtros.limit};
     if(recurso==="previsao" && !id) {
+      const {config}=await escopoComConfiguracao(request,"visualizar",aplicativoPaiId=>prisma.olistSyncConfiguracao.findUnique({
+        where:{aplicativoPaiId},select:{id:true,ativo:true,aplicativoPai:{select:{jobs:true}}}}));
       const agora=new Date();
       const e=await prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:["PENDENTE","AUDITANDO","AGUARDANDO_RETRY"]},modo:{in:["AUDITAR","AUDITAR_E_APLICAR"]}},
         select:{id:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:201}}});
       if(!e)return json({previsao:null});
-      const job=await prisma.configuracaoJob.findUnique({where:{chave:JOBS_SYNC.auditar.chave},select:{pausado:true}});
-      const pausada=!config.ativo || !job || job.pausado || !aplicativoTemJob(config.aplicativoPai.jobs,JOBS_SYNC.auditar.flag);
+      const permitidoNoPai=config.ativo && aplicativoTemJob(config.aplicativoPai.jobs,JOBS_SYNC.auditar.flag);
+      const job=permitidoNoPai?await prisma.configuracaoJob.findUnique({where:{chave:JOBS_SYNC.auditar.chave},select:{pausado:true}}):null;
+      const pausada=!permitidoNoPai || !job || job.pausado;
       const listagemPendente=e.etapas.length===0 || e.etapas.length>200 || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
+      const previa=calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
+        validadosNaJanela:0,listagemPendente,pausada});
+      if(previa.estado!=="SEM_RITMO")return json({previsao:previa});
       const inicio=inicioJanelaPrevisaoSync(agora,e.iniciadaEm);
-      const recentes=pausada||listagemPendente||!e.iniciadaEm?0:await contarValidacoesRecentesSync(prisma,config.id,e.id,inicio,agora);
+      const recentes=await contarValidacoesRecentesSync(prisma,config.id,e.id,inicio,agora);
       return json({previsao:calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
         validadosNaJanela:recentes,listagemPendente,pausada})});
     }
+    const {config}=await escopo(request,"visualizar");
+    if(id)z.uuid().parse(id);
+    const filtros=filtrosSchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+    const pagina={skip:filtros.offset,take:filtros.limit};
     if(recurso==="configuracao") {
       const [pai,filhos,jobs]=await Promise.all([
         prisma.aplicativo.findUniqueOrThrow({where:{id:config.aplicativoPaiId},select:{nome:true}}),

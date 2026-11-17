@@ -22,8 +22,9 @@ export function calcularPrevisaoValidacaoSync(entrada: {
   const estado: PrevisaoValidacaoSyncDto["estado"] = entrada.pausada ? "PAUSADA"
     : entrada.listagemPendente ? "LISTANDO"
       : restantes === 0 && entrada.iniciadaEm ? "LEITURA_CONCLUIDA"
-        : recentes === 0 ? "SEM_RITMO"
-          : recentes < 5 || minutos < 1 ? "AMOSTRA_INSUFICIENTE" : "ESTIMADA";
+        : minutos < 1 ? "AMOSTRA_INSUFICIENTE"
+          : recentes === 0 ? "SEM_RITMO"
+            : recentes < 5 ? "AMOSTRA_INSUFICIENTE" : "ESTIMADA";
   const porMinuto = estado === "ESTIMADA" ? recentes / minutos : null;
   const termino = porMinuto ? entrada.agora.getTime() + Math.ceil(restantes * (entrada.agora.getTime() - inicio.getTime()) / recentes) : NaN;
   return { execucaoId: entrada.execucaoId, calculadoEm: entrada.agora.toISOString(), janelaInicio: inicio.toISOString(),

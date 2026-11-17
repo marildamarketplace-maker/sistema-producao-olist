@@ -136,7 +136,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     handlers["$queryRaw"] = ({ query }) => {
       const valores = objeto(query).values as unknown[];
       assert.equal(valores[0], GRUPO);assert.equal(valores[1], EXECUCAO);
-      assert.equal((valores[3] as Date).getTime() - (valores[2] as Date).getTime(), 30 * 60_000);
+      assert.equal(Date.parse(String(valores[3])) - Date.parse(String(valores[2])), 30 * 60_000);
       return [{ total: 300 }];
     };
     const response = await GET(request("previsao?janela=9999&configuracaoId=externo"), contexto("previsao"));

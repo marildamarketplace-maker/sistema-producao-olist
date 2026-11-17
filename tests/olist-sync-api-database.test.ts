@@ -49,7 +49,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
   await t.test("previsão agrega só validações completas recentes e usa índice em 50 mil observações", async () => {
     const agora = new Date();
     const paiAnterior = await db.aplicativo.findUniqueOrThrow({ where: { id: pai }, select: { jobs: true } });
-    await db.aplicativo.update({ where: { id: pai }, data: { jobs: "AUDITAR_SINCRONIZACAO_OLIST" } });
+    await db.aplicativo.update({ where: { id: pai }, data: { jobs: "AUDITAR_SINCRONIZACAO_OLIST" }, select: { id: true } });
     const e = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "AUDITANDO",
       versaoConfiguracao: 1, iniciadaEm: new Date(agora.getTime() - 3_600_000), contadoresJson: { listados: 50_100, analisados: 50_060 } } });
     const outra = await db.olistSyncExecucao.create({ data: { configuracaoId: config.id, chaveIdempotencia: randomUUID(), modo: "AUDITAR", status: "CONCLUIDA", versaoConfiguracao: 1 } });
@@ -66,12 +66,20 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
       ] });
       await sql.query("VACUUM (ANALYZE) olist_sync_estado");
       const query = consultaValidacoesRecentesSync(config.id, e.id, new Date(agora.getTime() - 1_800_000), agora);
+      const [contagem] = await db.$queryRaw<Array<{ total: number }>>(query);
+      assert.equal(contagem.total, 60, "A janela deve contar os timestamps com o fuso correto");
+      for (const fuso of ["UTC", "America/Sao_Paulo"]) await db.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('TimeZone', ${fuso}, true)`);
+        const [contagemFuso] = await tx.$queryRaw<Array<{ total: number }>>(query);
+        assert.equal(contagemFuso.total, 60, `A mesma janela deve funcionar no fuso ${fuso}`);
+      });
       const plano = await db.$queryRaw<Array<{ "QUERY PLAN": Array<{ Plan: unknown; "Execution Time": number }> }>>(Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`);
       assert.match(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /olist_sync_estado_previsao_idx/);
       assert.doesNotMatch(JSON.stringify(plano[0]["QUERY PLAN"][0].Plan), /Seq Scan/);
       t.diagnostic(`Previsão: 50060 observações, 60 recentes; consulta agregada ${plano[0]["QUERY PLAN"][0]["Execution Time"]}ms em PostgreSQL local.`);
       const response = await api.GET(req("GET", ["previsao"]), contexto(["previsao"]));
       assert.equal(response.status, 200);const body = await response.json();
+      assert.equal(body.previsao.estado, "ESTIMADA", JSON.stringify(body.previsao));
       assert.equal(body.previsao.validadosNaJanela, 60);assert.equal(body.previsao.porMinuto, 2);assert.equal(body.previsao.restantes, 40);
       assert.equal(Date.parse(body.previsao.terminoPrevisto) - Date.parse(body.previsao.calculadoEm), 1_200_000);
       assert.equal((await api.GET(req("GET", ["previsao"], undefined, usuarioFilho), contexto(["previsao"]))).status, 403);
@@ -79,7 +87,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
       const pausada = await (await api.GET(req("GET", ["previsao"]), contexto(["previsao"]))).json();
       assert.equal(pausada.previsao.estado, "PAUSADA");assert.equal(pausada.previsao.terminoPrevisto, null);
     } finally {
-      await db.aplicativo.update({ where: { id: pai }, data: { jobs: paiAnterior.jobs } });
+      await db.aplicativo.update({ where: { id: pai }, data: { jobs: paiAnterior.jobs }, select: { id: true } });
       await db.configuracaoJob.update({ where: { chave: "auditar-sincronizacao-olist" }, data: { pausado: false } });
       await db.olistSyncEstado.deleteMany({ where: { ultimaExecucaoId: { in: [e.id, outra.id] } } });
       await db.olistSyncExecucao.deleteMany({ where: { id: { in: [e.id, outra.id] } } });

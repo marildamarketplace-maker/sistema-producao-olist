@@ -6,7 +6,7 @@ export function consultaValidacoesRecentesSync(grupo: string, execucaoId: string
     SELECT count(*)::int AS total
     FROM olist_sync_estado
     WHERE configuracao_id = ${grupo}::uuid AND ultima_execucao_id = ${execucaoId}::uuid
-      AND verificado_em > ${inicio} AND verificado_em <= ${fim}
+      AND verificado_em > ${inicio.toISOString()}::timestamptz AND verificado_em <= ${fim.toISOString()}::timestamptz
       AND metadados_json @> '{"completo":true}'::jsonb`;
 }
 
