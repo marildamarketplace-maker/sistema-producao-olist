@@ -45,6 +45,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   const repo = criarRepositorioAnotarSku(db), escopo = { id: user, aplicativoId: app, podeVisualizar: true };
   const pagina = (r: ReservaSku, ids: string[]) => repo.pagina(r, ids.map(id => ({ id, dataCriacao: hojeSku() })));
   let buscaComTitulosId = "";
+  let buscaComPeriodoId = "";
   const nova = () => repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0"] });
   async function reserva(): Promise<ReservaSku> {
     await db.$executeRaw`UPDATE busca_sku_jobs SET proxima_tentativa_em=now()-interval '1 second' WHERE status IN ('PENDENTE','AGUARDANDO_RETRY')`;
@@ -214,6 +215,71 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     await db.$executeRaw`DELETE FROM produto_olist WHERE sku_final='A'`;
     await db.$executeRaw`DELETE FROM tipo_produto WHERE sku='A'`;
   });
+  await t.test("período fica salvo no aceite e a chave não pode ser reutilizada com outras datas", async () => {
+    const entrada = { chave: crypto.randomUUID(), situacoes: ["0"], periodoInicio: "2024-01-02", periodoFim: "2024-01-16" };
+    const j = await repo.criar(escopo, entrada);
+    assert.equal(dataIsoSku(j.periodoInicio), entrada.periodoInicio);
+    assert.equal(dataIsoSku(j.periodoFim), entrada.periodoFim);
+    assert.equal((await repo.criar(escopo, entrada)).id, j.id);
+    await assert.rejects(repo.criar(escopo, { ...entrada, periodoInicio: "2024-01-01" }), /outro período/);
+    // Cliente antigo reenvia a mesma chave sem recalcular o período, inclusive em outro dia.
+    assert.equal(dataIsoSku((await repo.criar(escopo, { chave: j.chave, situacoes: ["0"] })).periodoFim), "2024-01-16");
+    await assert.rejects(db.buscaSkuJob.update({ where: { id: j.id }, data: { periodoInicio: null } }));
+    await repo.agir(escopo, j.id, "cancelar");
+  });
+  await t.test("lista páginas antigas inteiras, reconcilia IDs e detalha apenas pedidos dentro do período inclusivo", async () => {
+    const j = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0", "3"], periodoInicio: "2024-01-02", periodoFim: "2024-01-16" });
+    const antigos = Array.from({ length: 100 }, (_, i) => ({ id: String(810000 + i), dataCriacao: "2024-01-01" }));
+    await repo.pagina(await reserva(), antigos);
+    const segunda = await reserva();
+    assert.equal(segunda.paginaOffset, 100, "Uma página totalmente fora do período não encerra a paginação");
+    assert.equal(segunda.encontrados, 100); assert.equal(segunda.foraPeriodo, 100);
+    await repo.pagina(segunda, [{ id: "810100", dataCriacao: "2024-01-02" }, { id: "810101", dataCriacao: "2024-01-16" }, { id: "810102", dataCriacao: "2024-01-17" }]);
+    await repo.pagina(await reserva(), [antigos[0]]); // Segunda situação, ID repetido.
+    await repo.pagina(await reserva(), [antigos[0]]); // Reconciliação da primeira situação.
+    await repo.pagina(await reserva(), []);
+    const detalhes: string[] = [];
+    const cliente = { listar: async () => { throw new Error("Listagem já concluída"); }, detalhar: async (_app: string, id: string) => { detalhes.push(id); return [{ sku: "PERIODO", quantidade: 2, tituloProduto: "Produto no período" }]; } };
+    for (let i = 0; i < 4; i++) assert.equal(await processarEtapaSku(await reserva(), repo, cliente), "progresso");
+    assert.deepEqual(detalhes, ["810100", "810101"], "Não deve baixar itens dos 101 pedidos excluídos");
+    const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } });
+    assert.equal(final.status, "CONCLUIDO"); assert.equal(final.encontrados, 103); assert.equal(final.processados, 103); assert.equal(final.foraPeriodo, 101);
+    assert.ok(final.buscaId); buscaComPeriodoId = final.buscaId;
+    const resultado = await db.buscaSku.findUniqueOrThrow({ where: { id: final.buscaId }, include: { itens: true } });
+    assert.equal(resultado.quantidadePedidos, 2); assert.equal(resultado.quantidadeSkus, 1); assert.equal(resultado.pedidosForaPeriodo, 101);
+    assert.equal(dataIsoSku(resultado.periodoInicio), "2024-01-02"); assert.equal(dataIsoSku(resultado.periodoFim), "2024-01-16");
+    assert.deepEqual(resultado.itens.map(item => item.pedidoOlistId).sort(), detalhes);
+    assert.equal(resultado.itens.reduce((total, item) => total + item.quantidade, 0), 4);
+  });
+  await t.test("resultado só com alertas permanece acessível sem SKUs; pedidos antigos já anotados também geram alerta", async () => {
+    const j = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0"], periodoInicio: "2024-02-01", periodoFim: "2024-02-15" });
+    for (let i = 0; i < 2; i++) await repo.pagina(await reserva(), [{ id: "810100", dataCriacao: "2024-01-02" }]);
+    const cliente = { listar: async () => [], detalhar: async () => { throw new Error("Nenhum detalhe deveria ser consultado"); } };
+    await processarEtapaSku(await reserva(), repo, cliente); await processarEtapaSku(await reserva(), repo, cliente);
+    const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } }); assert.ok(final.buscaId);
+    const resultado = await db.buscaSku.findUniqueOrThrow({ where: { id: final.buscaId } });
+    assert.equal(resultado.quantidadePedidos, 0); assert.equal(resultado.quantidadeSkus, 0); assert.equal(resultado.pedidosForaPeriodo, 1);
+    assert.deepEqual(await repo.pedidosForaPeriodo(escopo, final.buscaId), { pedidos: [{ id: "810100", dataCriacao: "2024-01-02" }], proximoCursor: null });
+    await repo.excluir(escopo, final.buscaId);
+    await assert.rejects(repo.pedidosForaPeriodo(escopo, final.buscaId), /não encontrada/);
+  });
+  await t.test("data de criação inválida falha sem checkpoint parcial e retomada preserva período", async () => {
+    const j = await nova();
+    const cliente = { listar: async () => [{ id: "820001", dataCriacao: hojeSku() }, { id: "820002", dataCriacao: null }], detalhar: async () => [] };
+    assert.equal(await processarEtapaSku(await reserva(), repo, cliente), "falha");
+    const falho = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } });
+    assert.equal(falho.status, "FALHOU"); assert.equal(falho.erroCodigo, "DATA_CRIACAO"); assert.equal(falho.encontrados, 0);
+    assert.equal(await db.buscaSkuJobPedido.count({ where: { jobId: j.id } }), 0);
+    const retomado = await repo.agir(escopo, j.id, "retomar");
+    assert.equal(dataIsoSku(retomado.periodoInicio), dataIsoSku(j.periodoInicio));
+    await pagina(await reserva(), ["820001"]);
+    await repo.agir(escopo, j.id, "cancelar");
+    const legado = await nova();
+    await db.buscaSkuJob.update({ where: { id: legado.id }, data: { periodoInicio: null, periodoFim: null } });
+    for (let i = 0; i < 2; i++) await repo.pagina(await reserva(), [{ id: "820003", dataCriacao: null }]);
+    assert.deepEqual(await repo.proximoPedido(await reserva()), { id: "820003", ignorado: false }, "Jobs anteriores mantêm o contrato sem corte por data");
+    await repo.agir(escopo, legado.id, "cancelar");
+  });
   await t.test("API exige sessão/permissão, não expõe reserva e exporta só resultados", async () => {
     Object.assign(globalThis, { prisma: db });
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticio";
@@ -228,8 +294,11 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     assert.equal((await api.GET(req("GET", undefined, false))).status, 401);
     assert.equal((await (await api.GET(req())).json()).habilitado, true);
     assert.equal((await api.POST(req("POST", { chave: "x", situacoes: ["0"] }))).status, 400);
+    const periodoInvalido = await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"], periodoInicio: "2024-01-02", periodoFim: "2024-01-01" }));
+    assert.equal(periodoInvalido.status, 400); assert.match((await periodoInvalido.json()).error, /data final/);
     const resposta = await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"] })); assert.equal(resposta.status, 202);
     const json = await resposta.json(); assert.equal(json.job.status, "PENDENTE"); assert.equal("reservaId" in json.job, false); assert.equal("solicitadoPor" in json.job, false);
+    assert.equal(json.job.periodoFim, hojeSku()); assert.equal(json.job.foraPeriodo, 0);
     assert.equal((await historico.POST(new NextRequest(req("POST")))).status, 409);
     await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=false WHERE id=${user}::uuid`;
     assert.equal((await api.GET(req())).status, 200);
@@ -248,6 +317,16 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     assert.equal(comTitulos.status, 200);
     const detalhe = await comTitulos.json();
     assert.deepEqual(Object.fromEntries(detalhe.busca.skus.map((i: { sku: string; tituloProduto: string | null }) => [i.sku, i.tituloProduto])), { A: "Titulo final A", B: "Produto B", C: "Descricao Olist C", D: null, F: "=1+1" });
+    const detalhePeriodo = await (await historico.GET(new NextRequest(`https://example.test/api?id=${buscaComPeriodoId}`, { headers: { Authorization: "Bearer teste" } }))).json();
+    assert.equal(detalhePeriodo.busca.pedidosForaPeriodo, 101);
+    assert.equal(detalhePeriodo.busca.periodoInicio, "2024-01-02");
+    assert.deepEqual(detalhePeriodo.busca.pedidos.sort(), ["810100", "810101"]);
+    for (const formato of ["csv", "xlsx", "pdf"]) {
+      const exportacao = await historico.GET(new NextRequest(`https://example.test/api?id=${buscaComPeriodoId}&formato=${formato}`, { headers: { Authorization: "Bearer teste" } }));
+      assert.equal(exportacao.status, 200);
+      const conteudo = Buffer.from(await exportacao.arrayBuffer()).toString(formato === "pdf" ? "latin1" : "utf8");
+      assert.match(conteudo, /PERIODO/); assert.doesNotMatch(conteudo, /810000|810102/);
+    }
     for (const formato of ["csv", "xlsx", "pdf"]) {
       const arquivo = await historico.GET(new NextRequest(`https://example.test/api?id=${buscaComTitulosId}&formato=${formato}`, { headers: { Authorization: "Bearer teste" } }));
       assert.equal(arquivo.status, 200);
@@ -266,6 +345,32 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const estado = await (await api.GET(req())).json(); assert.equal(estado.habilitado, false); assert.match(estado.motivoPausa, /este aplicativo/);
     assert.equal((await api.POST(req("POST", { chave: crypto.randomUUID(), situacoes: ["0"] }))).status, 403);
     assert.deepEqual(await (await cron.GET(req())).json(), { ok: true, progresso: 0, retry: 0, falha: 0, reserva_perdida: 0 });
+  });
+  await t.test("alertas: API pagina 50 IDs com datas, sem itens, com autorização e isolamento", async () => {
+    const { GET } = await import("../src/app/api/olist/anotar-sku/[id]/fora-periodo/route");
+    const { NextRequest } = await import("next/server");
+    consultas.length = 0;
+    const primeira = await repo.pedidosForaPeriodo(escopo, buscaComPeriodoId);
+    assert.equal(primeira.pedidos.length, 50); assert.equal(primeira.proximoCursor, "810049");
+    const consultaPedidos = consultas.find(query => query.includes('FROM "public"."busca_sku_job_pedidos"'))!;
+    assert.ok(consultaPedidos); assert.match(consultaPedidos, /LIMIT/); assert.doesNotMatch(consultaPedidos, /"itens"|"created_at"/);
+    assert.ok(Buffer.byteLength(JSON.stringify(primeira)) < 4_000);
+    const segunda = await repo.pedidosForaPeriodo(escopo, buscaComPeriodoId, primeira.proximoCursor!);
+    assert.equal(segunda.pedidos.length, 50); assert.equal(segunda.proximoCursor, "810099");
+    assert.deepEqual(await repo.pedidosForaPeriodo(escopo, buscaComPeriodoId, segunda.proximoCursor!), { pedidos: [{ id: "810102", dataCriacao: "2024-01-17" }], proximoCursor: null });
+    const consultar = (id = buscaComPeriodoId, cursor?: string, autenticado = true) => GET(new NextRequest(`https://example.test/api${cursor === undefined ? "" : `?cursor=${encodeURIComponent(cursor)}`}`, { headers: autenticado ? { Authorization: "Bearer teste" } : {} }), { params: Promise.resolve({ id }) });
+    const resposta = await consultar(); assert.equal(resposta.status, 200); assert.equal(resposta.headers.get("Cache-Control"), "private, no-store");
+    assert.deepEqual(await resposta.json(), primeira);
+    assert.equal((await consultar("invalido")).status, 400); assert.equal((await consultar(buscaComPeriodoId, "")).status, 400);
+    assert.equal((await consultar(buscaComPeriodoId, "x".repeat(129))).status, 400);
+    assert.equal((await consultar(buscaComPeriodoId, undefined, false)).status, 401);
+    const outro = await db.buscaSku.create({ data: { aplicativoId: outroApp, situacoes: ["0"] } });
+    assert.equal((await consultar(outro.id)).status, 404);
+    await assert.rejects(repo.pedidosForaPeriodo({ ...escopo, podeVisualizar: false }, buscaComPeriodoId), /permissão/);
+    try {
+      await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=false WHERE id=${user}::uuid`;
+      assert.equal((await consultar()).status, 403);
+    } finally { await db.$executeRaw`UPDATE usuario SET pode_visualizar_anotar_sku=true WHERE id=${user}::uuid`; }
   });
   await t.test("pedidos por SKU: paginação limitada, quantidades, projeção e isolamento", async () => {
     const { GET } = await import("../src/app/api/olist/anotar-sku/[id]/pedidos/route");
