@@ -43,6 +43,16 @@ test("catálogo de tipos rejeita resposta truncada ou IDs sem precisão", async 
   }
 });
 
+test("catálogo real com perfil textual é normalizado antes da comparação e escrita", async () => {
+  const m = mock([{ status: 200, dados: pagina([
+    { id: 1, nome: "Outro", perfilContato: "0" }, { id: 87, nome: "Cliente", perfilContato: "1" },
+    { id: 88, nome: "Fornecedor", perfilContato: "2" }, { id: 89, nome: "Transportador", perfilContato: "4" },
+  ]) }]);
+  const catalogo = await m.cliente.listarTiposContato!("b", { offset: 0, limit: 100 });
+  assert.deepEqual(catalogo.itens.map(tipo => tipo.perfilContato), [0, 1, 2, 4]);
+  assert.equal(catalogo.total, 4);
+});
+
 function mock(respostas: (RespostaHttpSync | Error)[], substituir: Partial<DependenciasClienteSync> = {}) {
   const chamadas: RequisicaoSync[] = [];
   const tokens: { aplicativoId: string; rejeitado?: string }[] = [];

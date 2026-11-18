@@ -759,6 +759,17 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.deepEqual(paginas.map(r=>new URL(r.url).searchParams.get("offset")),["0","100"]);
     assert.equal(await db.olistSyncEstado.count({where:{entidade:"CONTATO",aplicativoId:a}}),5);assert.equal(escritas().length,0);
   });
+  await t.test("resposta real com perfilContato textual conclui coleta e aplicação nas duas empresas",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    tipos.set(a,[{id:1,nome:"Cliente",perfilContato:1}]);tipos.set(b,[{id:87,nome:"Cliente",perfilContato:1}]);
+    contas.get(a)!.set("10",contato(10,undefined,[{id:1,descricao:"Cliente"}]));
+    responder=async(r,app)=>new URL(r.url).pathname.endsWith("/contatos/tipos")
+      ?{status:200,dados:{itens:(tipos.get(app)??[]).map(tipo=>({...tipo,perfilContato:String(tipo.perfilContato)})),paginacao:{total:1,offset:0,limit:100}}}:undefined;
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
+    assert.equal(escritas().length,1);assert.deepEqual((escritas()[0].payload as CamposSync).tipos,[87]);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,status:"FALHOU"}}),0);
+    assert.equal(await db.olistSyncCobertura.count({where:{configuracaoId:config.id,entidade:"CONTATO",completaEm:{not:null}}}),2);
+  });
   await t.test("mudança do catálogo de destino após auditoria bloqueia a proposta antes do POST",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
     tipos.set(a,[{id:1,nome:"Cliente",perfilContato:0}]);tipos.set(b,[{id:87,nome:"Cliente",perfilContato:0}]);

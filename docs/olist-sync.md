@@ -294,3 +294,9 @@ Validação local desta revisão: 207 testes sem banco aprovados, incluindo nave
 ### Aplicação da migration incremental em produção (18/11/2026)
 
 A migration `20261117000100_olist_sync_incremental` foi aplicada isoladamente no Supabase e registrada no histórico Prisma com o mesmo SHA-256 do arquivo (`a17928c919b9262668a0146880b2d8f95fb808a75695f668cde2485e879591ab`). Foram verificados cinco novos campos de estado, quatro índices, duas tabelas com RLS e sem leitura por `anon`/`authenticated`, e o trigger de isolamento da fila. Os 17.222 estados existentes e os 1.034 detalhes completos foram preservados. Não havia execução ativa e nenhuma coleta ou escrita Olist foi iniciada nesta operação.
+
+### Contrato real de perfil de contato (18/11/2026)
+
+A execução `c7547f6d-212d-49af-8e79-30155f5aabde` encerrou a listagem com `CONTRATO`, antes de coletar contatos. O diagnóstico limitado e somente de leitura confirmou quatro tipos em cada conta participante, com `perfilContato` serializado como string numérica (`"0"`, `"1"`, `"2"`, `"4"`). O exemplo da documentação usa números, mas o schema descreve um enum textual. O parser agora aceita os perfis documentados 0–5 tanto numéricos quanto textuais canônicos, normalizando-os para números internamente. Valores vazios, booleanos, nulos, frações e perfis desconhecidos continuam recusados; não foi adotada coerção genérica. A correção não muda a assinatura semântica, não exige migration e não remove observações existentes.
+
+Regressões: 58 testes de domínio/cliente e 70 do consumidor com PostgreSQL local aprovados, incluindo catálogo textual nas duas contas, tradução para ID do destino e confirmação da escrita simulada. TypeScript, lint e build no ambiente pnpm isolado passaram. Nenhuma escrita Olist foi feita no diagnóstico. Após publicar a correção, o operador pode usar **Retomar trabalho pendente**; a coleta não depende de apagar a base.

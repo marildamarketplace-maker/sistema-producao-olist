@@ -5,7 +5,7 @@ export const MAXIMO_TIPOS_CONTATO = 1_000;
 export const VALIDADE_CATALOGO_TIPOS_MS = 15 * 60_000;
 export const VERSAO_OBSERVACAO_CONTATO = 2;
 const identificador = z.string().regex(/^[1-9]\d{0,15}$/).refine(id => Number.isSafeInteger(Number(id)));
-const tipoSchema = z.object({ id: identificador, nome: z.string().trim().min(1).max(200), perfilContato: z.number().int().min(0).max(255) });
+const tipoSchema = z.object({ id: identificador, nome: z.string().trim().min(1).max(200), perfilContato: z.number().int().min(0).max(5) });
 export type TipoContatoSync = z.infer<typeof tipoSchema>;
 export type ReferenciaTipoContatoSync = { id: string; descricao: string | null };
 const semanticasSchema = z.array(tipoSchema.omit({ id: true })).max(MAXIMO_TIPOS_CONTATO);
@@ -43,7 +43,11 @@ export function lerCatalogoTiposContatoSync(valor: unknown, conta: string): Cata
 
 export function interpretarTipoContatoSync(valor: unknown): TipoContatoSync {
   if (!valor || typeof valor !== "object" || !("id" in valor)) throw new FalhaSync("CONTRATO", "O catálogo de tipos de contato é inválido.");
-  const parsed = tipoSchema.safeParse({ ...valor, id: String(valor.id) });
+  // A API real serializa o enum como "0"…"5", embora o exemplo mostre números.
+  // Não usar coerção genérica: null, boolean e string vazia não são o perfil 0.
+  const perfil = "perfilContato" in valor ? valor.perfilContato : undefined;
+  const perfilContato = typeof perfil === "string" && /^[0-5]$/.test(perfil) ? Number(perfil) : perfil;
+  const parsed = tipoSchema.safeParse({ ...valor, id: String(valor.id), perfilContato });
   if (!parsed.success) throw new FalhaSync("CONTRATO", "O catálogo de tipos de contato é inválido.");
   return parsed.data;
 }

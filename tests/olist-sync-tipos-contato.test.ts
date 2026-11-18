@@ -3,7 +3,7 @@ import test from "node:test";
 import { FalhaSync } from "../src/lib/olist-sync/contrato";
 import { avaliarReplicas, observarRegistro, normalizarTelefoneContato, prepararPayload } from "../src/lib/olist-sync/dominio";
 import { serializarCanonico } from "../src/lib/olist-sync/cripto";
-import { lerCatalogoTiposContatoSync, payloadTiposContatoSync, referenciasTiposContatoSync, resolverTiposContatoSync } from "../src/lib/olist-sync/tipos-contato";
+import { interpretarTipoContatoSync, lerCatalogoTiposContatoSync, payloadTiposContatoSync, referenciasTiposContatoSync, resolverTiposContatoSync } from "../src/lib/olist-sync/tipos-contato";
 
 const origem = [{ id: "1", nome: "Cliente", perfilContato: 0 }];
 const destino = [{ id: "87", nome: " CLIENTE  ", perfilContato: 0 }];
@@ -11,6 +11,20 @@ const contato = (tipos: unknown = [{ id: 1, descricao: "Cliente" }], celular = "
   id: 10, nome: "Contato", tipoPessoa: "F", cpfCnpj: "529.982.247-25", situacao: "B", tipos, celular,
 }, { completo: true });
 const falha = (codigo: string) => (error: unknown) => error instanceof FalhaSync && error.codigo === codigo;
+
+test("perfil do catálogo aceita enum numérico ou string numérica canônica da API real", () => {
+  for (let perfil = 0; perfil <= 5; perfil++) {
+    const numerico = interpretarTipoContatoSync({ id: 10, nome: "Tipo", perfilContato: perfil });
+    const textual = interpretarTipoContatoSync({ id: 10, nome: "Tipo", perfilContato: String(perfil) });
+    assert.deepEqual(textual, numerico);
+    assert.equal(typeof textual.perfilContato, "number");
+  }
+});
+
+test("perfil não usa coerção genérica nem aceita enum desconhecido", () => {
+  for (const perfilContato of [null, undefined, true, false, "", " ", "01", "1.0", "1e0", " 1 ", "Cliente", "6", 6, -1, 1.5, [], {}])
+    assert.throws(() => interpretarTipoContatoSync({ id: 10, nome: "Tipo", perfilContato }), falha("CONTRATO"));
+});
 
 test("tipos usam nome e perfil na comparação, nunca o ID da origem no payload", () => {
   const a = resolverTiposContatoSync(contato(), origem);
