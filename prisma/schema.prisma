@@ -554,6 +554,9 @@ model BuscaSku {
   situacoes         String[]       @default([])
   quantidadePedidos Int            @default(0) @map("quantidade_pedidos")
   quantidadeSkus    Int            @default(0) @map("quantidade_skus")
+  periodoInicio     DateTime?      @map("periodo_inicio") @db.Date
+  periodoFim        DateTime?      @map("periodo_fim") @db.Date
+  pedidosForaPeriodo Int           @default(0) @map("pedidos_fora_periodo")
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   aplicativo        Aplicativo     @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
   itens             ItemBuscaSku[]
@@ -569,6 +572,9 @@ model BuscaSkuJob {
   solicitadoPor      String   @map("solicitado_por") @db.Uuid
   chave              String   @db.Uuid
   situacoes          String[]
+  periodoInicio      DateTime? @map("periodo_inicio") @db.Date
+  periodoFim         DateTime? @map("periodo_fim") @db.Date
+  foraPeriodo        Int      @default(0) @map("fora_periodo")
   status             String   @default("PENDENTE")
   etapa              String   @default("LISTAGEM")
   situacaoIndice     Int      @default(0) @map("situacao_indice")
@@ -606,6 +612,8 @@ model BuscaSkuJobPedido {
   jobId          String @map("job_id") @db.Uuid
   aplicativoId   String @map("aplicativo_id") @db.Uuid
   pedidoOlistId  String @map("pedido_olist_id")
+  dataCriacao    DateTime? @map("data_criacao") @db.Date
+  foraPeriodo    Boolean @default(false) @map("fora_periodo")
   processado     Boolean @default(false)
   ignorado       Boolean @default(false)
   itens          Json @default("[]")
@@ -613,6 +621,7 @@ model BuscaSkuJobPedido {
 
   @@id([jobId, pedidoOlistId])
   @@index([jobId, processado, pedidoOlistId])
+  @@index([jobId, foraPeriodo, pedidoOlistId])
   @@map("busca_sku_job_pedidos")
 }
 

@@ -12,6 +12,12 @@ export const paginaPedidosSkuSchema = z.object({
   proximoCursor: z.string().nullable(),
 });
 export type PaginaPedidosSku = z.infer<typeof paginaPedidosSkuSchema>;
+export const consultaForaPeriodoSkuSchema = consultaPedidosSkuSchema.omit({ sku: true });
+export const paginaForaPeriodoSkuSchema = z.object({
+  pedidos: z.array(z.object({ id: z.string(), dataCriacao: z.iso.date().nullable() })).max(LIMITE_PEDIDOS_SKU),
+  proximoCursor: z.string().nullable(),
+});
+export type PaginaForaPeriodoSku = z.infer<typeof paginaForaPeriodoSkuSchema>;
 
 export function linkPedidoOlist(id: string) {
   return `https://erp.olist.com/vendas#edit/${encodeURIComponent(id)}`;

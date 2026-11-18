@@ -1,8 +1,8 @@
-import { atrasoRetrySku, FalhaConsultaSku, type ItemSku } from "@/lib/anotar-sku/contrato";
+import { atrasoRetrySku, FalhaConsultaSku, type ItemSku, type PedidoEncontradoSku } from "@/lib/anotar-sku/contrato";
 import type { RepositorioAnotarSku, ReservaSku } from "@/repositories/anotar-sku-repository";
 
 export type ClienteAnotarSku = {
-  listar(aplicativoId: string, situacao: string, offset: number): Promise<string[]>;
+  listar(aplicativoId: string, situacao: string, offset: number): Promise<PedidoEncontradoSku[]>;
   detalhar(aplicativoId: string, pedidoId: string): Promise<ItemSku[]>;
 };
 export async function processarEtapaSku(r: ReservaSku, repo: RepositorioAnotarSku, cliente: ClienteAnotarSku) {

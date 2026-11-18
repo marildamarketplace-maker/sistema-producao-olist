@@ -1,7 +1,8 @@
 import axios from "axios";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { getValidOlistAccessToken } from "@/lib/olist";
-import { agregarItensSku, FalhaConsultaSku } from "./contrato";
+import { agregarItensSku, FalhaConsultaSku, type PedidoEncontradoSku } from "./contrato";
+import { dataCriacaoPedidoSku } from "./periodo";
 
 export function retryAfterSku(valor: unknown, agora = Date.now()) {
   if (typeof valor !== "string" && typeof valor !== "number") return 0;
@@ -46,7 +47,7 @@ async function consultar(aplicativoId: string, caminho: string, parametros?: Rec
   }
 }
 
-export function interpretarPaginaSku(payload: unknown): string[] {
+export function interpretarPaginaSku(payload: unknown): PedidoEncontradoSku[] {
   const objeto = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
   const lista = Array.isArray(payload) ? payload : objeto.itens ?? objeto.data ?? objeto.orders ?? objeto.results ?? objeto.pedidos;
   if (!Array.isArray(lista) || lista.length > 100) throw new FalhaConsultaSku("CONTRATO", "A listagem da Olist veio em um formato inesperado.", false);
@@ -55,7 +56,7 @@ export function interpretarPaginaSku(payload: unknown): string[] {
     if (!/^\d+$/.test(id) || (typeof item.id === "number" && !Number.isSafeInteger(item.id))) {
       throw new FalhaConsultaSku("CONTRATO", "A Olist retornou um pedido sem identificador válido.", false);
     }
-    return id;
+    return { id, dataCriacao: dataCriacaoPedidoSku(item.dataCriacao) };
   });
 }
 export const clienteAnotarSku = {

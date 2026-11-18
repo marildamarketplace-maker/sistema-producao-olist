@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { periodoSkuSchema } from "./periodo";
 
 export const SITUACOES_SKU = [
   { value: "8", label: "Dados incompletos" }, { value: "0", label: "Aberta" },
@@ -11,12 +12,21 @@ export const criarBuscaSkuSchema = z.object({
   chave: z.uuid(),
   situacoes: z.array(z.string().refine(s => SITUACOES_SKU.some(item => item.value === s)))
     .min(1).max(10).transform(itens => [...new Set(itens)].sort()),
-}).strict();
+  periodoInicio: z.string().optional(),
+  periodoFim: z.string().optional(),
+}).strict().superRefine((entrada, ctx) => {
+  if (entrada.periodoInicio === undefined && entrada.periodoFim === undefined) return;
+  const periodo = periodoSkuSchema.safeParse(entrada);
+  if (!periodo.success) for (const issue of periodo.error.issues) ctx.addIssue(issue);
+});
+export type EntradaBuscaSku = z.infer<typeof criarBuscaSkuSchema>;
+export type PedidoEncontradoSku = { id: string; dataCriacao: string | null };
 export const acaoBuscaSkuSchema = z.object({ acao: z.enum(["retomar", "cancelar"]) }).strict();
 export const ESTADOS_ABERTOS_SKU = ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY", "FALHOU"];
 export type ItemSku = { sku: string; quantidade: number; tituloProduto?: string };
 export type JobSkuResumo = {
   id: string; situacoes: string[]; status: string; etapa: string; passagem: number;
+  periodoInicio: string | null; periodoFim: string | null; foraPeriodo: number;
   encontrados: number; processados: number; ignorados: number; tentativas: number;
   proximaTentativaEm: string; createdAt: string; updatedAt: string; finalizadoEm: string | null;
   erro: string | null; buscaId: string | null; resultadoRemovido: boolean; podeGerenciar: boolean;

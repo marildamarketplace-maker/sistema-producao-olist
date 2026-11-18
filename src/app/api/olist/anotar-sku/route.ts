@@ -5,6 +5,7 @@ import { criarExcelBuscaSku, criarPdfBuscaSku } from "@/lib/exportar-busca-sku";
 import { z } from "zod";
 import { autenticarSku as autenticar, erroRespostaSku, repoSku } from "@/lib/anotar-sku/api";
 import { ErroAnotarSku } from "@/lib/anotar-sku/contrato";
+import { dataIsoSku } from "@/lib/anotar-sku/periodo";
 
 export const dynamic = "force-dynamic";
 
@@ -92,16 +93,18 @@ export async function GET(request: NextRequest) {
           situacoes: true,
           quantidadePedidos: true,
           quantidadeSkus: true,
+          periodoInicio: true, periodoFim: true, pedidosForaPeriodo: true,
           createdAt: true,
         },
       });
-      return NextResponse.json({ buscas }, { headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.json({ buscas: buscas.map(busca => ({ ...busca, periodoInicio: dataIsoSku(busca.periodoInicio), periodoFim: dataIsoSku(busca.periodoFim) })) }, { headers: { "Cache-Control": "private, no-store" } });
     }
 
     const busca = await prisma.buscaSku.findFirst({
       where: { id: buscaId, aplicativoId: autenticado.aplicativoId },
       select: {
         id: true, situacoes: true, quantidadePedidos: true, quantidadeSkus: true, createdAt: true,
+        periodoInicio: true, periodoFim: true, pedidosForaPeriodo: true,
         itens: {
           orderBy: [{ pedidoOlistId: "asc" }, { sku: "asc" }],
           select: { pedidoOlistId: true, sku: true, tituloProduto: true, quantidade: true },
@@ -161,6 +164,7 @@ export async function GET(request: NextRequest) {
         situacoes: busca.situacoes,
         quantidadePedidos: busca.quantidadePedidos,
         quantidadeSkus: busca.quantidadeSkus,
+        periodoInicio: dataIsoSku(busca.periodoInicio), periodoFim: dataIsoSku(busca.periodoFim), pedidosForaPeriodo: busca.pedidosForaPeriodo,
         createdAt: busca.createdAt,
         pedidos: [...new Set(busca.itens.map((item) => item.pedidoOlistId))],
         skus,

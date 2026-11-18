@@ -15,7 +15,7 @@ test("cliente Olist da fila: contratos, limites HTTP e classificação de falhas
       assert.throws(() => interpretarPaginaSku(payload), FalhaConsultaSku);
     }
     assert.deepEqual(interpretarPaginaSku({ itens: [] }), []);
-    assert.deepEqual(interpretarPaginaSku({ itens: [{ id: 42 }, { id: "43" }] }), ["42", "43"]);
+    assert.deepEqual(interpretarPaginaSku({ itens: [{ id: 42 }, { id: "43" }] }), [{ id: "42", dataCriacao: null }, { id: "43", dataCriacao: null }]);
     assert.equal(retryAfterSku("120"), 120_000);
     assert.equal(retryAfterSku("Mon, 16 Nov 2026 20:01:00 GMT", Date.parse("2026-11-16T20:00:00Z")), 60_000);
     assert.equal(retryAfterSku("inválido"), 0);

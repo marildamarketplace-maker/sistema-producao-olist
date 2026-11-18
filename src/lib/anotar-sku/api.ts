@@ -4,6 +4,7 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { ErroAnotarSku, type JobSkuResumo } from "./contrato";
 import { criarRepositorioAnotarSku, type EscopoSku } from "@/repositories/anotar-sku-repository";
 import type { BuscaSkuJob } from "@prisma/client";
+import { dataIsoSku } from "./periodo";
 
 export const repoSku = criarRepositorioAnotarSku(prisma);
 export async function autenticarSku(request: Request, permissao: "read" | "write" | "jobs") {
@@ -21,6 +22,7 @@ export async function autenticarSku(request: Request, permissao: "read" | "write
 export function resumoJobSku(job: BuscaSkuJob, escopo: EscopoSku & { podeEscrever: boolean }): JobSkuResumo {
   return {
     id: job.id, situacoes: job.situacoes, status: job.status, etapa: job.etapa, passagem: job.passagem,
+    periodoInicio: dataIsoSku(job.periodoInicio), periodoFim: dataIsoSku(job.periodoFim), foraPeriodo: job.foraPeriodo,
     encontrados: job.encontrados, processados: job.processados, ignorados: job.ignorados, tentativas: job.tentativas,
     proximaTentativaEm: job.proximaTentativaEm.toISOString(), createdAt: job.createdAt.toISOString(), updatedAt: job.updatedAt.toISOString(),
     finalizadoEm: job.finalizadoEm?.toISOString() ?? null, erro: job.erro, buscaId: job.buscaId,

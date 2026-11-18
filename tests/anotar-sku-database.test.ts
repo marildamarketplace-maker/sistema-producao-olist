@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { criarRepositorioAnotarSku, type ReservaSku } from "../src/repositories/anotar-sku-repository";
+import { hojeSku, dataIsoSku } from "../src/lib/anotar-sku/periodo";
 import { processarEtapaSku } from "../src/services/processarAnotarSkuService";
 
 const url = process.env.ANOTAR_SKU_TEST_DATABASE_URL;
@@ -36,11 +37,13 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   const { Client } = await import("pg");
   const sql = new Client({ connectionString: url! }); await sql.connect(); t.after(() => sql.end());
   await sql.query(await readFile(new URL("../prisma/migrations/20261116214414_anotar_sku_async/migration.sql", import.meta.url), "utf8"));
+  await sql.query(await readFile(new URL("../prisma/migrations/20261118001325_anotar_sku_periodo_alertas/migration.sql", import.meta.url), "utf8"));
   const app = crypto.randomUUID(), outroApp = crypto.randomUUID(), user = crypto.randomUUID(), outroUser = crypto.randomUUID();
   await db.$executeRaw`INSERT INTO aplicativo(id,nome) VALUES (${app}::uuid,'Teste'), (${outroApp}::uuid,'Outro')`;
   await db.$executeRaw`INSERT INTO usuario(id,aplicativo_id,nome,email) VALUES (${user}::uuid,${app}::uuid,'Teste','sku@example.test'), (${outroUser}::uuid,${outroApp}::uuid,'Outro','outro@example.test')`;
   await db.$executeRaw`INSERT INTO tipo_produto(sku,titulo) VALUES ('A','Produto A'), ('B','Produto B')`;
   const repo = criarRepositorioAnotarSku(db), escopo = { id: user, aplicativoId: app, podeVisualizar: true };
+  const pagina = (r: ReservaSku, ids: string[]) => repo.pagina(r, ids.map(id => ({ id, dataCriacao: hojeSku() })));
   let buscaComTitulosId = "";
   const nova = () => repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0"] });
   async function reserva(): Promise<ReservaSku> {
@@ -48,7 +51,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
     const r = await repo.reservar(); assert.ok(r); return r;
   }
   async function detalhamento(ids: string[]) {
-    await repo.pagina(await reserva(), ids); await repo.pagina(await reserva(), ids);
+    await pagina(await reserva(), ids); await pagina(await reserva(), ids);
   }
   await t.test("RLS, permissões diretas e isolamento por FK composta", async () => {
     for (const tabela of ["busca_sku_jobs", "busca_sku_job_pedidos"]) {
@@ -126,13 +129,13 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   await t.test("paginação retoma o offset e reconcilia duas situações sem duplicar IDs", async () => {
     const j = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0", "3"] });
     const pagina = Array.from({ length: 100 }, (_, i) => String(1000 + i));
-    await repo.pagina(await reserva(), pagina);
+    await pagina(await reserva(), pagina);
     const segunda = await reserva(); assert.equal(segunda.paginaOffset, 100); assert.equal(segunda.situacaoIndice, 0);
-    await repo.pagina(segunda, ["1100"]);
+    await pagina(segunda, ["1100"]);
     const situacao = await reserva(); assert.equal(situacao.situacaoIndice, 1); assert.equal(situacao.paginaOffset, 0);
-    await repo.pagina(situacao, ["1000", "1101"]);
+    await pagina(situacao, ["1000", "1101"]);
     const reconciliacao = await reserva(); assert.equal(reconciliacao.passagem, 1); assert.equal(reconciliacao.situacaoIndice, 0);
-    await repo.pagina(reconciliacao, ["1102"]); await repo.pagina(await reserva(), ["1000"]);
+    await pagina(reconciliacao, ["1102"]); await pagina(await reserva(), ["1000"]);
     const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } });
     assert.equal(final.encontrados, 103); assert.equal(final.etapa, "DETALHAMENTO");
     await repo.agir(escopo, j.id, "cancelar");

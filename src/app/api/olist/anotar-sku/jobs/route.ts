@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   try {
     const escopo = await autenticarSku(request, "write");
     const entrada = criarBuscaSkuSchema.safeParse(await request.json().catch(() => null));
-    if (!entrada.success) throw new ErroAnotarSku("Selecione ao menos uma situação válida e envie uma solicitação válida.", 400);
+    if (!entrada.success) throw new ErroAnotarSku(entrada.error.issues.find(issue => issue.path[0] === "periodoInicio" || issue.path[0] === "periodoFim")?.message ?? "Selecione ao menos uma situação válida e envie uma solicitação válida.", 400);
     const job = await repoSku.criar(escopo, entrada.data);
     return NextResponse.json({ job: resumoJobSku(job, escopo) }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (erro) { return erroRespostaSku(erro); }

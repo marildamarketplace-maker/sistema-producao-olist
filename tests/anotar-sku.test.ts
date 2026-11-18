@@ -42,7 +42,7 @@ function fixture(etapa = "DETALHAMENTO", tentativas = 1) {
     falhar: async (...args: unknown[]) => { chamadas.push(["falhar", ...args]); return true; },
     reservar: async () => r,
   } as unknown as RepositorioAnotarSku;
-  const cliente = { listar: async () => ["42"], detalhar: async () => [{ sku: "A", quantidade: 2 }] };
+  const cliente = { listar: async () => [{ id: "42", dataCriacao: "2026-11-17" }], detalhar: async () => [{ sku: "A", quantidade: 2 }] };
   return { r, repo, cliente, chamadas };
 }
 test("checkpoint recebe pedido completo; pedido já salvo dispensa consulta externa", async () => {

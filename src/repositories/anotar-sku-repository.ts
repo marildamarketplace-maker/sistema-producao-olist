@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type BuscaSkuJob } from "@prisma/client";
-import { ErroAnotarSku, ESTADOS_ABERTOS_SKU, type ItemSku } from "@/lib/anotar-sku/contrato";
+import { criarBuscaSkuSchema, ErroAnotarSku, FalhaConsultaSku, ESTADOS_ABERTOS_SKU, type EntradaBuscaSku, type ItemSku, type PedidoEncontradoSku } from "@/lib/anotar-sku/contrato";
+import { dataIsoSku, periodoPadraoSku } from "@/lib/anotar-sku/periodo";
 import { aplicativoTemJob, CHAVES_JOB, CHAVE_CONFIG_JOB_ANOTAR_SKU } from "@/lib/aplicativo-jobs";
-import { LIMITE_PEDIDOS_SKU, type PaginaPedidosSku } from "@/lib/anotar-sku/pedidos";
+import { LIMITE_PEDIDOS_SKU, type PaginaPedidosSku, type PaginaForaPeriodoSku } from "@/lib/anotar-sku/pedidos";
 
 type Tx = Prisma.TransactionClient;
 export type EscopoSku = { id: string; aplicativoId: string; podeVisualizar: boolean };
@@ -63,6 +64,18 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
     } });
   }
   return {
+    async pedidosForaPeriodo(escopo: EscopoSku, buscaId: string, cursor?: string): Promise<PaginaForaPeriodoSku> {
+      if (!escopo.podeVisualizar) throw new ErroAnotarSku("Você não tem permissão para esta operação.", 403);
+      const busca = await db.buscaSku.findFirst({ where: { id: buscaId, aplicativoId: escopo.aplicativoId }, select: { job: { select: { id: true } } } });
+      if (!busca) throw new ErroAnotarSku("Busca não encontrada.", 404);
+      if (!busca.job) return { pedidos: [], proximoCursor: null };
+      const itens = await db.buscaSkuJobPedido.findMany({
+        where: { jobId: busca.job.id, aplicativoId: escopo.aplicativoId, foraPeriodo: true, ...(cursor ? { pedidoOlistId: { gt: cursor } } : {}) },
+        select: { pedidoOlistId: true, dataCriacao: true }, orderBy: { pedidoOlistId: "asc" }, take: LIMITE_PEDIDOS_SKU + 1,
+      });
+      const pedidos = itens.slice(0, LIMITE_PEDIDOS_SKU).map(item => ({ id: item.pedidoOlistId, dataCriacao: dataIsoSku(item.dataCriacao) }));
+      return { pedidos, proximoCursor: itens.length > LIMITE_PEDIDOS_SKU ? pedidos.at(-1)!.id : null };
+    },
     async pedidosPorSku(escopo: EscopoSku, buscaId: string, sku: string, cursor?: string): Promise<PaginaPedidosSku> {
       if (!escopo.podeVisualizar) throw new ErroAnotarSku("Você não tem permissão para esta operação.", 403);
       const busca = await db.buscaSku.findFirst({
@@ -87,7 +100,10 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
       const { habilitado, motivoPausa } = await disponibilidade(db, aplicativoId);
       return { habilitado, motivoPausa };
     },
-    async criar(escopo: EscopoSku, entrada: { chave: string; situacoes: string[] }) {
+    async criar(escopo: EscopoSku, entrada: EntradaBuscaSku) {
+      const validada = criarBuscaSkuSchema.safeParse(entrada);
+      if (!validada.success) throw new ErroAnotarSku(validada.error.issues[0]?.message ?? "Filtros inválidos.", 400);
+      entrada = validada.data;
       return db.$transaction(async tx => {
         await travarAplicativoSku(tx, escopo.aplicativoId);
         const anterior = await tx.buscaSkuJob.findUnique({ where: { aplicativoId_solicitadoPor_chave: {
@@ -95,13 +111,20 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
         } } });
         if (anterior) {
           if (JSON.stringify(anterior.situacoes) !== JSON.stringify(entrada.situacoes)) throw new ErroAnotarSku("Esta solicitação já foi utilizada com outras situações. Atualize a página.");
+          if (entrada.periodoInicio !== undefined && (entrada.periodoInicio !== dataIsoSku(anterior.periodoInicio) || entrada.periodoFim !== dataIsoSku(anterior.periodoFim))) {
+            throw new ErroAnotarSku("Esta solicitação já foi utilizada com outro período. Atualize a página.");
+          }
           return anterior;
         }
         await exigirProcessamentoPermitido(tx, escopo.aplicativoId);
         if (await tx.buscaSkuJob.findFirst({ where: { aplicativoId: escopo.aplicativoId, ...aberto } })) {
           throw new ErroAnotarSku("Já existe uma busca em aberto neste aplicativo. Aguarde, retome ou cancele essa busca.");
         }
-        return tx.buscaSkuJob.create({ data: { aplicativoId: escopo.aplicativoId, solicitadoPor: escopo.id, ...entrada } });
+        const periodo = entrada.periodoInicio && entrada.periodoFim ? entrada : periodoPadraoSku();
+        return tx.buscaSkuJob.create({ data: { aplicativoId: escopo.aplicativoId, solicitadoPor: escopo.id,
+          chave: entrada.chave, situacoes: entrada.situacoes,
+          periodoInicio: new Date(`${periodo.periodoInicio}T00:00:00Z`), periodoFim: new Date(`${periodo.periodoFim}T00:00:00Z`),
+        } });
       });
     },
     async listar(escopo: EscopoSku) {
@@ -167,15 +190,26 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
       return Boolean(await db.usuario.findFirst({ where: { id: r.solicitadoPor, aplicativoId: r.aplicativoId,
         ativo: true, podeEscreverAnotarSku: true }, select: { id: true } }));
     },
-    async pagina(r: ReservaSku, ids: string[]) {
+    async pagina(r: ReservaSku, pedidos: PedidoEncontradoSku[]) {
       return comReserva(r, async (tx, j) => {
-        if (ids.length) await tx.buscaSkuJobPedido.createMany({ skipDuplicates: true,
-          data: [...new Set(ids)].map(pedidoOlistId => ({ jobId: j.id, aplicativoId: j.aplicativoId, pedidoOlistId })) });
-        const fim = ids.length < 100;
+        const inicio = dataIsoSku(j.periodoInicio), fimPeriodo = dataIsoSku(j.periodoFim);
+        const dados = pedidos.map(pedido => {
+          if (inicio && !pedido.dataCriacao) throw new FalhaConsultaSku("DATA_CRIACAO", "A Olist retornou um pedido sem data de criação válida. O período não pode ser conferido com segurança.", false);
+          const foraPeriodo = Boolean(inicio && fimPeriodo && pedido.dataCriacao && (pedido.dataCriacao < inicio || pedido.dataCriacao > fimPeriodo));
+          return { jobId: j.id, aplicativoId: j.aplicativoId, pedidoOlistId: pedido.id,
+            dataCriacao: pedido.dataCriacao ? new Date(`${pedido.dataCriacao}T00:00:00Z`) : null, foraPeriodo, processado: foraPeriodo };
+        });
+        if (dados.length) await tx.buscaSkuJobPedido.createMany({ skipDuplicates: true, data: dados });
+        // O fim da página depende da resposta completa, nunca da quantidade dentro do período.
+        const fim = pedidos.length < 100;
         const indice = fim ? j.situacaoIndice + 1 : j.situacaoIndice;
         const fimPassagem = indice >= j.situacoes.length;
+        const [contagens] = await tx.$queryRaw<{ encontrados: number; foraPeriodo: number }[]>`
+          SELECT count(*)::int AS encontrados, count(*) FILTER (WHERE fora_periodo)::int AS "foraPeriodo"
+          FROM busca_sku_job_pedidos WHERE job_id = ${j.id}::uuid
+        `;
         await avancar(tx, j.id, {
-          encontrados: await tx.buscaSkuJobPedido.count({ where: { jobId: j.id } }),
+          encontrados: contagens.encontrados, foraPeriodo: contagens.foraPeriodo, processados: contagens.foraPeriodo,
           paginaOffset: fim ? 0 : j.paginaOffset + 100,
           situacaoIndice: fimPassagem ? 0 : indice,
           passagem: fimPassagem ? 1 : j.passagem,
@@ -207,12 +241,14 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
         if (await tx.buscaSkuJobPedido.count({ where: { jobId: j.id, processado: false } })) throw new Error("Pedidos pendentes.");
         const [totais] = await tx.$queryRaw<{ pedidos: number; itens: number }[]>`
           SELECT count(*)::int AS pedidos, coalesce(sum(jsonb_array_length(p.itens)), 0)::int AS itens
-          FROM busca_sku_job_pedidos p WHERE p.job_id = ${j.id}::uuid AND NOT p.ignorado
+          FROM busca_sku_job_pedidos p WHERE p.job_id = ${j.id}::uuid AND NOT p.ignorado AND NOT p.fora_periodo AND jsonb_array_length(p.itens) > 0
           AND NOT EXISTS (SELECT 1 FROM itens_busca_sku i WHERE i.aplicativo_id = ${j.aplicativoId}::uuid AND i.pedido_olist_id = p.pedido_olist_id)
         `;
         let buscaId: string | null = null;
-        if (totais.itens > 0) {
-          const busca = await tx.buscaSku.create({ data: { aplicativoId: j.aplicativoId, situacoes: j.situacoes, quantidadePedidos: totais.pedidos } });
+        if (totais.itens > 0 || j.foraPeriodo > 0) {
+          const busca = await tx.buscaSku.create({ data: { aplicativoId: j.aplicativoId, situacoes: j.situacoes, quantidadePedidos: totais.pedidos,
+            periodoInicio: j.periodoInicio, periodoFim: j.periodoFim, pedidosForaPeriodo: j.foraPeriodo,
+          } });
           buscaId = busca.id;
           await tx.$executeRaw`
             INSERT INTO itens_busca_sku (id, busca_id, aplicativo_id, pedido_olist_id, sku, quantidade, titulo_produto)
@@ -222,7 +258,7 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
             FROM busca_sku_job_pedidos p CROSS JOIN LATERAL jsonb_array_elements(p.itens) item
             LEFT JOIN produto_olist po ON po.sku_final = item->>'sku'
             LEFT JOIN tipo_produto tp ON tp.sku = item->>'sku'
-            WHERE p.job_id = ${j.id}::uuid AND NOT p.ignorado
+            WHERE p.job_id = ${j.id}::uuid AND NOT p.ignorado AND NOT p.fora_periodo
               AND NOT EXISTS (SELECT 1 FROM itens_busca_sku i WHERE i.aplicativo_id = ${j.aplicativoId}::uuid AND i.pedido_olist_id = p.pedido_olist_id)
           `;
           const [contagem] = await tx.$queryRaw<{ total: number }[]>`SELECT count(DISTINCT sku)::int AS total FROM itens_busca_sku WHERE busca_id = ${busca.id}::uuid`;
