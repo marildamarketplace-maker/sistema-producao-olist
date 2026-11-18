@@ -17,7 +17,7 @@ export const criarBuscaSkuSchema = z.object({
 }).strict().superRefine((entrada, ctx) => {
   if (entrada.periodoInicio === undefined && entrada.periodoFim === undefined) return;
   const periodo = periodoSkuSchema.safeParse(entrada);
-  if (!periodo.success) for (const issue of periodo.error.issues) ctx.addIssue(issue);
+  if (!periodo.success) for (const issue of periodo.error.issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
 });
 export type EntradaBuscaSku = z.infer<typeof criarBuscaSkuSchema>;
 export type PedidoEncontradoSku = { id: string; dataCriacao: string | null };

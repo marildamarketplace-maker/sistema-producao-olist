@@ -128,8 +128,8 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   });
   await t.test("paginação retoma o offset e reconcilia duas situações sem duplicar IDs", async () => {
     const j = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0", "3"] });
-    const pagina = Array.from({ length: 100 }, (_, i) => String(1000 + i));
-    await pagina(await reserva(), pagina);
+    const idsPagina = Array.from({ length: 100 }, (_, i) => String(1000 + i));
+    await pagina(await reserva(), idsPagina);
     const segunda = await reserva(); assert.equal(segunda.paginaOffset, 100); assert.equal(segunda.situacaoIndice, 0);
     await pagina(segunda, ["1100"]);
     const situacao = await reserva(); assert.equal(situacao.situacaoIndice, 1); assert.equal(situacao.paginaOffset, 0);
