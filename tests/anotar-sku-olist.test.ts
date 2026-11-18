@@ -16,6 +16,7 @@ test("cliente Olist da fila: contratos, limites HTTP e classificação de falhas
     }
     assert.deepEqual(interpretarPaginaSku({ itens: [] }), []);
     assert.deepEqual(interpretarPaginaSku({ itens: [{ id: 42 }, { id: "43" }] }), [{ id: "42", dataCriacao: null }, { id: "43", dataCriacao: null }]);
+    assert.deepEqual(interpretarPaginaSku({ itens: [{ id: 42, dataCriacao: "2026-11-17 12:00:00", data: "2025-01-01" }, { id: 43, dataCriacao: "inválida", data: "2026-11-17" }] }), [{ id: "42", dataCriacao: "2026-11-17" }, { id: "43", dataCriacao: null }]);
     assert.equal(retryAfterSku("120"), 120_000);
     assert.equal(retryAfterSku("Mon, 16 Nov 2026 20:01:00 GMT", Date.parse("2026-11-16T20:00:00Z")), 60_000);
     assert.equal(retryAfterSku("inválido"), 0);
@@ -27,6 +28,8 @@ test("cliente Olist da fila: contratos, limites HTTP e classificação de falhas
       assert.equal(endereco.searchParams.get("offset"), "200");
       assert.equal(endereco.searchParams.get("limit"), "100");
       assert.equal(endereco.searchParams.get("situacao"), "3");
+      assert.equal(endereco.searchParams.has("dataInicial"), false, "Pedidos antigos também precisam ser listados para o alerta");
+      assert.equal(endereco.searchParams.has("dataFinal"), false);
       assert.equal(config.timeout, 20_000); assert.ok(config.signal instanceof AbortSignal);
       chamadas.push(config.headers.Authorization);
       return { status: 401, headers: {}, data: { segredo: "não expor" } };
