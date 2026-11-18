@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { aplicarMigrationsOlistSync } from "./fixtures/olist-sync-migrations";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
 import { criarOlistSyncRepository } from "../src/repositories/olist-sync-repository";
 import { criarServicoOlistSync } from "../src/services/olist-sync-service";
+import { assinaturaEscopoSync, VERSAO_CONTRATO_INCREMENTAL } from "../src/lib/olist-sync/incremental";
 import type { ClienteSync } from "../src/lib/olist-sync/contrato";
 
 const url = process.env.OLIST_SYNC_CONCURRENCY_TEST_DATABASE_URL;
@@ -28,7 +29,7 @@ test("Olist sync: concorrência real na conclusão de fases e cancelamento", { s
   const a = "00000000-0000-0000-0000-000000000004", b = "00000000-0000-0000-0000-000000000005", usuario = randomUUID();
   await sql.query("INSERT INTO aplicativo(id,nome) VALUES ($1,'Pai')", [pai]);
   await sql.query("INSERT INTO aplicativo(id,nome,aplicativo_pai_id) VALUES ($1,'A',$3),($2,'B',$3)", [a, b, pai]);
-  await sql.query(await readFile(new URL("../prisma/migrations/20261116000100_olist_sync_multiempresa/migration.sql", import.meta.url), "utf8"));
+  await aplicarMigrationsOlistSync(sql);
   await sql.query("INSERT INTO usuario(id,aplicativo_id,pode_executar_sincronizacao_olist,pode_configurar_sincronizacao_olist) VALUES ($1,$2,true,true)", [usuario, pai]);
   const repo = criarOlistSyncRepository(db), config = await repo.obterConfiguracao(pai);
   assert.ok(config);
@@ -46,7 +47,12 @@ test("Olist sync: concorrência real na conclusão de fases e cancelamento", { s
   const enfileirar = (chave = randomUUID()) => repo.enfileirar({ configuracaoId: config.id, modo: "AUDITAR_E_APLICAR", completa: true, idempotencia: chave, origem: "MANUAL", solicitadoPor: usuario });
   async function reservarDetalhes() {
     const execucao = await enfileirar();
-    await db.olistSyncEtapa.updateMany({ where: { execucaoId: execucao.id }, data: { fase: "DETALHAR" } });
+    // A fixture começa depois da listagem vazia já concluída. Checkpoints sem
+    // plano agora reiniciam coleta, portanto não representam essa fronteira.
+    for (const app of [a, b]) await db.olistSyncEtapa.updateMany({ where: { execucaoId: execucao.id, aplicativoId: app }, data: { fase: "DETALHAR", cursorJson: { plano: {
+      modo: "COMPLETA", iniciadaEm: new Date().toISOString(), desde: null, desdeUtc: null, watermarkAnterior: null,
+      geracao: 0, assinaturaEscopo: assinaturaEscopoSync("PRODUTO", [a, b]), contaIdentidade: `identidade-${app}`, fuso: null, versaoContrato: VERSAO_CONTRATO_INCREMENTAL,
+    } } } });
     const primeira = await repo.reservarEtapa(), segunda = await repo.reservarEtapa();
     assert.ok(primeira); assert.ok(segunda); assert.notEqual(primeira.id, segunda.id);
     return { execucao, primeira, segunda };

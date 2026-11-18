@@ -1,6 +1,6 @@
 # Planejamento de desempenho e custos da sincronização Olist
 
-Revisão de 16 de novembro de 2026, baseada na implementação local descrita em [Sincronização multiempresa Olist](olist-sync.md). As mudanças abaixo são propostas para a próxima implementação. Esta revisão não modifica código, banco, agendamentos nem infraestrutura.
+Revisão atualizada em 17 de novembro de 2026, baseada na implementação local descrita em [Sincronização multiempresa Olist](olist-sync.md). A coleta incremental, a preservação de snapshots completos e a comparação dos registros afetados foram implementadas localmente. As propostas restantes estão identificadas abaixo. Não houve aplicação das migrations em produção, sincronização real ou mudança de infraestrutura.
 
 A prioridade é reduzir trabalho repetido: consultas e gravações por cadastro, auditorias completas diárias e agregações durante o acompanhamento. Manter PostgreSQL como fila durável e estado compartilhado do grupo. Avaliar mudança de infraestrutura somente depois de medir o fluxo otimizado.
 
@@ -15,9 +15,9 @@ A prioridade é reduzir trabalho repetido: consultas e gravações por cadastro,
 
 ## Diagnóstico da versão anterior às correções de consistência
 
-Após esta análise, a correção de consistência passou a compartilhar a elegibilidade entre seleção do grupo e da etapa, resolveu as corridas de encerramento/cancelamento e vinculou identidade e credencial durante aplicação/reconciliação. A validação de chamadas também passou a reutilizar o contexto da reserva, retirando leituras redundantes desse caminho. Esses pontos não devem ser tratados como pendências idênticas às descritas no diagnóstico histórico abaixo. As demais otimizações de lotes, incremental, contadores e retenção continuam propostas.
+Após esta análise, a correção de consistência passou a compartilhar a elegibilidade entre seleção do grupo e da etapa, resolveu as corridas de encerramento/cancelamento e vinculou identidade e credencial durante aplicação/reconciliação. A entrega incremental passou a preservar o detalhe completo, manter fila durável de registros afetados e buscar suas réplicas em lote. Esses pontos não devem ser tratados como pendências idênticas às descritas no diagnóstico histórico abaixo. Persistência de páginas em conjuntos, projeções menores nas reservas, polling compacto e continuação da retenção continuam propostas.
 
-| Prioridade | Comportamento atual | Impacto e mudança proposta |
+| Prioridade | Comportamento no diagnóstico original | Impacto e mudança proposta |
 | --- | --- | --- |
 | P0 | `listar` e `detalhar` em `src/services/olist-sync-service.ts:118` consultam todos os produtos/contatos. A listagem parcial substitui o último detalhe completo. | Chamadas remotas e regravação crescem com o catálogo, mesmo sem mudanças. Separar observação da listagem, validade do detalhe e necessidade de consulta. |
 | P0 | `gravarObservacao`, no mesmo arquivo, linha 99, faz pelo menos quatro chamadas Prisma por item comum com chave; a página tem até 100 itens. | Centenas de operações sequenciais dentro de uma transação. Persistir a página em conjuntos limitados, preservando duplicidades e vínculos manuais. Chamada Prisma não equivale necessariamente a um único comando SQL. |
@@ -65,11 +65,11 @@ A aplicação revalida as réplicas para cada destino. Na versão original, o ca
 
 **Índices dirigidos às consultas.** Medir planos com dados locais representativos antes de acrescentar índices. Candidatos: detalhamento pendente por grupo/conta/entidade, seleção de etapa elegível, operações por destino/status, pendências por grupo/status/ordenação e FK `origem_execucao_id` usada na limpeza. Reutilizar índices existentes; índices adicionais também ampliam escrita e armazenamento. Se a cobertura incremental exigir campos próprios, preferir campos tipados para os filtros críticos a varreduras recorrentes de JSON.
 
-## 2. Auditoria incremental com cobertura explícita
+## 2. Auditoria incremental com cobertura explícita — implementada localmente
 
-O transporte local já reconhece filtros de data, mas o consumidor executa somente auditoria completa. A implementação atual considera `ultimaExecucaoId` diferente da execução corrente como falta de observação e pode produzir uma suspeita de remoção. Portanto, **passar apenas o filtro de data ao cliente seria incorreto**.
+O consumidor escolhe e persiste um plano por conta/entidade. O modo automático usa os filtros de data somente com baseline e validação compatíveis; uma solicitação completa força a varredura integral. `ultimaExecucaoId` já não é usado isoladamente para inferir ausência: uma observação não retornada no delta conserva seu último detalhe válido.
 
-Planejar quatro informações distintas, por conta e entidade:
+O modelo separa quatro informações, por conta e entidade:
 
 1. Cobertura da coleta: completa ou incremental, versão da política e janela consultada.
 2. Última observação na listagem e geração da última varredura completa em que o registro apareceu.
@@ -79,14 +79,16 @@ Planejar quatro informações distintas, por conta e entidade:
 Regras para habilitar:
 
 - Carga inicial completa obrigatória. Validar por conta/entidade a semântica do filtro, fuso, precisão, paginação, inclusão dos limites e cobertura de campos/subrecursos. Um timestamp do resumo só pode dispensar detalhe se houver evidência de que representa todas as alterações relevantes. Mudança apenas em estoque pode ainda exigir consulta se a API não distinguir o motivo.
-- Consultar desde o último watermark confirmado com uma sobreposição compatível com a precisão e o atraso observados. O limite inferior não avança por página. Ao concluir, avançar no máximo até o início da coleta; se houver limite superior suportado e validado, usá-lo. Persistir cursor e resultado atomicamente, deduplicar por conta/entidade/ID e testar alterações durante a paginação.
+- Consultar desde o último watermark confirmado com **24 horas de sobreposição**. O limite inferior não avança por página. Ao concluir coleta e comparação, avançar no máximo até o início da coleta. Cursor e observações são persistidos atomicamente; IDs repetidos, total inconsistente, página vazia prematura ou ausência de total impedem confirmar cobertura. A implementação não presume um limite superior remoto nem ordenação estável não comprovada.
 - Se não for possível assegurar completude da paginação ou do filtro, manter coleta completa para aquela conta/entidade. Não presumir ETag, webhook, ordenação ou limite superior que o contrato não garanta.
 - Ausência na consulta incremental significa “não retornado nessa janela”, nunca “removido”. Estados completos anteriores permanecem utilizáveis conforme a cobertura validada. Falha de uma conta não permite tratar seus cadastros como inexistentes.
 - Comparar a união das chaves afetadas, incluindo correspondências antigas e novas quando uma identidade mudar, pendências relevantes e dependências impactadas. Antes de escrever, reconsultar fonte/destino e invalidar a proposta se suas pré-condições mudaram.
-- Inicialmente propor uma auditoria incremental por dia e uma completa a cada sete dias, substituindo a incremental daquele dia. As entidades sem cobertura incremental confiável mantêm auditoria completa diária; formas de pagamento e vendedores seguem sua capacidade própria.
+- O agendamento diário usa seleção automática; a completa é exigida após **15 dias** desde a última bem-sucedida, substituindo o incremental daquele ciclo. As entidades sem cobertura incremental confiável mantêm auditoria completa diária; formas de pagamento e vendedores seguem sua capacidade própria.
 - Na completa periódica, ausência exige confirmação antes de qualquer decisão. Exclusões e inativações continuam sem propagação automática. A origem observada só pode ser inferida com cobertura completa suficiente; um delta não redefine origem.
 
-O intervalo de sete dias é uma proposta de política: ausências detectáveis apenas por varredura e falhas até então desconhecidas na cobertura do filtro podem levar até sete dias para aparecer, além do tempo de execução e eventuais falhas. Campos relevantes comprovadamente fora do filtro impedem habilitar esse incremental como substituto da auditoria diária; nesse caso, manter coleta completa diária. Se o negócio exigir detecção diária também das ausências, manter reconciliação diária ou validar outro sinal confiável. A tela deve mostrar a última coleta incremental e a última cobertura completa separadamente.
+O intervalo de 15 dias significa que ausências detectáveis apenas por varredura e falhas até então desconhecidas na cobertura do filtro podem levar até 15 dias para aparecer, além do tempo de execução e eventuais falhas. Campos relevantes comprovadamente fora do filtro impedem habilitar esse incremental como substituto da auditoria diária; nesse caso, manter coleta completa diária. Se o negócio exigir detecção diária também das ausências, manter reconciliação diária ou validar outro sinal confiável. A tela mostra a última coleta incremental e a última cobertura completa separadamente.
+
+A comparação seleciona até 25 registros afetados e carrega as réplicas desse lote em uma consulta, limitada a 5.001 observações para detectar excesso. Não carrega o catálogo inteiro nem recifra conteúdo idêntico. Ainda há operações individuais de persistência e leitura do snapshot anterior para os detalhes retornados: a entrega não cumpre por si só todas as metas de lote e bytes do item 1. A confirmação de ausência adiciona GETs quando necessário; essa proteção não pode ser eliminada para alcançar a estimativa de chamadas.
 
 ## 3. Consumidor e infraestrutura
 
@@ -116,14 +118,14 @@ Monitorar crescimento de tabela, índices e backlog vencido. Remover linhas torn
 
 ## 5. Configurações propostas
 
-Os nomes abaixo são contratos propostos, ainda não implementados. Validar limites no servidor e versionar as políticas; alterações que afetem a interpretação dos dados invalidam propostas antigas e podem exigir nova auditoria completa.
+Os itens de polling, lote, ociosidade e retenção abaixo continuam propostos. A seleção automática de coleta, a validação por conta/entidade e os intervalos de cobertura foram implementados. Validar limites no servidor e versionar as políticas; alterações que afetem a interpretação dos dados invalidam propostas antigas e podem exigir nova auditoria completa.
 
 | Local | Parâmetro ou responsabilidade | Proposta inicial |
 | --- | --- | --- |
 | `configuracoes_jobs` | Pausa/liberação dos quatro jobs existentes | Preservar controles globais e criação pausada; não criar um job por empresa ou por SKU |
 | Aplicativo pai | Flags e permissões de usuário | Preservar administração central; nenhuma permissão nova concedida automaticamente |
-| Configuração do grupo | Modo de auditoria por entidade | Completo por padrão; incremental somente após validação da conta/entidade e nova implementação |
-| Configuração do grupo | Intervalo da reconciliação completa | Proposta de sete dias para entidades elegíveis; diário onde cobertura ou requisito exigir |
+| Configuração do grupo | Modo de auditoria por entidade | Seleção automática; incremental somente após validação da conta/entidade e baseline compatível |
+| Cobertura por conta/entidade | Intervalo da reconciliação completa | 15 dias para entidades elegíveis; diário onde não houver validação; solicitação completa manual disponível |
 | Configuração do grupo | Sobreposição e watermark por conta/entidade | Derivados da precisão validada; persistência durável e exibição da cobertura |
 | Política do consumidor | Limites de lote, bytes, concorrência e tempo | Página 100, comparação 25, persistência inicial de 1 MiB, uma chamada por conta e até duas contas por grupo |
 | Política operacional | Orçamento de chamadas e alertas de atraso | Definir a partir do catálogo e da cota disponível; ao atingir limite, checkpoint e retomada, nunca sucesso parcial silencioso |
@@ -144,15 +146,27 @@ Estimativas para **duas contas, somente produtos, após carga inicial**, página
 | Uma auditoria completa | 2.022 GETs | 20.202 GETs |
 | Incremental com 1% efetivamente retornado | 24 GETs | 204 GETs |
 | Incremental com volume dobrado pela sobreposição | 44 GETs | 406 GETs |
-| Sete completas por semana | 14.154 GETs | 141.414 GETs |
-| Seis incrementais de 1% e uma completa por semana | 2.166 GETs | 21.426 GETs |
-| Redução calculada no ciclo semanal | 84,70% | 84,85% |
+| Quinze completas | 30.330 GETs | 303.030 GETs |
+| Quatorze incrementais de 1% e uma completa | 2.358 GETs | 23.058 GETs |
+| Redução calculada nesse ciclo de quinze coletas | 92,23% | 92,39% |
 
-Com sobreposição dobrando os itens, a redução semanal calculada cai para aproximadamente 83,85% e 83,99%. Outros cadastros, duplicidades, validações, alterações reais, chamadas de aplicação e recuperação somam consumo. A reconciliação completa ainda exige capacidade para seu pico; a média semanal não dimensiona esse dia.
+Com sobreposição dobrando os itens, a redução calculada nesse ciclo cai para aproximadamente 91,30% e 91,46%. São cenários ilustrativos; 24 horas de sobreposição não garantem volume duplicado constante. Outros cadastros, duplicidades, confirmações de ausência, validações, alterações reais, aplicação e recuperação somam consumo. A reconciliação completa ainda exige capacidade para seu pico; a média do ciclo não dimensiona esse dia.
 
-Com dez leituras por minuto por conta, a auditoria completa de produtos tem um piso aproximado de 101 minutos para mil produtos e 1.010 minutos, cerca de 16h50, para dez mil produtos por conta. São limites ideais de capacidade, não previsão de duração: latência, banco, compartilhamento da cota, retomadas e concorrência efetiva podem aumentar o tempo. Não elevar o limite para compensar banco ineficiente sem validar a cota remota.
+Com o teto atual de 30 leituras/minuto por conta, identidade + páginas + detalhes de produtos demandariam, em capacidade ideal, aproximadamente 33,7 minutos para mil produtos e 336,7 minutos (5h37) para dez mil por conta. A referência anterior a 10/minuto era aproximadamente 101 minutos e 16h50. São contas teóricas, não duração medida: latência, banco, compartilhamento da cota, retomadas e concorrência efetiva podem aumentar o tempo. O consumo anunciado nos headers reduz o ritmo automaticamente; completa e incremental usam a mesma política, sem consultas adicionais à Olist.
 
 Admitindo detalhes médios de 4 KB decimais, duas contas com mil produtos transferem aproximadamente 8 MB de detalhes por completa; com dez mil, 80 MB. Isso é **Olist → servidor**, não uma medição de egress Supabase. Listagens, headers e outros fluxos não estão incluídos.
+
+### Medição local da coleta incremental
+
+A fixture `tests/olist-sync-incremental-database.test.ts` executa PostgreSQL descartável, transporte HTTP simulado e relógio virtual com **100 produtos por conta em duas contas**. Depois da baseline completa, altera o mesmo conjunto em ambas as contas e executa somente auditoria. A medição considera os corpos JSON recebidos, sem headers, compressão, banco, navegador, retries ou aplicação:
+
+| Alterados por conta | GETs observados | Bytes JSON Olist → servidor |
+| --- | ---: | ---: |
+| 0 de 100 | 4 | 236 |
+| 1 de 100 | 6 | 870 |
+| 100 de 100 | 204 | 64.998 |
+
+Esses valores são uma medição do cenário sintético, não de produção nem da fatura. O cenário vazio preserva snapshots/revisões, não cria itens de comparação e faz apenas identidade mais primeira página por conta. Os testes não medem bytes de rede Supabase, CPU, WAL ou duração real com o pacing. Os exemplos de 1.000/10.000 produtos da tabela anterior continuam estimativas, não benchmarks executados.
 
 Medir separadamente:
 

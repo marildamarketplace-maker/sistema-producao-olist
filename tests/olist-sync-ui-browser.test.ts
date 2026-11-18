@@ -54,7 +54,7 @@ async function ate(condicao: () => Promise<boolean>, mensagem: string, limite = 
   assert.fail(mensagem);
 }
 
-test("UI real: previsão manual e polling atualizam sem consultas extras", { skip: chrome ? false : "Chrome/Chromium não está instalado; configure OLIST_SYNC_TEST_CHROME_PATH", timeout: 45_000 }, async t => {
+test("UI real: previsão manual, polling e sincronização incremental", { skip: chrome ? false : "Chrome/Chromium não está instalado; configure OLIST_SYNC_TEST_CHROME_PATH", timeout: 45_000 }, async t => {
   const pasta = await mkdtemp(path.join(tmpdir(), "olist-sync-ui-test-"));
   const conexao: { cdp?: ChromeDevTools } = {};
   const navegador = spawn(chrome!, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update", "--disable-features=MediaRouter", "--remote-debugging-port=0", `--user-data-dir=${path.join(pasta, "profile")}`, "about:blank"], { stdio: "ignore" });
@@ -126,8 +126,47 @@ test("UI real: previsão manual e polling atualizam sem consultas extras", { ski
       assert.equal(resultado.listaConcluida, true, "A lista deve refletir a execução concluída");
       assert.equal(await navegadorLocal.avaliar('document.querySelector("article")?.textContent.includes("Fim previsto da validação") ?? false'), false, "Execução concluída não conserva a previsão antiga");
       assert.equal(await navegadorLocal.avaliar('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length'), 2, "Conclusão e modal não podem consultar a previsão");
+      assert.match(resultado.dialogo, /Leitura efetiva: Incremental/);
+      assert.match(resultado.dialogo, /Alterações desde:/);
+      assert.match(resultado.dialogo, /detalhados: 4/);
       await aguardar(200);
       assert.equal(await navegadorLocal.avaliar("window.olistSyncTeste.chamadas.length"), resultado.chamadas, "Polling precisa encerrar após a conclusão");
+    });
+    await t.test(`automático, completa e validação por empresa em ${largura}px`, async () => {
+      await cdp.pedir("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+      await ate(() => cdp.avaliar<boolean>('!document.querySelector("[role=dialog]")'), "Escape não fechou o detalhe");
+      await ate(() => cdp.avaliar<boolean>('document.activeElement?.textContent === "Detalhes"'), "Escape não restaurou o foco do gatilho");
+      for (const completa of [false, true]) {
+        await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Nova execução").click()');
+        await ate(() => cdp.avaliar<boolean>('!!document.querySelector("[role=dialog] input[type=checkbox]")'), "Nova execução não abriu");
+        assert.equal(await cdp.avaliar('document.querySelector("[role=dialog] input[type=checkbox]").checked'), false);
+        if (completa) await cdp.avaliar('document.querySelector("[role=dialog] input[type=checkbox]").click()');
+        await cdp.avaliar('document.querySelector("[role=dialog] button[type=submit]").click()');
+        await ate(() => cdp.avaliar<boolean>('!document.querySelector("[role=dialog]")'), "Enfileiramento não terminou");
+        assert.equal(await cdp.avaliar('window.olistSyncTeste.mutacoes.at(-1).dados.completa'), completa);
+        assert.equal(await cdp.avaliar('window.olistSyncTeste.mutacoes.at(-1).dados.modo'), "AUDITAR");
+      }
+      await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Configuração").click()');
+      await ate(() => cdp.avaliar<boolean>('!!document.querySelector("details")'), "Configuração incremental não apareceu");
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /Limite por execução, entidade e destino/);
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /o restante autorizado continua nas próximas execuções/);
+      for (const escuro of [false, true]) {
+        await cdp.avaliar(`document.documentElement.classList.toggle("dark", ${escuro})`);
+        assert.equal(await cdp.avaliar('document.documentElement.scrollWidth <= window.innerWidth'), true, `Overflow em ${largura}px, escuro=${escuro}`);
+      }
+      await cdp.avaliar('document.querySelector("details").open = true; const select = document.querySelector("details select"); select.value = "VALIDAR"; select.dispatchEvent(new Event("change", {bubbles:true}))');
+      await ate(() => cdp.avaliar<boolean>('!!document.querySelector("details textarea")'), "Campos de evidência não apareceram");
+      assert.equal(await cdp.avaliar('document.querySelector("details input").value'), "", "Fuso não é certificado por default");
+      await cdp.avaliar('const fuso = document.querySelector("details input"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(fuso,"America/Sao_Paulo"); fuso.dispatchEvent(new Event("input",{bubbles:true})); const evidencia = document.querySelector("details textarea"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value").set.call(evidencia,"Cadastro antigo atualizado, inativação, exclusão, limites de data e paginação conferidos."); evidencia.dispatchEvent(new Event("input",{bubbles:true}))');
+      await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Salvar configuração").click()');
+      await ate(() => cdp.avaliar<boolean>('window.olistSyncTeste.mutacoes.some(m => m.recurso === "configuracao")'), "Validação não foi enviada");
+      const dados = await cdp.avaliar<{ incrementalValidacoes: { aplicativoId: string; entidade: string; validado: boolean; fusoHorario: string; versaoContrato: number; evidencia: string }[] }>('window.olistSyncTeste.mutacoes.find(m => m.recurso === "configuracao").dados');
+      assert.equal(dados.incrementalValidacoes.length, 1);
+      assert.equal(dados.incrementalValidacoes[0].aplicativoId, "00000000-0000-0000-0000-000000000004");
+      assert.equal(dados.incrementalValidacoes[0].entidade, "PRODUTO"); assert.equal(dados.incrementalValidacoes[0].validado, true);
+      assert.equal(dados.incrementalValidacoes[0].fusoHorario, "America/Sao_Paulo"); assert.equal(dados.incrementalValidacoes[0].versaoContrato, 1);
+      assert.match(dados.incrementalValidacoes[0].evidencia, /Cadastro antigo/);
+      assert.ok(!JSON.stringify(dados).includes("contaIdentidade"));
     });
   }
 });

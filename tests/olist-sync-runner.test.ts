@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const runner = fileURLToPath(new URL("../scripts/testar-olist-sync.mjs", import.meta.url));
-const variaveis = ["OLIST_SYNC_TEST_DATABASE_URL", "OLIST_SYNC_API_TEST_DATABASE_URL", "OLIST_SYNC_SERVICE_TEST_DATABASE_URL", "OLIST_SYNC_CONCURRENCY_TEST_DATABASE_URL"];
+const variaveis = ["OLIST_SYNC_TEST_DATABASE_URL", "OLIST_SYNC_API_TEST_DATABASE_URL", "OLIST_SYNC_SERVICE_TEST_DATABASE_URL", "OLIST_SYNC_CONCURRENCY_TEST_DATABASE_URL", "OLIST_SYNC_INCREMENTAL_TEST_DATABASE_URL"];
 const ambiente = () => {
   const env = { ...process.env };
   for (const variavel of variaveis) delete env[variavel];

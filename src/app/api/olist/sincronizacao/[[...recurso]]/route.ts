@@ -7,6 +7,7 @@ import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { aplicativoTemJob } from "@/lib/aplicativo-jobs";
 import { criarOlistSyncRepository, ErroRepositorioSync, ESTADOS_EXECUCAO_SYNC_ATIVOS, JOBS_SYNC } from "@/repositories/olist-sync-repository";
 import { aplicativoElegivelSync } from "@/lib/olist-sync/elegibilidade";
+import { VERSAO_CONTRATO_INCREMENTAL, INTERVALO_COMPLETA_MS, SOBREPOSICAO_INCREMENTAL_MS, fusoIncrementalValido } from "@/lib/olist-sync/incremental";
 import { criarCriptografiaSync } from "@/lib/olist-sync/cripto";
 import { FalhaSync } from "@/lib/olist-sync/contrato";
 import { configuracaoSchema, decisaoSchema, execucaoSchema, filtrosSchema, objetoJson, observacaoProtegida, origemSchema, proximoHorarioSync } from "@/lib/olist-sync/validacao";
@@ -14,6 +15,7 @@ import { configuracaoSchema, decisaoSchema, execucaoSchema, filtrosSchema, objet
 import { declararOrigemSync, resolverPendenciaSync } from "@/services/olist-sync-review-service";
 import { contarValidacoesRecentesSync } from "@/repositories/olist-sync-previsao-repository";
 import { calcularPrevisaoValidacaoSync, inicioJanelaPrevisaoSync } from "@/lib/olist-sync/previsao";
+import { adotarCoberturaLegada } from "@/repositories/olist-sync-cobertura-repository";
 
 export const dynamic="force-dynamic";
 type Contexto={params:Promise<{recurso?:string[]}>};
@@ -79,15 +81,24 @@ export async function GET(request:Request,contexto:Contexto) {
     const filtros=filtrosSchema.parse(Object.fromEntries(new URL(request.url).searchParams));
     const pagina={skip:filtros.offset,take:filtros.limit};
     if(recurso==="configuracao") {
-      const [pai,filhos,jobs]=await Promise.all([
+      const [pai,filhos,jobs,coberturas]=await Promise.all([
         prisma.aplicativo.findUniqueOrThrow({where:{id:config.aplicativoPaiId},select:{nome:true}}),
         prisma.aplicativo.findMany({where:{aplicativoPaiId:config.aplicativoPaiId},select:{id:true,nome:true,aplicativoPaiId:true},orderBy:[{nome:"asc"},{id:"asc"}],take:100}),
         prisma.configuracaoJob.findMany({where:{chave:{in:Object.values(JOBS_SYNC).map(j=>j.chave)}},select:{chave:true,pausado:true}}),
+        prisma.olistSyncCobertura.findMany({where:{configuracaoId:config.id,participante:{habilitado:true}},select:{aplicativoId:true,entidade:true,incrementalValidado:true,incrementalFuso:true,incrementalContaIdentidade:true,incrementalVersaoContrato:true,incrementalValidadoEm:true,completaEm:true,incrementalEm:true,watermarkConfirmado:true},orderBy:[{aplicativoId:"asc"},{entidade:"asc"}],take:80}),
       ]);
+      const coberturaPorEscopo=new Map(coberturas.map(c=>[`${c.aplicativoId}:${c.entidade}`,c]));
       return json({id:config.id,aplicativoPaiId:config.aplicativoPaiId,aplicativoPaiNome:pai.nome,versao:config.versao,ativo:config.ativo,entidades:config.entidades,
         participantes:config.participantes.map(p=>({id:p.aplicativoId,nome:p.aplicativo.nome,habilitado:p.habilitado})),aplicativosOrigem:filhos.map(p=>({id:p.id,nome:p.nome,habilitado:false})),aplicativosElegiveis:filhos.filter(p=>aplicativoElegivelSync(config,p)).map(p=>({id:p.id,nome:p.nome,habilitado:config.participantes.some(c=>c.aplicativoId===p.id&&c.habilitado)})),
         horaDiaria:config.horaDiaria,fusoHorario:config.timezone,limiteAlteracoes:config.limiteAlteracoes,proximaExecucaoEm:config.proximaExecucaoEm,
         prontidao:{sincronizacaoNativaCompativel:false,semanticaPutValidada:false,incrementalValidado:false,...objetoJson(config.readinessJson)},
+        incremental:{versaoContrato:VERSAO_CONTRATO_INCREMENTAL,completaCadaDias:INTERVALO_COMPLETA_MS/86_400_000,sobreposicaoHoras:SOBREPOSICAO_INCREMENTAL_MS/3_600_000,
+          coberturas:config.participantes.filter(p=>p.habilitado&&aplicativoElegivelSync(config,p.aplicativo)).flatMap(p=>config.entidades.map(entidade=>{
+            const c=coberturaPorEscopo.get(`${p.aplicativoId}:${entidade}`);
+            return {aplicativoId:p.aplicativoId,entidade,contaIdentificada:Boolean(p.contaIdentidade),
+              validado:Boolean(c?.incrementalValidado&&p.contaIdentidade&&c.incrementalContaIdentidade===p.contaIdentidade&&c.incrementalVersaoContrato===VERSAO_CONTRATO_INCREMENTAL&&c.incrementalFuso&&fusoIncrementalValido(c.incrementalFuso)),
+              fusoHorario:c?.incrementalFuso??null,validadoEm:c?.incrementalValidadoEm??null,completaEm:c?.completaEm??null,incrementalEm:c?.incrementalEm??null,watermarkConfirmado:c?.watermarkConfirmado??null};
+          }))},
         jobs:Object.values(JOBS_SYNC).map(j=>({chave:j.chave,permitidoNoPai:aplicativoTemJob(config.aplicativoPai.jobs,j.flag),pausado:jobs.find(c=>c.chave===j.chave)?.pausado??true}))});
     }
     if(recurso==="resumo") {
@@ -102,9 +113,21 @@ export async function GET(request:Request,contexto:Contexto) {
     }
     if(recurso==="execucoes") {
       if(id) {
-        const e=await prisma.olistSyncExecucao.findFirst({where:{id,configuracaoId:config.id},select:{...selectExecucao,etapas:{select:{id:true,entidade:true,aplicativoId:true,fase:true,status:true,tentativas:true,disponivelEm:true},orderBy:[{entidade:"asc"},{aplicativoId:"asc"}],take:200}}});
+        const e=await prisma.olistSyncExecucao.findFirst({where:{id,configuracaoId:config.id},select:{...selectExecucao,etapas:{select:{id:true,entidade:true,aplicativoId:true,fase:true,status:true,tentativas:true,disponivelEm:true},orderBy:[{entidade:"asc"},{aplicativoId:"asc"},{fase:"asc"},{id:"asc"}],take:200}}});
         if(!e)throw new ErroRepositorioSync("Execução não encontrada.",404);
-        return json({...execucaoDto(e),etapas:e.etapas.map(s=>({...s,aplicativoId:s.aplicativoId??config.aplicativoPaiId}))});
+        // Projeta somente a janela pública: não transfere o lote/cursor nem hashes internos.
+        const planos=await prisma.$queryRaw<{id:string;modo:string|null;iniciadaEm:string|null;desde:string|null}[]>`
+          SELECT etapa.id, etapa.cursor_json #>> '{plano,modo}' AS modo,
+            etapa.cursor_json #>> '{plano,iniciadaEm}' AS "iniciadaEm",
+            etapa.cursor_json #>> '{plano,desdeUtc}' AS desde
+          FROM olist_sync_etapa etapa JOIN olist_sync_execucao execucao ON execucao.id=etapa.execucao_id
+          WHERE etapa.execucao_id=${id}::uuid AND execucao.configuracao_id=${config.id}::uuid
+          ORDER BY etapa.entidade, etapa.aplicativo_id, etapa.fase, etapa.id LIMIT 200`;
+        const planoPorEtapa=new Map(planos.map(p=>[p.id,p]));
+        return json({...execucaoDto(e),etapas:e.etapas.map(s=>{
+          const plano=planoPorEtapa.get(s.id);
+          return {...s,aplicativoId:s.aplicativoId??config.aplicativoPaiId,plano:plano?.iniciadaEm&&["COMPLETA","INCREMENTAL"].includes(plano.modo??"")?{modo:plano.modo,iniciadaEm:plano.iniciadaEm,desde:plano.desde}:null};
+        })});
       }
       const where={configuracaoId:config.id,...(filtros.status?{status:filtros.status}:{})};
       const [itens,total]=await Promise.all([prisma.olistSyncExecucao.findMany({where,select:selectExecucao,orderBy:[{createdAt:"desc"},{id:"desc"}],...pagina}),prisma.olistSyncExecucao.count({where})]);
@@ -147,16 +170,41 @@ export async function PUT(request:Request,contexto:Contexto) {
       await tx.$queryRaw`SELECT id FROM olist_sync_configuracao WHERE id=${config.id}::uuid FOR UPDATE`;
       // A política pode ter mudado desde a leitura de autorização. O lock impede
       // que um bloqueio concorra com a seleção comum de participantes.
-      const politica=await tx.olistSyncConfiguracao.findUniqueOrThrow({where:{id:config.id},select:{aplicativoPaiId:true,aplicativosBloqueados:true}});
+      const politica=await tx.olistSyncConfiguracao.findUniqueOrThrow({where:{id:config.id},select:{aplicativoPaiId:true,aplicativosBloqueados:true,versao:true,entidades:true,participantes:{where:{habilitado:true},select:{aplicativoId:true}}}});
       if(politica.aplicativoPaiId!==usuario.aplicativoId)throw new ErroRepositorioSync("A configuração não pertence mais a este aplicativo pai.",403);
+      if(politica.versao!==input.versao)throw new ErroRepositorioSync("Configuração alterada por outro usuário. Recarregue antes de salvar.");
       const selecionados=await tx.aplicativo.findMany({where:{id:{in:input.participantesIds},aplicativoPaiId:politica.aplicativoPaiId},select:{id:true,aplicativoPaiId:true},take:input.participantesIds.length});
       if(selecionados.length!==input.participantesIds.length || selecionados.some(app=>!aplicativoElegivelSync(politica,app)))throw new ErroRepositorioSync("Somente filhos diretos sem bloqueio podem participar.",400);
+      const validacoes=input.incrementalValidacoes??[];
+      for(const v of validacoes) {
+        if(!input.participantesIds.includes(v.aplicativoId)||!input.entidades.includes(v.entidade))throw new ErroRepositorioSync("A validação incremental exige empresa e entidade selecionadas neste grupo.",400);
+        if(v.versaoContrato!==VERSAO_CONTRATO_INCREMENTAL)throw new ErroRepositorioSync("O contrato incremental mudou. Recarregue e repita a validação.");
+      }
+      const contas=validacoes.length?await tx.olistSyncParticipante.findMany({where:{configuracaoId:config.id,aplicativoId:{in:input.participantesIds}},select:{aplicativoId:true,contaIdentidade:true},take:20}):[];
+      const identidadePorApp=new Map(contas.map(p=>[p.aplicativoId,p.contaIdentidade]));
+      if(validacoes.some(v=>v.validado&&!identidadePorApp.get(v.aplicativoId)))throw new ErroRepositorioSync("Execute uma auditoria para identificar a conta antes de declarar sua validação incremental.",400);
+      const mesmoEscopo=politica.participantes.length===input.participantesIds.length&&politica.participantes.every(p=>input.participantesIds.includes(p.aplicativoId))
+        &&politica.entidades.length===input.entidades.length&&politica.entidades.every(e=>input.entidades.some(entidade=>entidade===e));
+      if(mesmoEscopo&&validacoes.some(v=>v.validado))for(const conta of contas)for(const entidade of input.entidades) {
+        if(!conta.contaIdentidade||(entidade!=="PRODUTO"&&entidade!=="CONTATO"))continue;
+        // Antes de incrementar a versão, reaproveita apenas uma completa legada
+        // comprovada para até 40 pares. Preserva os outros pares para validação
+        // posterior, sem certificá-los nem alterar cobertura já estabelecida.
+        await tx.olistSyncCobertura.upsert({where:{configuracaoId_aplicativoId_entidade:{configuracaoId:config.id,aplicativoId:conta.aplicativoId,entidade}},create:{configuracaoId:config.id,aplicativoId:conta.aplicativoId,entidade},update:{},select:{id:true}});
+        await adotarCoberturaLegada(tx,{grupo:config.id,execucao:randomUUID(),aplicativoId:conta.aplicativoId,entidade,participantesIds:input.participantesIds,
+          contaIdentidade:conta.contaIdentidade,completa:false,incrementalHabilitado:true,iniciadaEm:new Date(),versaoConfiguracao:politica.versao});
+      }
       const salva=await tx.olistSyncConfiguracao.updateMany({where:{id:config.id,versao:input.versao},data:{ativo:input.ativo,entidades:input.entidades,horaDiaria:input.horaDiaria,limiteAlteracoes:input.limiteAlteracoes,readinessJson:input.prontidao,autorizadoPor:usuario.id,versao:{increment:1},proximaExecucaoEm:proximoHorarioSync(new Date(),input.horaDiaria,config.timezone)}});
       if(!salva.count)throw new ErroRepositorioSync("Configuração alterada por outro usuário. Recarregue antes de salvar.");
       await tx.olistSyncParticipante.updateMany({where:{configuracaoId:config.id,aplicativoId:{notIn:input.participantesIds}},data:{habilitado:false}});
       for(const app of input.participantesIds)await tx.olistSyncParticipante.upsert({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:app}},create:{configuracaoId:config.id,aplicativoId:app,habilitado:true},update:{habilitado:true},select:{id:true}});
+      for(const v of validacoes) {
+        const dados={incrementalValidado:v.validado,incrementalFuso:v.validado?v.fusoHorario:null,incrementalContaIdentidade:v.validado?identidadePorApp.get(v.aplicativoId)!:null,incrementalVersaoContrato:v.validado?VERSAO_CONTRATO_INCREMENTAL:null,incrementalValidadoEm:v.validado?new Date():null,incrementalValidadoPor:v.validado?usuario.id:null};
+        await tx.olistSyncCobertura.upsert({where:{configuracaoId_aplicativoId_entidade:{configuracaoId:config.id,aplicativoId:v.aplicativoId,entidade:v.entidade}},create:{configuracaoId:config.id,aplicativoId:v.aplicativoId,entidade:v.entidade,...dados},update:dados,select:{id:true}});
+        await tx.olistSyncEvento.create({data:{configuracaoId:config.id,usuarioId:usuario.id,tipo:v.validado?"INCREMENTAL_VALIDACAO_DECLARADA":"INCREMENTAL_VALIDACAO_REVOGADA",metadadosJson:{aplicativoId:v.aplicativoId,entidade:v.entidade,versaoContrato:v.versaoContrato,fusoHorario:v.fusoHorario,evidencia:v.evidencia??null}},select:{id:true}});
+      }
       await tx.olistSyncEvento.create({data:{configuracaoId:config.id,usuarioId:usuario.id,tipo:"CONFIGURACAO_ALTERADA",metadadosJson:{versao:input.versao+1,participantes:input.participantesIds,prontidao:input.prontidao}},select:{id:true}});
-    });
+    },{timeout:25_000,maxWait:5_000});
     return json({ok:true,versao:input.versao+1});
   }catch(error){return respostaErro(error);}
 }

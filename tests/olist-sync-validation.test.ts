@@ -50,9 +50,20 @@ test('configuração recusa participantes repetidos, excesso de filhos e entidad
 test('aceite de execução exige idempotência válida e não aceita um pai fornecido pelo cliente',()=>{
   const base={modo:'AUDITAR',idempotencia:crypto.randomUUID()};
   assert.deepEqual(execucaoSchema.parse(base),{...base,completa:true});
+  assert.equal(execucaoSchema.parse({...base,completa:false}).completa,false);
   for(const input of [{...base,idempotencia:'repetir'}, {...base,modo:'APAGAR'}, {...base,aplicativoPaiId:crypto.randomUUID()}, {...base,completa:'true'}]) {
     assert.equal(execucaoSchema.safeParse(input).success,false);
   }
+});
+
+test('validação incremental é explícita por conta e entidade, com fuso, versão, evidência e pares únicos',()=>{
+  const aplicativoId=crypto.randomUUID();
+  const declaracao={aplicativoId,entidade:'PRODUTO',validado:true,fusoHorario:'America/Sao_Paulo',versaoContrato:1,evidencia:'Atualização de cadastro antigo, exclusão, inativação e paginação verificadas.'};
+  const base={versao:1,ativo:true,entidades:['PRODUTO'],participantesIds:[aplicativoId,crypto.randomUUID()],horaDiaria:'02:00',limiteAlteracoes:10,prontidao:{sincronizacaoNativaCompativel:false,semanticaPutValidada:false,incrementalValidado:false},incrementalValidacoes:[declaracao]};
+  assert.equal(configuracaoSchema.safeParse(base).success,true);
+  for(const item of [{...declaracao,entidade:'VENDEDOR'},{...declaracao,evidencia:undefined},{...declaracao,fusoHorario:'America/Inventada'},{...declaracao,versaoContrato:0},{...declaracao,contaIdentidade:'forjada'}])assert.equal(configuracaoSchema.safeParse({...base,incrementalValidacoes:[item]}).success,false);
+  assert.equal(configuracaoSchema.safeParse({...base,incrementalValidacoes:[declaracao,declaracao]}).success,false);
+  assert.equal(configuracaoSchema.safeParse({...base,incrementalValidacoes:[{...declaracao,validado:false,evidencia:undefined}]}).success,true);
 });
 
 test('declaração de origem exige versão, justificativa e ID remoto sem interpolação',()=>{

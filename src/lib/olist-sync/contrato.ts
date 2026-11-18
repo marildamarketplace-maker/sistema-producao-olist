@@ -1,4 +1,5 @@
 import type { CotaLeituraSync } from "./ritmo";
+import type { ReferenciaTipoContatoSync, TipoContatoSync } from "./tipos-contato";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type CamposSync = Record<string, JsonValue>;
@@ -21,6 +22,8 @@ export interface ObservacaoRemota {
   campos: CamposSync;
   /** Códigos estáveis, sem valores pessoais ou payload do provedor. */
   pendencias: string[];
+  /** Referências locais transitórias, até serem convertidas em nome/perfil. */
+  tiposContatoRemotos?: ReferenciaTipoContatoSync[];
 }
 
 export interface PaginaSync {
@@ -53,11 +56,13 @@ export interface OpcoesConsultaSync {
 }
 
 export interface OpcoesMutacaoSync extends Pick<OpcoesConsultaSync, "validarConta"> {
+  catalogoTiposContato?: readonly TipoContatoSync[];
   /** Verifica autorização e reserva após a leitura remota, antes de enviar a escrita. */
   antesDeEscrever?: () => Promise<void>;
 }
 
 export interface ClienteSync {
+  listarTiposContato?(aplicativoId: string, opcoes: { offset: number; limit: number }, consulta?: OpcoesConsultaSync): Promise<{ itens: TipoContatoSync[]; total: number; cotaLeitura?: CotaLeituraSync }>;
   listar(aplicativoId: string, entidade: EntidadeSync, opcoes: OpcoesListagemSync): Promise<PaginaSync>;
   buscarPorChave(aplicativoId: string, entidade: EntidadeSync, chave: string, opcoes?: OpcoesConsultaSync): Promise<ObservacaoRemota[]>;
   detalhar(aplicativoId: string, entidade: EntidadeSync, id: string, opcoes?: OpcoesConsultaSync): Promise<ObservacaoRemota>;

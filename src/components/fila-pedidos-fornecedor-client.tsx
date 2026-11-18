@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, Send } from "lucide-react";
+import { MoreHorizontal, Send, XCircle } from "lucide-react";
 import { EnviarPedidoFilaOlist } from "@/components/enviar-pedido-fila-olist";
+import { createPortal } from "react-dom";
+import { conterFocoNoDialogo } from "@/lib/dialogo-foco";
 import { filtrosStatusFila, rotulosStatusFila } from "@/lib/fila-fornecedor-contrato";
 import type { StatusFila, FilialFila, ListaFilaAdministracao, PedidoFilaAdministracao, SituacaoFila } from "@/lib/fila-fornecedor-contrato";
 
@@ -11,7 +13,7 @@ const secundario = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-s
 const primario = "min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:cursor-not-allowed disabled:opacity-50";
 const dataHora = (valor: string) => new Date(valor).toLocaleString("pt-BR");
 
-function MaisOpcoesFila({ disabled, aoEnviar, consulta = false }: { disabled: boolean; aoEnviar: () => void; consulta?: boolean }) {
+function MaisOpcoesFila({ disabled, envioDisabled, aoEnviar, aoCancelar, consulta = false }: { disabled: boolean; envioDisabled: boolean; aoEnviar: () => void; aoCancelar?: () => void; consulta?: boolean }) {
   const [aberto, setAberto] = useState(false);
   const painelId = useId();
   const container = useRef<HTMLDivElement>(null);
@@ -34,23 +36,71 @@ function MaisOpcoesFila({ disabled, aoEnviar, consulta = false }: { disabled: bo
       </button>
       {aberto && !disabled && (
         <div id={painelId} role="group" aria-label="Mais opções do pedido" className="absolute right-0 z-10 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
-          <button type="button" onClick={() => { setAberto(false); botao.current?.focus(); aoEnviar(); }}
-            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500">
+          <button type="button" disabled={envioDisabled} onClick={() => { setAberto(false); botao.current?.focus(); aoEnviar(); }}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:opacity-50">
             <Send className="h-4 w-4 shrink-0" aria-hidden="true" />{consulta ? "Consultar envio na Olist" : "Enviar para a Olist"}
           </button>
+          {aoCancelar && <button type="button" onClick={() => { setAberto(false); botao.current?.focus(); aoCancelar(); }}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2">
+            <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />Cancelar pedido
+          </button>}
         </div>
       )}
     </div>
   );
 }
 
-function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
-  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; token: string; aoSalvar: (filial: string, status: StatusFila) => void; aoAtualizar: () => void;
+function CancelarPedidoFila({ pedido, token, fechar, concluir }: { pedido: PedidoFilaAdministracao; token: string; fechar: () => void; concluir: () => void }) {
+  const dialogo = useRef<HTMLDialogElement>(null);
+  const titulo = useId();
+  const ocupado = useRef(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    const anterior = document.activeElement, elemento = dialogo.current;
+    elemento?.showModal();
+    return () => { elemento?.close(); if (anterior instanceof HTMLElement && anterior.isConnected) anterior.focus(); };
+  }, []);
+  async function cancelar() {
+    if (ocupado.current) return;
+    ocupado.current = true; setSalvando(true); setErro("");
+    try {
+      const response = await fetch(API, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "CANCELAR", pedidoId: pedido.id, versao: pedido.versao }) });
+      const dados = await response.json();
+      if (!response.ok) throw new Error(dados.error || "Não foi possível cancelar o pedido.");
+      concluir();
+    } catch (error) { setErro(error instanceof Error ? error.message : "Falha ao cancelar o pedido."); }
+    finally { ocupado.current = false; setSalvando(false); }
+  }
+  return createPortal(<dialog ref={dialogo} aria-labelledby={titulo} onKeyDown={event => {
+    if (event.key === "Escape") { event.preventDefault(); if (!ocupado.current) fechar(); }
+    else conterFocoNoDialogo(event);
+  }}
+    onCancel={event => { if (ocupado.current) event.preventDefault(); else fechar(); }}
+    className="m-auto max-h-[92dvh] w-[calc(100%-1rem)] max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 text-slate-900 backdrop:bg-black/50">
+    <div className="space-y-4" aria-busy={salvando}>
+      <h2 id={titulo} className="text-lg font-semibold">Cancelar pedido da fila?</h2>
+      <p className="break-words text-sm">Origem: {pedido.origem}</p>
+      <p className="break-all text-xs text-slate-500">Pedido: {pedido.id}</p>
+      <p className="text-sm">O pedido será encerrado como CANCELADO nesta fila e seu envio ficará bloqueado. Esta ação não cancela pedidos na Olist nem a solicitação de produção.</p>
+      {erro && <p role="alert" className="break-words text-sm text-red-700">{erro}</p>}
+      <div className="flex flex-wrap justify-end gap-3">
+        <button autoFocus type="button" className={secundario} disabled={salvando} onClick={fechar}>Voltar</button>
+        <button type="button" className={primario} disabled={salvando} onClick={() => void cancelar()}>{salvando ? "Cancelando..." : "Confirmar cancelamento"}</button>
+      </div>
+    </div>
+  </dialog>, document.body);
+}
+
+function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCancelar }: {
+  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; token: string; aoSalvar: (filial: string, status: StatusFila) => void; aoAtualizar: () => void; aoCancelar: () => void;
 }) {
   const [filialId, setFilialId] = useState(pedido.filial?.id ?? "");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [confirmando, setConfirmando] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
   const podeAlterar = pedido.status === "PENDENTE" || pedido.status === "FALHADO";
   const [conflito, setConflito] = useState(false);
   const envioEmAndamento = useRef(false);
@@ -131,7 +181,9 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
             </button>
             <MaisOpcoesFila
               consulta={pedido.status === "PROCESSAR" || pedido.status === "CONCLUIDO"}
-              disabled={salvando || conflito || pedido.status === "CANCELADO" || !filialId || filialId !== pedido.filial?.id}
+              disabled={salvando || conflito || pedido.status === "CANCELADO"}
+              envioDisabled={!filialId || filialId !== pedido.filial?.id}
+              aoCancelar={podeAlterar ? () => setCancelando(true) : undefined}
               aoEnviar={() => { setErro(""); setConfirmando(true); }}
             />
           </div>
@@ -141,6 +193,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar }: {
       </form>
       {filialId && filialId !== pedido.filial?.id && <p className="text-sm text-slate-600">Salve a filial antes de configurar o envio para a Olist.</p>}
       {pedido.status === "PROCESSAR" && <p className="text-sm text-slate-600">Envio reservado. Consulte o resultado em Mais opções antes de tentar novamente.</p>}
+      {cancelando && <CancelarPedidoFila pedido={pedido} token={token} fechar={() => setCancelando(false)} concluir={() => { setCancelando(false); aoCancelar(); }} />}
       {confirmando && <EnviarPedidoFilaOlist pedido={pedido} token={token} aoFechar={() => setConfirmando(false)} aoConcluir={aoAtualizar} />}
     </article>
   );
@@ -205,7 +258,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
           {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Seu aplicativo não possui filiais vinculadas. Vincule uma filial para direcionar os pedidos.</p>}
           <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) com o filtro selecionado.</p>
           {dados.pedidos.length === 0 ? <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum pedido encontrado nesta página.</p> : dados.pedidos.map((pedido) => (
-            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} />
+            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} aoCancelar={() => { focarAtualizacao.current = true; setMensagem("Pedido cancelado na fila. O envio está bloqueado."); atualizar(); }} />
           ))}
           <nav aria-label="Páginas da fila" className="flex flex-wrap items-center justify-between gap-3">
             <button type="button" disabled={pagina === 1} onClick={() => setPagina((valor) => valor - 1)} className={secundario}>Anterior</button>

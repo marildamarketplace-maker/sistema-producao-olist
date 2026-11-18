@@ -121,3 +121,41 @@ export async function PATCH(request: Request) {
     return NextResponse.json(resultado);
   } catch (error) { return falha(error); }
 }
+
+const cancelamentoSchema = z.object({
+  acao: z.literal("CANCELAR"), pedidoId: z.guid(),
+  versao: z.number().int().min(0).max(2147483646),
+}).strict();
+
+export async function POST(request: Request) {
+  try {
+    const { usuarioId, aplicativoId } = await autorizar(request);
+    const parsed = cancelamentoSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido e versão válidos para cancelar.", 400);
+    const { pedidoId, versao } = parsed.data;
+    await prisma.$transaction(async (tx) => {
+      const pais = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM aplicativo WHERE id=${aplicativoId}::uuid AND aplicativo_pai_id IS NULL FOR SHARE`;
+      if (!pais.length) throw new ErroAdministracaoFila("Somente o aplicativo pai pode cancelar pedidos desta fila.", 403);
+      const pedido = await tx.pedidoFornecedorQueue.findFirst({
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId },
+        select: { solicitacaoProducaoId: true },
+      });
+      if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
+      // Mesmo lock usado na reserva de envio: cancelar e enviar são excludentes.
+      await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id=${pedido.solicitacaoProducaoId}::uuid FOR UPDATE`;
+      const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: pedido.solicitacaoProducaoId }, select: { estado: true, pedidoOlistId: true } });
+      const enviado = await tx.pedidoFornecedorSolicitacao.findFirst({ where: { solicitacaoId: pedido.solicitacaoProducaoId }, select: { id: true } });
+      if (enviado || envio && (envio.pedidoOlistId || !["REJEITADO", "LIBERADO"].includes(envio.estado)))
+        throw new ErroAdministracaoFila("Há envio concluído, em andamento ou incerto. Confira o resultado na Olist antes de cancelar na fila.", 409);
+      // Atualiza somente este pedido e registra autoria sem carregar o snapshot.
+      const quantidade = await tx.$executeRaw`UPDATE pedido_fornecedor_queue
+        SET status='CANCELADO',versao=versao+1,
+          dados_pedido=jsonb_set(dados_pedido,'{cancelamento}',jsonb_build_object('usuarioId',${usuarioId}::text,'em',clock_timestamp()),true)
+        WHERE id=${pedidoId}::uuid AND aplicativo_fornecedor_id=${aplicativoId}::uuid
+          AND versao=${versao} AND status IN ('PENDENTE','FALHADO')`;
+      if (quantidade !== 1) throw new ErroAdministracaoFila("Pedido alterado, em processamento ou já encerrado. Atualize a fila antes de cancelar.", 409);
+    });
+    return NextResponse.json({ id: pedidoId, status: "CANCELADO", versao: versao + 1 });
+  } catch (error) { return falha(error); }
+}

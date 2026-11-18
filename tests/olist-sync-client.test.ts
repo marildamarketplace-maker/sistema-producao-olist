@@ -7,6 +7,42 @@ const produto = { id: 100, sku: "001-a", descricao: "Toalha", tipo: "S", situaca
 const pagina = (itens: unknown[] = [produto], total = itens.length) => ({ itens, paginacao: { total, offset: 0, limit: 100 } });
 const falha = (codigo: string, inconclusivo?: boolean) => (erro: unknown) => erro instanceof FalhaSync && erro.codigo === codigo && (inconclusivo === undefined || erro.inconclusivo === inconclusivo);
 
+test("catálogo de tipos usa paginação limitada, identidade protegida e headers de cota", async () => {
+  const m = mock([{ status: 200, dados: { cpfCnpj: "52998224725", razaoSocial: "Conta" } },
+    { status: 200, dados: pagina([{ id: 87, nome: "Cliente", perfilContato: 0 }]), cotaLeitura: { limite: 60, restante: 59, resetSegundos: 10 } }]);
+  let guard = 0;
+  const resposta = await m.cliente.listarTiposContato!("b", { offset: 0, limit: 100 }, { validarConta: conta => conta.documento === "52998224725", antesDeConsultar: async () => { guard++; } });
+  assert.equal(guard, 1);assert.equal(resposta.itens[0].id, "87");assert.equal(resposta.cotaLeitura?.restante, 59);
+  assert.match(m.chamadas[1].url, /\/contatos\/tipos\?offset=0&limit=100$/);
+  assert.equal(m.chamadas[0].token, m.chamadas[1].token);
+  await assert.rejects(m.cliente.listarTiposContato!("b", { offset: -1, limit: 100 }), falha("PAGINACAO_INVALIDA"));
+  assert.equal(m.chamadas.length, 2);
+});
+
+test("tipos de contato são traduzidos para IDs locais antes de POST e PUT", async () => {
+  for (const atualizar of [false, true]) {
+    const m = mock([{ status: 200, dados: { id: 123 } }]);
+    const campos = { nome: "Contato", cpfCnpj: "52998224725", tipoPessoa: "F", tiposContato: [{ nome: "Cliente", perfilContato: 0 }] };
+    const opcoes = { validarConta: () => true, catalogoTiposContato: [{ id: "87", nome: "CLIENTE", perfilContato: 0 }] };
+    // Sem callback de identidade, mutar mantém o contrato legado do transporte;
+    // neste teste fornecemos /info quando a proteção é solicitada.
+    const protegido = mock([{ status: 200, dados: { cpfCnpj: "52998224725", razaoSocial: "Conta" } }, { status: 200, dados: { id: 123 } }]);
+    if (atualizar) await protegido.cliente.atualizar("b", "CONTATO", "123", campos, opcoes);
+    else await protegido.cliente.criar("b", "CONTATO", campos, opcoes);
+    assert.deepEqual((protegido.chamadas.at(-1)?.payload as Record<string, unknown>).tipos, [87]);
+    assert.equal("tiposContato" in (protegido.chamadas.at(-1)?.payload as Record<string, unknown>), false);
+    await assert.rejects(m.cliente.criar("b", "CONTATO", campos), falha("TIPOS_CONTATO_NAO_MAPEADOS"));
+    assert.equal(m.chamadas.length, 0);
+  }
+});
+
+test("catálogo de tipos rejeita resposta truncada ou IDs sem precisão", async () => {
+  for (const dados of [pagina([{ id: Number.MAX_SAFE_INTEGER + 1, nome: "Cliente", perfilContato: 0 }]), pagina([], 1001), pagina([{ id: 1, nome: "Cliente" }])]) {
+    const m = mock([{ status: 200, dados }]);
+    await assert.rejects(m.cliente.listarTiposContato!("b", { offset: 0, limit: 100 }), falha("CONTRATO"));
+  }
+});
+
 function mock(respostas: (RespostaHttpSync | Error)[], substituir: Partial<DependenciasClienteSync> = {}) {
   const chamadas: RequisicaoSync[] = [];
   const tokens: { aplicativoId: string; rejeitado?: string }[] = [];

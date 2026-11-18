@@ -5,18 +5,24 @@ import { aplicativoTemJob } from "@/lib/aplicativo-jobs";
 import { aplicativoElegivelSync } from "@/lib/olist-sync/elegibilidade";
 import { criarCriptografiaSync, serializarCanonico } from "@/lib/olist-sync/cripto";
 import { avaliarReplicas, gerarHashesCampos, inferirOrigem, prepararPayload } from "@/lib/olist-sync/dominio";
-import { FalhaSync, type ClienteSync, type CamposSync, type JsonValue, type ObservacaoRemota, type ReplicaComparacao } from "@/lib/olist-sync/contrato";
+import { CAPACIDADES_SYNC, FalhaSync, type ClienteSync, type CamposSync, type EntidadeSync, type JsonValue, type ObservacaoRemota, type ReplicaComparacao } from "@/lib/olist-sync/contrato";
 import { entidadeSync, hashesJson, objetoJson, observacaoProtegida, proximoHorarioSync, prazoRetrySync } from "@/lib/olist-sync/validacao";
 import { cotaDaRespostaSync, proximaLeituraAuditoriaSync, type CotaLeituraSync } from "@/lib/olist-sync/ritmo";
+import { selecionarPlanoColeta, fecharCobertura, marcarAfetadosSync, transferirAfetadosPendentes, marcarPropostasDesatualizadas } from "@/repositories/olist-sync-cobertura-repository";
+import { lerPlanoColeta } from "@/lib/olist-sync/incremental";
+import { lerCatalogoTiposContatoSync, MAXIMO_TIPOS_CONTATO, payloadTiposContatoSync, resolverTiposContatoSync, VALIDADE_CATALOGO_TIPOS_MS, VERSAO_OBSERVACAO_CONTATO, type CatalogoTiposContatoSync } from "@/lib/olist-sync/tipos-contato";
 
 type Tx = Prisma.TransactionClient;
 type Repo = ReturnType<typeof criarOlistSyncRepository>;
 type Reserva = NonNullable<Awaited<ReturnType<Repo["reservarEtapa"]>>>;
 type Cripto = ReturnType<typeof criarCriptografiaSync>;
-const selecaoEstado = { id:true, registroId:true, aplicativoId:true, remoteId:true, chave:true, dadosCriptografados:true, ultimaExecucaoId:true, hashesJson:true, metadadosJson:true } as const;
-const jsonObservacao = (o: ObservacaoRemota): CamposSync => ({ id:o.id,chave:o.chave,nome:o.nome,situacao:o.situacao,alteradoEm:o.alteradoEm,completo:o.completo,campos:o.campos,pendencias:o.pendencias,...(o.tipo?{tipo:o.tipo}:{}),...(o.paiId?{paiId:o.paiId}:{}) });
+const selecaoEstado = { id:true, registroId:true, aplicativoId:true, remoteId:true, chave:true, dadosCriptografados:true, ultimaExecucaoId:true, hashesJson:true, metadadosJson:true, presente:true, detalhePendente:true, fingerprint:true } as const;
+const jsonObservacao = (o: ObservacaoRemota): CamposSync => ({ id:o.id,chave:o.chave,nome:o.nome,situacao:o.situacao,alteradoEm:o.alteradoEm,completo:o.completo,campos:o.campos,pendencias:o.pendencias,...(o.tipo?{tipo:o.tipo}:{}),...(o.paiId?{paiId:o.paiId}:{}),...(o.tiposContatoRemotos?{tiposContatoRemotos:o.tiposContatoRemotos.map(tipo=>({...tipo}))}:{}) });
 const contextoEstado = (grupo:string, app:string, entidade:string, id:string) => `${grupo}:estado:${app}:${entidade}:${id}`;
 const contextoOperacao = (grupo:string,id:string) => `${grupo}:operacao:${id}`;
+// A data remota pode mudar sem alterar o cadastro sincronizável. Identidade,
+// estrutura, situação e impedimentos também compõem a decisão, além dos campos.
+const conteudoObservacao = (o:ObservacaoRemota):CamposSync => ({...jsonObservacao(o),alteradoEm:null,pendencias:[...o.pendencias].sort()});
 const idAgendamento = (grupo:string, prevista:Date) => {
   const hash=createHash("sha256").update(`olist-sync:${grupo}:${prevista.toISOString()}`).digest("hex");
   return `${hash.slice(0,8)}-${hash.slice(8,12)}-5${hash.slice(13,16)}-a${hash.slice(17,20)}-${hash.slice(20,32)}`;
@@ -107,6 +113,33 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     }
   }
 
+  // Uma página por checkpoint: catálogo pequeno, durável e isolado por conta.
+  // As leituras protegidas reutilizam a mesma credencial para /info e o recurso.
+  async function paginaTipos(r:Reserva, app:string, grupo:string, conta:string, anterior:CatalogoTiposContatoSync|null):Promise<CatalogoTiposContatoSync> {
+    if(!cliente.listarTiposContato)throw new FalhaSync("TIPOS_CONTATO_NAO_MAPEADOS","O cliente não oferece o catálogo de tipos de contato.");
+    const pagina=await chamada(r,app,()=>cliente.listarTiposContato!(app,{offset:anterior?.offset??0,limit:100},{
+      validarConta:identidade=>criptografia().hash(identidade.documento,`${grupo}:conta`)===conta,
+      antesDeConsultar:async()=>{await aguardar(6_000);await repo.comReserva(r,(tx,atual)=>validarChamada(tx,atual,app));},
+    }),false,true);
+    const itens=[...(anterior?.itens??[]),...pagina.itens], total=pagina.total;
+    if(!Number.isSafeInteger(total)||total<0||total>MAXIMO_TIPOS_CONTATO||itens.length>total || !pagina.itens.length&&itens.length<total || anterior&&anterior.total!==total || new Set(itens.map(tipo=>tipo.id)).size!==itens.length)
+      throw new FalhaSync("CATALOGO_TIPOS_INCONSISTENTE","O catálogo de tipos mudou ou retornou páginas inconsistentes.");
+    const resultado=lerCatalogoTiposContatoSync({contaIdentidade:conta,coletadoEm:anterior?.coletadoEm??agora().toISOString(),offset:itens.length,total,itens},conta);
+    if(!resultado)throw new FalhaSync("CATALOGO_TIPOS_INCONSISTENTE","O catálogo de tipos de contato é inválido.");
+    return resultado;
+  }
+
+  async function garantirTiposAuditoria(r:Reserva, e:Awaited<ReturnType<typeof dadosReserva>>, cursor:CamposSync):Promise<CatalogoTiposContatoSync|null> {
+    if(e.entidade!=="CONTATO")return null;
+    const app=e.aplicativoId!, grupo=e.execucao.configuracaoId, conta=e.execucao.configuracao.participantes.find(p=>p.aplicativoId===app)?.contaIdentidade;
+    if(!conta)throw new FalhaSync("CONTA_NAO_VERIFICADA","Confirme a conta antes de consultar seus tipos.");
+    const catalogo=lerCatalogoTiposContatoSync(cursor.catalogoTiposContato,conta);
+    if(catalogo && catalogo.offset===catalogo.total)return catalogo;
+    const proximo=await paginaTipos(r,app,grupo,conta,catalogo);
+    await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{...cursor,catalogoTiposContato:{...proximo}}});
+    return null;
+  }
+
   async function pendencia(tx:Tx, entrada:{grupo:string;execucaoId:string;registroId?:string|null;aplicativoId?:string;entidade:string;tipo:string;chave:string;detalhes:JsonValue;severidade?:string}) {
     const c=criptografia(), chaveDedupe=c.hash(entrada.chave,`${entrada.grupo}:pendencia`);
     const anterior=await tx.olistSyncPendencia.findUnique({where:{configuracaoId_chaveDedupe:{configuracaoId:entrada.grupo,chaveDedupe}},select:{status:true,tipo:true,detalhesCriptografados:true}});
@@ -118,23 +151,52 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       update:{...dados,status:"AGUARDANDO_REVISAO",versao:{increment:1},decididoEm:null,decididoPor:null},select:{id:true}});
   }
 
-  async function gravarObservacao(tx:Tx, grupo:string, execucaoId:string, app:string, entidade:string, obs:ObservacaoRemota) {
-    const c=criptografia(), anterior=await tx.olistSyncEstado.findUnique({where:{aplicativoId_entidade_remoteId:{aplicativoId:app,entidade,remoteId:obs.id}},select:{configuracaoId:true,registroId:true,chave:true,metadadosJson:true}});
-    const vinculoManual=anterior?.configuracaoId===grupo && objetoJson(anterior.metadadosJson).vinculoManual===true && !!anterior.registroId && !!anterior.chave;
+  async function gravarObservacao(tx:Tx, grupo:string, execucaoId:string, app:string, entidade:EntidadeSync, obs:ObservacaoRemota, opcoes:{listagem?:boolean;completa?:boolean;aplicacao?:boolean;recomparar?:boolean}={}) {
+    const c=criptografia();
+    // Resumos só sinalizam trabalho. Nunca substituem o último detalhe válido.
+    if(!obs.completo) {
+      await tx.olistSyncEstado.upsert({where:{aplicativoId_entidade_remoteId:{aplicativoId:app,entidade,remoteId:obs.id},configuracaoId:grupo},
+        create:{configuracaoId:grupo,aplicativoId:app,entidade,remoteId:obs.id,detalhePendente:true,ultimaListagemExecucaoId:execucaoId,...(opcoes.completa?{ultimaCompletaExecucaoId:execucaoId}:{})},
+        update:{detalhePendente:true,ultimaListagemExecucaoId:execucaoId,...(opcoes.completa?{ultimaCompletaExecucaoId:execucaoId}:{})},select:{id:true}});
+      return;
+    }
+    const anterior=await tx.olistSyncEstado.findUnique({where:{aplicativoId_entidade_remoteId:{aplicativoId:app,entidade,remoteId:obs.id}},
+      select:{configuracaoId:true,registroId:true,chave:true,metadadosJson:true,fingerprint:true,presente:true,dadosCriptografados:true}});
+    if(anterior && anterior.configuracaoId!==grupo)throw new FalhaSync("ESCOPO_ALTERADO","A observação pertence a outro grupo.");
+    const vinculoManual=anterior && objetoJson(anterior.metadadosJson).vinculoManual===true && !!anterior.registroId && !!anterior.chave;
     const chave=vinculoManual?anterior.chave:obs.chave===null?null:entidade==="PRODUTO"?obs.chave:c.hash(obs.chave,`${grupo}:identidade:${entidade}`);
     const observada=vinculoManual?{...obs,chave:anterior.chave,pendencias:obs.pendencias.filter(p=>p!=="IDENTIDADE_AUSENTE_OU_INVALIDA"&&p!=="IDENTIDADE_REQUER_REVISAO")}:obs;
+    const fingerprint=c.hash(conteudoObservacao(observada),`${grupo}:observacao`);
+    let fingerprintAnterior=anterior?.fingerprint;
+    if(!fingerprintAnterior && anterior?.dadosCriptografados && objetoJson(anterior.metadadosJson).completo===true)
+      fingerprintAnterior=c.hash(conteudoObservacao(observacaoProtegida(c.decifrar(anterior.dadosCriptografados,contextoEstado(grupo,app,entidade,obs.id)))),`${grupo}:observacao`);
+    const mudou=!anterior?.presente || fingerprintAnterior!==fingerprint;
     const nome=entidade==="CONTATO"||entidade==="VENDEDOR"?"Cadastro protegido":obs.nome.slice(0,500);
     let registroId:string|null=vinculoManual?anterior.registroId:null;
-    if (chave && !vinculoManual) {
+    let registroDaChave:string|null=null;
+    if(chave && !vinculoManual) {
       const registro=await tx.olistSyncRegistro.upsert({where:{configuracaoId_entidade_chave:{configuracaoId:grupo,entidade,chave}},create:{configuracaoId:grupo,entidade,chave,nome},update:{},select:{id:true}});
+      registroDaChave=registro.id;
       const duplicado=await tx.olistSyncEstado.findFirst({where:{configuracaoId:grupo,registroId:registro.id,aplicativoId:app,remoteId:{not:obs.id}},select:{id:true}});
-      if (!duplicado) registroId=registro.id;
+      if(!duplicado)registroId=registro.id;
     }
+    const identidadeAlterada=!!anterior?.chave && anterior.chave!==chave;
+    // Duplicatas não recebem registroId, mas sua chave anterior também precisa
+    // ser reavaliada quando deixarem de pertencer àquela equivalência.
+    const registroAnterior=identidadeAlterada && !anterior?.registroId && anterior?.chave
+      ? await tx.olistSyncRegistro.findUnique({where:{configuracaoId_entidade_chave:{configuracaoId:grupo,entidade,chave:anterior.chave}},select:{id:true}}):null;
+    const dados={registroId,chave,nome,situacaoRemota:obs.situacao,fingerprint,presente:true,detalhePendente:false,
+      ultimaExecucaoId:execucaoId,verificadoEm:agora(),...(opcoes.listagem?{ultimaListagemExecucaoId:execucaoId}:{}),...(opcoes.completa?{ultimaCompletaExecucaoId:execucaoId}:{})};
+    const conteudo={hashesJson:gerarHashesCampos(obs.campos,v=>c.hash(v,`${grupo}:campo`)),metadadosJson:{completo:true,...(entidade==="CONTATO"?{versaoObservacaoContato:VERSAO_OBSERVACAO_CONTATO}:{}),...(vinculoManual?{vinculoManual:true}:{})},
+      dadosCriptografados:mudou?c.cifrar(jsonObservacao(observada),contextoEstado(grupo,app,entidade,obs.id)):anterior?.dadosCriptografados};
     await tx.olistSyncEstado.upsert({where:{aplicativoId_entidade_remoteId:{aplicativoId:app,entidade,remoteId:obs.id}},
-      create:{configuracaoId:grupo,registroId,aplicativoId:app,entidade,remoteId:obs.id,chave,nome,situacaoRemota:obs.situacao,status:obs.completo?"DIVERGENTE":"NAO_VERIFICADO",
-        hashesJson:gerarHashesCampos(obs.campos,v=>c.hash(v,`${grupo}:campo`)),metadadosJson:{completo:obs.completo,...(vinculoManual?{vinculoManual:true}:{})},dadosCriptografados:c.cifrar(jsonObservacao(observada),contextoEstado(grupo,app,entidade,obs.id)),ultimaExecucaoId:execucaoId,verificadoEm:agora()},
-      update:{registroId,chave,nome,situacaoRemota:obs.situacao,status:obs.completo?"DIVERGENTE":"NAO_VERIFICADO",hashesJson:gerarHashesCampos(obs.campos,v=>c.hash(v,`${grupo}:campo`)),metadadosJson:{completo:obs.completo,...(vinculoManual?{vinculoManual:true}:{})},dadosCriptografados:c.cifrar(jsonObservacao(observada),contextoEstado(grupo,app,entidade,obs.id)),ultimaExecucaoId:execucaoId,verificadoEm:agora()},select:{id:true}});
-    if (!chave) await pendencia(tx,{grupo,execucaoId,aplicativoId:app,entidade,tipo:"IDENTIDADE_REQUER_REVISAO",chave:`sem-chave:${app}:${entidade}:${obs.id}`,detalhes:{aplicativoId:app,remoteId:obs.id}});
+      create:{configuracaoId:grupo,aplicativoId:app,entidade,remoteId:obs.id,...dados,...conteudo,status:"DIVERGENTE"},
+      update:{...dados,...(mudou?{...conteudo,status:"DIVERGENTE"}:{})},select:{id:true}});
+    if((mudou || opcoes.recomparar) && !opcoes.aplicacao) {
+      await marcarAfetadosSync(tx,{grupo,execucao:execucaoId,entidade,registroIds:[anterior?.registroId,registroAnterior?.id,registroId,registroDaChave].filter((id):id is string=>!!id),identidadeAlterada});
+      if(mudou)await contar(tx,execucaoId,"alterados");
+    }
+    if(!chave && mudou)await pendencia(tx,{grupo,execucaoId,aplicativoId:app,entidade,tipo:"IDENTIDADE_REQUER_REVISAO",chave:`sem-chave:${app}:${entidade}:${obs.id}`,detalhes:{aplicativoId:app,remoteId:obs.id}});
   }
 
   async function listar(r:Reserva) {
@@ -151,17 +213,30 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       });
       await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{...cursor,identidadeVerificada:true}}); return;
     }
-    // Passagem completa é deliberada até o filtro incremental ser validado por conta.
+    let plano=lerPlanoColeta(cursor.plano);
+    if(!plano) {
+      const conta=config.participantes.find(p=>p.aplicativoId===app)?.contaIdentidade;
+      if(!conta)throw new FalhaSync("CONTA_NAO_VERIFICADA","Confirme a conta antes da coleta.");
+      plano=await repo.comReserva(r,tx=>selecionarPlanoColeta(tx,{grupo:config.id,execucao:e.execucaoId,aplicativoId:app,entidade,
+        participantesIds:config.participantes.map(p=>p.aplicativoId),contaIdentidade:conta,completa:e.execucao.completa,incrementalHabilitado:true,
+        iniciadaEm:agora(),versaoConfiguracao:e.execucao.versaoConfiguracao}));
+      await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{...cursor,plano:{...plano},offset:0}});return;
+    }
+    if(entidade==="CONTATO" && !await garantirTiposAuditoria(r,e,cursor))return;
     const offset=typeof cursor.offset==="number"?cursor.offset:0;
-    const pagina=await chamada(r,app,()=>cliente.listar(app,entidade,{offset,limit:100}));
-    // Página curta não prova ausência quando o total ainda anuncia outros itens.
-    if(pagina.total===null || (pagina.itens.length===0 && offset<pagina.total)) throw new FalhaSync("COBERTURA_INCOMPLETA","A listagem não comprova a cobertura completa dos cadastros.");
+    const pagina=await chamada(r,app,()=>cliente.listar(app,entidade,{offset,limit:100,...(plano.desde?{desde:plano.desde,incrementalValidado:true}:{})}));
+    if(pagina.total===null || (pagina.itens.length===0 && offset<pagina.total) || (typeof cursor.total==="number" && cursor.total!==pagina.total) || offset+pagina.itens.length>pagina.total)
+      throw new FalhaSync("COBERTURA_INCOMPLETA","A paginação mudou ou não comprova a cobertura da janela. Execute uma nova auditoria.");
     const terminou=offset+pagina.itens.length>=pagina.total;
     const cota=cotaDaRespostaSync(pagina);
-    const proximoCursor={...(terminou?{}:{identidadeVerificada:true,offset:offset+pagina.itens.length}),
+    const proximoCursor={...cursor,plano:{...plano},total:pagina.total,offset:offset+pagina.itens.length,
       ...(cota?{cotaLeitura:{...cota,observadaEm:agora().toISOString()}}:{})};
     await repo.comReserva(r,async tx=>{
-      for(const obs of pagina.itens) await gravarObservacao(tx,config.id,e.execucaoId,app,entidade,obs);
+      for(const obs of pagina.itens)await gravarObservacao(tx,config.id,e.execucaoId,app,entidade,obs,{listagem:true,completa:plano.modo==="COMPLETA",recomparar:plano.watermarkAnterior===null});
+      if(terminou) {
+        const unicos=await tx.olistSyncEstado.count({where:{configuracaoId:config.id,aplicativoId:app,entidade,ultimaListagemExecucaoId:e.execucaoId}});
+        if(unicos!==pagina.total)throw new FalhaSync("COBERTURA_INCOMPLETA","A listagem repetiu registros ou omitiu páginas. Execute uma nova auditoria.");
+      }
       await contar(tx,e.execucaoId,"listados",pagina.itens.length);
       await contar(tx,e.execucaoId,"analisados",pagina.itens.filter(item=>item.completo).length);
       await tx.olistSyncEtapa.update({where:{id:e.id},data:{...(terminou?{fase:"DETALHAR"}:{}),cursorJson:proximoCursor},select:{id:true}});
@@ -170,32 +245,84 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
   }
 
   async function detalhar(r:Reserva) {
-    const e=await dadosReserva(r), app=e.aplicativoId!, grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade);
-    const estado=await db.olistSyncEstado.findFirst({where:{configuracaoId:grupo,aplicativoId:app,entidade,ultimaExecucaoId:e.execucaoId,metadadosJson:{path:["completo"],equals:false}},orderBy:{id:"asc"},select:{remoteId:true}});
+    const e=await dadosReserva(r), app=e.aplicativoId!, grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), cursor=objetoJson(e.cursorJson);
+    const plano=lerPlanoColeta(cursor.plano);
+    if(!plano) {
+      // Checkpoints antigos não comprovam janela/presença. Reiniciar somente a
+      // coleta dessa conta, mantendo os últimos detalhes já persistidos.
+      await repo.comReserva(r,tx=>tx.olistSyncEtapa.update({where:{id:e.id},data:{fase:"LISTAR",cursorJson:{}},select:{id:true}}));
+      await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{}});return;
+    }
+    const catalogo=await garantirTiposAuditoria(r,e,cursor);
+    if(entidade==="CONTATO" && !catalogo)return;
+    // Uma interrupção pode deixar detalhes pendentes fora do próximo delta.
+    // A dívida pertence à conta/entidade, não apenas à execução que a descobriu.
+    const pendente=await db.olistSyncEstado.findFirst({where:{configuracaoId:grupo,aplicativoId:app,entidade,detalhePendente:true},orderBy:{id:"asc"},select:{id:true,remoteId:true,registroId:true,chave:true}});
+    const ausente=!pendente && plano.modo==="COMPLETA"?await db.olistSyncEstado.findFirst({where:{configuracaoId:grupo,aplicativoId:app,entidade,presente:true,
+      OR:[{ultimaCompletaExecucaoId:null},{ultimaCompletaExecucaoId:{not:e.execucaoId}}]},orderBy:{id:"asc"},select:{id:true,remoteId:true,registroId:true,chave:true}}):null;
+    const estado=pendente??ausente;
     if(estado) {
-      const obs=await chamada(r,app,()=>cliente.detalhar(app,entidade,estado.remoteId));
-      await repo.comReserva(r,async tx=>{await gravarObservacao(tx,grupo,e.execucaoId,app,entidade,obs);await contar(tx,e.execucaoId,"analisados");});
-      await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{}}); return;
+      // Entidades sem GET individual não têm exclusão comprovada pela ausência
+      // da lista. Conservamos o snapshot, bloqueando a decisão para revisão.
+      if(ausente && !CAPACIDADES_SYNC[entidade].detalhar) {
+        await repo.comReserva(r,async tx=>{
+          await tx.olistSyncEstado.update({where:{id:estado.id},data:{ultimaCompletaExecucaoId:e.execucaoId},select:{id:true}});
+          await pendencia(tx,{grupo,execucaoId:e.execucaoId,registroId:estado.registroId,aplicativoId:app,entidade,tipo:"AUSENCIA_NAO_CONFIRMADA",chave:`ausencia:${app}:${entidade}:${estado.remoteId}`,detalhes:{remoteId:estado.remoteId}});
+        });
+      } else {
+        let obs:ObservacaoRemota|null=null;
+        try {obs=await chamada(r,app,()=>cliente.detalhar(app,entidade,estado.remoteId));}
+        catch(error) {if(!(error instanceof FalhaSync) || error.codigo!=="OLIST_404")throw error;}
+        if(obs && catalogo)obs=resolverTiposContatoSync(obs,catalogo.itens);
+        await repo.comReserva(r,async tx=>{
+          if(obs)await gravarObservacao(tx,grupo,e.execucaoId,app,entidade,obs,{completa:plano.modo==="COMPLETA",recomparar:plano.watermarkAnterior===null});
+          else {
+            await tx.olistSyncEstado.update({where:{id:estado.id},data:{presente:false,detalhePendente:false,ultimaExecucaoId:e.execucaoId,verificadoEm:agora(),...(plano.modo==="COMPLETA"?{ultimaCompletaExecucaoId:e.execucaoId}:{})},select:{id:true}});
+            const registro=estado.chave?await tx.olistSyncRegistro.findUnique({where:{configuracaoId_entidade_chave:{configuracaoId:grupo,entidade,chave:estado.chave}},select:{id:true}}):null;
+            await marcarAfetadosSync(tx,{grupo,execucao:e.execucaoId,entidade,registroIds:[estado.registroId,registro?.id].filter((id):id is string=>!!id)});
+            await contar(tx,e.execucaoId,"alterados");
+          }
+          await contar(tx,e.execucaoId,"analisados");await contar(tx,e.execucaoId,"detalhados");
+        });
+      }
+      await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor});return;
     }
     await repo.comReserva(r,async tx=>{
       await tx.olistSyncEtapa.update({where:{id:e.id},data:{status:"CONCLUIDA",leaseToken:null,leaseAte:null},select:{id:true}});
       const faltam=await tx.olistSyncEtapa.count({where:{execucaoId:e.execucaoId,entidade,fase:{in:["LISTAR","DETALHAR"]},status:{not:"CONCLUIDA"}}});
-      if(!faltam) await tx.olistSyncEtapa.createMany({data:[{execucaoId:e.execucaoId,entidade,fase:"COMPARAR"}],skipDuplicates:true});
+      if(!faltam)await tx.olistSyncEtapa.createMany({data:[{execucaoId:e.execucaoId,entidade,fase:"COMPARAR"}],skipDuplicates:true});
     });
   }
 
   async function comparar(r:Reserva) {
     const e=await dadosReserva(r), grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
-    const registros=await db.olistSyncRegistro.findMany({where:{configuracaoId:grupo,entidade,...(typeof cursor.ultimoId==="string"?{id:{gt:cursor.ultimoId}}:{})},orderBy:{id:"asc"},take:25,
-      select:{id:true,chave:true,nome:true,hashesBaseJson:true,revisao:true,origemRegistradaEm:true,origemTipo:true,aplicativoOrigemId:true}});
+    await repo.comReserva(r,tx=>transferirAfetadosPendentes(tx,{grupo,execucao:e.execucaoId,entidades:[entidade]}));
+    await repo.comReserva(r,tx=>marcarPropostasDesatualizadas(tx,{grupo,execucao:e.execucaoId,entidade,versaoConfiguracao:e.execucao.versaoConfiguracao}));
+    const etapas=await db.olistSyncEtapa.findMany({where:{execucaoId:e.execucaoId,entidade,fase:"DETALHAR",status:"CONCLUIDA"},select:{aplicativoId:true,cursorJson:true},take:20});
+    const planos=etapas.map(etapa=>({app:etapa.aplicativoId,plano:lerPlanoColeta(objetoJson(etapa.cursorJson).plano)}));
+    if(e.execucao.configuracao.participantes.some(p=>!planos.some(item=>item.app===p.aplicativoId && item.plano)))
+      throw new FalhaSync("COBERTURA_INCOMPLETA","Todos os participantes precisam concluir a coleta antes da comparação.");
+    const prova=planos[0].plano!;
+    const afetados=await db.olistSyncAfetado.findMany({where:{configuracaoId:grupo,execucaoId:e.execucaoId,entidade,processadoEm:null},orderBy:{registroId:"asc"},take:25,
+      select:{registroId:true,identidadeAlterada:true,registro:{select:{id:true,chave:true,nome:true,hashesBaseJson:true,revisao:true,origemRegistradaEm:true,origemTipo:true,aplicativoOrigemId:true}}}});
+    const registros=afetados.map(a=>a.registro);
+    const identidadesPendentes=registros.length?await db.olistSyncPendencia.findMany({where:{configuracaoId:grupo,entidade,registroId:{in:registros.map(r=>r.id)},tipo:"IDENTIDADE_ALTERADA",status:"AGUARDANDO_REVISAO"},select:{registroId:true},take:25}):[];
+    // Uma projeção limitada por lote evita buscar réplicas para cada registro.
+    const estadosLote=registros.length?await db.olistSyncEstado.findMany({where:{configuracaoId:grupo,entidade,chave:{in:registros.map(r=>r.chave)},aplicativoId:{in:e.execucao.configuracao.participantes.map(p=>p.aplicativoId)}},orderBy:[{chave:"asc"},{id:"asc"}],take:5001,select:selecaoEstado}):[];
+    if(estadosLote.length>5000)throw new FalhaSync("LIMITE_OBSERVACOES","A quantidade de equivalências exige revisão antes de comparar.");
     for(const registro of registros) {
-      const estados=await db.olistSyncEstado.findMany({where:{configuracaoId:grupo,entidade,chave:registro.chave,aplicativoId:{in:e.execucao.configuracao.participantes.map(p=>p.aplicativoId)}},orderBy:[{ultimaExecucaoId:"desc"},{id:"asc"}],take:201,select:selecaoEstado});
+      const estados=estadosLote.filter(s=>s.chave===registro.chave);
+      const identidadeAlterada=afetados.find(a=>a.registroId===registro.id)?.identidadeAlterada===true || identidadesPendentes.some(p=>p.registroId===registro.id);
       const replicas:ReplicaComparacao[]=e.execucao.configuracao.participantes.map(p=>{
-        const estado=estados.find(s=>s.aplicativoId===p.aplicativoId && s.ultimaExecucaoId===e.execucaoId)??estados.find(s=>s.aplicativoId===p.aplicativoId), atual=estado?.ultimaExecucaoId===e.execucaoId;
-        const observacao=atual&&estado?.dadosCriptografados?observacaoProtegida(c.decifrar(estado.dadosCriptografados,contextoEstado(grupo,p.aplicativoId,entidade,estado.remoteId))):null;
-        if(observacao && estados.filter(s=>s.aplicativoId===p.aplicativoId && s.ultimaExecucaoId===e.execucaoId).length>1) observacao.pendencias.push("IDENTIDADE_DUPLICADA");
+        const candidatos=estados.filter(s=>s.aplicativoId===p.aplicativoId && s.presente);
+        const estado=candidatos.find(s=>s.registroId===registro.id)??candidatos[0];
+        if(estado && (estado.detalhePendente || !estado.dadosCriptografados || objetoJson(estado.metadadosJson).completo!==true))
+          throw new FalhaSync("COBERTURA_INCOMPLETA","Uma réplica ainda não possui observação completa.");
+        const observacao=estado?.dadosCriptografados?observacaoProtegida(c.decifrar(estado.dadosCriptografados,contextoEstado(grupo,p.aplicativoId,entidade,estado.remoteId))):null;
+        if(observacao && candidatos.length>1)observacao.pendencias.push("IDENTIDADE_DUPLICADA");
+        if(observacao && identidadeAlterada)observacao.pendencias.push("IDENTIDADE_ALTERADA");
         if(observacao && estados.length>200)observacao.pendencias.push("LIMITE_OBSERVACOES");
-        return {aplicativoId:p.aplicativoId,observacao,existia:!!estado&&!atual};
+        return {aplicativoId:p.aplicativoId,observacao,existia:estados.some(s=>s.aplicativoId===p.aplicativoId && !s.presente)};
       });
       if(entidade==="PRODUTO" && replicas.some(p=>!p.observacao) && registro.nome) {
         // pg_trgm usa o índice GIN; identidade continua sendo exclusivamente o SKU.
@@ -219,13 +346,13 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         // A confirmação de uma escrita anterior não pode sobrescrever essa decisão.
         await tx.olistSyncRegistro.update({where:{id:registro.id},data:{revisao},select:{id:true}});
         if(!registro.origemRegistradaEm) {
-          const origem=inferirOrigem(replicas,true), remoto=replicas.find(p=>p.aplicativoId===origem.aplicativoId)?.observacao?.id;
+          const origem=inferirOrigem(replicas,planos.every(item=>item.plano?.modo==="COMPLETA")), remoto=replicas.find(p=>p.aplicativoId===origem.aplicativoId)?.observacao?.id;
           await tx.olistSyncRegistro.update({where:{id:registro.id},data:{origemTipo:origem.tipo,aplicativoOrigemId:origem.aplicativoId,registroOlistOrigemId:remoto,origemRegistradaEm:agora(),origemExecucaoId:e.execucaoId},select:{id:true}});
         }
         await tx.olistSyncEstado.updateMany({where:{configuracaoId:grupo,entidade,chave:registro.chave,aplicativoId:{in:replicas.map(p=>p.aplicativoId)}},data:{status:decisao.status==="PROPAGAR"?"DIVERGENTE":decisao.status}});
         if(decisao.status==="AGUARDANDO_REVISAO") {
-          const observacoes=Object.fromEntries(replicas.map(p=>[p.aplicativoId,p.observacao?{remoteId:p.observacao.id,hashes:gerarHashesCampos(p.observacao.campos,v=>c.hash(v,`${grupo}:campo`)),situacao:p.observacao.situacao}:null]));
-          await pendencia(tx,{grupo,execucaoId:e.execucaoId,registroId:registro.id,entidade,tipo:decisao.motivos[0]??"CONFLITO",chave:`registro:${registro.id}`,detalhes:{motivos:decisao.motivos,observacoes},severidade:decisao.motivos.some(m=>/DUPLIC|IDENTIDADE|PROTEGIDO/.test(m))?"CRITICA":"ALTA"});
+          const observacoes=Object.fromEntries(replicas.map(p=>[p.aplicativoId,p.observacao?{remoteId:p.observacao.id,hashes:gerarHashesCampos(p.observacao.campos,v=>c.hash(v,`${grupo}:campo`)),situacao:p.observacao.situacao,fingerprint:estados.find(s=>s.aplicativoId===p.aplicativoId && s.remoteId===p.observacao?.id)?.fingerprint??null}:null]));
+          await pendencia(tx,{grupo,execucaoId:e.execucaoId,registroId:registro.id,entidade,tipo:decisao.motivos[0]??"CONFLITO",chave:`registro:${registro.id}`,detalhes:{motivos:decisao.motivos,observacoes,cobertura:{assinaturaEscopo:prova.assinaturaEscopo,versaoContrato:prova.versaoContrato}},severidade:decisao.motivos.some(m=>/DUPLIC|IDENTIDADE|PROTEGIDO/.test(m))?"CRITICA":"ALTA"});
           await contar(tx,e.execucaoId,"bloqueados");
           return;
         }
@@ -241,7 +368,20 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         let payload:CamposSync;
         try { payload=prepararPayload(entidade,decisao.campos,{operacao:decisao.aplicativosCriar.length?"CRIAR":"ATUALIZAR"}); }
         catch(error) { await pendencia(tx,{grupo,execucaoId:e.execucaoId,registroId:registro.id,entidade,tipo:error instanceof FalhaSync?error.codigo:"PAYLOAD_INVALIDO",chave:`registro:${registro.id}`,detalhes:{}});return; }
-        void payload;
+        if(entidade==="CONTATO") {
+          try {
+            for(const destino of [...decisao.aplicativosCriar,...decisao.aplicativosAtualizar]) {
+              const conta=e.execucao.configuracao.participantes.find(p=>p.aplicativoId===destino)?.contaIdentidade;
+              const catalogo=conta?lerCatalogoTiposContatoSync(objetoJson(etapas.find(p=>p.aplicativoId===destino)?.cursorJson).catalogoTiposContato,conta):null;
+              payloadTiposContatoSync(payload,catalogo?.offset===catalogo?.total?catalogo?.itens:undefined);
+            }
+          } catch(error) {
+            if(!(error instanceof FalhaSync))throw error;
+            await pendencia(tx,{grupo,execucaoId:e.execucaoId,registroId:registro.id,entidade,tipo:error.codigo,chave:`registro:${registro.id}`,detalhes:{}});
+            await contar(tx,e.execucaoId,"bloqueados");return;
+          }
+          await tx.olistSyncPendencia.updateMany({where:{configuracaoId:grupo,registroId:registro.id,status:"AGUARDANDO_REVISAO",tipo:{in:["REFERENCIA_TIPOS_CONTATO","TIPOS_CONTATO_NAO_MAPEADOS","TIPOS_CONTATO_AMBIGUOS"]}},data:{status:"RESOLVIDA",decididoEm:agora()}});
+        }
         for(const destino of [...decisao.aplicativosCriar,...decisao.aplicativosAtualizar]) {
           const id=randomUUID(), acao=decisao.aplicativosCriar.includes(destino)?"CRIAR":"ATUALIZAR";
           const observacaoDestino=replicas.find(p=>p.aplicativoId===destino)?.observacao;
@@ -251,20 +391,24 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
           const fonte=fontes[0]??replicas.find(p=>p.observacao)?.aplicativoId;
           if(!fonte)continue;
           const atuais=Object.fromEntries(replicas.map(p=>[p.aplicativoId,p.observacao?{remoteId:p.observacao.id,hashes:gerarHashesCampos(p.observacao.campos,v=>c.hash(v,`${grupo}:campo`))}:null]));
-          await tx.olistSyncOperacao.create({data:{id,configuracaoId:grupo,registroId:registro.id,execucaoId:e.execucaoId,sourceAppId:fonte,destinoAppId:destino,acao,revisao,status:"AUTORIZADA",precondicoesJson:{replicas:atuais,fontesPorCampo:decisao.fontesPorCampo,contas:Object.fromEntries(e.execucao.configuracao.participantes.map(p=>[p.aplicativoId,p.contaIdentidade])),versaoConfiguracao:e.execucao.versaoConfiguracao},payloadCriptografado:c.cifrar(decisao.campos,contextoOperacao(grupo,id))},select:{id:true}});
+          await tx.olistSyncOperacao.create({data:{id,configuracaoId:grupo,registroId:registro.id,execucaoId:e.execucaoId,sourceAppId:fonte,destinoAppId:destino,acao,revisao,status:"AUTORIZADA",precondicoesJson:{replicas:atuais,fontesPorCampo:decisao.fontesPorCampo,contas:Object.fromEntries(e.execucao.configuracao.participantes.map(p=>[p.aplicativoId,p.contaIdentidade])),versaoConfiguracao:e.execucao.versaoConfiguracao,...(entidade==="CONTATO"?{versaoObservacaoContato:VERSAO_OBSERVACAO_CONTATO}:{})},payloadCriptografado:c.cifrar(decisao.campos,contextoOperacao(grupo,id))},select:{id:true}});
         }
         } finally {
-          // O cursor avança junto com a decisão: uma retomada não recria propostas já confirmadas.
-          await tx.olistSyncEtapa.update({where:{id:r.id},data:{cursorJson:{ultimoId:registro.id}},select:{id:true}});
+          // A decisão e o consumo do item são atômicos, inclusive em conflitos.
+          await tx.olistSyncAfetado.updateMany({where:{execucaoId:e.execucaoId,entidade,registroId:registro.id,configuracaoId:grupo},data:{processadoEm:agora()}});
+          await contar(tx,e.execucaoId,"comparados");
         }
       });
     }
-    if(registros.length===25) {await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{ultimoId:registros[24].id}});return;}
+    if(registros.length===25) {await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor});return;}
     await repo.comReserva(r,async tx=>{
-      if(e.execucao.modo==="AUDITAR_E_APLICAR") {
-        for(const p of e.execucao.configuracao.participantes) await tx.olistSyncEtapa.createMany({data:[{execucaoId:e.execucaoId,entidade,aplicativoId:p.aplicativoId,fase:"APLICAR"}],skipDuplicates:true});
-      }
+      // Fechamento e watermarks na mesma transação: falhas não certificam janela.
       await tx.olistSyncEtapa.update({where:{id:e.id},data:{status:"CONCLUIDA",leaseToken:null,leaseAte:null},select:{id:true}});
+      if(!await fecharCobertura(tx,{grupo,execucao:e.execucaoId,entidade,agora:agora()}))
+        throw new FalhaSync("COBERTURA_INCOMPLETA","Não foi possível confirmar a cobertura de todos os participantes.");
+      if(e.execucao.modo==="AUDITAR_E_APLICAR") {
+        for(const p of e.execucao.configuracao.participantes)await tx.olistSyncEtapa.createMany({data:[{execucaoId:e.execucaoId,entidade,aplicativoId:p.aplicativoId,fase:"APLICAR"}],skipDuplicates:true});
+      }
     });
   }
 
@@ -272,7 +416,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     const e=await dadosReserva(r), grupo=e.execucao.configuracaoId, app=e.aplicativoId!, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
     const operacao=await db.olistSyncOperacao.findFirst({where:{configuracaoId:grupo,destinoAppId:app,registro:{entidade},...(typeof cursor.operacaoId==="string"?{id:cursor.operacaoId,status:{in:["AUTORIZADA","EM_APLICACAO","VERIFICANDO","RESULTADO_INCONCLUSIVO"]}}:{OR:[{status:{in:["AUTORIZADA","EM_APLICACAO","VERIFICANDO"]}},{status:"RESULTADO_INCONCLUSIVO",execucaoId:{not:e.execucaoId}}]})},orderBy:{id:"asc"},
       select:{id:true,registroId:true,sourceAppId:true,revisao:true,status:true,acao:true,tentativas:true,precondicoesJson:true,payloadCriptografado:true,remoteId:true,registro:{select:{revisao:true}}}});
-    const checkpoint=(valor:CamposSync)=>repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:valor});
+    const catalogos=objetoJson(cursor.catalogosTiposContato);
+    const checkpoint=(valor:CamposSync)=>repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{...valor,...(entidade==="CONTATO"?{catalogosTiposContato:catalogos}:{})}});
     if(!operacao) {await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{},...(typeof cursor.operacaoId==="string"?{}:{status:"CONCLUIDA"})});return;}
     const plan=objetoJson(operacao.precondicoesJson), replicas=objetoJson(plan.replicas);
     const reconciliando=operacao.status!=="AUTORIZADA";
@@ -286,14 +431,19 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     };
     // Reconciliação apura um efeito já enviado; uma revisão nova não apaga essa incerteza.
     if(!campos || !reconciliando&&(operacao.registro.revisao!==operacao.revisao || plan.versaoConfiguracao!==e.execucao.versaoConfiguracao)) {await bloquear("PROPOSTA_OBSOLETA",reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return;}
+    if(entidade==="CONTATO" && !reconciliando && plan.versaoObservacaoContato!==VERSAO_OBSERVACAO_CONTATO) {await bloquear("CONTRATO_CONTATO_DESATUALIZADO");return;}
     if(operacao.status==="AUTORIZADA") {
-      const total=await db.olistSyncOperacao.count({where:{configuracaoId:grupo,destinoAppId:app,registro:{entidade},status:"AUTORIZADA"}});
-      if(total>e.execucao.configuracao.limiteAlteracoes) {
+      // O limite é um orçamento por execução/entidade/destino. Um catálogo
+      // maior não torna suas equivalências ambíguas nem exige revisão humana.
+      const consumidas=await db.olistSyncOperacao.count({where:{configuracaoId:grupo,execucaoId:e.execucaoId,destinoAppId:app,registro:{entidade},tentativas:{gt:0},status:{not:"AUTORIZADA"}}});
+      if(consumidas>=e.execucao.configuracao.limiteAlteracoes) {
+        const verificar=await db.olistSyncOperacao.findFirst({where:{configuracaoId:grupo,destinoAppId:app,registro:{entidade},OR:[{status:{in:["EM_APLICACAO","VERIFICANDO"]}},{status:"RESULTADO_INCONCLUSIVO",execucaoId:{not:e.execucaoId}}]},orderBy:{id:"asc"},select:{id:true}});
+        if(verificar) {await checkpoint({operacaoId:verificar.id,fase:"VERIFICAR"});return;}
         await repo.comReserva(r,async tx=>{
-          await tx.olistSyncOperacao.updateMany({where:{configuracaoId:grupo,destinoAppId:app,registro:{entidade},status:"AUTORIZADA"},data:{status:"PROPOSTA",erroCodigo:"LIMITE_ALTERACOES"}});
-          await pendencia(tx,{grupo,execucaoId:e.execucaoId,aplicativoId:app,entidade,tipo:"LIMITE_ALTERACOES",chave:`limite:${e.execucaoId}:${app}:${entidade}`,detalhes:{quantidade:total,limite:e.execucao.configuracao.limiteAlteracoes}});
+          await tx.olistSyncEtapa.update({where:{id:e.id},data:{status:"CONCLUIDA",leaseToken:null,leaseAte:null},select:{id:true}});
+          await tx.olistSyncEvento.create({data:{configuracaoId:grupo,execucaoId:e.execucaoId,tipo:"LIMITE_EXECUCAO_ATINGIDO",metadadosJson:{aplicativoId:app,entidade,consumidas,limite:e.execucao.configuracao.limiteAlteracoes}},select:{id:true}});
         });
-        await checkpoint({});return;
+        return;
       }
     }
     const fontes=Object.keys(replicas).filter(id=>id!==app && replicas[id]!==null).sort();
@@ -317,6 +467,26 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         await bloquear(error.codigo,reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return null;
       }
     }
+    const catalogoConta=(alvo:string)=>lerCatalogoTiposContatoSync(catalogos[alvo],String(identidadeEsperada(alvo)??""));
+    if(entidade==="CONTATO") {
+      for(const alvo of reconciliando?[app]:[...fontes,app]) {
+        const conta=identidadeEsperada(alvo);
+        if(typeof conta!=="string" || !conta) {await bloquear("CONTA_NAO_VERIFICADA",reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return;}
+        let catalogo=catalogoConta(alvo);
+        if(catalogo && (agora().getTime()-Date.parse(catalogo.coletadoEm)>VALIDADE_CATALOGO_TIPOS_MS || Date.parse(catalogo.coletadoEm)>agora().getTime()))catalogo=null;
+        if(!catalogo || catalogo.offset!==catalogo.total) {
+          try {catalogos[alvo]={...await paginaTipos(r,alvo,grupo,conta,catalogo)};}
+          catch(error) {
+            if(error instanceof FalhaSync && !error.recuperavel && !["JOB_PAUSADO","AGUARDANDO_CONTA","PRONTIDAO_PENDENTE","LEASE_PERDIDA"].includes(error.codigo)) {await bloquear(error.codigo,reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return;}
+            throw error;
+          }
+          await checkpoint({...cursor,catalogosTiposContato:catalogos});return;
+        }
+      }
+      try {payloadTiposContatoSync(campos,catalogoConta(app)?.itens);}
+      catch(error) {if(!(error instanceof FalhaSync))throw error;await bloquear(error.codigo,reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return;}
+    }
+    const observarConta=(alvo:string,obs:ObservacaoRemota)=>entidade==="CONTATO"?resolverTiposContatoSync(obs,catalogoConta(alvo)?.itens??[]):obs;
     const observacaoPermitida=(obs:ObservacaoRemota)=>obs.completo && obs.chave===(entidade==="PRODUTO"?campos.sku:campos.cpfCnpj)
       && (entidade==="PRODUTO"?obs.situacao==="A":["A","B"].includes(obs.situacao))
       && !obs.pendencias.some(p=>!p.startsWith("REFERENCIA_")&&p!=="IMAGENS_REQUEREM_VALIDACAO");
@@ -330,7 +500,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       if(fonte) {
         const anterior=objetoJson(replicas[fonte]);
         if(typeof anterior.remoteId!=="string") {await bloquear("FONTE_INVALIDA");return;}
-        const obs=await consultar(fonte,()=>cliente.detalhar(fonte,entidade,anterior.remoteId as string,protegerConsulta(fonte)));
+        const remoto=await consultar(fonte,()=>cliente.detalhar(fonte,entidade,anterior.remoteId as string,protegerConsulta(fonte)));
+        const obs=remoto?observarConta(fonte,remoto):null;
         if(!obs)return;
         const hashes=serializarCanonico(gerarHashesCampos(obs.campos,v=>c.hash(v,`${grupo}:campo`)));
         // Outra réplica pode já ter recebido a mesma revisão. Aceitar apenas o
@@ -354,7 +525,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         }
       } else {
         if(typeof anterior.remoteId!=="string") {await bloquear("DESTINO_INVALIDO");return;}
-        const obs=await consultar(app,()=>cliente.detalhar(app,entidade,anterior.remoteId as string,protegerConsulta(app)));
+        const remoto=await consultar(app,()=>cliente.detalhar(app,entidade,anterior.remoteId as string,protegerConsulta(app)));
+        const obs=remoto?observarConta(app,remoto):null;
         if(!obs)return;
         if(!observacaoPermitida(obs) || serializarCanonico(gerarHashesCampos(obs.campos,v=>c.hash(v,`${grupo}:campo`)))!==serializarCanonico(hashesJson(anterior.hashes))) {await bloquear("DESTINO_ALTERADO");return;}
       }
@@ -368,6 +540,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       try {
         const resultado=await chamada(r,app,async()=>{
           const protecao={
+            ...(entidade==="CONTATO"?{catalogoTiposContato:catalogoConta(app)?.itens}:{}),
             validarConta:(identidade:{documento:string})=>c.hash(identidade.documento,`${grupo}:conta`)===identidadeEsperada(app),
             antesDeEscrever:async()=>{
               await aguardar(6_000);
@@ -414,7 +587,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       await repo.comReserva(r,tx=>tx.olistSyncOperacao.update({where:{id:operacao.id},data:{remoteId:remotoId,status:"VERIFICANDO"},select:{id:true}}));
       await checkpoint({operacaoId:operacao.id,fase:"VERIFICAR"});return;
     }
-    const observado=await consultar(app,()=>cliente.detalhar(app,entidade,remotoId!,protegerConsulta(app)));
+    const remoto=await consultar(app,()=>cliente.detalhar(app,entidade,remotoId!,protegerConsulta(app)));
+    const observado=remoto?observarConta(app,remoto):null;
     if(!observado)return;
     const obtidos=gerarHashesCampos(observado.campos,v=>c.hash(v,`${grupo}:campo`));
     if(!observacaoPermitida(observado) || Object.keys(hashesEsperados).some(campo=>hashesEsperados[campo]!==obtidos[campo])) {await bloquear("VERIFICACAO_DIVERGENTE","RESULTADO_INCONCLUSIVO");return;}
@@ -423,7 +597,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       const registro=await tx.olistSyncRegistro.findUniqueOrThrow({where:{id:operacao.registroId},select:{revisao:true}});
       const revisaoAtual=registro.revisao===operacao.revisao;
       if(revisaoAtual) {
-        await gravarObservacao(tx,grupo,e.execucaoId,app,entidade,observado);
+        await gravarObservacao(tx,grupo,e.execucaoId,app,entidade,observado,{aplicacao:true});
         await tx.olistSyncEstado.updateMany({where:{configuracaoId:grupo,registroId:operacao.registroId,aplicativoId:app},data:{status:"SINCRONIZADO",revisaoAplicada:operacao.revisao,ultimaFonteAppId:operacao.sourceAppId}});
         await tx.olistSyncRegistro.update({where:{id:operacao.registroId},data:{ultimaFonteAppId:operacao.sourceAppId},select:{id:true}});
       }
@@ -434,6 +608,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         await tx.olistSyncEstado.updateMany({where:{registroId:operacao.registroId,aplicativoId:{in:e.execucao.configuracao.participantes.map(p=>p.aplicativoId)},hashesJson:{equals:hashesEsperados}},data:{status:"SINCRONIZADO",revisaoAplicada:operacao.revisao}});
       }
       await tx.olistSyncPendencia.updateMany({where:{configuracaoId:grupo,chaveDedupe:c.hash(`operacao:${operacao.id}`,`${grupo}:pendencia`),status:"AGUARDANDO_REVISAO"},data:{status:"RESOLVIDA",decididoEm:agora()}});
+      // O antigo bloqueio por volume não representa conflito de conteúdo.
+      await tx.olistSyncPendencia.updateMany({where:{configuracaoId:grupo,aplicativoId:app,entidade,tipo:"LIMITE_ALTERACOES",status:"AGUARDANDO_REVISAO"},data:{status:"RESOLVIDA",decididoEm:agora()}});
       await tx.olistSyncEvento.create({data:{configuracaoId:grupo,execucaoId:e.execucaoId,registroId:operacao.registroId,tipo:"ESCRITA_CONFIRMADA",metadadosJson:{operacaoId:operacao.id,sourceAppId:operacao.sourceAppId,destinoAppId:app,revisao:operacao.revisao,acao:operacao.acao,fontesPorCampo:plan.fontesPorCampo??{}}},select:{id:true}});
       await contar(tx,e.execucaoId,operacao.acao==="CRIAR"?"criados":"atualizados");
     });
@@ -469,7 +645,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       if(!(await repo.disponibilidade(config.id,"agendar-sincronizacao-olist")).habilitado)continue;
       if(!config.proximaExecucaoEm) {await db.olistSyncConfiguracao.update({where:{id:config.id},data:{proximaExecucaoEm:proximoHorarioSync(agora(),config.horaDiaria,config.timezone)},select:{id:true}});continue;}
       try {
-        await repo.enfileirar({configuracaoId:config.id,modo:"AUDITAR_E_APLICAR",idempotencia:idAgendamento(config.id,config.proximaExecucaoEm),solicitadoPor:config.autorizadoPor,origem:"AGENDADA",completa:true});
+        await repo.enfileirar({configuracaoId:config.id,modo:"AUDITAR_E_APLICAR",idempotencia:idAgendamento(config.id,config.proximaExecucaoEm),solicitadoPor:config.autorizadoPor,origem:"AGENDADA",completa:false});
         await db.olistSyncConfiguracao.updateMany({where:{id:config.id,proximaExecucaoEm:config.proximaExecucaoEm},data:{proximaExecucaoEm:proximoHorarioSync(agora(),config.horaDiaria,config.timezone)}}); agendadas++;
       } catch { /* Outra execução ativa ou controle pausado: não perde a data pendente. */ }
     }

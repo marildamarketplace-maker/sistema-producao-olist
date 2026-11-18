@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { aplicativoTemJob } from "@/lib/aplicativo-jobs";
 import { aplicativoElegivelSync } from "@/lib/olist-sync/elegibilidade";
+import { transferirAfetadosPendentes } from "@/repositories/olist-sync-cobertura-repository";
 
 export const ESTADOS_EXECUCAO_SYNC_ATIVOS = ["PENDENTE", "AUDITANDO", "APLICANDO", "AGUARDANDO_RETRY"];
 export const JOBS_SYNC = {
@@ -172,6 +173,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
           origem: entrada.origem, solicitadoPor: entrada.solicitadoPor, completa: entrada.completa, versaoConfiguracao: c.versao }, select: execucaoSelect });
         await tx.olistSyncEtapa.createMany({ data: c.entidades.filter(entidade => entrada.modo !== "APLICAR" || ["PRODUTO", "CONTATO"].includes(entidade))
           .flatMap(entidade => c.participantes.filter(p => p.habilitado).map(p => ({ execucaoId: execucao.id, entidade, aplicativoId: p.aplicativoId, fase: entrada.modo === "APLICAR" ? "APLICAR" : "LISTAR" }))) });
+        if (entrada.modo !== "APLICAR") await transferirAfetadosPendentes(tx, { grupo: c.id, execucao: execucao.id, entidades: c.entidades });
         return execucao;
       };
       return transacao ? executar(transacao) : db.$transaction(executar, { timeout: 25_000, maxWait: 5_000 });
@@ -317,6 +319,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
       if (ESTADOS_EXECUCAO_SYNC_ATIVOS.includes(anterior.status)) throw new ErroRepositorioSync("A execução ainda está ativa.");
       // Retomar preserva a coleta do contrato original. Propostas antigas e
       // respostas incertas serão revalidadas/reconciliadas pelo consumidor.
+      // A nova coleta usa apenas watermarks confirmados; offsets antigos não são copiados.
       const modo = anterior.modo === "APLICAR" ? "APLICAR" : anterior.modo === "AUDITAR_E_APLICAR" ? "AUDITAR_E_APLICAR" : "AUDITAR";
       return repo.enfileirar({ configuracaoId: anterior.configuracaoId, modo, completa: anterior.completa, origem: "MANUAL", solicitadoPor: usuarioId, idempotencia });
     },
@@ -332,7 +335,14 @@ export function criarOlistSyncRepository(db: PrismaClient) {
         await tx.$executeRaw`UPDATE olist_sync_operacao SET payload_criptografado=NULL,resultado_criptografado=NULL WHERE id IN (SELECT id FROM olist_sync_operacao WHERE configuracao_id=${configuracaoId}::uuid AND status IN ('CONFIRMADA','OBSOLETA','FALHA_PERMANENTE') AND updated_at<${corte(30)} AND (payload_criptografado IS NOT NULL OR resultado_criptografado IS NOT NULL) ORDER BY updated_at,id LIMIT 500)`;
         removidos += await tx.$executeRaw`DELETE FROM olist_sync_operacao WHERE id IN (SELECT id FROM olist_sync_operacao WHERE configuracao_id=${configuracaoId}::uuid AND status IN ('CONFIRMADA','OBSOLETA','FALHA_PERMANENTE') AND updated_at<${corte(90)} ORDER BY updated_at,id LIMIT 500)`;
         removidos += await tx.$executeRaw`DELETE FROM olist_sync_pendencia WHERE id IN (SELECT id FROM olist_sync_pendencia WHERE configuracao_id=${configuracaoId}::uuid AND status<>'AGUARDANDO_REVISAO' AND decidido_em<${corte(365)} ORDER BY decidido_em,id LIMIT 500)`;
-        removidos += await tx.$executeRaw`DELETE FROM olist_sync_execucao WHERE id IN (SELECT id FROM olist_sync_execucao e WHERE configuracao_id=${configuracaoId}::uuid AND status IN ('CONCLUIDA','CONCLUIDA_COM_PENDENCIAS','FALHOU','CANCELADA') AND finalizada_em<${corte(90)} AND NOT EXISTS(SELECT 1 FROM olist_sync_operacao o WHERE o.execucao_id=e.id AND o.status IN ('PROPOSTA','AUTORIZADA','EM_APLICACAO','VERIFICANDO','RESULTADO_INCONCLUSIVO')) ORDER BY finalizada_em,id LIMIT 50)`;
+        removidos += await tx.$executeRaw`DELETE FROM olist_sync_afetado WHERE id IN (SELECT f.id FROM olist_sync_afetado f
+          WHERE f.configuracao_id=${configuracaoId}::uuid AND f.processado_em IS NOT NULL AND f.processado_em<${corte(90)}
+            AND EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=f.execucao_id AND s.entidade=f.entidade AND s.fase='COMPARAR' AND s.status='CONCLUIDA')
+          ORDER BY f.processado_em,f.id LIMIT 500)`;
+        removidos += await tx.$executeRaw`DELETE FROM olist_sync_execucao WHERE id IN (SELECT id FROM olist_sync_execucao e WHERE configuracao_id=${configuracaoId}::uuid AND status IN ('CONCLUIDA','CONCLUIDA_COM_PENDENCIAS','FALHOU','CANCELADA') AND finalizada_em<${corte(90)}
+          AND NOT EXISTS(SELECT 1 FROM olist_sync_operacao o WHERE o.execucao_id=e.id AND o.status IN ('PROPOSTA','AUTORIZADA','EM_APLICACAO','VERIFICANDO','RESULTADO_INCONCLUSIVO'))
+          AND NOT EXISTS(SELECT 1 FROM olist_sync_afetado f WHERE f.execucao_id=e.id)
+          AND NOT EXISTS(SELECT 1 FROM olist_sync_pendencia p WHERE p.execucao_id=e.id AND p.status='AGUARDANDO_REVISAO') ORDER BY finalizada_em,id LIMIT 50)`;
         await tx.olistSyncConfiguracao.update({ where: { id: configuracaoId }, data: { ultimaLimpezaEm: agora }, select: { id: true } });
         return { executada: true, removidos };
       }, { timeout: 25_000, maxWait: 5_000 });

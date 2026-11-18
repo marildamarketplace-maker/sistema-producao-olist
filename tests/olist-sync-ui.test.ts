@@ -8,6 +8,8 @@ import { execucaoSyncAtiva, intervaloPollingSync, textoValorSync, type Pendencia
 import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync } from "../src/components/olist-sync-ui";
 import { calcularPrevisaoValidacaoSync } from "../src/lib/olist-sync/previsao";
 import { DecisaoSyncDialog, ExecutarSyncDialog } from "../src/components/olist-sync-decisoes";
+import { ConfiguracaoIncrementalSync } from "../src/components/olist-sync-incremental";
+import type { ConfiguracaoSyncDto } from "../src/lib/olist-sync/api-contract";
 
 const todas = { podeVisualizarSincronizacaoOlist: true, podeExecutarSincronizacaoOlist: true, podeResolverSincronizacaoOlist: true, podeConfigurarSincronizacaoOlist: true };
 
@@ -85,6 +87,22 @@ test("formulário de nova execução começa somente auditando e bloqueia aplica
   assert.match(html, /value="AUDITAR_E_APLICAR" disabled=""/);
   assert.match(html, /value="APLICAR" disabled=""/);
   assert.match(html, /Enfileirar execução/); assert.match(html, /Aplicação indisponível/);
+  assert.match(html, /Forçar auditoria completa/); assert.doesNotMatch(html, /checked=""/);
+  assert.match(html, /modo automático/);
+});
+
+test("validação incremental é por empresa e entidade, sem certificado automático nem criação de baseline", () => {
+  const configuracao: ConfiguracaoSyncDto = {
+    id: "grupo", aplicativoPaiId: "pai", aplicativoPaiNome: "Pai", versao: 1, ativo: true, entidades: ["PRODUTO"],
+    participantes: [{ id: "filho", nome: "Empresa selecionada", habilitado: true }], aplicativosElegiveis: [{ id: "filho", nome: "Empresa selecionada", habilitado: true }, { id: "fora", nome: "Empresa fora do grupo", habilitado: false }], aplicativosOrigem: [], horaDiaria: "02:00", fusoHorario: "America/Sao_Paulo", limiteAlteracoes: 10, proximaExecucaoEm: null, prontidao: { incrementalValidado: true, semanticaPutValidada: false, sincronizacaoNativaCompativel: false }, jobs: [],
+    incremental: { versaoContrato: 1, completaCadaDias: 15, sobreposicaoHoras: 24, coberturas: [{ aplicativoId: "filho", entidade: "PRODUTO", contaIdentificada: true, validado: false, fusoHorario: null, validadoEm: null, completaEm: null, incrementalEm: null, watermarkConfirmado: null }] },
+  };
+  const props = { configuracao, participantesIds: ["filho"], entidades: configuracao.entidades, validacoes: [], disabled: false, alterar: () => {} };
+  const html = renderToStaticMarkup(React.createElement(ConfiguracaoIncrementalSync, props));
+  for (const texto of ["Empresa selecionada", "Não validado para a conta atual", "Última completa", "Última incremental", "15 dias", "24 horas", "declaração do responsável"]) assert.ok(html.includes(texto), texto);
+  assert.doesNotMatch(html, /Empresa fora do grupo|checked=""/);
+  const declarando = renderToStaticMarkup(React.createElement(ConfiguracaoIncrementalSync, { ...props, validacoes: [{ aplicativoId: "filho", entidade: "PRODUTO", validado: true, fusoHorario: "", versaoContrato: 1 }] }));
+  assert.match(declarando, /Fuso confirmado na API/); assert.match(declarando, /minLength="20"/); assert.match(declarando, /não cria cobertura/);
 });
 
 test("equivalência manual usa IDs por empresa e mantém somente os participantes habilitados", () => {

@@ -3,6 +3,7 @@
 import React, { useState, type FormEvent } from "react";
 import { ENTIDADES_SYNC_LABEL, type ConfiguracaoSyncDto, type EntidadeSyncApi, type SalvarConfiguracaoSync } from "@/lib/olist-sync/api-contract";
 import { dataSync, syncPanel, syncPrimary } from "@/components/olist-sync-ui";
+import { ConfiguracaoIncrementalSync } from "@/components/olist-sync-incremental";
 
 export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
   configuracao: ConfiguracaoSyncDto; podeEditar: boolean;
@@ -24,7 +25,7 @@ export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
     if (form.participantesIds.length < 2) { setErro("Selecione pelo menos dois aplicativos filhos."); return; }
     if (form.entidades.length === 0) { setErro("Selecione pelo menos uma entidade."); return; }
     setOcupado(true);
-    try { await salvar(form); setSalvo(true); }
+    try { await salvar({ ...form, incrementalValidacoes: form.incrementalValidacoes?.filter(v => form.participantesIds.includes(v.aplicativoId) && form.entidades.includes(v.entidade)) }); setSalvo(true); }
     catch (error) { setErro(error instanceof Error ? error.message : "Não foi possível salvar."); }
     finally { setOcupado(false); }
   }
@@ -47,11 +48,12 @@ export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
         </fieldset>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-sm font-medium">Horário diário ({configuracao.fusoHorario})<input required type="time" value={form.horaDiaria} onChange={(event) => setForm({ ...form, horaDiaria: event.target.value })} className="input mt-1 min-h-11" /></label>
-          <label className="text-sm font-medium">Limite de alterações por entidade e destino<input required type="number" min={1} max={100} value={form.limiteAlteracoes} onChange={(event) => setForm({ ...form, limiteAlteracoes: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
+          <label className="text-sm font-medium">Limite por execução, entidade e destino<input required type="number" min={1} max={100} value={form.limiteAlteracoes} onChange={(event) => setForm({ ...form, limiteAlteracoes: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
         </div>
       </fieldset>
-      <p className="mt-4 text-xs text-slate-500">Próxima execução: {dataSync(configuracao.proximaExecucaoEm)}. As auditorias são completas. Se o lote exceder o limite, a aplicação fica bloqueada para revisão.</p>
+      <p className="mt-4 text-xs text-slate-500">Próxima execução: {dataSync(configuracao.proximaExecucaoEm)}. A agenda usa auditoria automática. Cada execução aplica até o limite configurado; o restante autorizado continua nas próximas execuções. Conflitos reais exigem revisão.</p>
     </section>
+    <ConfiguracaoIncrementalSync configuracao={configuracao} participantesIds={form.participantesIds} entidades={form.entidades} validacoes={form.incrementalValidacoes ?? []} disabled={!podeEditar || ocupado} alterar={incrementalValidacoes => setForm(atual => ({ ...atual, incrementalValidacoes }))} />
     <section className={syncPanel}>
       <h3 className="font-semibold">Validações para aplicação</h3>
       <p className="mt-2 text-sm text-slate-600">Registre somente validações realizadas nas contas participantes. Habilitar estas opções não libera os jobs pausados.</p>

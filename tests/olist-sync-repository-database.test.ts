@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { aplicarMigrationsOlistSync } from "./fixtures/olist-sync-migrations";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
@@ -27,8 +27,7 @@ test("Olist sync: persistência real, isolamento, leases, gates e retenção", {
   const filhoA = "00000000-0000-0000-0000-000000000004", filhoB = "00000000-0000-0000-0000-000000000005", isolado = "00000000-0000-0000-0000-000000000001";
   await sql.query("INSERT INTO aplicativo(id,nome,jobs) VALUES ($1,'Pai','EXISTENTE'),($2,'Isolado','')", [pai, isolado]);
   await sql.query("INSERT INTO aplicativo(id,nome,aplicativo_pai_id) VALUES ($1,'Filho A',$4),($2,'Filho B',$4),($3,'Matriz excluída',$4)",[filhoA,filhoB,matriz,pai]);
-  const migration = await readFile(new URL("../prisma/migrations/20261116000100_olist_sync_multiempresa/migration.sql", import.meta.url),"utf8");
-  await sql.query(migration);
+  await aplicarMigrationsOlistSync(sql);
   const repo = criarOlistSyncRepository(db), config = await repo.obterConfiguracao(pai); assert.ok(config);
   const user = randomUUID(), userFilho = randomUUID();
   await sql.query("INSERT INTO usuario(id,aplicativo_id,pode_executar_sincronizacao_olist,pode_configurar_sincronizacao_olist) VALUES ($1,$2,true,true),($3,$4,true,true)",[user,pai,userFilho,filhoA]);
@@ -151,16 +150,21 @@ test("Olist sync: persistência real, isolamento, leases, gates e retenção", {
     const exec=await db.olistSyncExecucao.create({data:{configuracaoId:outro.id,chaveIdempotencia:randomUUID(),modo:"AUDITAR",versaoConfiguracao:1,status:"CONCLUIDA",finalizadaEm:new Date()}});
     await assert.rejects(db.olistSyncEvento.create({data:{configuracaoId:config.id,execucaoId:exec.id,tipo:"ERRO"}}));
   });
-  await t.test("retém origem e pendências inconclusivas após limpar execuções antigas",async()=>{
+  await t.test("preserva prova de pendência aberta e expurga execução após decisão sem perder origem",async()=>{
     const antiga=new Date(Date.now()-400*86_400_000);
     const exec=await db.olistSyncExecucao.create({data:{configuracaoId:config.id,chaveIdempotencia:randomUUID(),modo:"AUDITAR",versaoConfiguracao:1,status:"CONCLUIDA",finalizadaEm:antiga,createdAt:antiga}});
     const registro=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"PRODUTO",chave:"ORIGEM",aplicativoOrigemId:filhoA,registroOlistOrigemId:"10",origemTipo:"OBSERVADA_PELO_MODULO",origemRegistradaEm:antiga,origemExecucaoId:exec.id}});
     await db.olistSyncEstado.create({data:{configuracaoId:config.id,registroId:registro.id,aplicativoId:filhoA,entidade:"PRODUTO",remoteId:"10",chave:"ORIGEM",ultimaExecucaoId:exec.id}});
     const pendencia=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,registroId:registro.id,execucaoId:exec.id,entidade:"PRODUTO",tipo:"DIVERGENCIA",severidade:"ALTA",chaveDedupe:"ORIGEM",createdAt:antiga}});
     const resultado=await repo.limparHistorico(config.id);assert.equal(resultado.executada,true);
+    assert.ok(await db.olistSyncExecucao.findUnique({where:{id:exec.id}}),"A execução comprova a coleta exigida para aprovar a pendência.");
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}})).status,"AGUARDANDO_REVISAO");
+    assert.equal((await db.olistSyncEstado.findFirstOrThrow({where:{registroId:registro.id}})).ultimaExecucaoId,exec.id);
+    await db.olistSyncPendencia.update({where:{id:pendencia.id},data:{status:"IGNORADA",decididoEm:new Date()}});
+    await repo.limparHistorico(config.id);
     assert.equal(await db.olistSyncExecucao.findUnique({where:{id:exec.id}}),null);
     const preservado=await db.olistSyncRegistro.findUniqueOrThrow({where:{id:registro.id}});assert.equal(preservado.aplicativoOrigemId,filhoA);assert.equal(preservado.origemExecucaoId,null);
-    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}})).status,"AGUARDANDO_REVISAO");
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}})).status,"IGNORADA");
     assert.equal((await db.olistSyncEstado.findFirstOrThrow({where:{registroId:registro.id}})).ultimaExecucaoId,null);
   });
 

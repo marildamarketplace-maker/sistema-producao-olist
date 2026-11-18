@@ -1,8 +1,16 @@
 import { z } from "zod";
 import type { EntidadeSync, JsonValue, CamposSync, ObservacaoRemota } from "./contrato";
 import { FalhaSync, ENTIDADES_SYNC } from "./contrato";
+import { referenciasTiposContatoSync } from "./tipos-contato";
 
 export const entidadeSchema = z.enum(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"]);
+export const validacaoIncrementalSchema = z.object({
+  aplicativoId: z.guid(), entidade: z.enum(["PRODUTO", "CONTATO"]), validado: z.boolean(),
+  fusoHorario: z.string().trim().min(1).max(100).refine(fuso => {
+    try { new Intl.DateTimeFormat("pt-BR", { timeZone: fuso }); return true; } catch { return false; }
+  }),
+  versaoContrato: z.number().int().positive(), evidencia: z.string().trim().max(1000).optional(),
+}).strict().refine(v => !v.validado || (v.evidencia?.length ?? 0) >= 20, { message: "Descreva os ensaios realizados nesta conta e entidade." });
 export const configuracaoSchema = z.object({
   versao: z.number().int().positive(), ativo: z.boolean(),
   entidades: z.array(entidadeSchema).min(1).max(4).refine(v => new Set(v).size === v.length),
@@ -10,6 +18,7 @@ export const configuracaoSchema = z.object({
   horaDiaria: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   limiteAlteracoes: z.number().int().min(1).max(100),
   prontidao: z.object({ sincronizacaoNativaCompativel: z.boolean(), semanticaPutValidada: z.boolean(), incrementalValidado: z.boolean() }).strict(),
+  incrementalValidacoes: z.array(validacaoIncrementalSchema).max(40).refine(v => new Set(v.map(item => `${item.aplicativoId}:${item.entidade}`)).size === v.length).optional(),
 }).strict();
 export const execucaoSchema = z.object({ modo: z.enum(["AUDITAR", "AUDITAR_E_APLICAR", "APLICAR"]), idempotencia: z.uuid(), completa: z.boolean().default(true) }).strict();
 export const decisaoSchema = z.object({ versao: z.number().int().positive(), acao: z.enum(["APROVAR", "REJEITAR", "IGNORAR", "REAUDITAR", "VINCULAR"]), motivo: z.string().trim().min(10).max(1000), aplicativoFonteId: z.guid().optional(),
@@ -42,7 +51,8 @@ export function observacaoProtegida(valor: JsonValue): ObservacaoRemota {
   }
   return { id: r.id, nome: r.nome, situacao: r.situacao, completo: r.completo, chave: r.chave,
     alteradoEm: typeof r.alteradoEm === "string" ? r.alteradoEm : null, campos: objetoJson(r.campos), pendencias: r.pendencias as string[],
-    ...(typeof r.tipo === "string" ? { tipo: r.tipo } : {}), ...(typeof r.paiId === "string" ? { paiId: r.paiId } : {}) };
+    ...(typeof r.tipo === "string" ? { tipo: r.tipo } : {}), ...(typeof r.paiId === "string" ? { paiId: r.paiId } : {}),
+    ...(r.tiposContatoRemotos !== undefined ? { tiposContatoRemotos: referenciasTiposContatoSync(r.tiposContatoRemotos) } : {}) };
 }
 
 /** Busca no calendário local: funciona também em dias de transição de horário. */

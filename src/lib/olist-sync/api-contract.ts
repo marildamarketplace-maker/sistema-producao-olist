@@ -9,6 +9,15 @@ export type ProntidaoSync = {
 };
 export type EmpresaSyncDto = { id: string; nome: string; habilitado: boolean };
 export type JobSyncDto = { chave: string; permitidoNoPai: boolean; pausado: boolean };
+export type ValidacaoIncrementalSyncInput = {
+  aplicativoId: string; entidade: "PRODUTO" | "CONTATO"; validado: boolean;
+  fusoHorario: string; versaoContrato: number; evidencia?: string;
+};
+export type CoberturaSyncDto = {
+  aplicativoId: string; entidade: EntidadeSyncApi; contaIdentificada: boolean;
+  validado: boolean; fusoHorario: string | null; validadoEm: string | null;
+  completaEm: string | null; incrementalEm: string | null; watermarkConfirmado: string | null;
+};
 export type ConfiguracaoSyncDto = {
   id: string;
   aplicativoPaiId: string;
@@ -25,6 +34,7 @@ export type ConfiguracaoSyncDto = {
   proximaExecucaoEm: string | null;
   prontidao: ProntidaoSync;
   jobs: JobSyncDto[];
+  incremental: { versaoContrato: number; completaCadaDias: number; sobreposicaoHoras: number; coberturas: CoberturaSyncDto[] };
 };
 export type SalvarConfiguracaoSync = {
   versao: number;
@@ -34,6 +44,7 @@ export type SalvarConfiguracaoSync = {
   horaDiaria: string;
   limiteAlteracoes: number;
   prontidao: ProntidaoSync;
+  incrementalValidacoes?: ValidacaoIncrementalSyncInput[];
 };
 export type ExecucaoSyncDto = {
   id: string;
@@ -53,6 +64,7 @@ export type EtapaSyncDto = {
   status: string;
   tentativas: number;
   disponivelEm: string;
+  plano?: { modo: "COMPLETA" | "INCREMENTAL"; iniciadaEm: string; desde: string | null } | null;
 };
 export type ExecucaoSyncDetalheDto = ExecucaoSyncDto & { etapas: EtapaSyncDto[] };
 export type PrevisaoValidacaoSyncDto = {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { aplicarMigrationsOlistSync } from "./fixtures/olist-sync-migrations";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { consultaValidacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -24,8 +24,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
   const pai="00000000-0000-0000-0000-000000000002", matriz="00000000-0000-0000-0000-000000000003", a="00000000-0000-0000-0000-000000000004", b="00000000-0000-0000-0000-000000000005", externo="00000000-0000-0000-0000-000000000001";
   await sql.query("INSERT INTO aplicativo(id,nome) VALUES ($1,'Pai'),($2,'Externo')",[pai,externo]);
   await sql.query("INSERT INTO aplicativo(id,nome,aplicativo_pai_id) VALUES ($1,'A',$4),($2,'B',$4),($3,'Matriz',$4)",[a,b,matriz,pai]);
-  await sql.query(await readFile(new URL("../prisma/migrations/20261116000100_olist_sync_multiempresa/migration.sql",import.meta.url),"utf8"));
-  await sql.query(await readFile(new URL("../prisma/migrations/20261117000200_olist_sync_previsao/migration.sql",import.meta.url),"utf8"));
+  await aplicarMigrationsOlistSync(sql);
   const usuario=randomUUID(),usuarioFilho=randomUUID();
   await sql.query("INSERT INTO usuario(id,aplicativo_id,pode_visualizar_sincronizacao_olist,pode_configurar_sincronizacao_olist,pode_executar_sincronizacao_olist,pode_resolver_sincronizacao_olist) VALUES ($1,$2,true,true,true,true),($3,$4,true,true,true,true)",[usuario,pai,usuarioFilho,a]);
   const config=await db.olistSyncConfiguracao.findUniqueOrThrow({where:{aplicativoPaiId:pai}});

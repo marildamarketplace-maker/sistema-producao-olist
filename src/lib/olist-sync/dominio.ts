@@ -3,6 +3,7 @@ import {
   type JsonValue, type ObservacaoRemota, type OrigemSync, type ReplicaComparacao,
 } from "./contrato";
 import { serializarCanonico } from "./cripto";
+import { referenciasTiposContatoSync, tiposSemanticosContatoSync } from "./tipos-contato";
 
 const TEXTOS_PRODUTO = ["sku", "descricao", "descricaoComplementar", "unidade", "unidadePorCaixa", "gtin", "garantia"] as const;
 const TEXTOS_CONTATO = ["nome", "fantasia", "tipoPessoa", "cpfCnpj", "telefone", "celular", "telefoneAdicional", "email", "emailNfe", "site"] as const;
@@ -42,6 +43,19 @@ function estruturaTextos(valor: unknown, chaves: readonly string[]): JsonValue {
   if (valor === null || valor === undefined) return null;
   if (!objeto(valor)) return falhaContrato();
   return projetarTextos(valor, chaves);
+}
+
+/** Só ignora pontuação e código do Brasil em números reconhecíveis.
+ * Ramais, listas e números estrangeiros conservam seu significado original. */
+export function normalizarTelefoneContato(valor: JsonValue): JsonValue {
+  if (typeof valor !== "string") return valor;
+  const texto = valor.trim();
+  if (!texto) return null;
+  if (!/^\+?[\d\s().-]+$/.test(texto)) return texto;
+  let digitos = texto.replace(/\D/g, "");
+  if (/^55\d{10,11}$/.test(digitos)) digitos = digitos.slice(2);
+  if (/^[1-9]\d{9,10}$/.test(digitos) && (!texto.startsWith("+") || texto.startsWith("+55"))) return digitos;
+  return texto;
 }
 
 /** Não remove letras nem zeros: o CNPJ alfanumérico usa ASCII menos 48 no módulo 11. */
@@ -148,6 +162,7 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
   let tipo: string | undefined;
   let paiId: string | null | undefined;
   let situacao = String(payload.situacao ?? "");
+  let tiposContatoRemotos: ObservacaoRemota["tiposContatoRemotos"];
   if (entidade === "PRODUTO") {
     campos = projetarTextos(payload, TEXTOS_PRODUTO, completo);
     chave = typeof payload.sku === "string" && payload.sku.trim() ? payload.sku : null;
@@ -173,6 +188,8 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
     const fonte = entidade === "VENDEDOR" ? payload.contato : payload;
     if (!objeto(fonte)) return falhaContrato();
     campos = projetarTextos(fonte, TEXTOS_CONTATO, completo);
+    for (const campo of ["telefone", "celular", "telefoneAdicional"] as const)
+      if (campo in campos) campos[campo] = normalizarTelefoneContato(campos[campo]);
     chave = normalizarDocumento(fonte.cpfCnpj);
     if (chave) campos.cpfCnpj = chave;
     nome = texto(fonte.nome) ?? "";
@@ -180,7 +197,11 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
       if (completo || campo in fonte) campos[campo] = estruturaTextos(fonte[campo], ENDERECO);
     }
     if (objeto(fonte.vendedor) && fonte.vendedor.id) pendencias.push("REFERENCIA_VENDEDOR");
-    if (Array.isArray(fonte.tipos) && fonte.tipos.length) pendencias.push("REFERENCIA_TIPOS_CONTATO");
+    if (entidade === "CONTATO" && completo) {
+      tiposContatoRemotos = referenciasTiposContatoSync(fonte.tipos);
+      if (tiposContatoRemotos.length) pendencias.push("REFERENCIA_TIPOS_CONTATO");
+    }
+    if (entidade === "VENDEDOR" && Array.isArray(fonte.tipos) && fonte.tipos.length) pendencias.push("REFERENCIA_TIPOS_CONTATO");
     // Acesso ao sistema (A) não é uma propriedade transferível; B também é ativo.
     if (situacao === "A") situacao = "B";
   } else {
@@ -192,7 +213,7 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
   if (!nome.trim()) pendencias.push("NOME_OBRIGATORIO");
   const alterado = payload.dataAlteracao ?? payload.dataAtualizacao;
   const alteradoEm = alterado === null || alterado === undefined ? null : texto(alterado);
-  return { id, chave, nome, situacao, alteradoEm, tipo, paiId, completo, campos, pendencias };
+  return { id, chave, nome, situacao, alteradoEm, tipo, paiId, completo, campos, pendencias, ...(tiposContatoRemotos ? { tiposContatoRemotos } : {}) };
 }
 
 export function gerarHashesCampos(campos: CamposSync, hash: (valor: JsonValue) => string): Record<string, string> {
@@ -300,6 +321,7 @@ export function prepararPayload(entidade: EntidadeSync, campos: CamposSync, opco
     throw new FalhaSync("IDENTIDADE_INCOMPATIVEL", "O tipo de pessoa não corresponde ao documento.");
   }
   payload.cpfCnpj = documento;
+  if (campos.tiposContato !== undefined) payload.tiposContato = tiposSemanticosContatoSync(campos.tiposContato);
   for (const campo of ["endereco", "enderecoCobranca"] as const) if (campo in campos) payload[campo] = estruturaTextos(campos[campo], ENDERECO);
   if (opcoes.operacao === "CRIAR") payload.situacao = "B";
   return payload;

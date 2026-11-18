@@ -40,11 +40,12 @@ function metodo(nome: string) { return async (args: Args = {}) => { chamadas.pus
 function delegate(nome: string) {
   return Object.fromEntries(["findUnique", "findUniqueOrThrow", "findFirst", "findMany", "count", "groupBy", "create", "createMany", "update", "updateMany", "upsert"].map((op) => [op, metodo(`${nome}.${op}`)]));
 }
-const db: Record<string, unknown> = Object.fromEntries(["usuario", "aplicativo", "configuracaoJob", "olistSyncConfiguracao", "olistSyncParticipante", "olistSyncRegistro", "olistSyncEstado", "olistSyncExecucao", "olistSyncEtapa", "olistSyncOperacao", "olistSyncPendencia", "olistSyncEvento"].map((nome) => [nome, delegate(nome)]));
-db.$queryRaw = async (...args: unknown[]) => {
-  const entrada = { query: args[0] }; chamadas.push({ metodo: "$queryRaw", args: entrada });
-  return handlers["$queryRaw"]?.(entrada) ?? [];
+const db: Record<string, unknown> = Object.fromEntries(["usuario", "aplicativo", "configuracaoJob", "olistSyncConfiguracao", "olistSyncParticipante", "olistSyncCobertura", "olistSyncRegistro", "olistSyncEstado", "olistSyncExecucao", "olistSyncEtapa", "olistSyncOperacao", "olistSyncPendencia", "olistSyncEvento"].map((nome) => [nome, delegate(nome)]));
+db.$queryRaw = async (query: unknown, ...values: unknown[]) => {
+  const entrada = Array.isArray(query) ? { sql: query.join("?"), values } : { query };
+  return (await metodo("$queryRaw")(entrada)) ?? [];
 };
+db.$executeRaw = (strings: TemplateStringsArray, ...values: unknown[]) => metodo("$executeRaw")({ sql: strings.join("?"), values });
 db.$transaction = async (run: (tx: unknown) => Promise<unknown>) => run(db);
 Object.assign(globalThis, { prisma: db });
 
@@ -52,6 +53,8 @@ function reset() {
   chamadas.length = 0; usuarioApp = PAI;
   permissao = { podeVisualizarSincronizacaoOlist: true, podeExecutarSincronizacaoOlist: true, podeResolverSincronizacaoOlist: true, podeConfigurarSincronizacaoOlist: true };
   handlers = {
+    "$queryRaw": () => [],
+    "$executeRaw": () => 0,
     "usuario.findFirst": ({ where }) => objeto(where).id === "usuario" ? { id: "usuario", aplicativoId: usuarioApp } : null,
     "usuario.findUnique": () => permissao,
     "olistSyncConfiguracao.findUnique": ({ where }) => objeto(where).aplicativoPaiId && objeto(where).aplicativoPaiId !== PAI ? null : configuracao(),
@@ -66,6 +69,8 @@ function reset() {
     "configuracaoJob.findUnique": () => ({ pausado: false }),
     "olistSyncConfiguracao.updateMany": () => ({ count: 1 }), "olistSyncParticipante.updateMany": () => ({ count: 1 }),
     "olistSyncParticipante.upsert": () => ({ id: FILHO }), "olistSyncEvento.create": () => ({ id: "evento" }),
+    "olistSyncParticipante.findMany": () => empresas.map(app => ({ aplicativoId: app.id, contaIdentidade: null })),
+    "olistSyncCobertura.findMany": () => [], "olistSyncCobertura.upsert": () => ({ id: "cobertura" }),
     "olistSyncEvento.findFirst": () => null,
     "olistSyncRegistro.findMany": () => [registro], "olistSyncRegistro.count": () => 1,
     "olistSyncRegistro.findFirst": ({ where }) => objeto(where).id === REGISTRO && objeto(where).configuracaoId === GRUPO ? registro : null,
@@ -92,6 +97,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
   const { GET, PUT, POST } = await import("../src/app/api/olist/sincronizacao/[[...recurso]]/route");
 
   const configuracaoInput = { versao: 1, ativo: true, entidades: ["PRODUTO"], participantesIds: [FILHO, OUTRO], horaDiaria: "02:00", limiteAlteracoes: 100, prontidao: { sincronizacaoNativaCompativel: false, semanticaPutValidada: false, incrementalValidado: false } };
+  const validacaoIncremental = { aplicativoId: FILHO, entidade: "PRODUTO", validado: true, fusoHorario: "America/Sao_Paulo", versaoContrato: 1, evidencia: "Ensaiados cadastro antigo atualizado, inativação, exclusão e paginação na conta." };
   const operacoesProtegidas = [
     { nome: "enfileirar", chave: "podeExecutarSincronizacaoOlist", caminho: "execucoes", dados: { modo: "AUDITAR", idempotencia: IDEMPOTENCIA } },
     { nome: "cancelar", chave: "podeExecutarSincronizacaoOlist", caminho: `execucoes/${EXECUCAO}/cancelar`, dados: {} },
@@ -243,6 +249,111 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.equal(objeto(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.select).etapas).take, 200);
   });
 
+  await t.test("detalhe projeta só modo e janela públicos sem carregar cursor, conta ou lote", async () => {
+    reset();
+    handlers["olistSyncExecucao.findFirst"] = () => ({ ...execucao, etapas: [{ id: "etapa", aplicativoId: FILHO, entidade: "PRODUTO", fase: "COLETA", status: "AUDITANDO", tentativas: 1, disponivelEm: agora }] });
+    handlers["$queryRaw"] = () => [{ id: "etapa", modo: "INCREMENTAL", iniciadaEm: agora.toISOString(), desde: "2026-11-15T12:00:00Z" }];
+    const response = await GET(request(`execucoes/${EXECUCAO}`), contexto(`execucoes/${EXECUCAO}`));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.etapas[0].plano, { modo: "INCREMENTAL", iniciadaEm: agora.toISOString(), desde: "2026-11-15T12:00:00Z" });
+    const consulta = chamadasDe("$queryRaw")[0].args;
+    assert.deepEqual(consulta.values, [EXECUCAO, GRUPO]);
+    assert.match(String(consulta.sql), /desdeUtc/); assert.match(String(consulta.sql), /LIMIT 200/);
+    assert.doesNotMatch(String(consulta.sql), /contaIdentidade|assinaturaEscopo|SELECT\s+\*/);
+  });
+
+  await t.test("declaração incremental vincula identidade atual sob lock, exige evidência e preserva baseline", async () => {
+    reset();
+    handlers["olistSyncParticipante.findMany"] = () => [{ aplicativoId: FILHO, contaIdentidade: "identidade-atual-no-servidor" }];
+    const response = await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [validacaoIncremental] }), contexto("configuracao"));
+    assert.equal(response.status, 200);
+    const cobertura = chamadasDe("olistSyncCobertura.upsert")[0].args;
+    assert.deepEqual(objeto(cobertura.where).configuracaoId_aplicativoId_entidade, { configuracaoId: GRUPO, aplicativoId: FILHO, entidade: "PRODUTO" });
+    assert.equal(objeto(cobertura.update).incrementalContaIdentidade, "identidade-atual-no-servidor");
+    assert.equal(objeto(cobertura.update).incrementalValidadoPor, "usuario");
+    assert.equal(objeto(cobertura.update).incrementalVersaoContrato, 1);
+    for (const campo of ["completaEm", "incrementalEm", "watermarkConfirmado", "contaIdentidade", "geracao"]) assert.equal(objeto(cobertura.create)[campo], undefined, campo);
+    assert.ok(chamadas.findIndex(c => c.metodo === "$queryRaw") < chamadas.findIndex(c => c.metodo === "olistSyncParticipante.findMany"));
+    const evento = chamadasDe("olistSyncEvento.create").map(c => objeto(c.args.data)).find(e => e.tipo === "INCREMENTAL_VALIDACAO_DECLARADA");
+    assert.equal(objeto(evento?.metadadosJson).evidencia, validacaoIncremental.evidencia);
+    assert.ok(!JSON.stringify(evento).includes("identidade-atual-no-servidor"));
+  });
+
+  await t.test("validação incremental recusa falta de identidade, escopo estranho, versão antiga e hashes enviados", async () => {
+    for (const [alteracao, status] of [
+      [{}, 400], [{ aplicativoId: EXTERNO }, 400], [{ entidade: "CONTATO" }, 400], [{ versaoContrato: 2 }, 409],
+      [{ contaIdentidade: "forjada" }, 400], [{ evidencia: "curto" }, 400], [{ fusoHorario: "Brasil/invalido" }, 400],
+    ] as const) {
+      reset();
+      const response = await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [{ ...validacaoIncremental, ...alteracao }] }), contexto("configuracao"));
+      assert.equal(response.status, status, JSON.stringify(alteracao));
+      assert.equal(chamadasDe("olistSyncCobertura.upsert").length, 0);
+      assert.equal(chamadasDe("olistSyncConfiguracao.updateMany").length, 0);
+    }
+  });
+
+  await t.test("revogação limpa a declaração e não exige nova identificação nem apaga cobertura", async () => {
+    reset();
+    const response = await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [{ ...validacaoIncremental, validado: false, evidencia: undefined }] }), contexto("configuracao"));
+    assert.equal(response.status, 200);
+    const dados = objeto(chamadasDe("olistSyncCobertura.upsert")[0].args.update);
+    assert.equal(dados.incrementalValidado, false); assert.equal(dados.incrementalContaIdentidade, null);
+    assert.equal(dados.incrementalValidadoEm, null); assert.equal(dados.watermarkConfirmado, undefined);
+  });
+
+  await t.test("declarar validação em A preserva baseline legado de A e B antes do bump sem certificar B", async () => {
+    reset();
+    handlers["olistSyncConfiguracao.findUniqueOrThrow"] = () => ({ ...configuracao(), entidades: ["PRODUTO"] });
+    handlers["olistSyncParticipante.findMany"] = () => [{ aplicativoId: FILHO, contaIdentidade: "conta-atual" }, { aplicativoId: OUTRO, contaIdentidade: "conta-b" }];
+    handlers["olistSyncCobertura.findUnique"] = ({ where }) => ({ id: `cobertura-${objeto(objeto(where).configuracaoId_aplicativoId_entidade).aplicativoId}`, completaEm: null, watermarkConfirmado: null, geracao: 0 });
+    handlers["olistSyncCobertura.updateMany"] = () => ({ count: 1 });
+    handlers["olistSyncExecucao.findFirst"] = ({ where }) => objeto(where).completa ? { id: EXECUCAO, createdAt: agora, iniciadaEm: agora, finalizadaEm: new Date("2026-11-16T13:00:00Z"), etapas: [
+      ...[FILHO, OUTRO].map(aplicativoId => ({ aplicativoId, fase: "DETALHAR", status: "CONCLUIDA", cursorJson: {} })),
+      { aplicativoId: null, fase: "COMPARAR", status: "CONCLUIDA", cursorJson: {} },
+    ] } : null;
+    handlers["$queryRaw"] = ({ sql }) => String(sql).includes("count(*)") ? [{ quantidade: BigInt(0) }] : [];
+    const response = await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [validacaoIncremental] }), contexto("configuracao"));
+    assert.equal(response.status, 200);
+    const adotada = objeto(chamadasDe("olistSyncCobertura.updateMany")[0].args.data);
+    assert.equal(adotada.watermarkConfirmado, agora); assert.equal(adotada.completaExecucaoId, EXECUCAO);
+    assert.equal(adotada.contaIdentidade, "conta-atual");
+    const adotadas = chamadasDe("olistSyncCobertura.updateMany");
+    assert.equal(adotadas.length, 2); assert.equal(objeto(adotadas[1].args.data).contaIdentidade, "conta-b");
+    assert.ok(adotadas.every(c => objeto(c.args.data).incrementalValidado === undefined));
+    const declaradas = chamadasDe("olistSyncCobertura.upsert").filter(c => objeto(c.args.update).incrementalValidado === true);
+    assert.equal(declaradas.length, 1); assert.equal(objeto(objeto(declaradas[0].args.where).configuracaoId_aplicativoId_entidade).aplicativoId, FILHO);
+    assert.equal(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.where).versaoConfiguracao, 1);
+    assert.ok(chamadas.findIndex(c => c.metodo === "olistSyncCobertura.updateMany") < chamadas.findIndex(c => c.metodo === "olistSyncConfiguracao.updateMany"));
+    assert.equal(objeto(chamadasDe("olistSyncCobertura.upsert").at(-1)?.args.update).incrementalValidado, true);
+  });
+
+  await t.test("alterar entidades ou versão impede adoção oportunista de cobertura legada", async () => {
+    reset(); handlers["olistSyncParticipante.findMany"] = () => [{ aplicativoId: FILHO, contaIdentidade: "conta-atual" }];
+    assert.equal((await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [validacaoIncremental] }), contexto("configuracao"))).status, 200);
+    assert.equal(chamadasDe("olistSyncCobertura.findUnique").length, 0);
+    reset(); handlers["olistSyncConfiguracao.findUniqueOrThrow"] = () => ({ ...configuracao(), versao: 2, entidades: ["PRODUTO"] });
+    assert.equal((await PUT(request("configuracao", "PUT", { ...configuracaoInput, incrementalValidacoes: [validacaoIncremental] }), contexto("configuracao"))).status, 409);
+    assert.equal(chamadasDe("olistSyncCobertura.upsert").length, 0);
+  });
+
+  await t.test("GET cobertura oculta identidade, limita consulta e invalida declaração de outra conta ou versão", async () => {
+    for (const [identidade, versaoContrato, esperado] of [["conta-atual", 1, true], ["conta-anterior", 1, false], ["conta-atual", 2, false]] as const) {
+      reset();
+      handlers["olistSyncConfiguracao.findUnique"] = () => ({ ...configuracao(), participantes: configuracao().participantes.map(p => ({ ...p, contaIdentidade: "conta-atual" })) });
+      handlers["olistSyncCobertura.findMany"] = () => [{ aplicativoId: FILHO, entidade: "PRODUTO", incrementalValidado: true, incrementalFuso: "America/Sao_Paulo", incrementalContaIdentidade: identidade, incrementalVersaoContrato: versaoContrato, incrementalValidadoEm: agora, completaEm: agora, incrementalEm: null, watermarkConfirmado: agora }];
+      const response = await GET(request("configuracao"), contexto("configuracao"));
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.incremental.coberturas[0].validado, esperado);
+      assert.equal(body.incremental.completaCadaDias, 15); assert.equal(body.incremental.sobreposicaoHoras, 24);
+      assert.ok(!JSON.stringify(body).includes("conta-atual")); assert.ok(!JSON.stringify(body).includes("conta-anterior"));
+      const consulta = chamadasDe("olistSyncCobertura.findMany")[0].args;
+      assert.equal(consulta.take, 80); assert.equal(objeto(consulta.where).configuracaoId, GRUPO);
+      assert.equal(objeto(consulta.select).assinaturaEscopo, undefined);
+    }
+  });
+
   await t.test("nega não autenticados e filhos mesmo com todas as flags", async () => {
     reset(); assert.equal((await GET(new Request("https://example.test"), contexto("registros"))).status, 401);
     assert.equal(chamadasDe("olistSyncRegistro.findMany").length, 0);
@@ -344,10 +455,10 @@ void test("API de sincronização: autorização, isolamento, validação e trab
 
   await t.test("edição usa política relida na transação e rejeita bloqueio posterior ao escopo", async () => {
     reset();
-    handlers["olistSyncConfiguracao.findUniqueOrThrow"] = () => ({ aplicativoPaiId: PAI, aplicativosBloqueados: [OUTRO] });
+    handlers["olistSyncConfiguracao.findUniqueOrThrow"] = () => ({ ...configuracao(), aplicativosBloqueados: [OUTRO] });
     const response = await PUT(request("configuracao", "PUT", configuracaoInput), contexto("configuracao"));
     assert.equal(response.status, 400);
-    assert.deepEqual(chamadasDe("olistSyncConfiguracao.findUniqueOrThrow")[0].args.select, { aplicativoPaiId: true, aplicativosBloqueados: true });
+    assert.deepEqual(chamadasDe("olistSyncConfiguracao.findUniqueOrThrow")[0].args.select, { aplicativoPaiId: true, aplicativosBloqueados: true, versao: true, entidades: true, participantes: { where: { habilitado: true }, select: { aplicativoId: true } } });
     assert.equal(chamadasDe("aplicativo.findMany")[0].args.take, 2);
     assert.equal(chamadasDe("olistSyncConfiguracao.updateMany").length, 0);
     assert.equal(chamadasDe("olistSyncParticipante.upsert").length, 0);
@@ -481,11 +592,22 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.equal((await POST(request("execucoes", "POST", { ...input, modo: "APLICAR" }), contexto("execucoes"))).status, 409);
   });
 
+  await t.test("API preserva completa por omissão e aceita automático explícito sem certificação global", async () => {
+    for (const completa of [undefined, false, true]) {
+      reset();
+      const input = { modo: "AUDITAR", idempotencia: IDEMPOTENCIA, ...(completa === undefined ? {} : { completa }) };
+      assert.equal((await POST(request("execucoes", "POST", input), contexto("execucoes"))).status, 202);
+      assert.equal(objeto(chamadasDe("olistSyncExecucao.create")[0].args.data).completa, completa ?? true);
+    }
+    reset(); handlers["olistSyncExecucao.findUnique"] = () => execucao;
+    assert.equal((await POST(request("execucoes", "POST", { modo: "AUDITAR", idempotencia: IDEMPOTENCIA, completa: false }), contexto("execucoes"))).status, 409);
+  });
+
   await t.test("vínculo manual de formas de pagamento mantém origem desconhecida e não escreve na Olist", async () => {
     reset(); const path = `pendencias/${PENDENCIA}/decisao`;
     const detalhesCriptografados = criptografia.cifrar({ aplicativoId: FILHO, remoteId: "10" }, `${GRUPO}:pendencia:dedupe`);
     handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, registroId: null, entidade: "FORMA_PAGAMENTO", tipo: "IDENTIDADE_REQUER_REVISAO", detalhesCriptografados });
-    const estados = [FILHO, OUTRO].map((app, index) => ({ id: `estado-${index}`, registroId: null, aplicativoId: app, remoteId: String(10 + index), metadadosJson: {}, dadosCriptografados: criptografia.cifrar({ id: String(10 + index), chave: null, nome: "Cartão", situacao: "1", completo: true, alteradoEm: null, campos: { nome: "Cartão" }, pendencias: ["IDENTIDADE_REQUER_REVISAO"] }, `${GRUPO}:estado:${app}:FORMA_PAGAMENTO:${10 + index}`) }));
+    const estados = [FILHO, OUTRO].map((app, index) => ({ id: `estado-${index}`, registroId: null, aplicativoId: app, remoteId: String(10 + index), presente: true, detalhePendente: false, metadadosJson: {}, dadosCriptografados: criptografia.cifrar({ id: String(10 + index), chave: null, nome: "Cartão", situacao: "1", completo: true, alteradoEm: null, campos: { nome: "Cartão" }, pendencias: ["IDENTIDADE_REQUER_REVISAO"] }, `${GRUPO}:estado:${app}:FORMA_PAGAMENTO:${10 + index}`) }));
     handlers["olistSyncEstado.findMany"] = () => estados;
     handlers["olistSyncRegistro.create"] = () => ({ id: REGISTRO });
     handlers["olistSyncEstado.update"] = () => ({ id: "estado" });

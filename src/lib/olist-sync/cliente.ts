@@ -6,6 +6,7 @@ import {
 import { identificadorRemoto, normalizarDocumento, observarRegistro, prepararImagens, prepararPayload, prepararVariacao } from "./dominio";
 import { serializarCanonico } from "./cripto";
 import { cotaDaRespostaSync, interpretarCotaSync, type CotaLeituraSync } from "./ritmo";
+import { interpretarTipoContatoSync, MAXIMO_TIPOS_CONTATO, payloadTiposContatoSync } from "./tipos-contato";
 
 const RECURSOS = { PRODUTO: "produtos", CONTATO: "contatos", FORMA_PAGAMENTO: "formas-pagamento", VENDEDOR: "vendedores" } as const;
 const MAXIMO_RESPOSTA = 2 * 1024 * 1024;
@@ -199,6 +200,17 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
   }
 
   return {
+    async listarTiposContato(aplicativoId, opcoes, consulta) {
+      if (!Number.isSafeInteger(opcoes.offset) || opcoes.offset < 0 || opcoes.offset > MAXIMO_TIPOS_CONTATO || !Number.isSafeInteger(opcoes.limit) || opcoes.limit < 1 || opcoes.limit > 100)
+        throw new FalhaSync("PAGINACAO_INVALIDA", "Página inválida para o catálogo de tipos.");
+      const resposta = await requisitar(aplicativoId, "GET", "contatos/tipos", { offset: String(opcoes.offset), limit: String(opcoes.limit) }, undefined, consulta);
+      const dados = resposta.dados;
+      if (!dados || typeof dados !== "object" || !("itens" in dados) || !Array.isArray(dados.itens) || dados.itens.length > opcoes.limit || !("paginacao" in dados) || !dados.paginacao || typeof dados.paginacao !== "object" || !("total" in dados.paginacao)) return contratoInvalido();
+      const total = dados.paginacao.total;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > MAXIMO_TIPOS_CONTATO) return contratoInvalido();
+      const itens = dados.itens.map(interpretarTipoContatoSync), cota = cotaDaRespostaSync(resposta);
+      return { itens, total, ...(cota ? { cotaLeitura: cota } : {}) };
+    },
     async listar(aplicativoId, entidade, opcoes: OpcoesListagemSync) {
       if (!Number.isSafeInteger(opcoes.offset) || opcoes.offset < 0 || !Number.isSafeInteger(opcoes.limit) || opcoes.limit < 1 || opcoes.limit > 100) {
         throw new FalhaSync("PAGINACAO_INVALIDA", "Informe uma página entre 1 e 100 registros e um deslocamento válido.");
@@ -243,12 +255,12 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     async criar(aplicativoId, entidade, payload, opcoes) {
       const caminho = caminhoEntidade(entidade);
       const seguro = prepararPayload(entidade, payload, { operacao: "CRIAR" });
-      return mutar(aplicativoId, "POST", caminho, seguro, undefined, opcoes);
+      return mutar(aplicativoId, "POST", caminho, entidade === "CONTATO" ? payloadTiposContatoSync(seguro, opcoes?.catalogoTiposContato) : seguro, undefined, opcoes);
     },
     async atualizar(aplicativoId, entidade, id, payload, opcoes) {
       const caminho = caminhoEntidade(entidade, id);
       const seguro = prepararPayload(entidade, payload, { operacao: "ATUALIZAR" });
-      return mutar(aplicativoId, "PUT", caminho, seguro, id, opcoes);
+      return mutar(aplicativoId, "PUT", caminho, entidade === "CONTATO" ? payloadTiposContatoSync(seguro, opcoes?.catalogoTiposContato) : seguro, id, opcoes);
     },
     async listarImagens(aplicativoId, produtoId) {
       const resposta = await requisitar(aplicativoId, "GET", `produtos/${identificadorRemoto(produtoId)}/anexos`);

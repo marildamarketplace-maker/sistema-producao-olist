@@ -5,7 +5,7 @@ import type { ConfiguracaoSyncDto, ExecucaoSyncDetalheDto, ResumoSyncDto } from 
 
 declare global {
   interface Window {
-    olistSyncTeste: { concluir: () => void; chamadas: string[]; detalheFinalRespondido: boolean; detalheFinalAbortado: boolean };
+    olistSyncTeste: { concluir: () => void; chamadas: string[]; mutacoes: { recurso: string; dados: unknown }[]; detalheFinalRespondido: boolean; detalheFinalAbortado: boolean };
   }
 }
 
@@ -20,18 +20,23 @@ const configuracao: ConfiguracaoSyncDto = {
   entidades: ["PRODUTO"], participantes: empresas, aplicativosOrigem: empresas, aplicativosElegiveis: empresas,
   horaDiaria: "02:00", fusoHorario: "America/Sao_Paulo", limiteAlteracoes: 100, proximaExecucaoEm: null,
   prontidao: { sincronizacaoNativaCompativel: false, semanticaPutValidada: false, incrementalValidado: false }, jobs: [],
+  incremental: { versaoContrato: 1, completaCadaDias: 15, sobreposicaoHoras: 24, coberturas: empresas.map(app => ({ aplicativoId: app.id, entidade: "PRODUTO", contaIdentificada: true, validado: false, fusoHorario: null, validadoEm: null, completaEm: criadoEm, incrementalEm: null, watermarkConfirmado: criadoEm })) },
 };
 const execucao: ExecucaoSyncDetalheDto = {
   id, modo: "AUDITAR", status: "AUDITANDO", origem: "MANUAL", criadoEm, iniciadoEm: criadoEm, finalizadoEm: null,
-  contadores: {}, etapas: [],
+  contadores: { listados: 12, detalhados: 4, alterados: 2, comparados: 2 }, etapas: [{ id: "etapa", aplicativoId: empresas[0].id, entidade: "PRODUTO", fase: "COLETA", status: "CONCLUIDA", tentativas: 1, disponivelEm: criadoEm, plano: { modo: "INCREMENTAL", iniciadaEm: criadoEm, desde: "2026-11-15T12:00:00Z" } }],
 };
 let concluida = false;
-window.olistSyncTeste = { concluir: () => { concluida = true; }, chamadas: [], detalheFinalRespondido: false, detalheFinalAbortado: false };
+window.olistSyncTeste = { concluir: () => { concluida = true; }, chamadas: [], mutacoes: [], detalheFinalRespondido: false, detalheFinalAbortado: false };
 
 // Não há backend: qualquer URL ou método inesperado falha, impedindo contato externo.
 window.fetch = async (input, init) => {
   const recurso = String(input).replace(/^\/api\/olist\/sincronizacao\//, "");
-  if (init?.method && init.method !== "GET") throw new Error(`Mutação inesperada no teste: ${init.method}`);
+  if (init?.method && init.method !== "GET") {
+    if (!((recurso === "execucoes" && init.method === "POST") || (recurso === "configuracao" && init.method === "PUT"))) throw new Error(`Mutação inesperada no teste: ${init.method}`);
+    window.olistSyncTeste.mutacoes.push({ recurso, dados: JSON.parse(String(init.body)) });
+    return Response.json(recurso === "execucoes" ? { ...execucao, status: "PENDENTE" } : { ok: true });
+  }
   if (init?.cache !== "no-store" || new Headers(init.headers).get("authorization") !== "Bearer teste-local") throw new Error("Contrato de sessão/cache ausente");
   window.olistSyncTeste.chamadas.push(recurso);
   const atual: ExecucaoSyncDetalheDto = { ...execucao, status: concluida ? "CONCLUIDA" : "AUDITANDO", finalizadoEm: concluida ? "2026-11-16T12:01:00Z" : null };

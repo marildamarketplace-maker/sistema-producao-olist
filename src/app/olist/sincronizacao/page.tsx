@@ -47,7 +47,7 @@ function SincronizacaoOlist() {
   const [pendenciaAberta, setPendenciaAberta] = useState<PendenciaSyncDetalheDto | null>(null);
   const [origemAberta, setOrigemAberta] = useState<RegistroSyncDto | null>(null);
   const [execucaoAberta, setExecucaoAberta] = useState<ExecucaoSyncDetalheDto | null>(null);
-  const pedidoExecucao = useRef<{ modo: ModoExecucaoSync; idempotencia: string } | null>(null);
+  const pedidoExecucao = useRef<{ modo: ModoExecucaoSync; completa: boolean; idempotencia: string } | null>(null);
   const gatilhoDialogo = useRef<HTMLButtonElement | null>(null);
   const botaoAbaAtual = useRef<HTMLButtonElement | null>(null);
   const devolverFoco = () => requestAnimationFrame(() => {
@@ -164,9 +164,9 @@ function SincronizacaoOlist() {
     setAba(proxima); setOffset(0); setFiltros(FILTROS); setConsulta(FILTROS); setErro(null);
   }
   function pesquisar(event: FormEvent) { event.preventDefault(); setOffset(0); setConsulta({ ...filtros }); }
-  async function executar(modo: ModoExecucaoSync) {
-    if (pedidoExecucao.current?.modo !== modo) pedidoExecucao.current = { modo, idempotencia: crypto.randomUUID() };
-    const resultado = await api<ExecucaoSyncDto>("execucoes", { method: "POST", body: JSON.stringify({ ...pedidoExecucao.current, completa: true }) });
+  async function executar(modo: ModoExecucaoSync, completa: boolean) {
+    if (pedidoExecucao.current?.modo !== modo || pedidoExecucao.current.completa !== completa) pedidoExecucao.current = { modo, completa, idempotencia: crypto.randomUUID() };
+    const resultado = await api<ExecucaoSyncDto>("execucoes", { method: "POST", body: JSON.stringify(pedidoExecucao.current) });
     pedidoExecucao.current = null;
     setAviso(`Execução ${resultado.id} aceita na fila. Acompanhe o processamento abaixo.`);
     mudarAba("execucoes"); setVersaoLista((atual) => atual + 1);
@@ -283,7 +283,8 @@ function SincronizacaoOlist() {
     {execucaoAberta && <DialogoSync titulo="Detalhes da execução" ocupado={ocupado} fechar={fecharExecucao}>
       <div className="space-y-4"><StatusSync status={execucaoAberta.status} /><p className="break-all text-xs text-slate-500">{execucaoAberta.id}</p><p className="text-sm text-slate-600">Início: {dataSync(execucaoAberta.iniciadoEm)} · Fim: {dataSync(execucaoAberta.finalizadoEm)} · Duração: {duracaoSync(execucaoAberta.iniciadoEm, execucaoAberta.finalizadoEm)}</p>
         {erro && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
-        <div className="grid gap-3 sm:grid-cols-2">{execucaoAberta.etapas.map((etapa) => <section className="rounded-md border border-slate-200 p-3" key={etapa.id}><h3 className="break-words text-sm font-medium">{nomeEmpresa(etapa.aplicativoId)} · {ENTIDADES_SYNC_LABEL[etapa.entidade]}</h3><p className="my-2 text-xs text-slate-500">{etapa.fase.toLowerCase()} · Tentativas: {etapa.tentativas}</p><StatusSync status={etapa.status} /><p className="mt-2 text-xs text-slate-500">Disponível: {dataSync(etapa.disponivelEm)}</p></section>)}</div>
+        <dl className="flex flex-wrap gap-x-5 gap-y-2">{Object.entries(execucaoAberta.contadores).map(([nome, valor]) => <div key={nome} className="text-sm"><dt className="inline text-slate-500">{nome.replaceAll("_", " ")}: </dt><dd className="inline font-medium">{valor}</dd></div>)}</dl>
+        <div className="grid gap-3 sm:grid-cols-2">{execucaoAberta.etapas.map((etapa) => <section className="min-w-0 rounded-md border border-slate-200 p-3" key={etapa.id}><h3 className="break-words text-sm font-medium">{nomeEmpresa(etapa.aplicativoId)} · {ENTIDADES_SYNC_LABEL[etapa.entidade]}</h3><p className="my-2 text-xs text-slate-500">{etapa.fase.toLowerCase()} · Tentativas: {etapa.tentativas}</p><StatusSync status={etapa.status} />{etapa.plano && <div className="mt-3 space-y-1 text-xs text-slate-600"><p>Leitura efetiva: {etapa.plano.modo === "INCREMENTAL" ? "Incremental" : "Completa"}</p><p>Início da coleta: {dataSync(etapa.plano.iniciadaEm)}</p>{etapa.plano.desde && <p>Alterações desde: {dataSync(etapa.plano.desde)} · janela sobreposta</p>}</div>}<p className="mt-2 text-xs text-slate-500">Disponível: {dataSync(etapa.disponivelEm)}</p></section>)}</div>
         {usuario?.podeExecutarSincronizacaoOlist && <div className="flex flex-wrap justify-end gap-2">{execucaoSyncAtiva(execucaoAberta.status) && <button type="button" className={syncButton} disabled={ocupado} onClick={() => void alterarExecucao(execucaoAberta.id, "cancelar")}>Solicitar cancelamento</button>}{["CONCLUIDA_COM_PENDENCIAS", "FALHOU", "CANCELADA"].includes(execucaoAberta.status) && <button type="button" className={syncPrimary} disabled={ocupado || Boolean(resumo?.execucaoAtiva)} onClick={() => void alterarExecucao(execucaoAberta.id, "retomar")}>Retomar trabalho pendente</button>}</div>}
       </div>
     </DialogoSync>}

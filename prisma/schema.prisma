@@ -1381,6 +1381,8 @@ model OlistSyncConfiguracao {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   aplicativoPai Aplicativo @relation(fields:[aplicativoPaiId], references:[id], onDelete:Restrict)
   participantes OlistSyncParticipante[]
+  coberturas OlistSyncCobertura[]
+  afetados OlistSyncAfetado[]
   registros OlistSyncRegistro[]
   estados OlistSyncEstado[]
   execucoes OlistSyncExecucao[]
@@ -1405,6 +1407,7 @@ model OlistSyncParticipante {
   aplicativo Aplicativo @relation(fields:[aplicativoId], references:[id], onDelete:Restrict)
   estados OlistSyncEstado[]
   pendencias OlistSyncPendencia[]
+  coberturas OlistSyncCobertura[]
 
   @@unique([configuracaoId, aplicativoId])
   @@index([aplicativoId, habilitado])
@@ -1434,6 +1437,7 @@ model OlistSyncRegistro {
   operacoes OlistSyncOperacao[]
   pendencias OlistSyncPendencia[]
   eventos OlistSyncEvento[]
+  afetados OlistSyncAfetado[]
 
   @@unique([configuracaoId, entidade, chave])
   @@unique([id, configuracaoId])
@@ -1453,6 +1457,11 @@ model OlistSyncEstado {
   nome String?
   situacaoRemota String? @map("situacao_remota")
   status String @default("NAO_VERIFICADO")
+  presente Boolean @default(true)
+  detalhePendente Boolean @default(false) @map("detalhe_pendente")
+  fingerprint String?
+  ultimaListagemExecucaoId String? @map("ultima_listagem_execucao_id") @db.Uuid
+  ultimaCompletaExecucaoId String? @map("ultima_completa_execucao_id") @db.Uuid
   hashesJson Json @default("{}") @map("hashes_json")
   metadadosJson Json @default("{}") @map("metadados_json")
   dadosCriptografados String? @map("dados_criptografados")
@@ -1472,6 +1481,8 @@ model OlistSyncEstado {
   @@index([configuracaoId, status, id])
   @@index([ultimaExecucaoId])
   @@index([configuracaoId, ultimaExecucaoId, verificadoEm], map: "olist_sync_estado_previsao_idx", where: raw("(metadados_json @> '{\"completo\": true}'::jsonb)"))
+  @@index([configuracaoId, entidade, ultimaListagemExecucaoId, detalhePendente, id], map: "olist_sync_estado_coleta_pendente_idx")
+  @@index([configuracaoId, aplicativoId, entidade, id], map: "olist_sync_estado_detalhe_pendente_idx", where: raw("(detalhe_pendente = true)"))
   @@map("olist_sync_estado")
 }
 
@@ -1497,12 +1508,64 @@ model OlistSyncExecucao {
   operacoes OlistSyncOperacao[]
   pendencias OlistSyncPendencia[]
   eventos OlistSyncEvento[]
+  afetados OlistSyncAfetado[]
 
+  @@unique([id, configuracaoId])
   @@unique([configuracaoId], map: "olist_sync_execucao_ativa_unica", where: raw("(status IN ('PENDENTE', 'AUDITANDO', 'APLICANDO', 'AGUARDANDO_RETRY'))"))
   @@unique([configuracaoId, chaveIdempotencia])
   @@index([configuracaoId, createdAt, id])
   @@index([status, finalizadaEm])
   @@map("olist_sync_execucao")
+}
+
+// Cobertura de coleta é independente da base comum usada na comparação.
+model OlistSyncCobertura {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  entidade String
+  contaIdentidade String? @map("conta_identidade")
+  assinaturaEscopo String @default("") @map("assinatura_escopo")
+  versaoContrato Int @default(1) @map("versao_contrato")
+  completaExecucaoId String? @map("completa_execucao_id") @db.Uuid
+  completaIniciadaEm DateTime? @map("completa_iniciada_em") @db.Timestamptz(6)
+  completaEm DateTime? @map("completa_em") @db.Timestamptz(6)
+  watermarkConfirmado DateTime? @map("watermark_confirmado") @db.Timestamptz(6)
+  incrementalEm DateTime? @map("incremental_em") @db.Timestamptz(6)
+  ultimaExecucaoId String? @map("ultima_execucao_id") @db.Uuid
+  geracao Int @default(0)
+  incrementalValidado Boolean @default(false) @map("incremental_validado")
+  incrementalFuso String? @map("incremental_fuso")
+  incrementalContaIdentidade String? @map("incremental_conta_identidade")
+  incrementalValidadoEm DateTime? @map("incremental_validado_em") @db.Timestamptz(6)
+  incrementalValidadoPor String? @map("incremental_validado_por") @db.Uuid
+  incrementalVersaoContrato Int? @map("incremental_versao_contrato")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  participante OlistSyncParticipante @relation(fields:[configuracaoId, aplicativoId], references:[configuracaoId, aplicativoId], onDelete:Restrict)
+
+  @@unique([configuracaoId, aplicativoId, entidade])
+  @@map("olist_sync_cobertura")
+}
+
+// Só IDs: a fila sobrevive a cancelamento e mantém o trabalho ainda não decidido.
+model OlistSyncAfetado {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configuracaoId String @map("configuracao_id") @db.Uuid
+  execucaoId String @map("execucao_id") @db.Uuid
+  entidade String
+  registroId String @map("registro_id") @db.Uuid
+  identidadeAlterada Boolean @default(false) @map("identidade_alterada")
+  processadoEm DateTime? @map("processado_em") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  configuracao OlistSyncConfiguracao @relation(fields:[configuracaoId], references:[id], onDelete:Restrict)
+  execucao OlistSyncExecucao @relation(fields:[execucaoId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+  registro OlistSyncRegistro @relation(fields:[registroId, configuracaoId], references:[id, configuracaoId], onDelete:Restrict)
+
+  @@unique([execucaoId, entidade, registroId])
+  @@index([configuracaoId, entidade, processadoEm, registroId], map:"olist_sync_afetado_pendente_idx")
+  @@map("olist_sync_afetado")
 }
 
 model OlistSyncEtapa {
