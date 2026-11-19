@@ -96,7 +96,7 @@ export function criarRepositorioPedidosSemEnvio(db: PrismaClient) {
         // O total da API determina o fim, inclusive quando ela retorna páginas menores que o limite.
         const fim = pagina.pedidos.length === 0 || r.paginaOffset + pagina.pedidos.length >= pagina.total;
         const concluido = fim && r.situacaoIndice === 1;
-        await tx.pedidoSemEnvioJob.update({ where: { aplicativoId: r.aplicativoId }, data: {
+        await tx.pedidoSemEnvioJob.update({ where: { aplicativoId: r.aplicativoId }, select: { aplicativoId: true }, data: {
           status: concluido ? "CONCLUIDO" : "PENDENTE", reservaId: null, reservaAte: null,
           situacaoIndice: fim && !concluido ? 1 : r.situacaoIndice,
           paginaOffset: fim ? 0 : r.paginaOffset + pagina.pedidos.length,
