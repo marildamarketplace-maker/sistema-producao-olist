@@ -5,7 +5,7 @@ import type { ConfiguracaoSyncDto, ExecucaoSyncDetalheDto, ResumoSyncDto } from 
 
 declare global {
   interface Window {
-    olistSyncTeste: { concluir: () => void; chamadas: string[]; mutacoes: { recurso: string; dados: unknown }[]; detalheFinalRespondido: boolean; detalheFinalAbortado: boolean };
+    olistSyncTeste: { concluir: () => void; liberarAplicacao: () => void; chamadas: string[]; mutacoes: { recurso: string; dados: unknown }[]; detalheFinalRespondido: boolean; detalheFinalAbortado: boolean };
   }
 }
 
@@ -27,7 +27,10 @@ const execucao: ExecucaoSyncDetalheDto = {
   contadores: { listados: 12, detalhados: 4, alterados: 2, comparados: 2 }, etapas: [{ id: "etapa", aplicativoId: empresas[0].id, entidade: "PRODUTO", fase: "COLETA", status: "CONCLUIDA", tentativas: 1, disponivelEm: criadoEm, plano: { modo: "INCREMENTAL", iniciadaEm: criadoEm, desde: "2026-11-15T12:00:00Z" } }],
 };
 let concluida = false;
-window.olistSyncTeste = { concluir: () => { concluida = true; }, chamadas: [], mutacoes: [], detalheFinalRespondido: false, detalheFinalAbortado: false };
+window.olistSyncTeste = { concluir: () => { concluida = true; }, liberarAplicacao: () => {
+  configuracao.prontidao.sincronizacaoNativaCompativel=true;configuracao.prontidao.semanticaPutValidada=true;
+  configuracao.jobs=[{chave:"aplicar-sincronizacao-olist",permitidoNoPai:true,pausado:false}];
+}, chamadas: [], mutacoes: [], detalheFinalRespondido: false, detalheFinalAbortado: false };
 
 // Não há backend: qualquer URL ou método inesperado falha, impedindo contato externo.
 window.fetch = async (input, init) => {
@@ -45,7 +48,7 @@ window.fetch = async (input, init) => {
     janelaInicio: "2026-11-17T20:30:00Z", janelaFim: "2026-11-17T21:00:00Z", validadosNaJanela: 600, restantes: 1000,
     porMinuto: 20, terminoPrevisto: "2026-11-17T21:50:00Z", estado: "ESTIMADA" } });
   if (recurso === "resumo") {
-    const resumo: ResumoSyncDto = { sincronizados: 1, divergentes: 0, pendencias: 0, erros: 0, ultimaExecucao: atual, execucaoAtiva: concluida ? null : atual };
+    const resumo: ResumoSyncDto = { sincronizados: 1, divergentes: 15794, pendencias: 102, revisaoNecessaria: 1, erros: 0, fila:{aguardandoAplicacao:15694,emAplicacao:0,aguardandoConfirmacao:101,falhas:0,propostas:0}, ultimaExecucao: atual, execucaoAtiva: concluida ? null : atual };
     return Response.json(resumo);
   }
   if (recurso === `execucoes/${id}`) {

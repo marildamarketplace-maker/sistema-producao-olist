@@ -151,6 +151,27 @@ test("endereços são grupos atômicos e não mesclam partes conflitantes", () =
   assert.ok(decisao.motivos.includes("CONFLITO:endereco"));
 });
 
+test("cobrança ausente equivale somente ao endereço vazio com país padrão da Olist", () => {
+  const contato = (enderecoCobranca: CamposSync["enderecoCobranca"]) => observarRegistro("CONTATO", {
+    id: 10, nome: "Contato", cpfCnpj: "52998224725", tipoPessoa: "F", situacao: "B", enderecoCobranca,
+  }, { completo: true });
+  const origem = contato(null);
+  const vazios: CamposSync[] = [{}, { pais: "Brasil" }, { pais: "Brasil", endereco: "", numero: null, complemento: "" }];
+  for (const endereco of vazios) {
+    const destino = contato(endereco);
+    assert.deepEqual(gerarHashesCampos(origem.campos, hash), gerarHashesCampos(destino.campos, hash));
+    const decisao = avaliarReplicas({ entidade: "CONTATO", replicas: [{ aplicativoId: "a", observacao: origem }, { aplicativoId: "b", observacao: destino }], hashesBase: null, visaoCompleta: true, hash });
+    assert.equal(decisao.status, "SINCRONIZADO");assert.deepEqual(decisao.aplicativosAtualizar, []);
+    assert.notEqual(destino.campos.enderecoCobranca, null, "A comparação não deve descartar o snapshot original");
+  }
+  const preenchidos: CamposSync[] = [{ pais: "Portugal" }, { pais: "Brasil", numero: "0" }, { pais: "Brasil", cep: "12345678" }, { pais: "Brasil", endereco: "Rua A" }];
+  for (const endereco of preenchidos) {
+    const destino = contato(endereco);
+    assert.notEqual(gerarHashesCampos(origem.campos, hash).enderecoCobranca, gerarHashesCampos(destino.campos, hash).enderecoCobranca);
+    assert.equal(avaliarReplicas({ entidade: "CONTATO", replicas: [{ aplicativoId: "a", observacao: origem }, { aplicativoId: "b", observacao: destino }], hashesBase: null, visaoCompleta: true, hash }).status, "AGUARDANDO_REVISAO");
+  }
+});
+
 test("contatos não transferem acesso ao sistema, crédito, fiscal ou dados pessoais fora do escopo", () => {
   const obs = observarRegistro("CONTATO", { id: 10, nome: "Contato", cpfCnpj: "529.982.247-25", tipoPessoa: "F", situacao: "A", limiteCredito: 1000, dataNascimento: "2000-01-01", senha: "segredo", vendedor: { id: 123 } }, { completo: true });
   assert.equal(obs.situacao, "B");

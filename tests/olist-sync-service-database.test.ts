@@ -741,6 +741,43 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     // o número de chamadas não cresce com o número de contatos detalhados.
     assert.equal(chamadas.filter(r=>new URL(r.url).pathname.endsWith("/contatos/tipos")).length,6);
   });
+  await t.test("confirma cobrança vazia materializada pela Olist sem alterar a origem",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    contas.get(a)!.set("10",contato(10));
+    responder=async(r,app)=>app===b&&r.metodo==="GET"&&/\/contatos\/\d+$/.test(new URL(r.url).pathname)
+      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,enderecoCobranca:{endereco:"",numero:null,pais:"Brasil"}}}:undefined;
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);
+    assert.equal(escritas().length,1);assert.equal(escritas()[0].token,b);
+    assert.equal(contas.get(a)!.size,1);assert.equal(contas.get(a)!.get("10")!.enderecoCobranca,undefined);
+    responder=null;
+  });
+  await t.test("reconcilia envio inconclusivo antigo por ID sem POST nem nova coleta",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    contas.get(a)!.set("10",contato(10));
+    responder=async(r,app)=>app===b&&r.metodo==="GET"&&/\/contatos\/\d+$/.test(new URL(r.url).pathname)
+      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,enderecoCobranca:{endereco:"Outra rua",pais:"Brasil"}}}:undefined;
+    await terminar((await enfileirar()).id);
+    const op=await db.olistSyncOperacao.findFirstOrThrow();assert.equal(op.status,"RESULTADO_INCONCLUSIVO");assert.ok(op.remoteId);
+    responder=async(r,app)=>app===b&&r.metodo==="GET"&&/\/contatos\/\d+$/.test(new URL(r.url).pathname)
+      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,enderecoCobranca:{pais:"Brasil"}}}:undefined;
+    const antes=chamadas.length;const e=await enfileirar("APLICAR");assert.equal((await terminar(e.id)).status,"CONCLUIDA");
+    const confirmada=await db.olistSyncOperacao.findUniqueOrThrow({where:{id:op.id}});
+    assert.equal(confirmada.status,"CONFIRMADA");assert.equal(confirmada.remoteId,op.remoteId);assert.equal(escritas().length,1);
+    assert.equal(chamadas.slice(antes).filter(r=>new URL(r.url).pathname.endsWith('/contatos')).length,0);
+    assert.equal(await db.olistSyncPendencia.count({where:{status:"AGUARDANDO_REVISAO"}}),0);
+    responder=null;
+  });
+  await t.test("três confirmações realmente divergentes suspendem novas escritas daquele destino",async()=>{
+    await reset();for(let n=1;n<=4;n++)contas.get(a)!.set(String(n),produto(n,`SKU-${n}`,["Azulejo","Martelo","Camiseta","Livro"][n-1]));
+    responder=async(r,app)=>app===b&&r.metodo==="GET"&&/\/produtos\/\d+$/.test(new URL(r.url).pathname)
+      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,descricao:"Alteração externa"}}:undefined;
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(escritas().length,3);assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,status:"PAUSADA",erroCodigo:"CONFIRMACOES_DIVERGENTES"}}),1);
+    assert.equal(await db.olistSyncEvento.count({where:{tipo:"APLICACAO_REQUER_DIAGNOSTICO"}}),1);
+    responder=null;
+  });
   for(const catalogo of [[],[{id:87,nome:"Cliente",perfilContato:1}],[{id:87,nome:"Cliente",perfilContato:0},{id:88,nome:"cliente",perfilContato:0}]])
   await t.test(`tipo ausente, perfil incompatível ou equivalência ambígua bloqueia antes de escrever (${catalogo.length})`,async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
@@ -808,18 +845,39 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.equal(await db.olistSyncCobertura.count({where:{configuracaoId:config.id,aplicativoId:a,completaEm:{not:null}}}),0);
     assert.equal(escritas().length,0);
   });
-  await t.test("orçamento de uma alteração aplica um registro e mantém o restante para próxima execução sem revisão humana",async()=>{
+  await t.test("lotes de uma alteração continuam na mesma execução sem reler ou pedir revisão humana",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
     contas.get(a)!.set("10",produto(10,"ABC-1","Toalha azul"));contas.get(a)!.set("11",produto(11,"XYZ-9","Caixa madeira"));
-    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA_COM_PENDENCIAS");
-    assert.equal(escritas().length,1);
-    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
-    assert.equal(await db.olistSyncOperacao.count({where:{status:"PROPOSTA"}}),0);
-    assert.equal(await db.olistSyncPendencia.count({where:{status:"AGUARDANDO_REVISAO"}}),0);
-    const seguinte=await enfileirar();assert.equal((await terminar(seguinte.id)).status,"CONCLUIDA");
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
     assert.equal(escritas().length,2);
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),0);
+    assert.equal(await db.olistSyncPendencia.count({where:{status:"AGUARDANDO_REVISAO"}}),0);
     assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),2);
-    assert.equal(await db.olistSyncEvento.count({where:{tipo:"LIMITE_EXECUCAO_ATINGIDO"}}),1);
+    assert.equal(await db.olistSyncExecucao.count(),1);
+    assert.equal(chamadas.filter(r=>r.metodo==="GET"&&new URL(r.url).pathname.endsWith('/produtos')&&!new URL(r.url).searchParams.has('codigo')).length,2);
+    assert.equal(await db.olistSyncEvento.count({where:{tipo:"LOTE_APLICACAO_CONCLUIDO"}}),1);
+  });
+  await t.test("limite do lote persiste entre reservas e revogação na pausa impede a próxima escrita",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
+    contas.get(a)!.set("10",produto(10,"ABC-1","Azulejo"));contas.get(a)!.set("11",produto(11,"XYZ-9","Martelo"));
+    const e=await enfileirar();
+    await avancarAte(async()=>await db.olistSyncEvento.count({where:{execucaoId:e.id,tipo:"LOTE_APLICACAO_CONCLUIDO"}})>0,"próximo lote persistido");
+    const etapa=await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:e.id,aplicativoId:b,fase:"APLICAR"}});
+    assert.equal(escritas().length,1);assert.equal((etapa.cursorJson as CamposSync).loteConsumidas,0);
+    assert.ok(etapa.disponivelEm.getTime()>=agora+60_000);assert.equal(etapa.status,"PENDENTE");
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).finalizadaEm,null);
+    const chamadasAntes=chamadas.length;
+    await db.usuario.update({where:{id:usuario},data:{ativo:false},select:{id:true}});
+    await terminar(e.id);assert.equal(escritas().length,1);assert.equal(chamadas.length,chamadasAntes);
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
+  });
+  await t.test("429 consome orçamento do lote e continua com pré-condições renovadas sem duplicar",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
+    contas.get(a)!.set("10",produto(10));post429=true;
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
+    assert.equal(escritas().length,2);assert.equal(contas.get(b)!.size,1);
+    const op=await db.olistSyncOperacao.findFirstOrThrow();assert.equal(op.status,"CONFIRMADA");assert.equal(op.tentativas,2);
+    assert.equal(await db.olistSyncEvento.count({where:{tipo:"LOTE_APLICACAO_CONCLUIDO"}}),1);
   });
   await t.test("propostas antigas bloqueadas só por volume são reavaliadas e continuam sem aprovação manual",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
@@ -828,8 +886,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await db.olistSyncOperacao.updateMany({where:{status:"AUTORIZADA"},data:{status:"PROPOSTA",erroCodigo:"LIMITE_ALTERACOES"}});
     await db.olistSyncPendencia.create({data:{configuracaoId:config.id,aplicativoId:b,entidade:"PRODUTO",tipo:"LIMITE_ALTERACOES",severidade:"ALTA",chaveDedupe:"limite-legado"}});
     const e=await enfileirar();await terminar(e.id);
-    assert.equal(escritas().length,1);
-    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
+    assert.equal(escritas().length,2);
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),0);
     assert.equal(await db.olistSyncOperacao.count({where:{status:"PROPOSTA"}}),0);
     assert.equal(await db.olistSyncPendencia.count({where:{status:"AGUARDANDO_REVISAO"}}),0);
   });

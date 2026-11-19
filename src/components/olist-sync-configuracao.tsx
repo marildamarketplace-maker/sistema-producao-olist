@@ -48,10 +48,10 @@ export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
         </fieldset>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-sm font-medium">Horário diário ({configuracao.fusoHorario})<input required type="time" value={form.horaDiaria} onChange={(event) => setForm({ ...form, horaDiaria: event.target.value })} className="input mt-1 min-h-11" /></label>
-          <label className="text-sm font-medium">Limite por execução, entidade e destino<input required type="number" min={1} max={100} value={form.limiteAlteracoes} onChange={(event) => setForm({ ...form, limiteAlteracoes: Number(event.target.value) })} className="input mt-1 min-h-11" /></label>
+          <label className="text-sm font-medium">Alterações por lote, entidade e destino<input required type="number" min={1} max={100} value={form.limiteAlteracoes} onChange={(event) => setForm({ ...form, limiteAlteracoes: Number(event.target.value) })} className="input mt-1 min-h-11" /><span className="mt-1 block text-xs text-slate-500">Os lotes continuam automaticamente, com intervalo mínimo de um minuto e sem repetir a coleta.</span></label>
         </div>
       </fieldset>
-      <p className="mt-4 text-xs text-slate-500">Próxima execução: {dataSync(configuracao.proximaExecucaoEm)}. A agenda usa auditoria automática. Cada execução aplica até o limite configurado; o restante autorizado continua nas próximas execuções. Conflitos reais exigem revisão.</p>
+      <p className="mt-4 text-xs text-slate-500">Próxima execução: {dataSync(configuracao.proximaExecucaoEm)}. A agenda usa auditoria automática. Cada lote respeita o limite configurado; a fila continua na mesma execução, sem repetir a coleta. Conflitos reais exigem revisão.</p>
     </section>
     <ConfiguracaoIncrementalSync configuracao={configuracao} participantesIds={form.participantesIds} entidades={form.entidades} validacoes={form.incrementalValidacoes ?? []} disabled={!podeEditar || ocupado} alterar={incrementalValidacoes => setForm(atual => ({ ...atual, incrementalValidacoes }))} />
     <section className={syncPanel}>

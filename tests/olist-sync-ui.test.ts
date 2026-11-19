@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { permissionKeys, permissoesSincronizacaoParaAplicativo } from "../src/lib/permissions";
 import { paginasPermitidas } from "../src/lib/navigation";
 import { execucaoSyncAtiva, intervaloPollingSync, textoValorSync, type PendenciaSyncDetalheDto, type RegistroSyncDto } from "../src/lib/olist-sync/api-contract";
-import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync } from "../src/components/olist-sync-ui";
+import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, ResumoFilaSync } from "../src/components/olist-sync-ui";
 import { calcularPrevisaoValidacaoSync } from "../src/lib/olist-sync/previsao";
 import { DecisaoSyncDialog, ExecutarSyncDialog } from "../src/components/olist-sync-decisoes";
 import { ConfiguracaoIncrementalSync } from "../src/components/olist-sync-incremental";
@@ -135,4 +135,15 @@ test("paginação não permite ultrapassar a última página nem repetir navega�
   assert.match(html, /1–20 de 20/);
   const carregando = renderToStaticMarkup(React.createElement(PaginacaoSync, { offset: 25, total: 100, limit: 25, ocupado: true, mudar: () => {} }));
   assert.match(carregando, /disabled="">Anterior/); assert.match(carregando, /disabled="">Próxima/);
+});
+
+
+test("resumo distingue fila autorizada, confirmação e revisão sem exigir aprovação por item", () => {
+  const html = renderToStaticMarkup(React.createElement(ResumoFilaSync, { resumo: {
+    sincronizados: 32, divergentes: 15794, pendencias: 1482, revisaoNecessaria: 1381, erros: 0,
+    fila: { aguardandoAplicacao: 15694, aguardandoConfirmacao: 101, emAplicacao: 0, falhas: 2, propostas: 0 }, ultimaExecucao: null, execucaoAtiva: null,
+  } }));
+  for (const rotulo of ["Aguardando aplicação", "Aguardando confirmação", "Revisão necessária", "processadas automaticamente em lotes", "não representam aprovações manuais", "sem repetir a criação"]) assert.ok(html.includes(rotulo), rotulo);
+  assert.match(html,/15\.694/);assert.match(html,/101/);assert.doesNotMatch(html,/>Divergentes</);
+  assert.match(html,/sm:grid-cols-2/);assert.match(html,/min-w-0/);
 });

@@ -216,8 +216,19 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
   return { id, chave, nome, situacao, alteradoEm, tipo, paiId, completo, campos, pendencias, ...(tiposContatoRemotos ? { tiposContatoRemotos } : {}) };
 }
 
+/** A Olist materializa cobrança ausente como endereço vazio com país Brasil.
+ * Mantém o snapshot original; só essa representação sem endereço é equivalente
+ * a null. País estrangeiro ou qualquer parte preenchida continua significativa. */
+function valorComparavel(campo: string, valor: JsonValue): JsonValue {
+  if (campo !== "enderecoCobranca" || !objeto(valor)) return valor;
+  const pais = valor.pais;
+  if (pais !== null && pais !== undefined && pais !== "" && pais !== "Brasil") return valor;
+  if (Object.entries(valor).some(([chave, parte]) => chave !== "pais" && parte !== null && parte !== "")) return valor;
+  return null;
+}
+
 export function gerarHashesCampos(campos: CamposSync, hash: (valor: JsonValue) => string): Record<string, string> {
-  return Object.fromEntries(Object.keys(campos).sort().map(campo => [campo, hash(campos[campo])]));
+  return Object.fromEntries(Object.keys(campos).sort().map(campo => [campo, hash(valorComparavel(campo, campos[campo]))]));
 }
 
 export function inferirOrigem(replicas: ReplicaComparacao[], visaoCompleta: boolean, anterior?: OrigemSync): OrigemSync {
@@ -262,7 +273,10 @@ export function avaliarReplicas(entrada: {
       motivos.push(`CAMPO_INCOMPLETO:${campo}`);
       continue;
     }
-    const valores = presentes.map(item => ({ aplicativoId: item.aplicativoId, valor: item.observacao.campos[campo], hash: hash(item.observacao.campos[campo]) }));
+    const valores = presentes.map(item => {
+      const valor = valorComparavel(campo, item.observacao.campos[campo]);
+      return { aplicativoId: item.aplicativoId, valor, hash: hash(valor) };
+    });
     const valoresDistintos = new Set(valores.map(item => item.hash));
     const hashBase = hashesBase?.[campo];
     if (hashBase === undefined && valoresDistintos.size > 1) { motivos.push(`DIVERGENCIA_INICIAL:${campo}`); continue; }
@@ -282,7 +296,8 @@ export function avaliarReplicas(entrada: {
   }
   if (motivos.length) return bloqueada();
   const aplicativosCriar = replicas.filter(item => !item.observacao).map(item => item.aplicativoId);
-  const aplicativosAtualizar = presentes.filter(item => serializarCanonico(item.observacao.campos) !== serializarCanonico(campos)).map(item => item.aplicativoId);
+  const esperado = serializarCanonico(campos);
+  const aplicativosAtualizar = presentes.filter(item => serializarCanonico(Object.fromEntries(Object.entries(item.observacao.campos).map(([campo, valor]) => [campo, valorComparavel(campo, valor)]))) !== esperado).map(item => item.aplicativoId);
   if (aplicativosCriar.length) {
     for (const item of presentes) motivos.push(...item.observacao.pendencias.filter(codigo => codigo.startsWith("REFERENCIA_") || codigo === "IMAGENS_REQUEREM_VALIDACAO"));
   }

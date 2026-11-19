@@ -102,31 +102,37 @@ export async function GET(request:Request,contexto:Contexto) {
         jobs:Object.values(JOBS_SYNC).map(j=>({chave:j.chave,permitidoNoPai:aplicativoTemJob(config.aplicativoPai.jobs,j.flag),pausado:jobs.find(c=>c.chave===j.chave)?.pausado??true}))});
     }
     if(recurso==="resumo") {
-      const [estados,pendencias,ultima,ativa]=await Promise.all([
+      const [estados,tiposPendencias,ultima,ativa,operacoes]=await Promise.all([
         prisma.olistSyncEstado.groupBy({by:["status"],where:{configuracaoId:config.id,participante:{habilitado:true}},_count:true}),
-        prisma.olistSyncPendencia.count({where:{configuracaoId:config.id,status:"AGUARDANDO_REVISAO"}}),
+        prisma.olistSyncPendencia.groupBy({by:["tipo"],where:{configuracaoId:config.id,status:"AGUARDANDO_REVISAO"},_count:true}),
         prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id},orderBy:[{createdAt:"desc"},{id:"desc"}],select:selectExecucao}),
         prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:ESTADOS_EXECUCAO_SYNC_ATIVOS}},select:selectExecucao}),
+        prisma.olistSyncOperacao.groupBy({by:["status"],where:{configuracaoId:config.id,destinoAppId:{in:config.participantes.filter(p=>p.habilitado).map(p=>p.aplicativoId)},registro:{entidade:{in:config.entidades}}},_count:true}),
       ]);
       const quantidade=(...status:string[])=>estados.filter(e=>status.includes(e.status)).reduce((n,e)=>n+e._count,0);
-      return json({sincronizados:quantidade("SINCRONIZADO"),divergentes:quantidade("DIVERGENTE","AGUARDANDO_REVISAO"),erros:quantidade("ERRO"),pendencias,ultimaExecucao:ultima?execucaoDto(ultima):null,execucaoAtiva:ativa?execucaoDto(ativa):null});
+      const pendencias=tiposPendencias.reduce((n,p)=>n+p._count,0);
+      const revisaoNecessaria=tiposPendencias.filter(p=>!["VERIFICACAO_DIVERGENTE","RESULTADO_INCONCLUSIVO","RESPOSTA_INCERTA"].includes(p.tipo)).reduce((n,p)=>n+p._count,0);
+      const operacoesEm=(...status:string[])=>operacoes.filter(o=>status.includes(o.status)).reduce((n,o)=>n+o._count,0);
+      const fila={aguardandoAplicacao:operacoesEm("AUTORIZADA"),emAplicacao:operacoesEm("EM_APLICACAO"),aguardandoConfirmacao:operacoesEm("VERIFICANDO","RESULTADO_INCONCLUSIVO"),falhas:operacoesEm("FALHA_PERMANENTE"),propostas:operacoesEm("PROPOSTA")};
+      return json({sincronizados:quantidade("SINCRONIZADO"),divergentes:quantidade("DIVERGENTE","AGUARDANDO_REVISAO"),erros:quantidade("ERRO"),pendencias,revisaoNecessaria,fila,ultimaExecucao:ultima?execucaoDto(ultima):null,execucaoAtiva:ativa?execucaoDto(ativa):null});
     }
     if(recurso==="execucoes") {
       if(id) {
         const e=await prisma.olistSyncExecucao.findFirst({where:{id,configuracaoId:config.id},select:{...selectExecucao,etapas:{select:{id:true,entidade:true,aplicativoId:true,fase:true,status:true,tentativas:true,disponivelEm:true},orderBy:[{entidade:"asc"},{aplicativoId:"asc"},{fase:"asc"},{id:"asc"}],take:200}}});
         if(!e)throw new ErroRepositorioSync("Execução não encontrada.",404);
         // Projeta somente a janela pública: não transfere o lote/cursor nem hashes internos.
-        const planos=await prisma.$queryRaw<{id:string;modo:string|null;iniciadaEm:string|null;desde:string|null}[]>`
+        const planos=await prisma.$queryRaw<{id:string;modo:string|null;iniciadaEm:string|null;desde:string|null;confirmacoesDivergentes:boolean}[]>`
           SELECT etapa.id, etapa.cursor_json #>> '{plano,modo}' AS modo,
             etapa.cursor_json #>> '{plano,iniciadaEm}' AS "iniciadaEm",
-            etapa.cursor_json #>> '{plano,desdeUtc}' AS desde
+            etapa.cursor_json #>> '{plano,desdeUtc}' AS desde,
+            coalesce(etapa.erro_codigo='CONFIRMACOES_DIVERGENTES',false) AS "confirmacoesDivergentes"
           FROM olist_sync_etapa etapa JOIN olist_sync_execucao execucao ON execucao.id=etapa.execucao_id
           WHERE etapa.execucao_id=${id}::uuid AND execucao.configuracao_id=${config.id}::uuid
           ORDER BY etapa.entidade, etapa.aplicativo_id, etapa.fase, etapa.id LIMIT 200`;
         const planoPorEtapa=new Map(planos.map(p=>[p.id,p]));
         return json({...execucaoDto(e),etapas:e.etapas.map(s=>{
           const plano=planoPorEtapa.get(s.id);
-          return {...s,aplicativoId:s.aplicativoId??config.aplicativoPaiId,plano:plano?.iniciadaEm&&["COMPLETA","INCREMENTAL"].includes(plano.modo??"")?{modo:plano.modo,iniciadaEm:plano.iniciadaEm,desde:plano.desde}:null};
+          return {...s,aplicativoId:s.aplicativoId??config.aplicativoPaiId,confirmacoesDivergentes:plano?.confirmacoesDivergentes??false,plano:plano?.iniciadaEm&&["COMPLETA","INCREMENTAL"].includes(plano.modo??"")?{modo:plano.modo,iniciadaEm:plano.iniciadaEm,desde:plano.desde}:null};
         })});
       }
       const where={configuracaoId:config.id,...(filtros.status?{status:filtros.status}:{})};

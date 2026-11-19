@@ -45,6 +45,26 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
     assert.equal((await api.GET(req("GET",["resumo"],undefined,usuarioFilho),contexto(["resumo"]))).status,403);
     const response=await api.GET(req("GET",["resumo"]),contexto(["resumo"]));assert.equal(response.status,200);assert.equal(response.headers.get("cache-control"),"private, no-store");
   });
+  await t.test("resumo separa fila e revisão com agregações isoladas aos destinos habilitados", async () => {
+    const registro=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"CONTATO",chave:"fila-resumo"}});
+    const tipos=["VERIFICACAO_DIVERGENTE","IDENTIDADE_DUPLICADA"];
+    await db.olistSyncParticipante.create({data:{configuracaoId:config.id,aplicativoId:matriz,habilitado:false}});
+    try {
+      await db.olistSyncOperacao.createMany({data:["AUTORIZADA","EM_APLICACAO","VERIFICANDO","RESULTADO_INCONCLUSIVO","FALHA_PERMANENTE","PROPOSTA"].map((status,i)=>({configuracaoId:config.id,registroId:registro.id,sourceAppId:a,destinoAppId:b,acao:"CRIAR",revisao:i+1,status}))});
+      await db.olistSyncOperacao.create({data:{configuracaoId:config.id,registroId:registro.id,sourceAppId:a,destinoAppId:matriz,acao:"CRIAR",revisao:10,status:"AUTORIZADA"}});
+      await db.olistSyncPendencia.createMany({data:tipos.map(tipo=>({configuracaoId:config.id,registroId:registro.id,entidade:"CONTATO",tipo,severidade:"ALTA",chaveDedupe:`resumo-${tipo}`}))});
+      const response=await api.GET(req("GET",["resumo"]),contexto(["resumo"]));assert.equal(response.status,200);
+      const resumo=await response.json();
+      assert.deepEqual(resumo.fila,{aguardandoAplicacao:1,emAplicacao:1,aguardandoConfirmacao:2,falhas:1,propostas:1});
+      assert.equal(resumo.pendencias,2);assert.equal(resumo.revisaoNecessaria,1);
+      assert.doesNotMatch(JSON.stringify(resumo),/payload|criptografado|cpfCnpj|precondicoes/);
+    } finally {
+      await db.olistSyncPendencia.deleteMany({where:{registroId:registro.id}});
+      await db.olistSyncOperacao.deleteMany({where:{registroId:registro.id}});
+      await db.olistSyncParticipante.deleteMany({where:{configuracaoId:config.id,aplicativoId:matriz}});
+      await db.olistSyncRegistro.delete({where:{id:registro.id}});
+    }
+  });
   await t.test("previsão agrega só validações completas recentes e usa índice em 50 mil observações", async () => {
     const agora = new Date();
     const paiAnterior = await db.aplicativo.findUniqueOrThrow({ where: { id: pai }, select: { jobs: true } });

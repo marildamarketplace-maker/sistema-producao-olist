@@ -64,6 +64,7 @@ export type EtapaSyncDto = {
   status: string;
   tentativas: number;
   disponivelEm: string;
+  confirmacoesDivergentes?: boolean;
   plano?: { modo: "COMPLETA" | "INCREMENTAL"; iniciadaEm: string; desde: string | null } | null;
 };
 export type ExecucaoSyncDetalheDto = ExecucaoSyncDto & { etapas: EtapaSyncDto[] };
@@ -82,7 +83,10 @@ export type ResumoSyncDto = {
   sincronizados: number;
   divergentes: number;
   pendencias: number;
+  revisaoNecessaria?: number;
   erros: number;
+  /** Operações por destino; contagens de estados legadas continuam disponíveis. */
+  fila?: { aguardandoAplicacao: number; emAplicacao: number; aguardandoConfirmacao: number; falhas: number; propostas: number };
   ultimaExecucao: ExecucaoSyncDto | null;
   execucaoAtiva: ExecucaoSyncDto | null;
 };

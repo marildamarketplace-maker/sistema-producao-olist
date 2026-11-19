@@ -7,7 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { ConfiguracaoSync } from "@/components/olist-sync-configuracao";
 import { DecisaoSyncDialog, ExecutarSyncDialog, OrigemSyncDialog } from "@/components/olist-sync-decisoes";
-import { dataSync, duracaoSync, DialogoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, StatusSync, syncButton, syncPanel, syncPrimary } from "@/components/olist-sync-ui";
+import { dataSync, duracaoSync, DialogoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, ResumoFilaSync, StatusSync, syncButton, syncPanel, syncPrimary } from "@/components/olist-sync-ui";
 import {
   ENTIDADES_SYNC_LABEL, ORIGENS_SYNC_LABEL, execucaoSyncAtiva, intervaloPollingSync,
   type ConfiguracaoSyncDto, type EntidadeSyncApi, type ExecucaoSyncDetalheDto, type ExecucaoSyncDto,
@@ -216,9 +216,13 @@ function SincronizacaoOlist() {
   const jobAplicar = config?.jobs.find((job) => job.chave === "aplicar-sincronizacao-olist");
   const permiteAplicar = Boolean(config?.ativo && config.prontidao.sincronizacaoNativaCompativel && config.prontidao.semanticaPutValidada && jobAplicar && !jobAplicar.pausado && jobAplicar.permitidoNoPai);
   const lista = aba === "registros" ? registros : aba === "pendencias" ? pendencias : execucoes;
-  const totais = resumo ? [
-    ["Sincronizados", resumo.sincronizados], ["Divergentes", resumo.divergentes], ["Pendências humanas", resumo.pendencias], ["Erros", resumo.erros],
-  ] as const : [];
+  const temFila = Boolean(resumo?.fila && (resumo.fila.aguardandoAplicacao + resumo.fila.emAplicacao + resumo.fila.aguardandoConfirmacao > 0));
+  async function processarFila() {
+    setOcupado(true); setErro(null);
+    try { await executar("APLICAR", false); }
+    catch (error) { setErro(error instanceof Error ? error.message : "Não foi possível iniciar o processamento da fila."); }
+    finally { setOcupado(false); }
+  }
 
   return <div className="space-y-6">
     <PageHeader title="Sincronização entre empresas" description="Audite e sincronize os cadastros dos aplicativos filhos. Controle conflitos, execuções e a origem de cada registro pelo aplicativo pai." />
@@ -234,7 +238,14 @@ function SincronizacaoOlist() {
     {config && <>
       {!config.ativo && <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800">A configuração do grupo está desabilitada. O histórico permanece disponível.</p>}
       {aba === "resumo" && <>
-        <section aria-label="Resumo dos registros" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{totais.map(([nome, total]) => <div className={syncPanel} key={nome}><h3 className="text-sm text-slate-500">{nome}</h3><p className="mt-2 text-2xl font-semibold">{total.toLocaleString("pt-BR")}</p></div>)}</section>
+        {resumo && <ResumoFilaSync resumo={resumo} />}
+        {temFila && <section className={`${syncPanel} space-y-3`} aria-label="Continuação da fila">
+          <h3 className="font-semibold">Continuar a sincronização com os dados já coletados</h3>
+          <p className="text-sm text-slate-600">Cria ou atualiza na Olist as alterações já autorizadas, aproveitando os dados coletados. A fila inteira continua em lotes, com revalidação da origem e do destino antes de cada escrita. Envios anteriores são confirmados pelo ID existente.</p>
+          {resumo?.execucaoAtiva ? <p role="status" className="text-sm text-slate-600">Há uma execução em andamento. Acompanhe seu processamento na aba Execuções.</p>
+            : usuario?.podeExecutarSincronizacaoOlist && <button type="button" className={syncPrimary} disabled={ocupado || !permiteAplicar} onClick={() => void processarFila()}>Processar fila existente</button>}
+          {!permiteAplicar && <p className="text-sm text-amber-800">A aplicação depende da configuração ativa, das validações e da liberação do job no aplicativo pai.</p>}
+        </section>}
         <section className={syncPanel}><h3 className="font-semibold">Empresas participantes</h3><p className="mt-1 text-sm text-slate-500">Administradas por {config.aplicativoPaiNome}</p><ul className="mt-4 grid gap-3 sm:grid-cols-2">{config.participantes.map((empresa) => <li className="rounded-md border border-slate-200 p-3" key={empresa.id}><span className="break-words text-sm font-medium">{empresa.nome}</span><p className="mt-1 text-xs text-slate-500">{empresa.habilitado ? "Participante habilitado" : "Participação desabilitada"}</p></li>)}</ul><p className="mt-4 text-xs text-slate-500">O aplicativo pai e os filhos não selecionados não recebem dados deste módulo.</p></section>
         <section className={`${syncPanel} grid gap-5 sm:grid-cols-2`}>
           <div><h3 className="text-sm font-medium">Última execução</h3>{resumo?.ultimaExecucao ? <div className="mt-2 space-y-2"><StatusSync status={resumo.ultimaExecucao.status} /><p className="text-xs text-slate-500">{dataSync(resumo.ultimaExecucao.criadoEm)}</p><button type="button" onClick={(event) => void abrirExecucao(resumo.ultimaExecucao!.id, event.currentTarget)} className={syncButton} disabled={ocupado}>Ver execução</button></div> : <p className="mt-2 text-sm text-slate-500">Nenhuma execução registrada.</p>}</div>
@@ -284,7 +295,7 @@ function SincronizacaoOlist() {
       <div className="space-y-4"><StatusSync status={execucaoAberta.status} /><p className="break-all text-xs text-slate-500">{execucaoAberta.id}</p><p className="text-sm text-slate-600">Início: {dataSync(execucaoAberta.iniciadoEm)} · Fim: {dataSync(execucaoAberta.finalizadoEm)} · Duração: {duracaoSync(execucaoAberta.iniciadoEm, execucaoAberta.finalizadoEm)}</p>
         {erro && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
         <dl className="flex flex-wrap gap-x-5 gap-y-2">{Object.entries(execucaoAberta.contadores).map(([nome, valor]) => <div key={nome} className="text-sm"><dt className="inline text-slate-500">{nome.replaceAll("_", " ")}: </dt><dd className="inline font-medium">{valor}</dd></div>)}</dl>
-        <div className="grid gap-3 sm:grid-cols-2">{execucaoAberta.etapas.map((etapa) => <section className="min-w-0 rounded-md border border-slate-200 p-3" key={etapa.id}><h3 className="break-words text-sm font-medium">{nomeEmpresa(etapa.aplicativoId)} · {ENTIDADES_SYNC_LABEL[etapa.entidade]}</h3><p className="my-2 text-xs text-slate-500">{etapa.fase.toLowerCase()} · Tentativas: {etapa.tentativas}</p><StatusSync status={etapa.status} />{etapa.plano && <div className="mt-3 space-y-1 text-xs text-slate-600"><p>Leitura efetiva: {etapa.plano.modo === "INCREMENTAL" ? "Incremental" : "Completa"}</p><p>Início da coleta: {dataSync(etapa.plano.iniciadaEm)}</p>{etapa.plano.desde && <p>Alterações desde: {dataSync(etapa.plano.desde)} · janela sobreposta</p>}</div>}<p className="mt-2 text-xs text-slate-500">Disponível: {dataSync(etapa.disponivelEm)}</p></section>)}</div>
+        <div className="grid gap-3 sm:grid-cols-2">{execucaoAberta.etapas.map((etapa) => <section className="min-w-0 rounded-md border border-slate-200 p-3" key={etapa.id}><h3 className="break-words text-sm font-medium">{nomeEmpresa(etapa.aplicativoId)} · {ENTIDADES_SYNC_LABEL[etapa.entidade]}</h3><p className="my-2 text-xs text-slate-500">{etapa.fase.toLowerCase()} · Tentativas: {etapa.tentativas}</p><StatusSync status={etapa.status} />{etapa.confirmacoesDivergentes && <p className="mt-2 text-sm text-amber-800">Aplicação pausada após três confirmações com diferenças reais. Confira as pendências antes de continuar. Os IDs enviados foram preservados para reconciliação, sem nova criação.</p>}{etapa.plano && <div className="mt-3 space-y-1 text-xs text-slate-600"><p>Leitura efetiva: {etapa.plano.modo === "INCREMENTAL" ? "Incremental" : "Completa"}</p><p>Início da coleta: {dataSync(etapa.plano.iniciadaEm)}</p>{etapa.plano.desde && <p>Alterações desde: {dataSync(etapa.plano.desde)} · janela sobreposta</p>}</div>}<p className="mt-2 text-xs text-slate-500">Disponível: {dataSync(etapa.disponivelEm)}</p></section>)}</div>
         {usuario?.podeExecutarSincronizacaoOlist && <div className="flex flex-wrap justify-end gap-2">{execucaoSyncAtiva(execucaoAberta.status) && <button type="button" className={syncButton} disabled={ocupado} onClick={() => void alterarExecucao(execucaoAberta.id, "cancelar")}>Solicitar cancelamento</button>}{["CONCLUIDA_COM_PENDENCIAS", "FALHOU", "CANCELADA"].includes(execucaoAberta.status) && <button type="button" className={syncPrimary} disabled={ocupado || Boolean(resumo?.execucaoAtiva)} onClick={() => void alterarExecucao(execucaoAberta.id, "retomar")}>Retomar trabalho pendente</button>}</div>}
       </div>
     </DialogoSync>}

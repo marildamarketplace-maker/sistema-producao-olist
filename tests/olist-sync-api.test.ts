@@ -79,6 +79,7 @@ function reset() {
     "olistSyncPendencia.findFirst": ({ where }) => objeto(where).id === PENDENCIA && objeto(where).configuracaoId === GRUPO ? pendencia : null,
     "olistSyncPendencia.update": () => ({ id: PENDENCIA }),
     "olistSyncEstado.findMany": () => [], "olistSyncEstado.groupBy": () => [],
+    "olistSyncOperacao.groupBy": () => [], "olistSyncPendencia.groupBy": () => [{tipo:"DIVERGENCIA",_count:1}],
     "olistSyncExecucao.findUnique": () => null,
     "olistSyncExecucao.findFirst": () => null,
     "olistSyncExecucao.create": () => execucao,
@@ -165,6 +166,15 @@ void test("API de sincronização: autorização, isolamento, validação e trab
       assert.equal((await response.json()).previsao.estado, estado);
     }
     assert.equal(chamadasDe("$queryRaw").length, 0);
+  });
+  await t.test("detalhe da pausa expõe somente um sinal público sem erro bruto do provedor", async () => {
+    reset();
+    handlers["olistSyncExecucao.findFirst"] = () => ({...execucao,etapas:[{id:"etapa",aplicativoId:FILHO,entidade:"CONTATO",fase:"APLICAR",status:"PAUSADA",tentativas:0,disponivelEm:agora}]});
+    handlers["$queryRaw"] = () => [{id:"etapa",modo:null,iniciadaEm:null,desde:null,confirmacoesDivergentes:true}];
+    const caminho=`execucoes/${EXECUCAO}`;
+    const response=await GET(request(caminho),contexto(caminho));assert.equal(response.status,200);
+    const body=await response.json();assert.equal(body.etapas[0].confirmacoesDivergentes,true);
+    assert.doesNotMatch(JSON.stringify(body),/erroCodigo|payload|criptografado|cursorJson|cpfCnpj/);
   });
   await t.test("polling do resumo e consultas de detalhes/lista não calculam previsão", async () => {
     reset();handlers["olistSyncExecucao.findMany"] = () => [];handlers["olistSyncExecucao.count"] = () => 0;

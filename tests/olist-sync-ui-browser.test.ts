@@ -148,8 +148,8 @@ test("UI real: previsão manual, polling e sincronização incremental", { skip:
       }
       await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Configuração").click()');
       await ate(() => cdp.avaliar<boolean>('!!document.querySelector("details")'), "Configuração incremental não apareceu");
-      assert.match(await cdp.avaliar<string>('document.body.innerText'), /Limite por execução, entidade e destino/);
-      assert.match(await cdp.avaliar<string>('document.body.innerText'), /o restante autorizado continua nas próximas execuções/);
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /Alterações por lote, entidade e destino/);
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /a fila continua na mesma execução, sem repetir a coleta/);
       for (const escuro of [false, true]) {
         await cdp.avaliar(`document.documentElement.classList.toggle("dark", ${escuro})`);
         assert.equal(await cdp.avaliar('document.documentElement.scrollWidth <= window.innerWidth'), true, `Overflow em ${largura}px, escuro=${escuro}`);
@@ -167,6 +167,33 @@ test("UI real: previsão manual, polling e sincronização incremental", { skip:
       assert.equal(dados.incrementalValidacoes[0].fusoHorario, "America/Sao_Paulo"); assert.equal(dados.incrementalValidacoes[0].versaoContrato, 1);
       assert.match(dados.incrementalValidacoes[0].evidencia, /Cadastro antigo/);
       assert.ok(!JSON.stringify(dados).includes("contaIdentidade"));
+    });
+    await t.test(`fila existente aplica sem coletar, com layout e teclado em ${largura}px`, async () => {
+      await cdp.pedir("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+      await ate(() => cdp.avaliar<boolean>('!document.querySelector("[role=dialog]")'), "Detalhe não fechou");
+      await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Visão geral").click()');
+      await ate(() => cdp.avaliar<boolean>('[...document.querySelectorAll("section")].some(s => s.getAttribute("aria-label") === "Resumo do processamento")'), "Resumo não apareceu");
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /Aguardando aplicação/);
+      assert.match(await cdp.avaliar<string>('document.body.innerText'), /Aguardando confirmação/);
+      const getBotao='[...document.querySelectorAll("button")].find(b => b.textContent === "Processar fila existente")';
+      assert.equal(await cdp.avaliar(`${getBotao}?.disabled`), true, "Validações pendentes devem bloquear a aplicação");
+      await cdp.avaliar('window.olistSyncTeste.liberarAplicacao(); [...document.querySelectorAll("button")].find(b => b.textContent === "Atualizar").click()');
+      await ate(() => cdp.avaliar<boolean>(`${getBotao}?.disabled === false`), "Fila não foi liberada");
+      for (const escuro of [false,true]) {
+        await cdp.avaliar(`document.documentElement.classList.toggle("dark", ${escuro})`);
+        assert.equal(await cdp.avaliar('document.documentElement.scrollWidth <= window.innerWidth'), true, "Fila não pode transbordar no mobile");
+      }
+      const previsoesAntes=await cdp.avaliar<number>('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length');
+      await cdp.pedir("Page.bringToFront");
+      await cdp.pedir("Emulation.setFocusEmulationEnabled",{enabled:true});
+      await cdp.avaliar(`${getBotao}.scrollIntoView(); ${getBotao}.focus();`);
+      assert.equal(await cdp.avaliar("document.activeElement?.textContent"),"Processar fila existente");
+      await cdp.pedir("Input.dispatchKeyEvent", {type:"rawKeyDown",key:"Enter",code:"Enter",windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+      await cdp.pedir("Input.dispatchKeyEvent", {type:"char",key:"Enter",code:"Enter",text:"\r",unmodifiedText:"\r",windowsVirtualKeyCode:13});
+      await cdp.pedir("Input.dispatchKeyEvent", {type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+      await ate(() => cdp.avaliar<boolean>('window.olistSyncTeste.mutacoes.at(-1)?.dados.modo === "APLICAR"'), "Teclado não iniciou a fila existente");
+      assert.equal(await cdp.avaliar('window.olistSyncTeste.mutacoes.at(-1).dados.completa'),false);
+      assert.equal(await cdp.avaliar('window.olistSyncTeste.chamadas.filter(c => c === "previsao").length'),previsoesAntes,"Iniciar aplicação não recalcula previsão");
     });
   }
 });

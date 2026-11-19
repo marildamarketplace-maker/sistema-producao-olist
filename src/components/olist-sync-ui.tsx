@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import {
   ORIGENS_SYNC_LABEL, textoValorSync,
-  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto, type PrevisaoValidacaoSyncDto,
+  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto, type PrevisaoValidacaoSyncDto, type ResumoSyncDto,
 } from "@/lib/olist-sync/api-contract";
 
 export const syncButton = "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50";
@@ -16,6 +16,21 @@ export function dataSync(valor: string | null): string {
   if (!valor) return "—";
   const data = new Date(valor);
   return Number.isNaN(data.getTime()) ? "—" : data.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
+export function ResumoFilaSync({ resumo }: { resumo: ResumoSyncDto }) {
+  const fila = resumo.fila;
+  const totais: Array<[string, number]> = [
+    ["Sincronizados", resumo.sincronizados],
+    ...(fila ? [["Aguardando aplicação", fila.aguardandoAplicacao], ["Em aplicação", fila.emAplicacao], ["Aguardando confirmação", fila.aguardandoConfirmacao]] as Array<[string, number]> : []),
+    ["Revisão necessária", resumo.revisaoNecessaria ?? resumo.pendencias],
+    ["Falhas", fila ? fila.falhas : resumo.erros],
+  ];
+  return <section aria-label="Resumo do processamento" className="space-y-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{totais.map(([nome, total]) => <div className={`${syncPanel} min-w-0`} key={nome}><h3 className="text-sm text-slate-500">{nome}</h3><p className="mt-2 break-words text-2xl font-semibold">{total.toLocaleString("pt-BR")}</p></div>)}</div>
+    <p className="text-sm text-slate-600">A fila contém alterações já autorizadas, processadas automaticamente em lotes. Envios sem confirmação são consultados antes de novas escritas, sem repetir a criação.</p>
+    <p className="text-xs text-slate-500">Os totais da fila contam operações por destino; sincronizados e diferenças contam observações por empresa. {resumo.divergentes.toLocaleString("pt-BR")} observações com diferenças incluem itens ainda na fila e não representam aprovações manuais.{fila && fila.propostas > 0 ? ` Há também ${fila.propostas.toLocaleString("pt-BR")} propostas sem autorização.` : ""}</p>
+  </section>;
 }
 
 export function duracaoSync(iniciadoEm: string | null, finalizadoEm: string | null): string {
@@ -50,6 +65,7 @@ export function PrevisaoValidacaoSync({ previsao, falhou }: { previsao: Previsao
 
 const STATUS: Record<string, string> = {
   PENDENTE: "Na fila", AUDITANDO: "Auditando", APLICANDO: "Aplicando", AGUARDANDO_RETRY: "Aguardando nova tentativa",
+  PAUSADA: "Pausada para revisão",
   CONCLUIDA: "Concluída", CONCLUIDA_COM_PENDENCIAS: "Concluída com pendências", FALHOU: "Falhou", CANCELADA: "Cancelada",
   NAO_VERIFICADO: "Não verificado", SINCRONIZADO: "Sincronizado", AUSENTE: "Ausente", DIVERGENTE: "Divergente",
   AGUARDANDO_REVISAO: "Aguardando revisão", ERRO: "Erro", INATIVO_EXCLUIDO: "Inativo ou excluído",
