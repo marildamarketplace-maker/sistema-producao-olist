@@ -41,6 +41,9 @@ function agregarPorSku(itens: Array<{ sku: string; tituloProduto: string | null;
   return [...totais.entries()]
     .map(([sku, dados]) => ({ sku, ...dados }))
     .sort((a, b) => {
+      const comparacaoQuantidade = b.quantidade - a.quantidade;
+      if (comparacaoQuantidade !== 0) return comparacaoQuantidade;
+
       const tituloA = a.tituloProduto?.trim();
       const tituloB = b.tituloProduto?.trim();
       if (tituloA && !tituloB) return -1;

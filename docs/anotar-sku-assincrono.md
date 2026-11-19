@@ -2,6 +2,8 @@
 
 A tela registra uma solicitação durável e acompanha seu estado. O cron executa o trabalho sem depender do navegador. O histórico e as exportações CSV, Excel e PDF mantêm o contrato existente; resultados parciais não ficam disponíveis.
 
+Ao abrir uma busca salva ou exportar CSV, Excel ou PDF, os SKUs aparecem pela quantidade total da maior para a menor, depois de somar os itens de todos os pedidos da busca. Empates preservam a ordenação por título e SKU (com comparação numérica e títulos ausentes por último). A regra também vale para buscas anteriores, sem executar novamente a consulta na Olist ou alterar os dados salvos. A ordenação usa os dados já carregados; não acrescenta consultas nem volume transferido.
+
 As responsabilidades ficam separadas entre contrato/validação, cliente Olist, repositório transacional, serviço de processamento, endpoints e interface. O serviço recebe cliente e repositório por parâmetro, permitindo testar falhas sem serviços externos. As interfaces são específicas deste fluxo; não foi introduzida uma infraestrutura genérica de filas.
 
 ## Fluxo e garantias
