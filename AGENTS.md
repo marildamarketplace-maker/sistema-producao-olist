@@ -152,6 +152,83 @@ os limites adotados e o trade-off; não crie infraestrutura de cache sem necessi
 - Mudanças exclusivamente documentais exigem revisão do conteúdo e do diff;
   não exigem executar a aplicação ou sua suíte de testes.
 
+## Padrão de commits e publicação pela IA
+
+### Mensagem do commit
+
+Use Conventional Commits, com tipo em inglês e resumo em português:
+
+```text
+<tipo>(<escopo>): <resumo da alteração>
+```
+
+- Tipos: `feat` (funcionalidade), `fix` (correção), `perf` (desempenho),
+  `refactor` (refatoração), `test` (testes), `docs` (documentação),
+  `build` (build/dependências), `ci` (pipeline), `chore` (manutenção) e `revert`.
+- Escopo: módulo afetado, como `olist-sync`, `pedidos`, `estoque` ou `dashboard`.
+  Pode ser omitido quando não houver um módulo específico.
+- Resumo: descreva a mudança concreta com verbo de ação no presente, como
+  "adiciona", "corrige" ou "reduz". Prefira até 72 caracteres no título inteiro,
+  sem ponto final. Evite mensagens genéricas como "ajustes", "atualização" ou
+  "correções diversas".
+- Em mudanças complexas, acrescente um corpo separado por uma linha em branco,
+  explicando o problema, a solução e os impactos relevantes. Registre somente
+  validações realmente realizadas; diferencie testes locais de produção.
+- Mudança incompatível de contrato deve usar `!` após o tipo/escopo e explicar
+  a incompatibilidade no corpo com `BREAKING CHANGE:`.
+
+Exemplos:
+
+```text
+fix(olist-sync): normaliza perfis textuais dos tipos de contato
+feat(pedidos): adiciona alertas de pedidos sem envio
+perf(dashboard): pagina consultas e reduz dados transferidos
+docs(agentes): define o padrão de commits da IA
+```
+
+### Seleção dos arquivos e validação
+
+- Confira branch, `git status`, diff de trabalho e diff do índice antes de
+  preparar o commit. Preserve alterações de outras tarefas e de outros agentes,
+  inclusive arquivos já preparados; estar no índice não identifica sua autoria.
+- Inclua apenas o escopo autorizado. Se o pedido já identificar esse escopo,
+  prossiga sem reconfirmar. Pergunte somente quando houver ambiguidade real,
+  especialmente se a tarefa atual não alterou arquivos e o índice contiver
+  trabalho independente.
+- Prepare arquivos por caminhos explícitos. Use `git add .` apenas quando o
+  usuário solicitar ou quando todos os arquivos tiverem sido conferidos e
+  pertencerem ao mesmo escopo autorizado.
+- Faça commits coesos por objetivo. Código, migration, testes e documentação da
+  mesma funcionalidade podem ficar juntos; alterações independentes devem ser
+  separadas, mesmo quando sua publicação conjunta estiver autorizada.
+- Não inclua secrets, `.env`, credenciais, caches de CLI, diretórios temporários,
+  logs ou artefatos de build. Preserve no disco os arquivos locais excluídos do
+  commit; não apague trabalho para deixar o status limpo.
+- Revise `git diff --cached` e execute `git diff --cached --check`. O conteúdo
+  preparado deve corresponder ao que foi validado. Se arquivos forem alterados
+  em paralelo, confira novamente o escopo antes de incluí-los.
+- Execute as verificações proporcionais à mudança previstas neste documento.
+  Use o gerenciador e o lockfile do pipeline (`pnpm` neste projeto); quando houver
+  falha de dependências ou resolução de tipos no CI, valide também com instalação
+  isolada e lockfile congelado. Mudanças só documentais exigem revisão do diff,
+  sem build ou testes da aplicação.
+
+### Commit, push e confirmação do resultado
+
+- Faça commit e push quando solicitados ou já autorizados para aquele escopo.
+  Um pedido apenas de commit não autoriza push, deploy, migrations nem ativação
+  de jobs. Quando o push puder disparar o deploy automático existente, informe
+  esse efeito se for relevante.
+- Antes do push, confira remoto, branch e atualizações remotas. Preserve commits
+  alheios e resolva divergências sem sobrescrevê-los. Não use force push nem
+  reescreva commits publicados sem autorização explícita.
+- Depois do push, confirme o sucesso e a correspondência do commit com a branch
+  remota. Informe hash, branch e verificações realizadas, além de alterações
+  relevantes que permaneceram locais.
+- Diferencie commit criado, push concluído, migration aplicada e deploy ativo.
+  Só declare o deploy concluído após confirmar seu estado no provedor; uma
+  validação local ou um push bem-sucedido não comprova publicação em produção.
+
 ## Design system e usabilidade
 
 ### Usabilidade desktop e mobile: requisito obrigatório
