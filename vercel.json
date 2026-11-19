@@ -3,6 +3,10 @@
   "framework": "nextjs",
   "crons": [
     {
+      "path": "/api/cron/alertar-pedidos-sem-envio",
+      "schedule": "*/15 11-22 * * *"
+    },
+    {
       "path": "/api/cron/processar-anotar-sku",
       "schedule": "*/1 * * * *"
     },
