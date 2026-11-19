@@ -1,4 +1,5 @@
 import axios from "axios";
+import { createHash } from "node:crypto";
 import {
   CAPACIDADES_SYNC, FalhaSync, type CamposSync, type ClienteSync, type EntidadeSync,
   type IdentidadeContaSync, type JsonValue, type OpcoesConsultaSync, type OpcoesListagemSync, type OpcoesMutacaoSync, type PaginaSync, type ResultadoMutacaoSync,
@@ -25,6 +26,7 @@ export interface RespostaHttpSync {
   cotaLeitura?: CotaLeituraSync;
 }
 export interface DependenciasClienteSync {
+  agora?: () => number;
   configurar(aplicativoId: string): Promise<{ apiBaseUrl: string }>;
   token(aplicativoId: string, opcoes?: { tokenRejeitado?: string }): Promise<string>;
   http(requisicao: RequisicaoSync): Promise<RespostaHttpSync>;
@@ -93,6 +95,9 @@ export interface ClienteSyncSubrecursos extends ClienteSync {
 }
 
 export function criarClienteSync(dependencias: DependenciasClienteSync = dependenciasPadrao): ClienteSyncSubrecursos {
+  // Limitado ao cliente/servidor: nenhum token bruto ou identidade vai ao checkpoint.
+  const identidades = new Map<string, { credencial: string; identidade: IdentidadeContaSync; em: number }>();
+  const agora = dependencias.agora ?? Date.now;
   async function prepararRequisicao(aplicativoId: string, caminho: string, parametros: Record<string, string> = {}) {
     if (!aplicativoId || aplicativoId.length > 150) throw new FalhaSync("APLICATIVO_INVALIDO", "O aplicativo da integração é inválido.");
     try {
@@ -112,14 +117,21 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     }
   }
 
-  async function executarRequisicao(metodo: "GET" | "POST" | "PUT", preparado: { url: string; token: string }, payload?: JsonValue) {
+  async function executarRequisicao(metodo: "GET" | "POST" | "PUT", preparado: { url: string; token: string }, payload?: JsonValue,
+    opcoes?: OpcoesConsultaSync, guard?: () => Promise<void>) {
+    await opcoes?.antesDeRequisicao?.(metodo);
+    // Autorização/lease e marca de envio são verificadas depois de esperar a cota.
+    await guard?.();
+    let resposta: RespostaHttpSync;
     try {
-      return await dependencias.http({ metodo, url: preparado.url, token: preparado.token, payload, timeoutMs: 20_000 });
+      resposta = await dependencias.http({ metodo, url: preparado.url, token: preparado.token, payload, timeoutMs: 20_000 });
     } catch {
       throw new FalhaSync(metodo === "GET" ? "REDE" : "MUTACAO_INCONCLUSIVA",
         metodo === "GET" ? "A consulta à Olist foi interrompida." : "O resultado da alteração na Olist precisa ser reconciliado antes de outra tentativa.",
         metodo === "GET", metodo !== "GET");
     }
+    opcoes?.aposResposta?.(metodo, { status: resposta.status, cotaLeitura: resposta.cotaLeitura, retryAfterMs: retryAfterSync(resposta.retryAfter, agora()) });
+    return resposta;
   }
 
   function validarResposta(metodo: "GET" | "POST" | "PUT", resposta: RespostaHttpSync) {
@@ -135,27 +147,49 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     return resposta;
   }
 
-  async function validarContaPreparada(preparado: { token: string }, opcoes: OpcoesConsultaSync) {
-    const info = validarResposta("GET", await executarRequisicao("GET", {
-      url: "https://api.tiny.com.br/public-api/v3/info", token: preparado.token,
-    }));
-    const identidade = interpretarIdentidade(info.dados);
+  async function validarContaPreparada(aplicativoId: string, preparado: { token: string }, opcoes: OpcoesConsultaSync, fresca = false) {
+    const credencial = createHash("sha256").update(preparado.token).digest("hex");
+    const anterior = identidades.get(aplicativoId);
+    const idade = anterior ? agora() - anterior.em : Infinity;
+    const cache = !fresca && opcoes.reutilizarIdentidade === true && anterior?.credencial === credencial && idade >= 0 && idade < 60_000 ? anterior : undefined;
+    if (!cache) identidades.delete(aplicativoId);
+    let identidade = cache?.identidade;
+    if (!identidade) {
+      const info = validarResposta("GET", await executarRequisicao("GET", {
+        url: "https://api.tiny.com.br/public-api/v3/info", token: preparado.token,
+      }, undefined, opcoes));
+      identidade = interpretarIdentidade(info.dados);
+    }
     let permitida = false;
-    try { permitida = opcoes.validarConta(identidade) === true; } catch { /* Falha fechada sem expor a validação. */ }
-    if (!permitida) throw new FalhaSync("CONTA_ALTERADA", "A conexão aponta para outra conta Olist. Execute uma nova auditoria.");
+    try { permitida = opcoes.validarConta({ ...identidade }) === true; } catch { /* Falha fechada sem expor a validação. */ }
+    if (!permitida) {
+      identidades.delete(aplicativoId);
+      throw new FalhaSync("CONTA_ALTERADA", "A conexão aponta para outra conta Olist. Execute uma nova auditoria.");
+    }
+    if (!cache) {
+      // TTL absoluto: hits não renovam validade; limite evita crescimento em workers longos.
+      const primeira = identidades.keys().next().value;
+      if (identidades.size >= 100 && primeira !== undefined) identidades.delete(primeira);
+      identidades.set(aplicativoId, { credencial, identidade: { ...identidade }, em: agora() });
+    }
   }
 
   async function requisitar(aplicativoId: string, metodo: "GET" | "POST" | "PUT", caminho: string, parametros: Record<string, string> = {}, payload?: JsonValue, opcoes?: OpcoesConsultaSync) {
     const preparado = await prepararRequisicao(aplicativoId, caminho, parametros);
     if (opcoes) {
-      await validarContaPreparada(preparado, opcoes);
+      await validarContaPreparada(aplicativoId, preparado, opcoes);
+    }
+    const guard = opcoes ? async () => {
       try { await opcoes.antesDeConsultar?.(); }
       catch (error) {
         if (error instanceof FalhaSync) throw error;
         throw new FalhaSync("VALIDACAO_CONSULTA", "Não foi possível confirmar a autorização da consulta.", true);
       }
-    }
-    let resposta = await executarRequisicao(metodo, preparado, payload);
+    } : undefined;
+    let resposta: RespostaHttpSync;
+    try { resposta = await executarRequisicao(metodo, preparado, payload, opcoes, guard); }
+    catch (error) { identidades.delete(aplicativoId); throw error; }
+    if (resposta.status === 401 || resposta.status === 403) identidades.delete(aplicativoId);
     // Leituras protegidas mantêm o token vinculado ao /info. Só GET comum pode
     // renovar; escritas nunca entram em retry automático.
     if (metodo === "GET" && !opcoes && resposta.status === 401) {
@@ -179,13 +213,17 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
       // O token fica apenas nesta chamada. Uma reconexão durante /info não pode
       // trocar a conta usada no POST/PUT, e nenhuma escrita renova credenciais.
       const preparado = await prepararRequisicao(aplicativoId, caminho);
-      await validarContaPreparada(preparado, opcoes);
-      try { await opcoes.antesDeEscrever?.(); }
-      catch (error) {
-        if (error instanceof FalhaSync) throw error;
-        throw new FalhaSync("VALIDACAO_ESCRITA", "Não foi possível confirmar a autorização da alteração.", true);
-      }
-      resposta = validarResposta(metodo, await executarRequisicao(metodo, preparado, payload));
+      await validarContaPreparada(aplicativoId, preparado, opcoes, true);
+      const guard = async () => {
+        try { await opcoes.antesDeEscrever?.(); }
+        catch (error) {
+          if (error instanceof FalhaSync) throw error;
+          throw new FalhaSync("VALIDACAO_ESCRITA", "Não foi possível confirmar a autorização da alteração.", true);
+        }
+      };
+      const recebida = await executarRequisicao(metodo, preparado, payload, opcoes, guard);
+      if (recebida.status === 401 || recebida.status === 403) identidades.delete(aplicativoId);
+      resposta = validarResposta(metodo, recebida);
     } else {
       resposta = await requisitar(aplicativoId, metodo, caminho, {}, payload);
     }

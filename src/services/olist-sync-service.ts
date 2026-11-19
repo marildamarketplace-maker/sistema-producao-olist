@@ -5,9 +5,9 @@ import { aplicativoTemJob } from "@/lib/aplicativo-jobs";
 import { aplicativoElegivelSync } from "@/lib/olist-sync/elegibilidade";
 import { criarCriptografiaSync, serializarCanonico } from "@/lib/olist-sync/cripto";
 import { avaliarReplicas, gerarHashesCampos, inferirOrigem, prepararPayload } from "@/lib/olist-sync/dominio";
-import { CAPACIDADES_SYNC, FalhaSync, type ClienteSync, type CamposSync, type EntidadeSync, type JsonValue, type ObservacaoRemota, type ReplicaComparacao } from "@/lib/olist-sync/contrato";
+import { CAPACIDADES_SYNC, FalhaSync, type ClienteSync, type CamposSync, type EntidadeSync, type JsonValue, type ObservacaoRemota, type OpcoesConsultaSync, type ReplicaComparacao } from "@/lib/olist-sync/contrato";
 import { entidadeSync, hashesJson, objetoJson, observacaoProtegida, proximoHorarioSync, prazoRetrySync } from "@/lib/olist-sync/validacao";
-import { cotaDaRespostaSync, proximaLeituraAuditoriaSync, type CotaLeituraSync } from "@/lib/olist-sync/ritmo";
+import { cotaDaRespostaSync, proximaChamadaAplicacaoSync, proximaLeituraAuditoriaSync, type CotaLeituraSync } from "@/lib/olist-sync/ritmo";
 import { selecionarPlanoColeta, fecharCobertura, marcarAfetadosSync, transferirAfetadosPendentes, marcarPropostasDesatualizadas } from "@/repositories/olist-sync-cobertura-repository";
 import { lerPlanoColeta } from "@/lib/olist-sync/incremental";
 import { lerCatalogoTiposContatoSync, MAXIMO_TIPOS_CONTATO, payloadTiposContatoSync, resolverTiposContatoSync, VALIDADE_CATALOGO_TIPOS_MS, VERSAO_OBSERVACAO_CONTATO, type CatalogoTiposContatoSync } from "@/lib/olist-sync/tipos-contato";
@@ -45,6 +45,28 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
   const agora = opcoes.agora ?? (() => new Date());
   const aguardar = opcoes.aguardar ?? ((ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms)));
   const criptografia = () => opcoes.cripto ?? criarCriptografiaSync();
+  const chamadasAtivas = new Map<string, { inicio: number; proxima: number; observada: boolean }>();
+  // O mutex durável da conta envolve todos os HTTP, inclusive /info. O mapa só
+  // acompanha a chamada reservada; não guarda tokens nem substitui o mutex.
+  function ritmoTransporte(app: string): Pick<OpcoesConsultaSync, "antesDeRequisicao" | "aposResposta"> {
+    return {
+      antesDeRequisicao: async () => {
+        const ritmo = chamadasAtivas.get(app);
+        if (!ritmo) throw new FalhaSync("LEASE_PERDIDA", "A chamada não possui reserva ativa.");
+        const espera = Math.max(0, ritmo.proxima - agora().getTime());
+        if (espera > 12_000) throw new FalhaSync("COTA_OLIST", "Aguarde a liberação da cota Olist.", true, false, null, espera);
+        if (espera) await aguardar(espera);
+        ritmo.inicio = agora().getTime();
+      },
+      aposResposta: (metodo, resposta) => {
+        const ritmo = chamadasAtivas.get(app);
+        if (!ritmo) return;
+        ritmo.observada = true;
+        ritmo.proxima = proximaChamadaAplicacaoSync(ritmo.inicio, agora().getTime(), resposta.cotaLeitura ?? null,
+          metodo !== "GET", resposta.status === 429, resposta.retryAfterMs);
+      },
+    };
+  }
 
   async function contar(tx:Tx, execucaoId:string, campo:string, quantidade=1) {
     await tx.$executeRaw`UPDATE olist_sync_execucao SET contadores_json=jsonb_set(coalesce(contadores_json,'{}'::jsonb),ARRAY[${campo}],to_jsonb(coalesce((contadores_json->>${campo})::integer,0)+${quantidade}::integer),true) WHERE id=${execucaoId}::uuid`;
@@ -85,7 +107,10 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     return repo.comReserva(r, async (tx,atual) => {
       const config=await validarChamada(tx,atual,app,escrita);
       const participante=await tx.olistSyncParticipante.updateMany({where:{configuracaoId:config.id,aplicativoId:app,habilitado:true,OR:[{proximaChamadaEm:null},{proximaChamadaEm:{lte:agora()}}]},data:{proximaChamadaEm:new Date(agora().getTime()+120_000)}});
-      if(participante.count!==1)throw new FalhaSync("AGUARDANDO_CONTA", "Aguarde a janela de chamadas desta conta.");
+      if(participante.count!==1) {
+        const janela=await tx.olistSyncParticipante.findUnique({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:app}},select:{proximaChamadaEm:true}});
+        throw new FalhaSync("AGUARDANDO_CONTA", "Aguarde a janela de chamadas desta conta.",true,false,null,Math.max(250,(janela?.proximaChamadaEm?.getTime()??agora().getTime()+10_000)-agora().getTime()));
+      }
       return config;
     });
   }
@@ -93,6 +118,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
   async function chamada<T>(r:Reserva, app:string, executar:()=>Promise<T>, escrita=false, identidadeVinculada=false):Promise<T> {
     const config=await contaPermitida(r,app,escrita);
     const inicio=agora().getTime();
+    chamadasAtivas.set(app,{inicio,proxima:inicio,observada:false});
     const auditoria = !escrita && !identidadeVinculada && ["LISTAR","DETALHAR"].includes(r.fase);
     let cota:CotaLeituraSync|null=null, limitada=false, retryAfterMs=0;
     try { const resposta=await executar();cota=cotaDaRespostaSync(resposta);return resposta; }
@@ -101,11 +127,11 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       throw error;
     }
     finally {
-      // Escrita inclui uma leitura de identidade com a mesma credencial: 6s + 12s.
       const respostaEm=agora().getTime();
-      const intervalo=escrita?18_000:identidadeVinculada?12_000:6_000;
+      const transporte=chamadasAtivas.get(app);
       const proxima=auditoria?proximaLeituraAuditoriaSync(inicio,respostaEm,cota,limitada,retryAfterMs)
-        :Math.max(respostaEm,inicio+intervalo,respostaEm+retryAfterMs);
+        :Math.max(transporte?.observada?transporte.proxima:proximaChamadaAplicacaoSync(inicio,respostaEm,cota,escrita,limitada,retryAfterMs),respostaEm+retryAfterMs);
+      chamadasAtivas.delete(app);
       await repo.comReserva(r,async(tx,atual)=>{
         await tx.olistSyncParticipante.updateMany({where:{configuracaoId:config.id,aplicativoId:app},data:{proximaChamadaEm:new Date(proxima)}});
         if(auditoria && cota)await tx.olistSyncEtapa.update({where:{id:r.id},data:{cursorJson:{...objetoJson(atual.cursorJson),cotaLeitura:{...cota,observadaEm:agora().toISOString()}}},select:{id:true}});
@@ -118,8 +144,9 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
   async function paginaTipos(r:Reserva, app:string, grupo:string, conta:string, anterior:CatalogoTiposContatoSync|null):Promise<CatalogoTiposContatoSync> {
     if(!cliente.listarTiposContato)throw new FalhaSync("TIPOS_CONTATO_NAO_MAPEADOS","O cliente não oferece o catálogo de tipos de contato.");
     const pagina=await chamada(r,app,()=>cliente.listarTiposContato!(app,{offset:anterior?.offset??0,limit:100},{
+      ...ritmoTransporte(app), reutilizarIdentidade:true,
       validarConta:identidade=>criptografia().hash(identidade.documento,`${grupo}:conta`)===conta,
-      antesDeConsultar:async()=>{await aguardar(6_000);await repo.comReserva(r,(tx,atual)=>validarChamada(tx,atual,app));},
+      antesDeConsultar:async()=>{await repo.comReserva(r,(tx,atual)=>validarChamada(tx,atual,app));},
     }),false,true);
     const itens=[...(anterior?.itens??[]),...pagina.itens], total=pagina.total;
     if(!Number.isSafeInteger(total)||total<0||total>MAXIMO_TIPOS_CONTATO||itens.length>total || !pagina.itens.length&&itens.length<total || anterior&&anterior.total!==total || new Set(itens.map(tipo=>tipo.id)).size!==itens.length)
@@ -455,7 +482,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         const consumidas=loteConsumidas;loteConsumidas=0;
         // Libera o consumidor entre lotes, mantendo a mesma execução e coleta.
         await repo.comReserva(r,tx=>tx.olistSyncEvento.create({data:{configuracaoId:grupo,execucaoId:e.execucaoId,tipo:"LOTE_APLICACAO_CONCLUIDO",metadadosJson:{aplicativoId:app,entidade,consumidas,limite:e.execucao.configuracao.limiteAlteracoes}},select:{id:true}}));
-        await checkpoint({},new Date(agora().getTime()+60_000));return;
+        await checkpoint({},new Date(agora().getTime()+5_000));return;
       }
     }
     const fontes=Object.keys(replicas).filter(id=>id!==app && replicas[id]!==null).sort();
@@ -465,10 +492,10 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     const fase=reconciliando?"VERIFICAR":typeof cursor.fase==="string"?cursor.fase:"FONTES";
     const hashesEsperados=gerarHashesCampos(campos,v=>c.hash(v,`${grupo}:campo`));
     const identidadeEsperada=(alvo:string)=>objetoJson(plan.contas)[alvo]??e.execucao.configuracao.participantes.find(p=>p.aplicativoId===alvo)?.contaIdentidade;
-    const protegerConsulta=(alvo:string)=>({
+    const protegerConsulta=(alvo:string,identidadeFresca=false)=>({
+      ...ritmoTransporte(alvo), reutilizarIdentidade:!identidadeFresca,
       validarConta:(identidade:{documento:string})=>c.hash(identidade.documento,`${grupo}:conta`)===identidadeEsperada(alvo),
       antesDeConsultar:async()=>{
-        await aguardar(6_000);
         await repo.comReserva(r,(tx,atual)=>validarChamada(tx,atual,alvo));
       },
     });
@@ -552,10 +579,10 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       try {
         const resultado=await chamada(r,app,async()=>{
           const protecao={
+            ...ritmoTransporte(app),
             ...(entidade==="CONTATO"?{catalogoTiposContato:catalogoConta(app)?.itens}:{}),
             validarConta:(identidade:{documento:string})=>c.hash(identidade.documento,`${grupo}:conta`)===identidadeEsperada(app),
             antesDeEscrever:async()=>{
-              await aguardar(6_000);
               await repo.comReserva(r,async(tx,atual)=>{
                 await validarChamada(tx,atual,app,true);
                 if(agora().getTime()-Number(cursor.iniciadaEm)>janelaValidacaoMs)throw new FalhaSync("JANELA_VALIDACAO_EXCEDIDA","Revalide os cadastros antes de escrever.");
@@ -596,14 +623,14 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     if(!remotoId) {
       const chave=entidade==="PRODUTO"?campos.sku:campos.cpfCnpj;
       if(typeof chave!=="string") {await bloquear("RESULTADO_INCONCLUSIVO","RESULTADO_INCONCLUSIVO");return;}
-      const encontrados=await consultar(app,()=>cliente.buscarPorChave(app,entidade,chave,protegerConsulta(app)));
+      const encontrados=await consultar(app,()=>cliente.buscarPorChave(app,entidade,chave,protegerConsulta(app,true)));
       if(!encontrados)return;
       if(encontrados.length!==1) {await bloquear("RESULTADO_INCONCLUSIVO","RESULTADO_INCONCLUSIVO");return;}
       remotoId=encontrados[0].id;
       await repo.comReserva(r,tx=>tx.olistSyncOperacao.update({where:{id:operacao.id},data:{remoteId:remotoId,status:"VERIFICANDO"},select:{id:true}}));
       await checkpoint({operacaoId:operacao.id,fase:"VERIFICAR"});return;
     }
-    const remoto=await consultar(app,()=>cliente.detalhar(app,entidade,remotoId!,protegerConsulta(app)));
+    const remoto=await consultar(app,()=>cliente.detalhar(app,entidade,remotoId!,protegerConsulta(app,true)));
     const observado=remoto?observarConta(app,remoto):null;
     if(!observado)return;
     const obtidos=gerarHashesCampos(observado.campos,v=>c.hash(v,`${grupo}:campo`));
@@ -644,16 +671,26 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       else throw new FalhaSync("ETAPA_INVALIDA","Etapa não suportada.");
     } catch(error) {
       const falha=error instanceof FalhaSync?error:new FalhaSync("FALHA_INTERNA","Falha ao processar a etapa.",true);
-      if(["AGUARDANDO_CONTA","JOB_PAUSADO"].includes(falha.codigo)) {
+      if(["AGUARDANDO_CONTA","COTA_OLIST","JOB_PAUSADO"].includes(falha.codigo)) {
         const e=await dadosReserva(r);
-        await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:objetoJson(e.cursorJson),disponivelEm:new Date(agora().getTime()+10_000)});
+        const cursor=objetoJson(e.cursorJson);
+        if(e.fase==="APLICAR" && ["AGUARDANDO_CONTA","COTA_OLIST"].includes(falha.codigo)
+          && ["FONTES","DESTINO","ESCREVER"].includes(String(cursor.fase))) {
+          // Espera de cota não é mudança do cadastro. Refaz pré-condições sem
+          // descartar a proposta nem reutilizar uma janela vencida após a pausa.
+          cursor.fase="FONTES";cursor.indice=0;delete cursor.iniciadaEm;
+        }
+        await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor,disponivelEm:new Date(agora().getTime()+Math.max(250,falha.retryAfterMs||10_000))});
       } else if(falha.codigo==="PRONTIDAO_PENDENTE") {
         await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:{},status:"CONCLUIDA"});
       } else {
         await repo.falharEtapa(r,falha.codigo,falha.recuperavel?prazoRetrySync(r.tentativas,agora(),falha.retryAfterMs).getTime()-agora().getTime():null);
       }
     }
-    await repo.concluirExecucaoQuandoPossivel(r.execucaoId);
+    // Enquanto há outra fase ativa, uma consulta de existência dispensa a
+    // transação de finalização. O fechamento mantém sua checagem sob lock.
+    const ativa=await db.olistSyncEtapa.findFirst({where:{execucaoId:r.execucaoId,status:{in:["PENDENTE","PROCESSANDO","AGUARDANDO_RETRY"]}},select:{id:true}});
+    if(!ativa)await repo.concluirExecucaoQuandoPossivel(r.execucaoId);
   }
 
   async function agendar() {
@@ -672,11 +709,16 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
 
   async function executar(prazo=agora().getTime()+240_000) {
     const agendadas=await agendar(); let etapas=0;
+    let ultimaRecuperacao=-Infinity;
     // Reserva também OAuth inicial, uma renovação após 401 e duas consultas de 20s.
     // Uma etapa iniciada perto do fim não pode ultrapassar o orçamento do cron.
     const margemEtapaMs=120_000;
     while(agora().getTime()<prazo-margemEtapaMs) {
-      const r=await repo.reservarEtapa({agora:agora(),leaseMs:180_000});
+      // Recuperação global é manutenção periódica; gates/locks da reserva e
+      // autorização antes de cada HTTP permanecem ativos em todas as etapas.
+      const recuperar=agora().getTime()-ultimaRecuperacao>=30_000;
+      if(recuperar)ultimaRecuperacao=agora().getTime();
+      const r=await repo.reservarEtapa({agora:agora(),leaseMs:180_000,recuperar});
       if(!r) {
         const proxima=await repo.proximaJanelaEtapa({agora:agora(),limiteMs:12_000});
         const espera=proxima?Math.ceil(proxima.getTime()-agora().getTime()):0;

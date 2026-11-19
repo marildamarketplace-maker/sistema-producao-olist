@@ -2,6 +2,26 @@
 export type CotaLeituraSync = { limite: number; restante: number; resetSegundos: number };
 export const INTERVALO_AUDITORIA_MS = 2_000;
 
+/** Aplicação: usa até 80% da cota, com teto de 48 GET/min e 60 HTTP de escrita/min.
+ * Cada escrita exige um GET fresco de identidade, limitando envios a menos de 30/min.
+ * Sem headers assume o menor plano (30/min), reservando 20% para outros usos.
+ * A janela é compartilhada entre métodos: conservadora, sem rajadas paralelas.
+ */
+export function proximaChamadaAplicacaoSync(inicio: number, respostaEm: number,
+  cota: CotaLeituraSync | null, escrita = false, limitada = false, retryAfterMs = 0): number {
+  const limite = cota?.limite ?? 30;
+  const cadencia = Math.ceil(60_000 / Math.min(escrita ? 60 : 48, limite * 0.8));
+  const reserva = Math.max(1, Math.ceil(limite * 0.2));
+  const saldo = cota ? cota.restante - reserva : 0;
+  const esperaSaldo = !cota ? 0 : saldo > 0
+    ? Math.ceil(cota.resetSegundos * 1_000 / saldo)
+    : Math.ceil(cota.resetSegundos * 1_000) + 250;
+  return Math.max(respostaEm, inicio + cadencia,
+    esperaSaldo > cadencia ? respostaEm + esperaSaldo : 0,
+    limitada ? respostaEm + Math.max(60_000, (cota?.resetSegundos ?? 0) * 1_000 + 250) : 0,
+    respostaEm + (Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : 0));
+}
+
 const reservaLeitura = (cota: CotaLeituraSync) => Math.max(1, Math.ceil(cota.limite * 0.1));
 
 export function interpretarCotaSync(limite: unknown, restante: unknown, reset: unknown): CotaLeituraSync | null {

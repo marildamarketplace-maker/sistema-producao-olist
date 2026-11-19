@@ -178,57 +178,59 @@ export function criarOlistSyncRepository(db: PrismaClient) {
       };
       return transacao ? executar(transacao) : db.$transaction(executar, { timeout: 25_000, maxWait: 5_000 });
     },
-    async reservarEtapa({ agora = new Date(), leaseMs = 180_000 }: { agora?: Date; leaseMs?: number } = {}): Promise<ReservaEtapaSync | null> {
+    async reservarEtapa({ agora = new Date(), leaseMs = 180_000, recuperar = true }: { agora?: Date; leaseMs?: number; recuperar?: boolean } = {}): Promise<ReservaEtapaSync | null> {
       if (!Number.isInteger(leaseMs) || leaseMs < 30_000 || leaseMs > 180_000) throw new ErroRepositorioSync("Duração de reserva inválida.", 400);
       // Cancelamento, alteração do grupo e revogação de autorização não podem deixar
       // uma execução sem consumidor bloqueando para sempre as auditorias seguintes.
-      await db.$transaction(async tx => {
-        const encerradas = await tx.$queryRaw<{ id: string; motivo: string }[]>`
-          SELECT e.id, CASE WHEN e.cancelamento_solicitado THEN 'CANCELADA'
-            WHEN NOT c.ativo OR c.versao<>e.versao_configuracao OR ${grupoInelegivel} THEN 'CONFIGURACAO_ALTERADA'
-            ELSE 'AUTORIZACAO_REVOGADA' END AS motivo
-          FROM olist_sync_execucao e JOIN olist_sync_configuracao c ON c.id=e.configuracao_id
-          WHERE e.status IN ('PENDENTE','AUDITANDO','APLICANDO','AGUARDANDO_RETRY')
-            AND NOT EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=e.id AND s.status='PROCESSANDO' AND s.lease_ate>${agora})
-            AND (e.cancelamento_solicitado OR NOT c.ativo OR c.versao<>e.versao_configuracao OR ${grupoInelegivel}
-              OR NOT EXISTS(SELECT 1 FROM usuario u WHERE u.id=CASE WHEN e.origem='AGENDADA' THEN c.autorizado_por ELSE e.solicitado_por END
-                AND u.aplicativo_id=c.aplicativo_pai_id AND u.ativo
-                AND CASE WHEN e.origem='AGENDADA' THEN u.pode_configurar_sincronizacao_olist ELSE u.pode_executar_sincronizacao_olist END))
-          ORDER BY e.created_at,e.id LIMIT 20 FOR UPDATE OF e SKIP LOCKED`;
-        for (const e of encerradas) {
-          await tx.olistSyncOperacao.updateMany({ where: { execucaoId: e.id, status: { in: ["EM_APLICACAO", "VERIFICANDO"] } }, data: { status: "RESULTADO_INCONCLUSIVO", erroCodigo: e.motivo } });
-          await tx.olistSyncEtapa.updateMany({ where: { execucaoId: e.id, status: { in: ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"] } }, data: { ...liberacao, status: e.motivo === "CANCELADA" ? "CANCELADA" : "PAUSADA", erroCodigo: e.motivo } });
-          await tx.olistSyncExecucao.update({ where: { id: e.id }, data: { status: e.motivo === "CANCELADA" ? "CANCELADA" : "CONCLUIDA_COM_PENDENCIAS", erroCodigo: e.motivo, finalizadaEm: agora }, select: { id: true } });
-        }
-      }, { timeout: 25_000, maxWait: 5_000 });
-      // Recuperação independe dos gates de consumo: uma lease esgotada ou uma
-      // aplicação pausada não pode impedir o fechamento e bloquear o grupo.
-      await db.$transaction(async tx => {
-        const execucoes = await tx.$queryRaw<{ id: string }[]>`
-          SELECT e.id FROM olist_sync_execucao e JOIN olist_sync_configuracao c ON c.id=e.configuracao_id
-            JOIN aplicativo a ON a.id=c.aplicativo_pai_id
-          WHERE e.status IN ('PENDENTE','AUDITANDO','APLICANDO','AGUARDANDO_RETRY')
-            AND EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=e.id
-              AND ((s.status='PROCESSANDO' AND s.lease_ate<=${agora} AND s.tentativas>=5)
-                OR (s.fase='APLICAR' AND ${aplicacaoPausada}
-                  AND (s.status IN ('PENDENTE','AGUARDANDO_RETRY') OR (s.status='PROCESSANDO' AND s.lease_ate<=${agora})))))
-          ORDER BY e.created_at,e.id LIMIT 20 FOR UPDATE OF e SKIP LOCKED`;
-        for (const e of execucoes) {
-          await tx.$executeRaw`UPDATE olist_sync_operacao o SET status='RESULTADO_INCONCLUSIVO',erro_codigo='RESERVA_EXPIRADA',updated_at=now()
-            WHERE o.execucao_id=${e.id}::uuid AND o.status IN ('EM_APLICACAO','VERIFICANDO')
-              AND EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=o.execucao_id AND s.aplicativo_id=o.destino_app_id
-                AND s.fase='APLICAR' AND s.status='PROCESSANDO' AND s.lease_ate<=${agora})`;
-          await tx.$executeRaw`UPDATE olist_sync_etapa s SET status='FALHOU',erro_codigo='TENTATIVAS_ESGOTADAS',lease_token=NULL,lease_ate=NULL,updated_at=now()
-            WHERE s.execucao_id=${e.id}::uuid AND s.status='PROCESSANDO' AND s.lease_ate<=${agora} AND s.tentativas>=5`;
-          await tx.$executeRaw`UPDATE olist_sync_etapa s SET status='PAUSADA',lease_token=NULL,lease_ate=NULL,updated_at=now()
-            FROM olist_sync_execucao e,olist_sync_configuracao c,aplicativo a
-            WHERE s.execucao_id=${e.id}::uuid AND s.execucao_id=e.id AND c.id=e.configuracao_id AND a.id=c.aplicativo_pai_id
-              AND s.fase='APLICAR' AND ${aplicacaoPausada}
-              AND (s.status IN ('PENDENTE','AGUARDANDO_RETRY') OR (s.status='PROCESSANDO' AND s.lease_ate<=${agora}))`;
-        }
-      }, { timeout: 25_000, maxWait: 5_000 });
-      const finalizaveis = await db.olistSyncExecucao.findMany({ where: { status: { in: ESTADOS_EXECUCAO_SYNC_ATIVOS }, etapas: { some: { status: { in: ["PAUSADA", "FALHOU"] } }, none: { status: { in: ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"] } } } }, select: { id: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 20 });
-      for (const e of finalizaveis) await concluirExecucaoQuandoPossivel(e.id);
+      if (recuperar) {
+        await db.$transaction(async tx => {
+          const encerradas = await tx.$queryRaw<{ id: string; motivo: string }[]>`
+            SELECT e.id, CASE WHEN e.cancelamento_solicitado THEN 'CANCELADA'
+              WHEN NOT c.ativo OR c.versao<>e.versao_configuracao OR ${grupoInelegivel} THEN 'CONFIGURACAO_ALTERADA'
+              ELSE 'AUTORIZACAO_REVOGADA' END AS motivo
+            FROM olist_sync_execucao e JOIN olist_sync_configuracao c ON c.id=e.configuracao_id
+            WHERE e.status IN ('PENDENTE','AUDITANDO','APLICANDO','AGUARDANDO_RETRY')
+              AND NOT EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=e.id AND s.status='PROCESSANDO' AND s.lease_ate>${agora})
+              AND (e.cancelamento_solicitado OR NOT c.ativo OR c.versao<>e.versao_configuracao OR ${grupoInelegivel}
+                OR NOT EXISTS(SELECT 1 FROM usuario u WHERE u.id=CASE WHEN e.origem='AGENDADA' THEN c.autorizado_por ELSE e.solicitado_por END
+                  AND u.aplicativo_id=c.aplicativo_pai_id AND u.ativo
+                  AND CASE WHEN e.origem='AGENDADA' THEN u.pode_configurar_sincronizacao_olist ELSE u.pode_executar_sincronizacao_olist END))
+            ORDER BY e.created_at,e.id LIMIT 20 FOR UPDATE OF e SKIP LOCKED`;
+          for (const e of encerradas) {
+            await tx.olistSyncOperacao.updateMany({ where: { execucaoId: e.id, status: { in: ["EM_APLICACAO", "VERIFICANDO"] } }, data: { status: "RESULTADO_INCONCLUSIVO", erroCodigo: e.motivo } });
+            await tx.olistSyncEtapa.updateMany({ where: { execucaoId: e.id, status: { in: ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"] } }, data: { ...liberacao, status: e.motivo === "CANCELADA" ? "CANCELADA" : "PAUSADA", erroCodigo: e.motivo } });
+            await tx.olistSyncExecucao.update({ where: { id: e.id }, data: { status: e.motivo === "CANCELADA" ? "CANCELADA" : "CONCLUIDA_COM_PENDENCIAS", erroCodigo: e.motivo, finalizadaEm: agora }, select: { id: true } });
+          }
+        }, { timeout: 25_000, maxWait: 5_000 });
+        // Recuperação independe dos gates de consumo: uma lease esgotada ou uma
+        // aplicação pausada não pode impedir o fechamento e bloquear o grupo.
+        await db.$transaction(async tx => {
+          const execucoes = await tx.$queryRaw<{ id: string }[]>`
+            SELECT e.id FROM olist_sync_execucao e JOIN olist_sync_configuracao c ON c.id=e.configuracao_id
+              JOIN aplicativo a ON a.id=c.aplicativo_pai_id
+            WHERE e.status IN ('PENDENTE','AUDITANDO','APLICANDO','AGUARDANDO_RETRY')
+              AND EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=e.id
+                AND ((s.status='PROCESSANDO' AND s.lease_ate<=${agora} AND s.tentativas>=5)
+                  OR (s.fase='APLICAR' AND ${aplicacaoPausada}
+                    AND (s.status IN ('PENDENTE','AGUARDANDO_RETRY') OR (s.status='PROCESSANDO' AND s.lease_ate<=${agora})))))
+            ORDER BY e.created_at,e.id LIMIT 20 FOR UPDATE OF e SKIP LOCKED`;
+          for (const e of execucoes) {
+            await tx.$executeRaw`UPDATE olist_sync_operacao o SET status='RESULTADO_INCONCLUSIVO',erro_codigo='RESERVA_EXPIRADA',updated_at=now()
+              WHERE o.execucao_id=${e.id}::uuid AND o.status IN ('EM_APLICACAO','VERIFICANDO')
+                AND EXISTS(SELECT 1 FROM olist_sync_etapa s WHERE s.execucao_id=o.execucao_id AND s.aplicativo_id=o.destino_app_id
+                  AND s.fase='APLICAR' AND s.status='PROCESSANDO' AND s.lease_ate<=${agora})`;
+            await tx.$executeRaw`UPDATE olist_sync_etapa s SET status='FALHOU',erro_codigo='TENTATIVAS_ESGOTADAS',lease_token=NULL,lease_ate=NULL,updated_at=now()
+              WHERE s.execucao_id=${e.id}::uuid AND s.status='PROCESSANDO' AND s.lease_ate<=${agora} AND s.tentativas>=5`;
+            await tx.$executeRaw`UPDATE olist_sync_etapa s SET status='PAUSADA',lease_token=NULL,lease_ate=NULL,updated_at=now()
+              FROM olist_sync_execucao e,olist_sync_configuracao c,aplicativo a
+              WHERE s.execucao_id=${e.id}::uuid AND s.execucao_id=e.id AND c.id=e.configuracao_id AND a.id=c.aplicativo_pai_id
+                AND s.fase='APLICAR' AND ${aplicacaoPausada}
+                AND (s.status IN ('PENDENTE','AGUARDANDO_RETRY') OR (s.status='PROCESSANDO' AND s.lease_ate<=${agora}))`;
+          }
+        }, { timeout: 25_000, maxWait: 5_000 });
+        const finalizaveis = await db.olistSyncExecucao.findMany({ where: { status: { in: ESTADOS_EXECUCAO_SYNC_ATIVOS }, etapas: { some: { status: { in: ["PAUSADA", "FALHOU"] } }, none: { status: { in: ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"] } } } }, select: { id: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 20 });
+        for (const e of finalizaveis) await concluirExecucaoQuandoPossivel(e.id);
+      }
       const leaseToken = randomUUID();
       return db.$transaction(async tx => {
         // Lock da configuração serializa a seleção entre workers e limita duas contas por grupo.

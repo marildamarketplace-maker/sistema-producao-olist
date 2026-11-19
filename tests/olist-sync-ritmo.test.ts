@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cotaDaRespostaSync, esperaAuditoriaSync, interpretarCotaSync, proximaLeituraAuditoriaSync } from "../src/lib/olist-sync/ritmo";
+import { cotaDaRespostaSync, esperaAuditoriaSync, interpretarCotaSync, proximaChamadaAplicacaoSync, proximaLeituraAuditoriaSync } from "../src/lib/olist-sync/ritmo";
+
+test("aplicação usa headers com reserva de 20%, teto próprio e fallback para plano de 30/min", () => {
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, null), 2_500);
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, null, true), 2_500);
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, {limite:60,restante:59,resetSegundos:50}), 1_250);
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, {limite:60,restante:59,resetSegundos:50}, true), 1_250);
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, {limite:140,restante:139,resetSegundos:50}), 1_250);
+  assert.equal(proximaChamadaAplicacaoSync(0, 0, {limite:30,restante:29,resetSegundos:40}), 2_500);
+});
+test("cota reduzida por outras integrações, reset, 429 e Retry-After prevalecem na aplicação", () => {
+  assert.equal(proximaChamadaAplicacaoSync(0, 500, {limite:60,restante:15,resetSegundos:30}), 10_500);
+  assert.equal(proximaChamadaAplicacaoSync(0, 500, {limite:60,restante:12,resetSegundos:30}), 30_750);
+  assert.equal(proximaChamadaAplicacaoSync(0, 500, null, false, true), 60_500);
+  assert.equal(proximaChamadaAplicacaoSync(0, 500, null, true, true, 90_000), 90_500);
+  assert.equal(proximaChamadaAplicacaoSync(0, 5_000, null), 5_000);
+  for(const invalido of [NaN,Infinity,-1])assert.equal(proximaChamadaAplicacaoSync(0,0,null,false,false,invalido),2_500);
+});
 
 test("ritmo da auditoria é de até 30 leituras/minuto com ou sem headers", () => {
   assert.equal(esperaAuditoriaSync(null), 2_000);

@@ -49,13 +49,18 @@ export interface IdentidadeContaSync {
 export interface ResultadoMutacaoSync { id: string | null }
 
 export interface OpcoesConsultaSync {
+  /** Cache privado de identidade por credencial; escritas sempre validam /info. */
+  reutilizarIdentidade?: boolean;
+  /** Executados para cada HTTP, inclusive /info; nunca recebem dados pessoais. */
+  antesDeRequisicao?: (metodo: "GET" | "POST" | "PUT") => Promise<void>;
+  aposResposta?: (metodo: "GET" | "POST" | "PUT", resposta: { status: number; cotaLeitura?: CotaLeituraSync; retryAfterMs: number }) => void;
   /** Valida a identidade usando a mesma credencial que será usada no recurso. */
   validarConta: (identidade: IdentidadeContaSync) => boolean;
   /** Respeita a janela da conta e revalida a reserva antes de ler o recurso. */
   antesDeConsultar?: () => Promise<void>;
 }
 
-export interface OpcoesMutacaoSync extends Pick<OpcoesConsultaSync, "validarConta"> {
+export interface OpcoesMutacaoSync extends Omit<OpcoesConsultaSync, "antesDeConsultar" | "reutilizarIdentidade"> {
   catalogoTiposContato?: readonly TipoContatoSync[];
   /** Verifica autorização e reserva após a leitura remota, antes de enviar a escrita. */
   antesDeEscrever?: () => Promise<void>;

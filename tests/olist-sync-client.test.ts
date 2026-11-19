@@ -553,3 +553,61 @@ test("leituras transportam somente números da cota e 429 mantém reset e Retry-
   const limitado = mock([{ status: 429, dados: {}, retryAfter: "90", cotaLeitura: { ...cotaLeitura, restante: 0 } }]);
   await assert.rejects(limitado.cliente.detalhar("a", "PRODUTO", "100"), error => error instanceof FalhaSync && error.status === 429 && error.retryAfterMs === 90_000 && error.cotaLeitura?.restante === 0);
 });
+
+
+test("cache opt-in é por aplicativo/credencial, tem TTL absoluto e não dispensa guard nem escrita fresca", async () => {
+  let agora=0, token="token-a", infos=0, guards=0;
+  const caminhos:string[]=[];
+  const cliente=criarClienteSync({
+    agora:()=>agora,
+    configurar:async()=>({apiBaseUrl:"https://api.tiny.com.br/public-api/v3"}),
+    token:async()=>token,
+    http:async r=>{
+      caminhos.push(r.url);
+      if(r.url.endsWith("/info")){infos++;return {status:200,dados:{cpfCnpj:"52998224725",razaoSocial:"Conta"}};}
+      return r.metodo==="GET"?{status:200,dados:produto}:{status:200,dados:{id:100}};
+    },
+  });
+  const opcoes={reutilizarIdentidade:true,validarConta:()=>true,antesDeConsultar:async()=>{guards++;}};
+  await cliente.detalhar("a","PRODUTO","100",opcoes);
+  agora=59_000;await cliente.detalhar("a","PRODUTO","100",opcoes);
+  assert.equal(infos,1);assert.equal(guards,2);
+  agora=60_000;await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,2);
+  token="token-b";await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,3);
+  await cliente.detalhar("b","PRODUTO","100",opcoes);assert.equal(infos,4);
+  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},opcoes);assert.equal(infos,5);
+  await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,5);
+  agora=-1;await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,6);
+  assert.equal(caminhos.filter(c=>!c.endsWith("/info")).length,8);
+});
+
+test("cache não reaproveita autorização e 401 invalida identidade sem retry protegido", async () => {
+  let infos=0, rejeitar=false;
+  const cliente=criarClienteSync({
+    configurar:async()=>({apiBaseUrl:"https://api.tiny.com.br/public-api/v3"}),token:async()=>"token",
+    http:async r=>r.url.endsWith("/info")?(infos++,{status:200,dados:{cpfCnpj:"52998224725",razaoSocial:"Conta"}}):{status:rejeitar?401:200,dados:produto},
+  });
+  const opcoes={reutilizarIdentidade:true,validarConta:()=>true};
+  await cliente.detalhar("a","PRODUTO","100",opcoes);
+  await assert.rejects(cliente.detalhar("a","PRODUTO","100",{...opcoes,validarConta:()=>false}),falha("CONTA_ALTERADA"));
+  await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,2);
+  rejeitar=true;await assert.rejects(cliente.detalhar("a","PRODUTO","100",opcoes),falha("OLIST_401"));
+  rejeitar=false;await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,3);
+});
+
+test("cadência envolve cada HTTP, publica só metadados e precede guard e marca de envio", async () => {
+  const eventos:string[]=[];
+  const cliente=criarClienteSync({
+    configurar:async()=>({apiBaseUrl:"https://api.tiny.com.br/public-api/v3"}),token:async()=>"token",
+    http:async r=>{eventos.push(r.metodo);return r.url.endsWith("/info")?{status:200,dados:{cpfCnpj:"52998224725",razaoSocial:"Conta"},cotaLeitura:{limite:60,restante:12,resetSegundos:20}}:{status:200,dados:{id:100}};},
+  });
+  const opcoes={validarConta:()=>true,antesDeRequisicao:async(m:string)=>{eventos.push("espera "+m);},
+    aposResposta:(m:string,r:object)=>{assert.deepEqual(Object.keys(r).sort(),["cotaLeitura","retryAfterMs","status"]);eventos.push("resposta "+m);},
+    antesDeEscrever:async()=>{eventos.push("guard");}};
+  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},opcoes);
+  assert.deepEqual(eventos,["espera GET","GET","resposta GET","espera POST","guard","POST","resposta POST"]);
+  eventos.length=0;
+  await assert.rejects(cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},
+    {...opcoes,antesDeRequisicao:async m=>{if(m!=="GET")throw new FalhaSync("COTA_OLIST","Aguarde",true);}}),falha("COTA_OLIST",false));
+  assert.ok(!eventos.includes("guard")&&!eventos.includes("POST"));
+});

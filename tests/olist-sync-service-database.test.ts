@@ -8,7 +8,7 @@ import { Client } from "pg";
 import { criarOlistSyncRepository, JOBS_SYNC } from "../src/repositories/olist-sync-repository";
 import { criarServicoOlistSync } from "../src/services/olist-sync-service";
 import { resolverPendenciaSync } from "../src/services/olist-sync-review-service";
-import { criarClienteSync, type RequisicaoSync, type RespostaHttpSync } from "../src/lib/olist-sync/cliente";
+import { criarClienteSync, type DependenciasClienteSync, type RequisicaoSync, type RespostaHttpSync } from "../src/lib/olist-sync/cliente";
 import { criarCriptografiaSync } from "../src/lib/olist-sync/cripto";
 import { gerarHashesCampos, observarRegistro } from "../src/lib/olist-sync/dominio";
 import type { CamposSync } from "../src/lib/olist-sync/contrato";
@@ -46,7 +46,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   let interceptar:((r:RequisicaoSync,app:string)=>Promise<void>)|null = null;
   let responder:((r:RequisicaoSync,app:string)=>Promise<RespostaHttpSync|undefined>)|null = null;
   const docs = new Map([[a,"04252011000110"],[b,"11222333000181"],[terceiro,"12ABC34501DE35"]]);
-  const cliente = criarClienteSync({
+  const transporte: DependenciasClienteSync = {
+    agora:()=>agora,
     async configurar() { return { apiBaseUrl:"https://api.tiny.com.br/public-api/v3" }; },
     async token(app) { credenciaisSolicitadas.push(app); return app; },
     async http(r) {
@@ -78,7 +79,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       }
       conta.set(id,{...conta.get(id),...dadosContato});return {status:204,dados:null};
     },
-  });
+  };
+  const cliente = criarClienteSync(transporte);
   const servico=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
   const produto=(id:number,sku="001-A",descricao="Toalha"):CamposSync=>({id,sku,descricao,tipo:"S",situacao:"A",estoque:{saldo:10},precos:{preco:50},ncm:"1234"});
   async function reset() {
@@ -635,6 +637,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
       assert.equal(proposta.destinoAppId,b);
       const inicio=agora, execucao=await enfileirar("APLICAR");
+      interceptar=async r=>{if(r.metodo==="GET"&&!r.url.endsWith("/info"))agora+=7_000;};
       // Usa apenas o relógio virtual de executar()/aguardar(), sem avançar 6s
       // artificialmente entre etapas pelo helper passo().
       assert.equal((await consumirAteFinal(execucao.id)).status,"CONCLUIDA");
@@ -864,7 +867,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await avancarAte(async()=>await db.olistSyncEvento.count({where:{execucaoId:e.id,tipo:"LOTE_APLICACAO_CONCLUIDO"}})>0,"próximo lote persistido");
     const etapa=await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:e.id,aplicativoId:b,fase:"APLICAR"}});
     assert.equal(escritas().length,1);assert.equal((etapa.cursorJson as CamposSync).loteConsumidas,0);
-    assert.ok(etapa.disponivelEm.getTime()>=agora+60_000);assert.equal(etapa.status,"PENDENTE");
+    assert.ok(etapa.disponivelEm.getTime()>=agora+5_000);assert.equal(etapa.status,"PENDENTE");
     assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).finalizadaEm,null);
     const chamadasAntes=chamadas.length;
     await db.usuario.update({where:{id:usuario},data:{ativo:false},select:{id:true}});
@@ -904,12 +907,106 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     const consumidor=criarServicoOlistSync(db,cliente,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{esperas.push(ms);agora+=ms;}});
     const resultado=await consumidor.executar(agora+240_000);
     assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA");
-    assert.equal(escritas().length,1);assert.ok(resultado.etapas>10);assert.ok(esperas.length>1);assert.ok(esperas.includes(12_000));
+    assert.equal(escritas().length,1);assert.ok(resultado.etapas>10);assert.ok(esperas.length>1);assert.ok(esperas.includes(2_500));
     assert.ok(esperas.every(ms=>ms>0&&ms<=12_000));
     for(const app of [a,b]) {
       const conta=horarios.filter(h=>h.app===app);
-      for(let i=1;i<conta.length;i++)assert.ok(conta[i].quando-conta[i-1].quando>=(conta[i-1].metodo==="GET"?2_000:12_000),"Preserva o intervalo da conta entre consultas/escritas.");
+      for(let i=1;i<conta.length;i++)assert.ok(conta[i].quando-conta[i-1].quando>=(conta[i-1].metodo==="GET"?2_000:2_500),"Preserva o intervalo da conta entre consultas/escritas.");
     }
+  });
+  await t.test("aplicação com headers processa fila existente em cadência controlada sem relistar",async()=>{
+    await reset();
+    await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    for(let i=0;i<40;i++){
+      let cpf=String(100000000+i);
+      for(const peso of [10,11]){
+        const resto=[...cpf].reduce((s,d,indice)=>s+Number(d)*(peso-indice),0)*10%11;
+        cpf+=resto===10?0:resto;
+      }
+      contas.get(a)!.set(String(10+i),contato(10+i,cpf));
+    }
+    await terminar((await enfileirar("AUDITAR")).id,400);
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),40);
+    chamadas.length=0;
+    const cotas=new Map<string,{janela:number;consumidas:number}>();
+    let limitesExcedidos=0;
+    const rapido=criarClienteSync({...transporte,http:async r=>{
+      const chave=`${r.token}:${r.metodo==="GET"?"leitura":"escrita"}`,janela=Math.floor(agora/60_000);
+      const cota=cotas.get(chave)?.janela===janela?cotas.get(chave)!:{janela,consumidas:0};
+      cota.consumidas++;cotas.set(chave,cota);
+      const headers={limite:60,restante:Math.max(0,60-cota.consumidas),resetSegundos:(60_000-agora%60_000)/1_000};
+      if(cota.consumidas>60){limitesExcedidos++;return {status:429,dados:{},retryAfter:headers.resetSegundos,cotaLeitura:headers};}
+      return {...await transporte.http(r),cotaLeitura:headers};
+    }});
+    const consumidor=criarServicoOlistSync(db,rapido,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+    const e=await enfileirar("APLICAR"),inicio=agora;
+    for(let i=0;i<5;i++){
+      await consumidor.executar(agora+240_000);
+      if((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).finalizadaEm)break;
+    }
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),40);
+    assert.equal(escritas().length,40);assert.equal(contas.get(b)!.size,40);assert.equal(limitesExcedidos,0);
+    assert.ok(!chamadas.some(r=>r.metodo==="GET"&&new URL(r.url).pathname.endsWith("/contatos")&&!new URL(r.url).searchParams.has("cpfCnpj")));
+    const infos=chamadas.filter(r=>r.url.endsWith("/info")).length;
+    assert.ok(infos<100,`Cache deve reduzir /info: ${infos}`);
+    const porMinuto=40*60_000/(agora-inicio);
+    assert.ok(porMinuto>=8,`Ritmo simulado abaixo da meta: ${porMinuto}`);
+    t.diagnostic(`40 criações confirmadas em ${agora-inicio}ms virtuais; ${porMinuto.toFixed(2)}/min; ${chamadas.length} HTTP; ${infos} identidades`);
+  });
+  await t.test("cota de identidade esgotada adia escrita sem marcar envio e retoma a mesma operação",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar();await aguardarEscrita(e.id);
+    const reserva=await reservarEscrita(e.id);let limitada=false;
+    responder=async(r,app)=>{
+      if(!limitada&&app===b&&r.url.endsWith("/info")){
+        limitada=true;return {status:200,dados:{cpfCnpj:docs.get(b),razaoSocial:"Conta"},cotaLeitura:{limite:60,restante:0,resetSegundos:180}};
+      }
+      return undefined;
+    };
+    await servico.processar(reserva);
+    const op=await db.olistSyncOperacao.findFirstOrThrow();
+    assert.equal(op.status,"AUTORIZADA");assert.equal(op.tentativas,0);assert.equal(escritas().length,0);
+    const etapa=await db.olistSyncEtapa.findUniqueOrThrow({where:{id:reserva.id}});
+    assert.equal(etapa.status,"PENDENTE");assert.ok(etapa.disponivelEm.getTime()>=agora+180_000);
+    assert.equal((etapa.cursorJson as CamposSync).fase,"FONTES");
+    assert.equal((etapa.cursorJson as CamposSync).iniciadaEm,undefined);
+    responder=null;agora+=181_000;await terminar(e.id);
+    assert.equal((await db.olistSyncOperacao.findUniqueOrThrow({where:{id:op.id}})).status,"CONFIRMADA");
+    assert.equal(escritas().length,1);
+  });
+  for(const fase of ["CONTAS","FONTES","DESTINO","ESCREVER","VERIFICAR"]){
+    await t.test(`consumidor novo retoma checkpoint legado em ${fase} sem relistar nem duplicar`,async()=>{
+      await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar();
+      if(fase==="VERIFICAR")await avancarAte(async()=>await db.olistSyncOperacao.count({where:{execucaoId:e.id,status:"VERIFICANDO"}})>0,"envio já registrado");
+      else await aguardarEscrita(e.id);
+      const etapa=await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:e.id,aplicativoId:b,fase:"APLICAR"}});
+      const operacao=await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id}});
+      const cursor:CamposSync={...(etapa.cursorJson as CamposSync),operacaoId:operacao.id,fase,indice:0,loteConsumidas:36};
+      if(["CONTAS","FONTES"].includes(fase))delete cursor.iniciadaEm;
+      await db.olistSyncEtapa.update({where:{id:etapa.id},data:{cursorJson:cursor,disponivelEm:new Date(agora)}});
+      await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:b}},data:{proximaChamadaEm:new Date(agora+18_000)}});
+      const antes=chamadas.length,novo=criarServicoOlistSync(db,criarClienteSync(transporte),{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+      for(let i=0;i<5;i++){
+        await novo.executar(agora+240_000);
+        if((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).finalizadaEm)break;
+        agora+=20_000;
+      }
+      assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA");
+      assert.equal((await db.olistSyncOperacao.findUniqueOrThrow({where:{id:operacao.id}})).status,"CONFIRMADA");
+      assert.equal(await db.olistSyncExecucao.count(),1);assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,1);
+      assert.ok(!chamadas.slice(antes).some(r=>r.metodo==="GET"&&new URL(r.url).pathname.endsWith("/produtos")&&!new URL(r.url).searchParams.has("codigo")));
+    });
+  }
+  await t.test("consumidor novo respeita reserva anterior e confirma seu efeito sem reenviar",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar();await aguardarEscrita(e.id);
+    const anterior=await reservarEscrita(e.id),antes=chamadas.length;
+    const novo=criarServicoOlistSync(db,criarClienteSync(transporte),{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+    await novo.executar(agora+240_000);
+    assert.equal(chamadas.length,antes);assert.equal(escritas().length,0);
+    assert.equal((await db.olistSyncEtapa.findUniqueOrThrow({where:{id:anterior.id}})).leaseToken,anterior.leaseToken);
+    await servico.processar(anterior);assert.equal(escritas().length,1);
+    await novo.executar(agora+240_000);
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA");
+    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,1);
   });
   await t.test("pausar durante a espera encerra a invocação sem polling nem nova chamada",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));await enfileirar("AUDITAR");const esperas:number[]=[];
