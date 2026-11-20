@@ -8,8 +8,9 @@ As rotinas antigas mantêm fila, worker, contratos e notificações existentes.
 ## Fluxo e contratos
 
 1. `POST /api/olist/anotar-sku/:id/relatorio-ia`, corpo `{chave: UUID}`:
-   autentica, autoriza leitura e escrita, verifica origem e consumidor compatível,
-   congela os prompts fixos/personalizados e devolve `trabalho` e `statusUrl`.
+   autentica, autoriza leitura e escrita e verifica a origem. Reutiliza a conclusão
+   existente; para nova execução, exige consumidor compatível, congela os prompts
+   fixos/personalizados e devolve `trabalho` e `statusUrl`.
 2. `PREPARAR`: páginas de até 50 SKUs e 64 KiB. Agrega quantidades no banco,
    escolhe título do cadastro Olist, tipo de produto ou título salvo no pedido,
    nessa ordem. Não consulta a Olist nem envia dados de clientes ao Codex.
@@ -21,14 +22,19 @@ As rotinas antigas mantêm fila, worker, contratos e notificações existentes.
    presença literal da evidência no título. O modelo não devolve quantidades:
    elas são recompostas a partir da entrada original.
 5. `PUBLICAR`: só após todos os lotes revisados. A interface oferece a versão
-   concluída, ordenada por quantidade decrescente, produto e SKU. Uma geração nova
-   não remove a anterior. Os downloads originais da busca continuam separados.
+   concluída, ordenada por quantidade decrescente, produto e SKU. Cada busca tem
+   um único relatório concluído: solicitações posteriores reutilizam esse resultado.
+   Os downloads originais e os do relatório IA ficam em menus de arquivos próprios.
 
 `GET /api/trabalhos-ia?tipo=...&origem=...` aceita até 50 origens e retorna somente
 o último trabalho e o último concluído de cada origem. `GET /api/trabalhos-ia/:id`
 consulta metadados; `PATCH` aceita `cancelar` ou `retomar` (apenas falhas).
 O relatório é lido em páginas de 50: `GET /api/olist/anotar-sku/:id/relatorio-ia`,
 com `trabalho` opcional e `offset`. Fixe `trabalho` durante a paginação/download.
+Aceita `ordenarPor=sku|produto|tecido|quantidade` e `direcao=asc|desc`, com padrão
+`quantidade/desc`. A API valida os valores e escolhe fragmentos SQL fixos; a ordenação
+global precede `LIMIT/OFFSET`, com desempate estável por produto/SKU. As páginas e
+os downloads do relatório usam o mesmo critério selecionado na tela.
 CSV, XLSX e PDF usam `formato`; a exportação síncrona é limitada a 10.000 linhas
 e 4 MB, com leitura de 500 linhas por consulta. Para volumes superiores, o
 relatório continua consultável na tela; exportações maiores deverão ganhar
@@ -42,11 +48,53 @@ suficiente: `NÃO IDENTIFICADO`. O resumo preserva kit e medidas; Qtd é a quant
 dos pedidos e nunca o número de peças multiplicado pelo kit. Revisão por IA e
 evidência literal reduzem erros; não provam que um título comercial esteja correto.
 
+### Solicitação automática após a busca
+
+Na engrenagem de Anotar SKU, marque **Gerar relatório IA automaticamente** e
+salve. A preferência é por aplicativo, começa desmarcada e usa a mesma permissão
+e revisão otimista das instruções personalizadas. O contrato de configuração
+inclui `gerarAutomaticamente: boolean`; clientes anteriores que omitem o campo
+preservam o valor salvo.
+
+A conclusão de uma busca com pelo menos um SKU grava a solicitação IA na mesma
+transação do resultado. A preferência e os prompts são lidos nesse momento,
+inclusive para buscas que estavam em andamento ao marcar a opção. A solicitação
+fica associada ao usuário que iniciou a busca, com revalidação de suas permissões.
+Se ele perder leitura/escrita, a busca pode concluir sem solicitar IA.
+Resultados vazios ou somente com alertas não enfileiram IA. A opção não percorre
+buscas já concluídas; desmarcá-la não cancela solicitações já registradas.
+
+O navegador pode estar fechado e a VM pode estar offline: o trabalho fica
+`PENDENTE` até o consumidor voltar. Não há chamada Codex na transação de conclusão.
+Falhas de banco desfazem resultado e solicitação juntos; a busca pode retomar sua
+consolidação. O identificador do job de busca é a chave de idempotência; solicitações
+manuais e automáticas compartilham a proteção de uma execução ativa e de um
+relatório concluído por busca. Geração, revisão e consulta do resultado reutilizam
+o worker e a interface existentes, sem novas variáveis na VM.
+
+Antes de publicar este backend, aplicar **somente** a migration aditiva
+`prisma/migrations/20261120222700_relatorio_ia_automatico/migration.sql` em ambientes
+que já possuem o núcleo IA e regenerar o cliente Prisma. Ela acrescenta um booleano
+com padrão `false`, preservando prompts, relatórios, RLS e permissões. Não executar
+o histórico global de migrations; seguir `prisma/migrations/README.md`.
+
 ## Concorrência, recuperação e segurança
 
-- Um trabalho ativo por origem/tipo/aplicativo, até 20 ativos por aplicativo.
+- Um trabalho ativo por origem/tipo/aplicativo. Solicitações manuais e retomadas
+  são recusadas quando há 20 trabalhos ativos no aplicativo. Eventos automáticos
+  podem ultrapassar esse limite de admissão para não perder solicitações nem
+  bloquear a busca quando a VM está offline; a fila pode acumular até um trabalho
+  por nova busca com SKUs. O limite de execução serial permanece inalterado.
   Chave de idempotência por aplicativo e solicitante; duplo clique não duplica
   trabalho. A UI preserva a chave enquanto não recebe confirmação.
+- O tipo de relatório SKU define `reutilizarConcluido: true`. Solicitação com outra
+  chave ou usuário devolve o relatório concluído da mesma busca/aplicativo, mesmo
+  com configuração alterada ou worker offline. Autorização continua obrigatória.
+  Retomar uma falha quando já há conclusão retorna 409; gerações legadas ainda na
+  fila são canceladas pelo consumidor antes de executar/publicar novamente.
+  Falhas continuam retomáveis e cancelamentos sem conclusão permitem novo pedido.
+  Tipos sem essa opção mantêm o comportamento de novas execuções. Tudo usa o
+  bloqueio transacional existente do aplicativo, sem migration nem apagar históricos.
 - Uma etapa em execução por aplicativo e por `grupo` de workers. Use o mesmo
   grupo em processos que compartilham capacidade. Adicione grupos/VMs conforme
   necessidade; a política por aplicativo permanece serial. O grupo não inclui
@@ -57,7 +105,7 @@ evidência literal reduzem erros; não provam que um título comercial esteja co
 - Até três tentativas por etapa/lote, com espera de 60/120/240 s. Expiração
   conta como tentativa. Erro de autenticação/configuração ou revogação de acesso
   encerra o trabalho com falha. Retomada explícita reutiliza prompts e progresso;
-  para aplicar regras novas, gere outro relatório.
+  alterações de regras valem para buscas que ainda não tenham relatório gerado.
 - Autorização revalidada no servidor antes de execução, renovação e conclusão.
   Tokens de worker delimitam aplicativo, tipos e grupo. URLs não são recebidas
   como destino do cliente; redirects HTTP do worker são recusados.
@@ -74,6 +122,7 @@ evidência literal reduzem erros; não provam que um título comercial esteja co
 Implemente `TipoTrabalhoIa`, registre em `runtime.ts` e autorize o novo tipo na
 credencial e no anúncio de capacidades do worker. O tipo define autorização,
 origem, preparação paginada, contrato, prompts fixos, validação e publicação.
+`reutilizarConcluido` é opcional e adequado quando o resultado deve ser único por origem.
 Crie a API/UI do domínio para preparar dados confiáveis: o browser nunca envia
 um prompt de sistema, ferramentas ou comandos arbitrários para execução.
 
@@ -180,26 +229,74 @@ reservas expiradas e falhas em `ia_tentativa`; não usar enfileiramento como suc
 Histórico fica associado à busca até sua exclusão. Não há limpeza automática de
 versões antigas; acompanhar crescimento antes de definir uma retenção de negócio.
 
+Com a opção automática desmarcada, cada conclusão com SKUs consulta somente o
+booleano da configuração por chave aplicativo/tipo. Quando marcada, acrescenta
+leituras limitadas de autorização, origem, configuração e resumos de deduplicação,
+além da gravação dos prompts; os itens não são copiados nem lidos integralmente
+nesse momento. O preparo paginado continua a cargo do consumidor. Não há nova
+rota de polling, varredura periódica ou requisição do navegador para disparar IA.
+Marcar a opção aumenta chamadas Codex conforme o número de buscas elegíveis:
+até uma solicitação por busca, sujeita aos limites existentes de lotes/tentativas.
+A fila offline pode crescer; acompanhar pendências e idade da mais antiga.
+
 ## Validação local
 
 - `tests/trabalhos-ia.test.ts`: migration em PostgreSQL WASM descartável, etapas,
   duplicidade, permissões, revisão, retomada, expiração, cancelamento, RLS,
-  paginação e segundo tipo. Sem banco remoto ou chamadas reais ao Codex.
+  paginação e segundo tipo. Inclui preferência por aplicativo, solicitação
+  automática offline, fila cheia, autorização, revisão otimista e rollback.
+  Sem banco remoto ou chamadas reais ao Codex.
 - `tests/trabalhos-ia-api.test.ts`: sessão, 202, escopo, contratos, exportações e
-  autenticação interna com dependências simuladas.
+  autenticação interna com dependências simuladas. O endpoint manual rejeita
+  flags que tentem contornar a admissão como uma solicitação automática.
 - `tests/trabalhos-ia-browser.test.ts`: componentes reais em Chrome com APIs
   simuladas, 360/390/1280/1440px, temas claro/escuro, foco, Escape, paginação,
   clique repetido, revisão, retomada, erro de configuração e fim de polling.
+  O checkbox é acionado por teclado e preservado após falha ao salvar/reabertura;
+  ativação e desativação são conferidas nas oito combinações de largura/tema.
 - Testes de regressão de Anotar SKU e worker antigo; lint, TypeScript, Prisma e
   build. PostgreSQL WASM serializa transações no teste: não certifica disputa de
   locks em múltiplas conexões de produção. `tests/anotar-sku-database.test.ts`
   mantém a opção de teste em PostgreSQL local vazio com a nova migration.
+  A conclusão real do repositório verifica a solicitação automática, rollback
+  conjunto, repetição idempotente e ausência de solicitação com zero SKUs.
 
 Não representam validação em aparelho físico, produção ou VM real. A ativação
 requer migration, configuração do backend, implantação e serviço na VM.
 
-Conferência realizada nesta implementação: 53 testes locais aprovados (incluindo
+Validação da opção automática em 20/11/2026: 72 testes aprovados (17 de IA/API,
+25 de Anotar SKU, 21 com PostgreSQL nativo local descartável e 9 de navegador),
+TypeScript, lint do escopo, validação do schema Prisma e build. Foram inspecionadas
+as capturas da configuração em 390px escuro e 1440px claro. O build mantém os
+avisos preexistentes de imagens/variável não utilizada em outros módulos.
+A nova migration foi aplicada somente nos bancos descartáveis dos testes;
+não houve implantação nem alteração no banco de produção.
+
+Conferência da implementação inicial: 53 testes locais aprovados (incluindo
 9 do navegador), lint dos arquivos alterados, TypeScript, Prisma e build de
 produção local. PDF renderizado para inspeção de colunas e SKU longo. O build
 apresenta avisos preexistentes de imagens e variável não usada fora deste escopo.
 O PDF reutiliza a fonte Latin-1 do exportador existente; CSV/XLSX preservam Unicode.
+
+## Simplificação da tela
+
+O período editável vem antes das situações e mantém o padrão de 15 dias sem
+atalho de restauração. O acompanhamento aparece em buscas abertas e em conclusões
+sem resultado/cancelamentos; resultados publicados ficam somente no histórico.
+Alertas de pedidos fora do período permanecem em **Ver SKUs**, com acesso aos IDs.
+Os menus **Arquivos** e **Arquivos IA** agrupam CSV, Excel e PDF, abrem por toque
+ou teclado e fecham por Escape, Tab ou interação externa. A engrenagem configura
+os próximos relatórios. Relatórios concluídos oferecem apenas visualização.
+
+Egress: abrir um menu não faz requisições. Downloads e detalhes continuam sob
+demanda; o polling IA segue encerrando na conclusão. A proteção de resultado único
+acrescenta uma consulta limitada a um resumo por solicitação/retomada/etapa com
+trabalho disponível, sem carregar lotes ou prompts; evita nova geração/revisão de
+resultados prontos. Não há medição de custos faturados.
+
+Validação desta simplificação: 47 testes aprovados (13 de IA/API, 25 de Anotar
+SKU e 9 de navegador), TypeScript, lint e build. Um teste que exige PostgreSQL
+externo ficou sem execução; os testes SQL de IA rodaram em PostgreSQL WASM local.
+Navegador com dados simulados em 360/390/1280/1440px, temas claro/escuro, teclado,
+toque emulado, menus, downloads, falha, cancelamento e validação de datas.
+Sem execução real do Codex, mudança no banco ou publicação em produção.

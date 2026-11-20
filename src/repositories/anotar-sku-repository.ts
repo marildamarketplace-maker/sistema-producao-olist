@@ -4,6 +4,7 @@ import { criarBuscaSkuSchema, ErroAnotarSku, FalhaConsultaSku, ESTADOS_ABERTOS_S
 import { dataIsoSku, periodoPadraoSku } from "@/lib/anotar-sku/periodo";
 import { aplicativoTemJob, CHAVES_JOB, CHAVE_CONFIG_JOB_ANOTAR_SKU } from "@/lib/aplicativo-jobs";
 import { LIMITE_PEDIDOS_SKU, type PaginaPedidosSku, type PaginaForaPeriodoSku } from "@/lib/anotar-sku/pedidos";
+import { solicitarRelatorioSkuAutomatico } from "@/lib/trabalhos-ia/automatico-sku";
 
 type Tx = Prisma.TransactionClient;
 export type EscopoSku = { id: string; aplicativoId: string; podeVisualizar: boolean };
@@ -48,7 +49,11 @@ async function exigirProcessamentoPermitido(tx: Tx, aplicativoId: string) {
 export function criarRepositorioAnotarSku(db: PrismaClient) {
   async function comReserva<T>(r: ReservaSku, executar: (tx: Tx, atual: BuscaSkuJob) => Promise<T>, travarApp = false) {
     return db.$transaction(async tx => {
-      if (travarApp) await travarAplicativoSku(tx, r.aplicativoId);
+      if (travarApp) {
+        // Mesma ordem da exclusão: lock IA, aplicativo e, depois, job da busca.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'ia:'+r.aplicativoId},0))::text`;
+        await travarAplicativoSku(tx, r.aplicativoId);
+      }
       const valido = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM busca_sku_jobs WHERE id = ${r.id}::uuid AND aplicativo_id = ${r.aplicativoId}::uuid
         AND reserva_id = ${r.reservaId}::uuid AND status = 'PROCESSANDO' AND reserva_ate > now() FOR UPDATE
@@ -266,6 +271,7 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
           `;
           const [contagem] = await tx.$queryRaw<{ total: number }[]>`SELECT count(DISTINCT sku)::int AS total FROM itens_busca_sku WHERE busca_id = ${busca.id}::uuid`;
           await tx.buscaSku.update({ where: { id: busca.id }, data: { quantidadeSkus: contagem.total } });
+          if (contagem.total > 0) await solicitarRelatorioSkuAutomatico(tx, { id: j.solicitadoPor, aplicativoId: j.aplicativoId }, busca.id, j.id);
         }
         await tx.buscaSkuJob.update({ where: { id: j.id }, data: { ...liberar, status: "CONCLUIDO", buscaId,
           teveResultado: Boolean(buscaId), erro: null, erroCodigo: null, tentativas: 0, updatedAt: new Date(), finalizadoEm: new Date() } });

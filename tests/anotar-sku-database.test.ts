@@ -6,6 +6,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { criarRepositorioAnotarSku, type ReservaSku } from "../src/repositories/anotar-sku-repository";
 import { hojeSku, dataIsoSku } from "../src/lib/anotar-sku/periodo";
 import { processarEtapaSku } from "../src/services/processarAnotarSkuService";
+import { TIPO_RELATORIO_SKU } from "../src/lib/trabalhos-ia/contrato";
 
 const url = process.env.ANOTAR_SKU_TEST_DATABASE_URL;
 test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !url }, async t => {
@@ -39,6 +40,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   await sql.query(await readFile(new URL("../prisma/migrations/20261116214414_anotar_sku_async/migration.sql", import.meta.url), "utf8"));
   await sql.query(await readFile(new URL("../prisma/migrations/20261118001325_anotar_sku_periodo_alertas/migration.sql", import.meta.url), "utf8"));
   await sql.query(await readFile(new URL("../prisma/migrations/20261120210023_trabalhos_ia/migration.sql", import.meta.url), "utf8"));
+  await sql.query(await readFile(new URL("../prisma/migrations/20261120222700_relatorio_ia_automatico/migration.sql", import.meta.url), "utf8"));
   const app = crypto.randomUUID(), outroApp = crypto.randomUUID(), user = crypto.randomUUID(), outroUser = crypto.randomUUID();
   await db.$executeRaw`INSERT INTO aplicativo(id,nome) VALUES (${app}::uuid,'Teste'), (${outroApp}::uuid,'Outro')`;
   await db.$executeRaw`INSERT INTO usuario(id,aplicativo_id,nome,email) VALUES (${user}::uuid,${app}::uuid,'Teste','sku@example.test'), (${outroUser}::uuid,${outroApp}::uuid,'Outro','outro@example.test')`;
@@ -197,6 +199,47 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   await t.test("busca vazia conclui sem histórico falso", async () => {
     const j = await nova(); await detalhamento([]); await repo.prepararConclusao(await reserva()); await repo.concluir(await reserva());
     const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } }); assert.equal(final.status, "CONCLUIDO"); assert.equal(final.buscaId, null);
+  });
+  await t.test("relatório automático acompanha a confirmação da busca, sem depender da VM ou da tela", async () => {
+    await db.$executeRaw`INSERT INTO ia_configuracao(aplicativo_id,tipo,prompt,revisao,gerar_automaticamente,atualizado_por)
+      VALUES (${app}::uuid,${TIPO_RELATORIO_SKU},'Sedinha = Fourway',1,true,${user}::uuid)`;
+    try {
+      const j = await nova(); await detalhamento(["830001"]);
+      await repo.pedido(await reserva(), "830001", [{ sku: "AUTO", quantidade: 2, tituloProduto: "Lenço Sedinha" }], false);
+      await repo.prepararConclusao(await reserva());
+      const r = await reserva(), antes = await db.buscaSku.count();
+      // Falha depois do INSERT da solicitação IA: nem a busca nem a IA podem vazar.
+      await sql.query(`CREATE FUNCTION rejeitar_conclusao_ia_teste() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN IF NEW.status = 'CONCLUIDO' THEN RAISE EXCEPTION 'falha controlada'; END IF; RETURN NEW; END $$;
+        CREATE TRIGGER falha_conclusao_ia_teste BEFORE UPDATE ON busca_sku_jobs FOR EACH ROW EXECUTE FUNCTION rejeitar_conclusao_ia_teste();`);
+      try {
+        await assert.rejects(repo.concluir(r));
+        assert.equal(await db.buscaSku.count(), antes);
+        assert.equal(await db.iaTrabalho.count({ where: { chave: j.id } }), 0);
+      } finally { await sql.query("DROP TRIGGER falha_conclusao_ia_teste ON busca_sku_jobs; DROP FUNCTION rejeitar_conclusao_ia_teste();"); }
+      assert.equal(await repo.concluir(r), true);
+      assert.equal(await repo.concluir(r), null, "Repetir a conclusão não pode solicitar outra IA");
+      const final = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: j.id } });
+      assert.ok(final.buscaId);
+      const trabalhos = await db.iaTrabalho.findMany({ where: { origemId: final.buscaId } });
+      assert.equal(trabalhos.length, 1); assert.equal(trabalhos[0].status, "PENDENTE");
+      assert.equal(trabalhos[0].solicitadoPor, user); assert.equal(trabalhos[0].aplicativoId, app);
+      assert.equal(trabalhos[0].promptPersonalizado, "Sedinha = Fourway");
+
+      const totalIa = await db.iaTrabalho.count();
+      const vazia = await nova(); await detalhamento([]);
+      await repo.prepararConclusao(await reserva()); await repo.concluir(await reserva());
+      assert.equal((await db.buscaSkuJob.findUniqueOrThrow({ where: { id: vazia.id } })).buscaId, null);
+      assert.equal(await db.iaTrabalho.count(), totalIa, "Busca sem resultados não solicita IA");
+
+      const alertas = await repo.criar(escopo, { chave: crypto.randomUUID(), situacoes: ["0"], periodoInicio: "2024-02-01", periodoFim: "2024-02-15" });
+      for (let i = 0; i < 2; i++) await repo.pagina(await reserva(), [{ id: "830002", dataCriacao: "2024-01-01" }]);
+      await repo.prepararConclusao(await reserva()); await repo.concluir(await reserva());
+      const soAlertas = await db.buscaSkuJob.findUniqueOrThrow({ where: { id: alertas.id } });
+      assert.ok(soAlertas.buscaId);
+      assert.equal((await db.buscaSku.findUniqueOrThrow({ where: { id: soAlertas.buscaId } })).quantidadeSkus, 0);
+      assert.equal(await db.iaTrabalho.count(), totalIa, "Resultado apenas com alertas não solicita IA");
+    } finally { await db.$executeRaw`UPDATE ia_configuracao SET gerar_automaticamente=false WHERE aplicativo_id=${app}::uuid`; }
   });
   await t.test("consolidação salva título final, título do tipo ou descrição da Olist", async () => {
     await db.$executeRaw`INSERT INTO produto_olist(sku_final,titulo_final) VALUES ('A','Titulo final A'), ('B',' ')`;

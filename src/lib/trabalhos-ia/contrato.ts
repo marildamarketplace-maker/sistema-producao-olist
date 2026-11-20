@@ -5,7 +5,7 @@ export const TIPO_RELATORIO_SKU = "anotar_sku.relatorio.v1";
 export const ESTADOS_ATIVOS_IA = ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"] as const;
 export const textoIa = (max: number) => z.string().max(max).trim().refine(v => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v), "Texto contém caracteres inválidos.");
 export const solicitarIaSchema = z.object({ chave: z.uuid() }).strict();
-export const configurarIaSchema = z.object({ prompt: textoIa(8_000), revisao: z.number().int().nonnegative() }).strict();
+export const configurarIaSchema = z.object({ prompt: textoIa(8_000), revisao: z.number().int().nonnegative(), gerarAutomaticamente: z.boolean().optional() }).strict();
 export const acaoIaSchema = z.object({ acao: z.enum(["cancelar", "retomar"]) }).strict();
 export const operacaoIaSchema = z.discriminatedUnion("acao", [
   z.object({ acao: z.literal("reservar"), protocolo: z.literal(PROTOCOLO_IA), tipos: z.array(textoIa(100).min(1)).min(1).max(20) }).strict(),

@@ -64,6 +64,51 @@ A pausa é conferida na entrada do cron e novamente a cada reserva. Uma etapa j�
 
 Monitorar respostas do cron, jobs `FALHOU`, reservas expiradas, `proxima_tentativa_em` atrasada e `updated_at` sem progresso. O processamento depende do agendador: a fila sobrevive a indisponibilidade, mas só avança quando ele volta. Nenhum resultado histórico é recriado automaticamente após exclusão.
 
+### Tabelas e ordenação por coluna
+
+**Ver SKUs** e **Relatório IA** usam `TabelaSkus`, com cabeçalhos clicáveis,
+indicador de direção, `aria-sort`, foco visível e rolagem horizontal contida no
+celular. Ambos abrem por quantidade decrescente. Colunas textuais começam em ordem
+crescente; clicar novamente inverte a direção. **Ver SKUs** mantém o acesso aos
+pedidos de cada SKU e a ordenação ao voltar desses detalhes.
+
+Em **Ver SKUs**, o contrato existente já entrega o resultado completo: ordenar
+reaproveita esses dados sem outra consulta e sem alterar o array original. Os
+arquivos da busca continuam no padrão de quantidade decrescente. No relatório IA,
+a ordenação ocorre no banco antes da paginação, reinicia na primeira página ao
+mudar o critério e também vale para os arquivos exportados. Reabrir qualquer uma
+das tabelas restaura o padrão. Esta mudança não requer migration adicional.
+
+Egress: zero requisições adicionais ao ordenar os SKUs já carregados. No relatório
+IA, cada clique consulta somente a página de até 50 linhas, com as mesmas projeções
+e verificações de autorização; não busca todos os lotes no servidor da aplicação
+nem cria polling. A consulta SQL ordena os resultados dentro do banco. O volume
+adicional depende dos cliques e do tamanho dos textos; não foi medido faturamento.
+
+Validação da ordenação: 55 testes aprovados (46 de regras/API/SQL em PostgreSQL
+WASM e 9 de navegador), TypeScript, lint do escopo e build. No Chrome com dados
+fictícios, foram conferidas 360/390/1280/1440px em claro/escuro, todas as colunas,
+direções, paginação global, teclado/toque emulado, erro/retry, navegação para os
+pedidos e ausência de novas consultas ao ordenar os SKUs completos. Capturas de
+390px escuro e 1440px claro foram inspecionadas. Sem teste em dispositivo físico
+ou publicação em produção; o build mantém avisos preexistentes fora do escopo.
+
+### Relatório IA automático (opcional)
+
+A engrenagem do relatório IA permite salvar **Gerar relatório IA automaticamente**
+por aplicativo. Ao concluir uma busca com SKUs, o servidor registra a solicitação
+IA na mesma transação do resultado, mesmo com navegador fechado ou VM offline.
+Buscas sem SKUs (incluindo resultados somente com alertas) não solicitam relatório;
+buscas anteriores não são reprocessadas. As permissões do solicitante e a proteção
+contra duplicidade continuam obrigatórias. A falha de gravação desfaz a conclusão
+inteira para permitir sua retomada, sem deixar relatório órfão.
+
+Para evitar inversão com a exclusão de resultados, a consolidação adquire o lock
+IA do aplicativo antes do lock da linha do aplicativo e da reserva da busca.
+Exige a migration aditiva `20261120222700_relatorio_ia_automatico` antes do backend;
+não exige outro worker ou mudanças nas variáveis da VM. Ativação, limites da fila
+automática e contratos estão em [Trabalhos IA](trabalhos-ia.md#solicitação-automática-após-a-busca).
+
 ## Validação local
 
 - `node --import tsx --test tests/anotar-sku.test.ts`: validação de entrada, quantidades, retries, perda de reserva e permissões revogadas.
@@ -77,7 +122,7 @@ O cron é disparado independentemente da tela. Testes com transporte simulado n�
 
 ## Período dos SKUs e pedidos fora do período
 
-Novas buscas consultam **todos** os pedidos de cada situação selecionada, sem enviar `dataInicial` ou `dataFinal` à Olist. A lista de situações e a seleção inicial Aberta permanecem iguais: o contrato de pedidos da Olist não contém situação ou parâmetro “ativo”. O período padrão inclui hoje e os 14 dias anteriores no calendário de São Paulo; a tela permite editar ambas as datas e restaurar os últimos 15 dias. O servidor valida datas reais, ordem, limite de 366 dias e ausência de data final futura.
+Novas buscas consultam **todos** os pedidos de cada situação selecionada, sem enviar `dataInicial` ou `dataFinal` à Olist. A lista de situações e a seleção inicial Aberta permanecem iguais: o contrato de pedidos da Olist não contém situação ou parâmetro “ativo”. O período padrão inclui hoje e os 14 dias anteriores no calendário de São Paulo; a tela apresenta ambas as datas no início do formulário, sem botão de restauração. O servidor valida datas reais, ordem, limite de 366 dias e ausência de data final futura.
 
 O período fica congelado no aceite durável da solicitação e permanece nas retomadas, reenvios da mesma chave e resultado salvo. Clientes anteriores que não enviam datas recebem o padrão no servidor. Jobs/históricos anteriores, com datas nulas, preservam o comportamento anterior e são identificados na tela como buscas sem corte por data.
 

@@ -31,6 +31,7 @@ export function validarRelatorioSkuIa(entrada: unknown, saida: unknown): LinhaRe
 
 export const relatorioSkuIa: TipoTrabalhoIa = {
   tipo: TIPO_RELATORIO_SKU, promptPadrao: PROMPT_SKU_PADRAO,
+  reutilizarConcluido: true,
   promptGeracao: PROMPT_SKU_GERACAO, promptRevisao: PROMPT_SKU_REVISAO,
   schemaSaida: z.toJSONSchema(saidaSkuIaSchema),
   async autorizar(db, escopo, acao) {

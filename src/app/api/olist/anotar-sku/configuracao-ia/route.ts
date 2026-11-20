@@ -8,6 +8,6 @@ export async function GET(request:Request) {
 export async function PUT(request:Request) {
   try {
     const escopo=await sessaoIa(request),entrada=configurarIaSchema.parse(await corpoIa(request));
-    return jsonIa(await trabalhosIa.configurar(escopo,TIPO_RELATORIO_SKU,entrada.prompt,entrada.revisao));
+    return jsonIa(await trabalhosIa.configurar(escopo,TIPO_RELATORIO_SKU,entrada.prompt,entrada.revisao,entrada.gerarAutomaticamente));
   } catch(error) { return erroIa(error); }
 }

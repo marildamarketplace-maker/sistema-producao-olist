@@ -20,12 +20,13 @@ test("APIs IA: aceite 202, sessão, escopo, parâmetros, exportações e worker 
     if (env.key === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = env.key;
   });
   let leitura = true, consultas = 0;
+  const consultasLotes: Prisma.Sql[] = [];
   const usuario = { id: usuarioId, aplicativoId: app, ativo: true };
   Object.assign(globalThis, { prisma: { usuario: { findUnique: async () => usuario, findFirst: async () => usuario }, $queryRaw: async (q: Prisma.Sql) => {
     consultas++; assert.ok(q.values.includes(app), "Toda consulta privada deve conter o aplicativo");
     if (q.text.includes("FROM usuario")) return [{ ler: leitura, escrever: false, configurar: false }];
     if (q.text.includes("FROM ia_trabalho")) return [{ id: job, total: 2, criadoEm: new Date(), finalizadoEm: new Date(), revisaoConfig: 1 }];
-    if (q.text.includes("FROM ia_lote")) return [{ sku: "001", produto: "Kit 2 Lenços 70x70cm", tecido: "Fourway", quantidade: 9 }, { sku: "=1+1", produto: "=FORMULA()", tecido: "NÃO IDENTIFICADO", quantidade: 2 }];
+    if (q.text.includes("FROM ia_lote")) { consultasLotes.push(q); return [{ sku: "001", produto: "Kit 2 Lenços 70x70cm", tecido: "Fourway", quantidade: 9 }, { sku: "=1+1", produto: "=FORMULA()", tecido: "NÃO IDENTIFICADO", quantidade: 2 }]; }
     assert.fail("Consulta não prevista");
   } } });
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "ficticio";
@@ -40,8 +41,34 @@ test("APIs IA: aceite 202, sessão, escopo, parâmetros, exportações e worker 
   assert.equal(consultas, 0);
   assert.equal((await POST(req("", { chave: crypto.randomUUID() }), contexto)).status, 202);
   assert.equal((await POST(req("", { chave: crypto.randomUUID(), aplicativoId: app }), contexto)).status, 400);
+  assert.equal((await POST(req("", { chave: crypto.randomUUID(), automatico: true }), contexto)).status, 400, "API pública não aceita furar admissão como evento automático");
   assert.equal(criar.mock.callCount(), 1);
+  const { PUT: salvarConfig, GET: lerConfig } = await import("../src/app/api/olist/anotar-sku/configuracao-ia/route");
+  const salvo = { prompt: "Oxford", revisao: 1, gerarAutomaticamente: true };
+  t.mock.method(trabalhosIa, "configuracao", async () => salvo);
+  const configurar = t.mock.method(trabalhosIa, "configurar", async (...args: unknown[]) => {
+    assert.deepEqual(args, [{ id: usuarioId, aplicativoId: app }, "anotar_sku.relatorio.v1", "Oxford", 0, true]);
+    return salvo;
+  });
+  const configReq = (body: unknown, auth = true) => new Request("https://erp.test/api/olist/anotar-sku/configuracao-ia", { method: "PUT", headers: auth ? { Authorization: "Bearer teste" } : {}, body: JSON.stringify(body) });
+  const entradaConfig = { prompt: "Oxford", revisao: 0, gerarAutomaticamente: true };
+  assert.equal((await salvarConfig(configReq(entradaConfig, false))).status, 401);
+  assert.equal((await salvarConfig(configReq({ ...entradaConfig, gerarAutomaticamente: "true" }))).status, 400);
+  assert.equal((await salvarConfig(configReq({ ...entradaConfig, aplicativoId: app }))).status, 400);
+  assert.deepEqual(await (await salvarConfig(configReq(entradaConfig))).json(), salvo);
+  assert.deepEqual(await (await lerConfig(req())).json(), salvo);
+  assert.equal(configurar.mock.callCount(), 1);
   assert.equal((await GET(req("?offset=-1"), contexto)).status, 400);
+  for (const invalido of ["ordenarPor=inexistente", "ordenarPor=sku%3BDROP%20TABLE%20ia_lote", "direcao=desc%3BSELECT%201"]) {
+    const antes = consultasLotes.length;
+    assert.equal((await GET(req(`?${invalido}`), contexto)).status, 400);
+    assert.equal(consultasLotes.length, antes, "Ordenação inválida é recusada antes de consultar itens");
+  }
+  assert.equal((await GET(req("?ordenarPor=tecido&direcao=asc&offset=50"), contexto)).status, 200);
+  assert.match(consultasLotes.at(-1)!.text, /ORDER BY nullif\(lower\(item->>'tecido'\),''\) ASC NULLS LAST/);
+  assert.deepEqual(consultasLotes.at(-1)!.values.slice(-2), [50, 50]);
+  assert.equal((await GET(req("?formato=csv&ordenarPor=produto&direcao=desc"), contexto)).status, 200);
+  assert.match(consultasLotes.at(-1)!.text, /ORDER BY nullif\(lower\(item->>'produto'\),''\) DESC NULLS LAST/);
   for (const formato of ["", "csv", "xlsx", "pdf"]) {
     const response = await GET(req(formato ? `?formato=${formato}` : ""), contexto);
     assert.equal(response.status, 200); assert.equal(response.headers.get("Cache-Control"), "private, no-store");

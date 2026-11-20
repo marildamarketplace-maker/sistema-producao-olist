@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, Clock3, Download, Loader2, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { AnotarSkuResultado } from "@/components/anotar-sku-resultado";
 import { AnotarSkuPeriodo } from "@/components/anotar-sku-periodo";
 import { ConfiguracaoSkuIa } from "@/components/trabalhos-ia/configuracao-sku";
 import { RelatorioSkuIa } from "@/components/trabalhos-ia/relatorio-sku";
 import { useTrabalhosIa, trabalhoIaAtivo } from "@/hooks/use-trabalhos-ia";
+import { MenuArquivos } from "@/components/menu-arquivos";
 import { PageHeader } from "@/components/page-header";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import { criarBuscaSkuSchema, ESTADOS_ABERTOS_SKU, SITUACOES_SKU, type JobSkuResumo, type EntradaBuscaSku } from "@/lib/anotar-sku/contrato";
@@ -56,7 +57,6 @@ function CartaoJob({ job, ocupado, pausado, gerenciar, visualizar, podeVisualiza
       <p className="text-xs text-slate-500">Último progresso ou tentativa: {data(job.updatedAt)}</p>
     </div>}
     {concluido && <p className="mt-4 text-sm text-slate-700">{job.resultadoRemovido ? "O resultado desta busca foi excluído do histórico." : job.buscaId ? "Conferência concluída. Consulte os SKUs e os alertas no resultado salvo." : "Nenhum SKU novo para salvar. Pedidos já registrados não foram repetidos."}</p>}
-    {job.foraPeriodo > 0 && !job.resultadoRemovido && job.status !== "CANCELADO" && <p role="status" className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{job.foraPeriodo} pedido(s) fora do período, sem somar aos SKUs.{!concluido && " A lista completa ficará disponível ao concluir a busca."}</p>}
     {job.status === "CANCELADO" && <p className="mt-4 text-sm text-slate-600">Busca encerrada sem publicar resultado.</p>}
     {(job.podeGerenciar && aberto || podeVisualizar && job.buscaId) && <div className="mt-4 flex flex-wrap gap-3">
       {job.podeGerenciar && falhou && <button type="button" className={primario} disabled={ocupado || pausado} onClick={() => gerenciar(job, "retomar")}><RefreshCw className="h-4 w-4" aria-hidden="true" />Retomar busca</button>}
@@ -74,7 +74,7 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo, p
   const [motivoPausa, setMotivoPausa] = useState<string | null>(null);
   const [erroAtualizacao, setErroAtualizacao] = useState<string | null>(null), [erro, setErro] = useState<string | null>(null), [mensagem, setMensagem] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null), [pendente, setPendente] = useState<Pendente | null>(null), [detalhe, setDetalhe] = useState<Detalhe | null>(null);
-  const [confirmacao, setConfirmacao] = useState<{ tipo: "cancelar" | "excluir"; id: string } | null>(null), [erroDialogo, setErroDialogo] = useState<string | null>(null), [maisJobs, setMaisJobs] = useState(false);
+  const [confirmacao, setConfirmacao] = useState<{ tipo: "cancelar" | "excluir"; id: string } | null>(null), [erroDialogo, setErroDialogo] = useState<string | null>(null);
   const erroRef = useRef<HTMLParagraphElement>(null), mensagemRef = useRef<HTMLParagraphElement>(null), erroDialogoRef = useRef<HTMLParagraphElement>(null);
   const requisicao = useRef<AbortController | null>(null), bloqueio = useRef(false);
   const origemDetalhe = useRef<HTMLElement | null>(null);
@@ -161,41 +161,50 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo, p
     if (confirmacao.tipo === "cancelar") await enviar(`${endpoint}/jobs/${confirmacao.id}`, "PATCH", { acao: "cancelar" }); else await enviar(`${endpoint}?id=${encodeURIComponent(confirmacao.id)}`, "DELETE");
     setConfirmacao(null); setMensagem(confirmacao.tipo === "cancelar" ? "Busca cancelada. Você já pode iniciar outra." : "Resultado excluído. Os pedidos podem ser buscados novamente."); await atualizar(true);
   }, true); }
-  const atual = jobs.find(j => ESTADOS_ABERTOS_SKU.includes(j.status)), anteriores = jobs.filter(j => !ESTADOS_ABERTOS_SKU.includes(j.status));
+  const atual = jobs.find(j => ESTADOS_ABERTOS_SKU.includes(j.status));
+  const encerrado = jobs.find(j => !ESTADOS_ABERTOS_SKU.includes(j.status));
+  // Resultados publicados já estão no histórico. Preserve o feedback de buscas
+  // sem resultado, canceladas ou cujo resultado não pode ser visualizado.
+  const avisoEncerramento = !atual && encerrado && (!encerrado.buscaId || !podeVisualizar) ? encerrado : null;
+  const mostrarAcompanhamento = carregando || emAberto || Boolean(atual) || Boolean(avisoEncerramento);
   return <div className="space-y-6">
-    <PageHeader title="Anotar SKU" description="Separe os SKUs de pedidos novos da Olist. A busca continua mesmo quando você sai desta tela." actions={podeConfigurar && podeVisualizar ? <ConfiguracaoSkuIa token={token} /> : undefined} />
+    <PageHeader title="Anotar SKU" description="Busque pedidos da Olist e organize os SKUs para produção." actions={podeConfigurar && podeVisualizar ? <ConfiguracaoSkuIa token={token} /> : undefined} />
     {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{erro}</p>}
     {mensagem && <p ref={mensagemRef} tabIndex={-1} role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:text-emerald-200">{mensagem}</p>}
     {erroAtualizacao && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><p className="min-w-0 flex-1">{erroAtualizacao} A falha de atualização da tela não cancela uma busca já registrada.</p><button type="button" className={botao} onClick={() => void atualizar(true)} disabled={atualizando}>Tentar atualizar</button></div>}
     {!carregando && !habilitado && !erroAtualizacao && <p role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{motivoPausa ?? "Novas buscas e retomadas estão temporariamente pausadas. O histórico continua disponível."}</p>}
-    <div className="grid items-start gap-6 xl:grid-cols-2">
-      {podeEscrever && <section className={`${emAberto ? "order-2" : "order-1"} rounded-lg border border-slate-200 bg-white p-4 sm:p-6 xl:order-1`} aria-labelledby="sku-nova">
-        <h2 id="sku-nova" className="text-lg font-semibold text-slate-900">Nova busca</h2><p className="mt-1 text-sm text-slate-600">Escolha as situações dos pedidos. Os já registrados no histórico não serão somados novamente aos SKUs.</p>
-        <fieldset className="mt-5" disabled={Boolean(ocupado) || emAberto || Boolean(pendente) || !habilitado || carregando}><legend className="mb-2 text-sm font-medium text-slate-900">Situações dos pedidos</legend><div className="grid gap-2 sm:grid-cols-2">
+    <div className="flex flex-col gap-4">
+      {podeEscrever && <section className={`${emAberto ? "order-2" : "order-1"} rounded-lg border border-slate-200 bg-white p-4 sm:p-5`} aria-labelledby="sku-nova">
+        <h2 id="sku-nova" className="text-lg font-semibold text-slate-900">Nova busca</h2>
+        <AnotarSkuPeriodo periodo={periodo} alterar={setPeriodo} desabilitado={Boolean(ocupado) || emAberto || Boolean(pendente) || !habilitado || carregando} />
+        <fieldset className="mt-5" disabled={Boolean(ocupado) || emAberto || Boolean(pendente) || !habilitado || carregando}><legend className="mb-2 text-sm font-medium text-slate-900">Situações dos pedidos</legend><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
           {SITUACOES_SKU.map(s => <label key={s.value} className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm text-slate-700 ${selecionadas.includes(s.value) ? "border-slate-400 bg-slate-50" : "border-slate-200"}`}><input type="checkbox" className="h-4 w-4 shrink-0 accent-slate-700" checked={selecionadas.includes(s.value)} onChange={() => setSelecionadas(valores => valores.includes(s.value) ? valores.filter(v => v !== s.value) : [...valores, s.value])} />{s.label}</label>)}
         </div></fieldset>
-        <AnotarSkuPeriodo periodo={periodo} alterar={setPeriodo} desabilitado={Boolean(ocupado) || emAberto || Boolean(pendente) || !habilitado || carregando} />
         {pendente && !pendente.periodoInicio && <p className="mt-3 text-sm text-amber-800">Esta confirmação recupera os filtros da solicitação anterior. O período efetivo será exibido no acompanhamento.</p>}
         {pendente && ocupado !== "buscar" && <p className="mt-4 text-sm text-amber-800">Há uma solicitação sem confirmação nesta sessão. Confirme o envio para recuperar a mesma busca, sem duplicá-la.</p>}
         <button type="button" className={`${primario} mt-5 w-full sm:w-auto`} onClick={buscar} disabled={Boolean(ocupado) || (!pendente && emAberto) || !selecionadas.length || !token || !habilitado || carregando || Boolean(erroAtualizacao) || (!pendente && !periodoSkuSchema.safeParse(periodo).success)}>
           {ocupado === "buscar" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}{ocupado === "buscar" ? "Registrando busca…" : pendente ? "Confirmar solicitação" : "Iniciar busca"}
-        </button><p className="mt-3 text-xs text-slate-500">{emAberto ? "Uma busca por vez neste aplicativo. Conclua, retome ou cancele a busca em aberto." : !selecionadas.length ? "Selecione ao menos uma situação para continuar." : "Depois de registrada, a busca não depende desta página aberta."}</p>
+        </button><p className="mt-3 text-xs text-slate-500">{emAberto ? "Uma busca por vez neste aplicativo. Conclua, retome ou cancele a busca em aberto." : !selecionadas.length ? "Selecione ao menos uma situação para continuar." : "Pedidos já salvos não serão somados novamente. A busca continua em segundo plano."}</p>
       </section>}
-      <section className={`${emAberto ? "order-1" : "order-2"} min-w-0 space-y-3 xl:order-2 ${!podeEscrever ? "xl:col-span-2" : ""}`} aria-labelledby="sku-acompanhamento">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="sku-acompanhamento" className="text-lg font-semibold text-slate-900">Acompanhamento</h2><button type="button" className={botao} disabled={atualizando} onClick={() => void atualizar(true)}><RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} aria-hidden="true" />{atualizando ? "Atualizando…" : "Atualizar"}</button></div>
-        <p className="sr-only" role="status">{atual ? `${estados[atual.status]}. ${atual.processados} de ${atual.encontrados} pedidos conferidos.` : erroAtualizacao && !jobsCarregados.current ? "Andamento indisponível." : "Nenhuma busca sua em andamento."}</p>
-        {carregando ? <p role="status" className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">Carregando buscas…</p> : atual ? <CartaoJob job={atual} ocupado={Boolean(ocupado)} pausado={!habilitado} gerenciar={gerenciar} visualizar={visualizar} podeVisualizar={podeVisualizar} /> : <div className="rounded-lg border border-slate-200 bg-white p-6"><Clock3 className="mb-3 h-6 w-6 text-slate-500" aria-hidden="true" /><p className="text-sm font-medium text-slate-900">{erroAtualizacao && !jobsCarregados.current ? "Andamento indisponível" : emAberto ? "Há uma busca de outro usuário em aberto." : "Nenhuma busca em andamento"}</p><p className="mt-1 text-sm text-slate-600">{erroAtualizacao && !jobsCarregados.current ? "Tente atualizar para consultar as buscas registradas." : emAberto ? "Aguarde a conclusão ou peça ao solicitante para retomar ou cancelar." : "O andamento da próxima busca aparecerá aqui."}</p></div>}
-        {anteriores.slice(0, maisJobs ? 20 : 1).map(job => <CartaoJob key={job.id} job={job} ocupado={Boolean(ocupado)} pausado={!habilitado} gerenciar={gerenciar} visualizar={visualizar} podeVisualizar={podeVisualizar} />)}
-        {anteriores.length > 1 && <button type="button" className={botao} aria-expanded={maisJobs} onClick={() => setMaisJobs(!maisJobs)}>{maisJobs ? "Mostrar apenas a última" : "Ver solicitações anteriores"}</button>}
-      </section>
+      {mostrarAcompanhamento && <section className={`${emAberto ? "order-1" : "order-2"} min-w-0 space-y-3`} aria-labelledby="sku-acompanhamento">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="sku-acompanhamento" className="text-lg font-semibold text-slate-900">Acompanhamento</h2>{!podeVisualizar && <button type="button" className={botao} disabled={atualizando} onClick={() => void atualizar(true)}>Atualizar</button>}</div>
+        <p className="sr-only" role="status">{atual ? `${estados[atual.status]}. ${atual.processados} de ${atual.encontrados} pedidos conferidos.` : "Nenhuma busca sua em andamento."}</p>
+        {carregando ? <p role="status" className="text-sm text-slate-500">Carregando buscas…</p> : atual ? <CartaoJob job={atual} ocupado={Boolean(ocupado)} pausado={!habilitado} gerenciar={gerenciar} visualizar={visualizar} podeVisualizar={podeVisualizar} /> : emAberto ? <p role="status" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Há uma busca de outro usuário em aberto. Aguarde a conclusão ou peça ao solicitante para retomar ou cancelar.</p> : avisoEncerramento && <CartaoJob job={avisoEncerramento} ocupado={Boolean(ocupado)} pausado={!habilitado} gerenciar={gerenciar} visualizar={visualizar} podeVisualizar={podeVisualizar} />}
+      </section>}
     </div>
-    {podeVisualizar && <section className="space-y-4" aria-labelledby="sku-historico"><div><h2 id="sku-historico" className="text-lg font-semibold text-slate-900">Resultados salvos</h2><p className="mt-1 text-sm text-slate-600">Abra os SKUs ou baixe o arquivo. Somente buscas concluídas aparecem aqui.</p>{emAberto && podeEscrever && <p className="mt-2 text-xs text-slate-500">A exclusão fica disponível após concluir ou cancelar a busca em aberto.</p>}</div>
+    {podeVisualizar && <section className="space-y-3" aria-labelledby="sku-historico"><div className="flex flex-wrap items-center justify-between gap-3"><h2 id="sku-historico" className="text-lg font-semibold text-slate-900">Resultados salvos</h2><button type="button" className={botao} disabled={atualizando} onClick={() => { void atualizar(true); ia.atualizar(); }}><RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} aria-hidden="true" />{atualizando ? "Atualizando…" : "Atualizar"}</button></div>
+      {emAberto && podeEscrever && <p className="text-xs text-slate-500">A exclusão fica disponível após concluir ou cancelar a busca em aberto.</p>}
       {!carregando && buscas.length === 0 && <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">{erroAtualizacao && !historicoCarregado.current ? "Não foi possível carregar o histórico. Tente atualizar." : "Nenhum resultado salvo ainda."}</p>}
       {ia.erro && <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><p>Acompanhamento IA: {ia.erro}</p><button type="button" className={`${botao} mt-2`} onClick={ia.atualizar}>Atualizar relatórios IA</button></div>}
-      {buscas.map(busca => <article key={busca.id} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h3 className="font-medium text-slate-900">Busca de {data(busca.createdAt)}</h3><p className="mt-1 break-words text-sm text-slate-600">{situacoes(busca.situacoes)}</p><p className="mt-1 text-sm text-slate-600">{descreverPeriodoSku(busca.periodoInicio, busca.periodoFim)}</p></div><p className="text-sm text-slate-700"><strong>{busca.quantidadePedidos}</strong> pedidos nos SKUs · <strong>{busca.quantidadeSkus}</strong> SKUs</p></div>
-        {busca.pedidosForaPeriodo > 0 && <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><strong>{busca.pedidosForaPeriodo} pedido(s) fora do período.</strong> Não entram nos SKUs nem nos arquivos. Abra o resultado para conferir os IDs.</p>}
-        <div className="mt-4 flex flex-wrap gap-2"><button type="button" className={primario} disabled={Boolean(ocupado)} onClick={() => visualizar(busca.id)}>{ocupado === busca.id ? "Abrindo…" : busca.quantidadeSkus === 0 && busca.pedidosForaPeriodo > 0 ? "Ver alerta" : "Ver SKUs"}</button>{["csv", "xlsx", "pdf"].map(formato => <button key={formato} type="button" className={botao} disabled={Boolean(ocupado) || busca.quantidadeSkus === 0} onClick={() => baixar(busca.id, formato)}><Download className="h-4 w-4" aria-hidden="true" />{ocupado === `${busca.id}:${formato}` ? "Baixando…" : formato === "xlsx" ? "Excel" : formato.toUpperCase()}</button>)}{podeEscrever && <button type="button" className={`${botao} text-red-700 sm:ml-auto`} disabled={Boolean(ocupado) || emAberto || ia.trabalhos.some(t => t.origemId === busca.id && trabalhoIaAtivo(t))} onClick={() => { setErroDialogo(null); setConfirmacao({ tipo: "excluir", id: busca.id }); }}>Excluir</button>}</div>
-        <RelatorioSkuIa busca={busca.id} token={token} escopo={escopo} podeEscrever={podeEscrever} temItens={busca.quantidadeSkus > 0} trabalhos={ia.trabalhos.filter(t => t.origemId === busca.id)} atualizar={ia.atualizar} />
+      {buscas.map(busca => <article key={busca.id} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium text-slate-900">Busca de {data(busca.createdAt)}</h3><p className="text-sm text-slate-700"><strong>{busca.quantidadePedidos}</strong> pedidos · <strong>{busca.quantidadeSkus}</strong> SKUs</p></div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600"><p className="break-words">{situacoes(busca.situacoes)}</p><p>{descreverPeriodoSku(busca.periodoInicio, busca.periodoFim)}</p></div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" className={primario} disabled={Boolean(ocupado)} onClick={() => visualizar(busca.id)}>{ocupado === busca.id ? "Abrindo…" : "Ver SKUs"}</button>
+          <RelatorioSkuIa busca={busca.id} token={token} escopo={escopo} podeEscrever={podeEscrever} temItens={busca.quantidadeSkus > 0} trabalhos={ia.trabalhos.filter(t => t.origemId === busca.id)} atualizar={ia.atualizar} />
+          <MenuArquivos baixar={formato => baixar(busca.id, formato)} desabilitado={Boolean(ocupado) || busca.quantidadeSkus === 0} baixando={Boolean(ocupado?.startsWith(`${busca.id}:`))} />
+          {podeEscrever && <button type="button" className={`${botao} text-red-700 sm:ml-auto`} disabled={Boolean(ocupado) || emAberto || ia.trabalhos.some(t => t.origemId === busca.id && trabalhoIaAtivo(t))} onClick={() => { setErroDialogo(null); setConfirmacao({ tipo: "excluir", id: busca.id }); }}>Excluir</button>}
+        </div>
       </article>)}
     </section>}
     {detalhe && <Dialogo titulo="Resultado da busca" origem={origemDetalhe.current} fechar={() => setDetalhe(null)}>

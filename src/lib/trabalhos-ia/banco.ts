@@ -14,3 +14,9 @@ export function adaptarSqlIa(db: Pick<Prisma.TransactionClient, "$queryRaw" | "$
 export function bancoPrismaIa(db: PrismaClient): BancoIa {
   return { ...adaptarSqlIa(db), transacao: fn => db.$transaction(tx => fn(adaptarSqlIa(tx)), { timeout: 25_000, maxWait: 5_000 }) };
 }
+
+/** Participa da transação da busca: não abre outra conexão/transação. */
+export function bancoNaTransacaoIa(tx: Prisma.TransactionClient): BancoIa {
+  const sql = adaptarSqlIa(tx);
+  return { ...sql, transacao: fn => fn(sql) };
+}

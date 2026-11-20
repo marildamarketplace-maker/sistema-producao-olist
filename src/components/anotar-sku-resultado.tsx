@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AlertTriangle, ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { linkPedidoOlist, paginaPedidosSkuSchema, paginaForaPeriodoSkuSchema, type PaginaPedidosSku, type PaginaForaPeriodoSku } from "@/lib/anotar-sku/pedidos";
 import { descreverPeriodoSku, formatarDiaSku } from "@/lib/anotar-sku/periodo";
+import { TabelaSkus } from "@/components/tabela-skus";
+import { alternarOrdenacaoSku, ordenarSkus, ORDENACAO_SKU_PADRAO } from "@/lib/anotar-sku/ordenacao";
 
 type SkuResultado = { sku: string; tituloProduto: string | null; quantidade: number };
 type PaginaConferencia = { pedidos: (PaginaPedidosSku["pedidos"][number] | PaginaForaPeriodoSku["pedidos"][number])[]; proximoCursor: string | null };
@@ -93,6 +95,8 @@ function PedidosDoResultado({ buscaId, item, token, cache, totalForaPeriodo }: {
 /** O cache existe somente durante a abertura deste resultado, no escopo da sessão. */
 export function AnotarSkuResultado({ buscaId, skus, token, children, pedidosForaPeriodo = 0, periodoInicio, periodoFim }: { buscaId: string; skus: SkuResultado[]; token: string; children?: ReactNode; pedidosForaPeriodo?: number; periodoInicio?: string | null; periodoFim?: string | null }) {
   const [selecionado, setSelecionado] = useState<SkuResultado | "fora-periodo" | null>(null);
+  const [ordem, setOrdem] = useState(ORDENACAO_SKU_PADRAO);
+  const linhas = useMemo(() => ordenarSkus(skus.map(item => ({ ...item, produto: item.tituloProduto })), ordem), [skus, ordem]);
   const cache = useRef(new Map<string, PaginaConferencia>());
   const origem = useRef<HTMLButtonElement | null>(null);
   const voltar = useRef<HTMLButtonElement | null>(null);
@@ -110,15 +114,8 @@ export function AnotarSkuResultado({ buscaId, skus, token, children, pedidosFora
         <p className="mt-2 text-sm">Não foram somados aos SKUs nem incluídos nos arquivos. Confira os IDs e as datas de criação.</p>
         <button type="button" className={`${botao} mt-3 w-full sm:w-auto`} onClick={event => { origem.current = event.currentTarget; setSelecionado("fora-periodo"); }}>Ver pedidos fora do período</button>
       </div>}
-      {skus.length === 0 ? <p role="status" className="mt-4 rounded-md border border-slate-200 p-4 text-sm text-slate-600">Nenhum SKU novo no período selecionado.{pedidosForaPeriodo > 0 && " Os pedidos fora do período estão disponíveis no alerta acima."}</p> : <div tabIndex={0} role="region" aria-label="Tabela de SKUs com rolagem horizontal" className="mt-4 overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
-        <table className="w-full text-left text-sm"><caption className="sr-only">Quantidades agrupadas por SKU</caption>
-          <thead><tr className="border-b border-slate-200 text-slate-600"><th scope="col" className="px-3 py-3">SKU / pedidos</th><th scope="col" className="px-3 py-3">Produto</th><th scope="col" className="px-3 py-3 text-right">Quantidade</th></tr></thead>
-          <tbody>{skus.map(item => <tr key={item.sku} className="border-b border-slate-100">
-            <th scope="row" className="min-w-40 max-w-xs break-words px-3 py-3 font-medium text-slate-900"><span className="block break-all">{item.sku}</span>
-              <button type="button" className={`${botao} mt-2 whitespace-nowrap`} aria-label={`Ver pedidos do SKU ${item.sku}`} onClick={event => { origem.current = event.currentTarget; setSelecionado(item); }}>Ver pedidos</button>
-            </th><td className="min-w-40 break-words px-3 py-3 text-slate-600">{item.tituloProduto || "—"}</td><td className="px-3 py-3 text-right font-semibold text-slate-900">{item.quantidade}</td>
-          </tr>)}</tbody>
-        </table>
+      {skus.length === 0 ? <p role="status" className="mt-4 rounded-md border border-slate-200 p-4 text-sm text-slate-600">Nenhum SKU novo no período selecionado.{pedidosForaPeriodo > 0 && " Os pedidos fora do período estão disponíveis no alerta acima."}</p> : <div className="mt-4">
+        <TabelaSkus nome="Tabela de SKUs" itens={linhas} ordem={ordem} ordenar={coluna => setOrdem(atual => alternarOrdenacaoSku(atual, coluna))} verPedidos={(item, botao) => { origem.current = botao; setSelecionado(item); }} />
       </div>}
     </div>
     {selecionado && <div>

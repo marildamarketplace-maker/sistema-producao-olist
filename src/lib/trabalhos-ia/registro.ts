@@ -5,6 +5,8 @@ export type ContextoTipoIa = { aplicativoId: string; solicitadoPor: string; orig
 export type PaginaEntradaIa = { entrada: unknown[]; cursor: string | null; fim: boolean };
 export interface TipoTrabalhoIa {
   tipo: string;
+  /** Reaproveita o resultado concluído desta origem, mesmo com nova chave/usuário. */
+  reutilizarConcluido?: boolean;
   promptPadrao: string;
   promptGeracao: string;
   promptRevisao: string;

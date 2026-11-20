@@ -16,6 +16,7 @@ const camposResumo = Prisma.sql`id,tipo,origem_id AS "origemId",status,fase,tota
 const campos = Prisma.sql`${camposResumo},aplicativo_id AS "aplicativoId",solicitado_por AS "solicitadoPor",
   prompt_geracao AS "promptGeracao",prompt_revisao AS "promptRevisao",prompt_personalizado AS "promptPersonalizado",
   cursor,total_lotes AS "totalLotes",lote_atual AS "loteAtual",tentativas,reserva,reserva_ate AS "reservaAte",worker`;
+type ConfigIa = { prompt: string; revisao: number; gerarAutomaticamente: boolean };
 type ResumoDb = Omit<TrabalhoIaResumo, "criadoEm" | "finalizadoEm"> & { criadoEm: Date; finalizadoEm: Date | null };
 const resumo = (t: ResumoDb): TrabalhoIaResumo => ({ ...t, criadoEm: t.criadoEm.toISOString(), finalizadoEm: t.finalizadoEm?.toISOString() ?? null });
 const ativo = (status: string) => ["PENDENTE", "PROCESSANDO", "AGUARDANDO_RETRY"].includes(status);
@@ -26,8 +27,8 @@ const contexto = (t: Trabalho) => ({ aplicativoId: t.aplicativoId, solicitadoPor
 
 export function criarServicoTrabalhosIa(db: BancoIa, registro: RegistroIa) {
   async function config(tx: SqlIa, app: string, tipo: string) {
-    const [salva] = await tx.consultar<{ prompt: string; revisao: number }>(Prisma.sql`SELECT prompt,revisao FROM ia_configuracao WHERE aplicativo_id=${app}::uuid AND tipo=${tipo}`);
-    return salva ?? { prompt: registro.obter(tipo).promptPadrao, revisao: 0 };
+    const [salva] = await tx.consultar<ConfigIa>(Prisma.sql`SELECT prompt,revisao,gerar_automaticamente AS "gerarAutomaticamente" FROM ia_configuracao WHERE aplicativo_id=${app}::uuid AND tipo=${tipo}`);
+    return salva ?? { prompt: registro.obter(tipo).promptPadrao, revisao: 0, gerarAutomaticamente: false };
   }
   async function mudar(tx: SqlIa, t: Trabalho, fase: FaseIa, status = "PENDENTE") {
     await tx.executar(Prisma.sql`UPDATE ia_trabalho SET fase=${fase},status=${status},reserva=NULL,reserva_ate=NULL,worker=NULL,grupo=NULL,
@@ -52,44 +53,74 @@ export function criarServicoTrabalhosIa(db: BancoIa, registro: RegistroIa) {
   async function autorizarTrabalho(tx: SqlIa, t: Trabalho) {
     await registro.obter(t.tipo).autorizar(tx, { id: t.solicitadoPor, aplicativoId: t.aplicativoId }, "executar");
   }
+  async function concluidoDaOrigem(tx: SqlIa, app: string, tipo: string, origem: string) {
+    if (!registro.obter(tipo).reutilizarConcluido) return undefined;
+    const [concluido] = await tx.consultar<ResumoDb>(Prisma.sql`SELECT ${camposResumo} FROM ia_trabalho
+      WHERE aplicativo_id=${app}::uuid AND tipo=${tipo} AND origem_id=${origem}::uuid AND status='CONCLUIDO'
+      ORDER BY criado_em DESC,id DESC LIMIT 1`);
+    return concluido;
+  }
+  // Chamadores mantêm o lock IA do aplicativo durante toda a transação.
+  async function solicitarNaTransacao(tx: SqlIa, escopo: EscopoIa, tipo: string, origemId: string, chave: string, configAutomatica?: ConfigIa) {
+    const definicao = registro.obter(tipo);
+    if (!configAutomatica) await definicao.autorizar(tx, escopo, "executar");
+    const [anterior] = await tx.consultar<ResumoDb>(Prisma.sql`SELECT ${camposResumo} FROM ia_trabalho WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND solicitado_por=${escopo.id}::uuid AND chave=${chave}::uuid`);
+    if (anterior) {
+      if (anterior.tipo !== tipo || anterior.origemId !== origemId) throw new ErroTrabalhoIa("Chave já utilizada para outra solicitação.", 409);
+      return resumo(anterior);
+    }
+    await definicao.verificarOrigem(tx, escopo.aplicativoId, origemId);
+    const concluido = await concluidoDaOrigem(tx, escopo.aplicativoId, tipo, origemId);
+    if (concluido) return resumo(concluido);
+    const [aberto] = await tx.consultar<ResumoDb>(Prisma.sql`SELECT ${camposResumo} FROM ia_trabalho WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND tipo=${tipo} AND origem_id=${origemId}::uuid AND status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY')`);
+    if (aberto) return resumo(aberto);
+    if (!configAutomatica) {
+      const [worker] = await tx.consultar<{ id: string }>(Prisma.sql`SELECT id FROM ia_worker WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND protocolo=1 AND ${tipo}=ANY(tipos) AND contato_em>now()-interval '3 minutes' LIMIT 1`);
+      if (!worker) throw new ErroTrabalhoIa("O worker de IA está indisponível ou ainda não foi atualizado. Aguarde sua conexão.", 503);
+      await verificarCapacidade(tx, escopo.aplicativoId);
+    }
+    const cfg = configAutomatica ?? await config(tx, escopo.aplicativoId, tipo);
+    const id = randomUUID();
+    const [trabalho] = await tx.consultar<ResumoDb>(Prisma.sql`INSERT INTO ia_trabalho(id,aplicativo_id,solicitado_por,tipo,origem_id,chave,prompt_geracao,prompt_revisao,prompt_personalizado,revisao_config)
+      VALUES (${id}::uuid,${escopo.aplicativoId}::uuid,${escopo.id}::uuid,${tipo},${origemId}::uuid,${chave}::uuid,${definicao.promptGeracao},${definicao.promptRevisao},${cfg.prompt},${cfg.revisao}) RETURNING ${camposResumo}`);
+    await definicao.vincular(tx, { aplicativoId: escopo.aplicativoId, solicitadoPor: escopo.id, origemId, trabalhoId: id });
+    return resumo(trabalho);
+  }
   return {
     async configuracao(escopo: EscopoIa, tipo: string) {
       const definicao = registro.obter(tipo);
       await definicao.autorizar(db, escopo, "configurar");
       return { ...await config(db, escopo.aplicativoId, tipo), geracao: definicao.promptGeracao, revisaoFixa: definicao.promptRevisao };
     },
-    async configurar(escopo: EscopoIa, tipo: string, prompt: string, revisao: number) {
+    async configurar(escopo: EscopoIa, tipo: string, prompt: string, revisao: number, gerarAutomaticamente?: boolean) {
       return db.transacao(async tx => {
         await travarApp(tx, escopo.aplicativoId);
         await registro.obter(tipo).autorizar(tx, escopo, "configurar");
-        if ((await config(tx, escopo.aplicativoId, tipo)).revisao !== revisao) throw new ErroTrabalhoIa("A configuração mudou. Reabra para conferir a versão atual.", 409);
-        await tx.executar(Prisma.sql`INSERT INTO ia_configuracao(aplicativo_id,tipo,prompt,revisao,atualizado_por) VALUES (${escopo.aplicativoId}::uuid,${tipo},${prompt},${revisao+1},${escopo.id}::uuid)
-          ON CONFLICT(aplicativo_id,tipo) DO UPDATE SET prompt=excluded.prompt,revisao=excluded.revisao,atualizado_por=excluded.atualizado_por,atualizado_em=now()`);
-        return { prompt, revisao: revisao+1 };
+        const atual = await config(tx, escopo.aplicativoId, tipo);
+        if (atual.revisao !== revisao) throw new ErroTrabalhoIa("A configuração mudou. Reabra para conferir a versão atual.", 409);
+        const automatico = gerarAutomaticamente ?? atual.gerarAutomaticamente;
+        await tx.executar(Prisma.sql`INSERT INTO ia_configuracao(aplicativo_id,tipo,prompt,revisao,gerar_automaticamente,atualizado_por) VALUES (${escopo.aplicativoId}::uuid,${tipo},${prompt},${revisao+1},${automatico},${escopo.id}::uuid)
+          ON CONFLICT(aplicativo_id,tipo) DO UPDATE SET prompt=excluded.prompt,revisao=excluded.revisao,gerar_automaticamente=excluded.gerar_automaticamente,atualizado_por=excluded.atualizado_por,atualizado_em=now()`);
+        return { prompt, revisao: revisao+1, gerarAutomaticamente: automatico };
       });
     },
     async solicitar(escopo: EscopoIa, tipo: string, origemId: string, chave: string) {
       return db.transacao(async tx => {
         await travarApp(tx, escopo.aplicativoId);
-        const definicao = registro.obter(tipo);
-        await definicao.autorizar(tx, escopo, "executar");
-        const [anterior] = await tx.consultar<ResumoDb>(Prisma.sql`SELECT ${camposResumo} FROM ia_trabalho WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND solicitado_por=${escopo.id}::uuid AND chave=${chave}::uuid`);
-        if (anterior) {
-          if (anterior.tipo !== tipo || anterior.origemId !== origemId) throw new ErroTrabalhoIa("Chave já utilizada para outra solicitação.", 409);
-          return resumo(anterior);
-        }
-        await definicao.verificarOrigem(tx, escopo.aplicativoId, origemId);
-        const [aberto] = await tx.consultar<ResumoDb>(Prisma.sql`SELECT ${camposResumo} FROM ia_trabalho WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND tipo=${tipo} AND origem_id=${origemId}::uuid AND status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY')`);
-        if (aberto) return resumo(aberto);
-        const [worker] = await tx.consultar<{ id: string }>(Prisma.sql`SELECT id FROM ia_worker WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND protocolo=1 AND ${tipo}=ANY(tipos) AND contato_em>now()-interval '3 minutes' LIMIT 1`);
-        if (!worker) throw new ErroTrabalhoIa("O worker de IA está indisponível ou ainda não foi atualizado. Aguarde sua conexão.", 503);
-        await verificarCapacidade(tx, escopo.aplicativoId);
-        const cfg = await config(tx, escopo.aplicativoId, tipo);
-        const id = randomUUID();
-        const [trabalho] = await tx.consultar<ResumoDb>(Prisma.sql`INSERT INTO ia_trabalho(id,aplicativo_id,solicitado_por,tipo,origem_id,chave,prompt_geracao,prompt_revisao,prompt_personalizado,revisao_config)
-          VALUES (${id}::uuid,${escopo.aplicativoId}::uuid,${escopo.id}::uuid,${tipo},${origemId}::uuid,${chave}::uuid,${definicao.promptGeracao},${definicao.promptRevisao},${cfg.prompt},${cfg.revisao}) RETURNING ${camposResumo}`);
-        await definicao.vincular(tx, { aplicativoId: escopo.aplicativoId, solicitadoPor: escopo.id, origemId, trabalhoId: id });
-        return resumo(trabalho);
+        return solicitarNaTransacao(tx, escopo, tipo, origemId, chave);
+      });
+    },
+    // Somente eventos internos duráveis usam esta entrada; não é exposta na API.
+    async solicitarAutomatico(escopo: EscopoIa, tipo: string, origemId: string, chave: string) {
+      return db.transacao(async tx => {
+        await travarApp(tx, escopo.aplicativoId);
+        const [preferencia] = await tx.consultar<{ habilitado: boolean }>(Prisma.sql`SELECT gerar_automaticamente AS habilitado FROM ia_configuracao WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND tipo=${tipo}`);
+        if (!preferencia?.habilitado) return null;
+        try { await registro.obter(tipo).autorizar(tx, escopo, "executar"); }
+        catch (erro) { if (erro instanceof ErroTrabalhoIa && erro.status === 403) return null; throw erro; }
+        // Não perde o evento por ausência temporária da VM ou fila manual cheia.
+        // O consumidor mantém a execução serial e os limites por lote/tentativa.
+        return solicitarNaTransacao(tx, escopo, tipo, origemId, chave, await config(tx, escopo.aplicativoId, tipo));
       });
     },
     async listar(escopo: EscopoIa, tipo: string, origens: string[]) {
@@ -120,6 +151,7 @@ export function criarServicoTrabalhosIa(db: BancoIa, registro: RegistroIa) {
         if (acao === "retomar") {
           if (t.status !== "FALHOU") throw new ErroTrabalhoIa("Somente trabalhos com falha podem ser retomados.", 409);
           await tipo.verificarOrigem(tx, escopo.aplicativoId, t.origemId);
+          if (await concluidoDaOrigem(tx, t.aplicativoId, t.tipo, t.origemId)) throw new ErroTrabalhoIa("Esta busca já possui um relatório IA concluído.", 409);
           const [outro] = await tx.consultar<{ id: string }>(Prisma.sql`SELECT id FROM ia_trabalho WHERE aplicativo_id=${t.aplicativoId}::uuid AND tipo=${t.tipo} AND origem_id=${t.origemId}::uuid AND status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY') LIMIT 1`);
           if (outro) throw new ErroTrabalhoIa("Já existe uma nova geração em andamento.", 409);
           await autorizarTrabalho(tx,t);
@@ -149,6 +181,12 @@ export function criarServicoTrabalhosIa(db: BancoIa, registro: RegistroIa) {
             AND ((status IN ('PENDENTE','AGUARDANDO_RETRY') AND disponivel_em<=now()) OR (status='PROCESSANDO' AND reserva_ate<=now()))
             ORDER BY disponivel_em,criado_em,id LIMIT 1 FOR UPDATE SKIP LOCKED`);
           if (!t) return { trabalho: null, aguardarMs: 60_000 };
+          // Gerações enfileiradas na versão anterior não refazem um relatório pronto.
+          if (await concluidoDaOrigem(tx, t.aplicativoId, t.tipo, t.origemId)) {
+            await tx.executar(Prisma.sql`UPDATE ia_tentativa SET status='CANCELADO',finalizada_em=now() WHERE trabalho_id=${t.id}::uuid AND finalizada_em IS NULL`);
+            await mudar(tx, t, t.fase, "CANCELADO");
+            return { trabalho: null, aguardarMs: 0 };
+          }
           if (t.reserva) {
             await tx.executar(Prisma.sql`UPDATE ia_tentativa SET status='EXPIRADA',codigo='RESERVA_EXPIRADA',finalizada_em=now() WHERE id=${t.reserva}::uuid AND finalizada_em IS NULL`);
             if (t.tentativas >= 3) { await falhar(tx,t,"TEMPO_LIMITE"); return { trabalho: null, aguardarMs: 0 }; }
