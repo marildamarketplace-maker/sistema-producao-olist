@@ -330,6 +330,43 @@ test("Olist sync: persistência real, isolamento, leases, gates e retenção", {
       assert.equal(await db.olistSyncEvento.count({ where: { execucaoId: e.id } }), 0);
     });
 
+    await suite.test("controle enxuto lê gates atuais sem políticas nem contadores e recusa lease vencido", async contexto => {
+      const e = await nova(), r = await reservar();
+      await db.olistSyncConfiguracao.update({ where: { id: config.id }, data: { politicasJson: { conteudo: "x".repeat(20_000) } } });
+      await db.olistSyncExecucao.update({ where: { id: e.id }, data: { contadoresJson: { analisados: 123 } } });
+      await db.olistSyncEtapa.update({ where: { id: r.id }, data: { cursorJson: { offset: 7 } } });
+      const controle = await repo.comControle(r, async (_tx, atual) => atual);
+      assert.ok(controle);
+      assert.deepEqual(controle.cursorJson, { offset: 7 });
+      assert.equal("contadoresJson" in controle.execucao, false);
+      assert.equal("politicasJson" in controle.execucao.configuracao, false);
+      assert.equal(controle.execucao.configuracao.autorizadoPor, user);
+      assert.equal(controle.execucao.configuracao.participantes.length, 2);
+      const completa = await repo.comReserva(r, async (_tx, atual) => atual);
+      const bytesCompleta = Buffer.byteLength(JSON.stringify(completa)), bytesControle = Buffer.byteLength(JSON.stringify(controle));
+      assert.ok(bytesCompleta - bytesControle >= 20_000);
+      contexto.diagnostic(`Fixture com política de 20 kB: reserva completa ${bytesCompleta} B; controle ${bytesControle} B`);
+      await db.olistSyncConfiguracao.update({ where: { id: config.id }, data: { ativo: false } });
+      assert.equal(await repo.comControle(r, async (_tx, atual) => atual.execucao.configuracao.ativo), false);
+      await db.olistSyncEtapa.update({ where: { id: r.id }, data: { leaseAte: new Date(0) } });
+      let executou = false;
+      assert.equal(await repo.comControle(r, async () => { executou = true; return true; }), null);
+      assert.equal(executou, false);
+    });
+
+    await suite.test("controle enxuto mantém rollback e checkpoint respeita cancelamento atual", async () => {
+      const e = await nova(), r = await reservar();
+      await assert.rejects(repo.comControle(r, async tx => {
+        await tx.olistSyncEtapa.update({ where: { id: r.id }, data: { cursorJson: { offset: 999 } } });
+        throw new Error("Falha sob controle");
+      }), /Falha sob controle/);
+      assert.deepEqual((await etapa(r.id)).cursorJson, {});
+      await db.olistSyncExecucao.update({ where: { id: e.id }, data: { cancelamentoSolicitado: true } });
+      await repo.salvarCheckpoint({ etapaId: r.id, leaseToken: r.leaseToken, cursor: { offset: 10 } });
+      assert.equal((await etapa(r.id)).status, "CANCELADA");
+      assert.equal((await etapa(r.id)).leaseToken, null);
+    });
+
     await suite.test("enfileiramento em transação externa desfaz execução e etapas no rollback", async () => {
       const chave = randomUUID();
       await assert.rejects(db.$transaction(async tx => {

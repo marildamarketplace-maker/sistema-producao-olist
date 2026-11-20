@@ -1008,6 +1008,37 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA");
     assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,1);
   });
+  await t.test("janela vence durante consulta real e a mesma invocação retoma o processamento",async()=>{
+    await reset();await enfileirar("AUDITAR");
+    await db.olistSyncEtapa.updateMany({data:{disponivelEm:new Date(agora+50)}});
+    let atrasou=false;
+    const instrumentado=db.$extends({query:{async $queryRaw({args,query}) {
+      const resultado=await query(args);
+      if(!atrasou && JSON.stringify(args).includes("SELECT c.id FROM olist_sync_configuracao")) {
+        atrasou=true;agora+=100;
+      }
+      return resultado;
+    }}});
+    const consumidor=criarServicoOlistSync(instrumentado as unknown as PrismaClient,cliente,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+    const resultado=await consumidor.executar(agora+240_000);
+    assert.equal(atrasou,true);
+    assert.ok(resultado.etapas>0,"A janela pronta deve ser consumida na mesma invocação");
+    assert.ok(chamadas.length>0);
+  });
+  await t.test("processar carrega dados do handler uma única vez sem repetir a leitura no despacho",async()=>{
+    await reset();await enfileirar("AUDITAR");
+    const reserva=await repo.reservarEtapa({agora:new Date(agora)});assert.ok(reserva);
+    let leituras=0;
+    const instrumentado=db.$extends({query:{olistSyncEtapa:{async findUniqueOrThrow({args,query}) {
+      if(args.select?.leaseAte && args.select.execucao)leituras++;
+      return query(args);
+    }}}});
+    const consumidor=criarServicoOlistSync(instrumentado as unknown as PrismaClient,cliente,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{agora+=ms;}});
+    await consumidor.processar(reserva);
+    assert.equal(leituras,1);
+    assert.equal(chamadas.length,1);
+    assert.ok(chamadas[0].url.endsWith("/info"));
+  });
   await t.test("pausar durante a espera encerra a invocação sem polling nem nova chamada",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));await enfileirar("AUDITAR");const esperas:number[]=[];
     const consumidor=criarServicoOlistSync(db,cliente,{cripto,agora:()=>new Date(agora),aguardar:async ms=>{

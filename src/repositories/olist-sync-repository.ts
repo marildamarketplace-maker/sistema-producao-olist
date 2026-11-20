@@ -36,6 +36,25 @@ const etapaSelect = {
 } satisfies Prisma.OlistSyncEtapaSelect;
 export type ConfiguracaoSync = Prisma.OlistSyncConfiguracaoGetPayload<{ select: typeof configuracaoSyncSelect }>;
 export type ReservaEtapaSync = Prisma.OlistSyncEtapaGetPayload<{ select: typeof etapaSelect }> & { leaseToken: string };
+// Controle vigente por HTTP: não transfere políticas, agenda, contadores ou
+// metadados da execução que não participam da autorização.
+const controleEtapaSelect = {
+  id: true, execucaoId: true, fase: true, cursorJson: true, leaseToken: true,
+  execucao: { select: {
+    versaoConfiguracao: true, cancelamentoSolicitado: true, origem: true, solicitadoPor: true,
+    configuracao: { select: {
+      id: true, aplicativoPaiId: true, aplicativosBloqueados: true, ativo: true, versao: true, readinessJson: true, autorizadoPor: true,
+      aplicativoPai: { select: { jobs: true } },
+      participantes: { select: { aplicativoId: true, habilitado: true,
+        aplicativo: { select: { id: true, aplicativoPaiId: true } } } },
+    } },
+  } },
+} satisfies Prisma.OlistSyncEtapaSelect;
+export type ControleEtapaSync = Prisma.OlistSyncEtapaGetPayload<{ select: typeof controleEtapaSelect }> & { leaseToken: string };
+const checkpointSelect = {
+  id: true, execucaoId: true, cursorJson: true, leaseToken: true, tentativas: true,
+  execucao: { select: { cancelamentoSolicitado: true } },
+} satisfies Prisma.OlistSyncEtapaSelect;
 export type EntradaExecucaoSync = { configuracaoId: string; modo: "AUDITAR" | "AUDITAR_E_APLICAR" | "APLICAR";
   idempotencia: string; solicitadoPor: string | null; origem: "MANUAL" | "AGENDADA"; completa: boolean };
 
@@ -107,7 +126,11 @@ const aplicacaoPausada = Prisma.sql`
 `;
 
 export function criarOlistSyncRepository(db: PrismaClient) {
-  async function comReserva<T>(reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">, executar: (tx: Tx, atual: ReservaEtapaSync) => Promise<T>) {
+  async function sobReserva<T, Atual extends { leaseToken: string | null }>(
+    reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">,
+    carregar: (tx: Tx) => Promise<Atual>,
+    executar: (tx: Tx, atual: Atual & { leaseToken: string }) => Promise<T>,
+  ) {
     return db.$transaction(async tx => {
       // Ordem compartilhada por reserva, cancelamento e persistência: execução
       // antes da etapa. Serializa também a criação da próxima fase sem manter
@@ -122,10 +145,20 @@ export function criarOlistSyncRepository(db: PrismaClient) {
         WHERE s.id=${reserva.id}::uuid AND s.lease_token=${reserva.leaseToken}::uuid AND s.lease_ate>clock_timestamp()
           AND s.status='PROCESSANDO' FOR UPDATE OF s`;
       if (!valida.length) return null;
-      const atual = await tx.olistSyncEtapa.findUniqueOrThrow({ where: { id: reserva.id }, select: etapaSelect });
+      const atual = await carregar(tx);
       if (atual.leaseToken !== reserva.leaseToken) return null;
       return executar(tx, { ...atual, leaseToken: reserva.leaseToken });
     }, { timeout: 25_000, maxWait: 5_000 });
+  }
+  function comReserva<T>(reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">, executar: (tx: Tx, atual: ReservaEtapaSync) => Promise<T>) {
+    return sobReserva(reserva, tx => tx.olistSyncEtapa.findUniqueOrThrow({ where: { id: reserva.id }, select: etapaSelect }), executar);
+  }
+  function comControle<T>(reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">, executar: (tx: Tx, atual: ControleEtapaSync) => Promise<T>) {
+    return sobReserva(reserva, tx => tx.olistSyncEtapa.findUniqueOrThrow({ where: { id: reserva.id }, select: controleEtapaSelect }), executar);
+  }
+  function comCheckpoint<T>(reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">,
+    executar: (tx: Tx, atual: Prisma.OlistSyncEtapaGetPayload<{ select: typeof checkpointSelect }>) => Promise<T>) {
+    return sobReserva(reserva, tx => tx.olistSyncEtapa.findUniqueOrThrow({ where: { id: reserva.id }, select: checkpointSelect }), executar);
   }
   async function concluirExecucaoQuandoPossivel(id: string) {
     return db.$transaction(async tx => {
@@ -145,6 +178,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
   }
   const repo = {
     comReserva,
+    comControle,
     concluirExecucaoQuandoPossivel,
     disponibilidade: (configuracaoId: string, chave: JobSync | string) => disponibilidade(db, configuracaoId, chave),
     obterConfiguracao: (aplicativoPaiId: string) => db.olistSyncConfiguracao.findUnique({ where: { aplicativoPaiId }, select: configuracaoSyncSelect }),
@@ -278,7 +312,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
       return rows[0]?.disponivel ?? null;
     },
     async salvarCheckpoint(entrada: { etapaId: string; leaseToken: string; cursor: Prisma.InputJsonValue; status?: string; contadores?: Prisma.InputJsonObject; disponivelEm?: Date; fase?: string }) {
-      return comReserva({ id: entrada.etapaId, leaseToken: entrada.leaseToken }, async (tx, atual) => {
+      return comCheckpoint({ id: entrada.etapaId, leaseToken: entrada.leaseToken }, async (tx, atual) => {
         const anterior=atual.cursorJson, cursor=entrada.cursor;
         const cota=anterior && typeof anterior==="object" && !Array.isArray(anterior) ? anterior.cotaLeitura : undefined;
         const checkpoint=cota && cursor && typeof cursor==="object" && !Array.isArray(cursor) ? {...cursor,cotaLeitura:cota} : cursor;
@@ -290,7 +324,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
     },
     async falharEtapa(reserva: Pick<ReservaEtapaSync, "id" | "leaseToken">, codigo: string, atrasoMs: number | null) {
       if (!/^[A-Z0-9_]{1,80}$/.test(codigo)) throw new ErroRepositorioSync("Código de erro inválido.", 400);
-      return comReserva(reserva, async (tx, atual) => {
+      return comCheckpoint(reserva, async (tx, atual) => {
         const retry = !atual.execucao.cancelamentoSolicitado && atrasoMs !== null && atual.tentativas < 5;
         await tx.olistSyncEtapa.update({ where: { id: atual.id }, data: { ...liberacao, status: atual.execucao.cancelamentoSolicitado ? "CANCELADA" : retry ? "AGUARDANDO_RETRY" : "FALHOU", erroCodigo: codigo,
           disponivelEm: new Date(Date.now() + (retry ? Math.min(Math.max(atrasoMs!, 1000), 3_600_000) : 0)) }, select: { id: true } });

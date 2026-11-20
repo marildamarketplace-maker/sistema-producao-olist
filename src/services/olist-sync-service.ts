@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
-import { criarOlistSyncRepository, JOBS_SYNC } from "@/repositories/olist-sync-repository";
+import { criarOlistSyncRepository, JOBS_SYNC, type ControleEtapaSync } from "@/repositories/olist-sync-repository";
 import { aplicativoTemJob } from "@/lib/aplicativo-jobs";
 import { aplicativoElegivelSync } from "@/lib/olist-sync/elegibilidade";
 import { criarCriptografiaSync, serializarCanonico } from "@/lib/olist-sync/cripto";
@@ -31,8 +31,8 @@ const idAgendamento = (grupo:string, prevista:Date) => {
 export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, opcoes: { agora?:()=>Date; aguardar?:(ms:number)=>Promise<void>; cripto?:Cripto } = {}) {
   const persistencia = criarOlistSyncRepository(db);
   const repo = { ...persistencia,
-    async comReserva<T>(reserva:Pick<Reserva,"id"|"leaseToken">, executar:(tx:Tx,atual:Reserva)=>Promise<T>) {
-      const resultado=await persistencia.comReserva(reserva,executar);
+    async comReserva<T>(reserva:Pick<Reserva,"id"|"leaseToken">, executar:(tx:Tx,atual:ControleEtapaSync)=>Promise<T>) {
+      const resultado=await persistencia.comControle(reserva,executar);
       if(resultado===null)throw new FalhaSync("LEASE_PERDIDA","A reserva de execução expirou.");
       return resultado;
     },
@@ -78,8 +78,9 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
         configuracao:{select:{id:true,aplicativoPaiId:true,autorizadoPor:true,ativo:true,versao:true,readinessJson:true,limiteAlteracoes:true,participantes:{where:{habilitado:true},select:{aplicativoId:true,contaIdentidade:true}}}}}}} });
     return etapa;
   }
+  type DadosReserva = Awaited<ReturnType<typeof dadosReserva>>;
 
-  async function validarChamada(tx:Tx, etapa:Reserva, app:string, escrita=false) {
+  async function validarChamada(tx:Tx, etapa:ControleEtapaSync, app:string, escrita=false) {
     const config = etapa.execucao.configuracao;
     const membros=config.participantes.filter(p=>p.habilitado);
     if (!config.ativo || config.versao !== etapa.execucao.versaoConfiguracao || etapa.execucao.cancelamentoSolicitado || membros.length<2 || !membros.some(p=>p.aplicativoId===app)
@@ -226,8 +227,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     if(!chave && mudou)await pendencia(tx,{grupo,execucaoId,aplicativoId:app,entidade,tipo:"IDENTIDADE_REQUER_REVISAO",chave:`sem-chave:${app}:${entidade}:${obs.id}`,detalhes:{aplicativoId:app,remoteId:obs.id}});
   }
 
-  async function listar(r:Reserva) {
-    const e=await dadosReserva(r), app=e.aplicativoId!; const config=e.execucao.configuracao, cursor=objetoJson(e.cursorJson), entidade=entidadeSync(e.entidade);
+  async function listar(r:Reserva,e:DadosReserva) {
+    const app=e.aplicativoId!; const config=e.execucao.configuracao, cursor=objetoJson(e.cursorJson), entidade=entidadeSync(e.entidade);
     if (cursor.identidadeVerificada!==true) {
       const identidade=await chamada(r,app,()=>cliente.identidadeConta(app));
       const hash=criptografia().hash(identidade.documento,`${config.id}:conta`);
@@ -271,8 +272,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     await repo.salvarCheckpoint({etapaId:r.id,leaseToken:r.leaseToken,cursor:proximoCursor});
   }
 
-  async function detalhar(r:Reserva) {
-    const e=await dadosReserva(r), app=e.aplicativoId!, grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), cursor=objetoJson(e.cursorJson);
+  async function detalhar(r:Reserva,e:DadosReserva) {
+    const app=e.aplicativoId!, grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), cursor=objetoJson(e.cursorJson);
     const plano=lerPlanoColeta(cursor.plano);
     if(!plano) {
       // Checkpoints antigos não comprovam janela/presença. Reiniciar somente a
@@ -321,8 +322,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     });
   }
 
-  async function comparar(r:Reserva) {
-    const e=await dadosReserva(r), grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
+  async function comparar(r:Reserva,e:DadosReserva) {
+    const grupo=e.execucao.configuracaoId, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
     await repo.comReserva(r,tx=>transferirAfetadosPendentes(tx,{grupo,execucao:e.execucaoId,entidades:[entidade]}));
     await repo.comReserva(r,tx=>marcarPropostasDesatualizadas(tx,{grupo,execucao:e.execucaoId,entidade,versaoConfiguracao:e.execucao.versaoConfiguracao}));
     const etapas=await db.olistSyncEtapa.findMany({where:{execucaoId:e.execucaoId,entidade,fase:"DETALHAR",status:"CONCLUIDA"},select:{aplicativoId:true,cursorJson:true},take:20});
@@ -439,8 +440,8 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     });
   }
 
-  async function aplicar(r:Reserva) {
-    const e=await dadosReserva(r), grupo=e.execucao.configuracaoId, app=e.aplicativoId!, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
+  async function aplicar(r:Reserva,e:DadosReserva) {
+    const grupo=e.execucao.configuracaoId, app=e.aplicativoId!, entidade=entidadeSync(e.entidade), c=criptografia(), cursor=objetoJson(e.cursorJson);
     const selecaoOperacao={id:true,registroId:true,sourceAppId:true,revisao:true,status:true,acao:true,tentativas:true,precondicoesJson:true,payloadCriptografado:true,remoteId:true,registro:{select:{revisao:true}}} as const;
     const escopo={configuracaoId:grupo,destinoAppId:app,registro:{entidade}};
     // Apura envios anteriores antes de enviar novas alterações. Uma incerteza
@@ -663,11 +664,13 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
 
   async function processar(r:Reserva) {
     try {
+      // Compartilha a leitura atual com o handler. Gates e lease continuam
+      // sendo revalidados antes dos efeitos e de cada HTTP.
       const e=await dadosReserva(r);
-      if(e.fase==="LISTAR")await listar(r);
-      else if(e.fase==="DETALHAR")await detalhar(r);
-      else if(e.fase==="COMPARAR")await comparar(r);
-      else if(e.fase==="APLICAR")await aplicar(r);
+      if(e.fase==="LISTAR")await listar(r,e);
+      else if(e.fase==="DETALHAR")await detalhar(r,e);
+      else if(e.fase==="COMPARAR")await comparar(r,e);
+      else if(e.fase==="APLICAR")await aplicar(r,e);
       else throw new FalhaSync("ETAPA_INVALIDA","Etapa não suportada.");
     } catch(error) {
       const falha=error instanceof FalhaSync?error:new FalhaSync("FALHA_INTERNA","Falha ao processar a etapa.",true);
@@ -709,7 +712,7 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
 
   async function executar(prazo=agora().getTime()+240_000) {
     const agendadas=await agendar(); let etapas=0;
-    let ultimaRecuperacao=-Infinity;
+    let ultimaRecuperacao=-Infinity, reservasProntasSemProgresso=0;
     // Reserva também OAuth inicial, uma renovação após 401 e duas consultas de 20s.
     // Uma etapa iniciada perto do fim não pode ultrapassar o orçamento do cron.
     const margemEtapaMs=120_000;
@@ -721,13 +724,22 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
       const r=await repo.reservarEtapa({agora:agora(),leaseMs:180_000,recuperar});
       if(!r) {
         const proxima=await repo.proximaJanelaEtapa({agora:agora(),limiteMs:12_000});
-        const espera=proxima?Math.ceil(proxima.getTime()-agora().getTime()):0;
+        if(!proxima)break;
+        const espera=Math.ceil(proxima.getTime()-agora().getTime());
+        // A janela pode vencer durante o I/O do banco. Isso pede nova reserva,
+        // não saída até o próximo cron. Contenção repetida não pode gerar spin.
+        if(espera<=0) {
+          if(++reservasProntasSemProgresso>3 || agora().getTime()+100>=prazo-margemEtapaMs)break;
+          await aguardar(100);
+          continue;
+        }
         // Só uma janela curta de trabalho já elegível mantém a invocação viva.
         // Pausas, fila vazia, retries longos e falta de orçamento terminam sem polling.
-        if(espera<=0 || espera>12_000 || agora().getTime()+espera>=prazo-margemEtapaMs)break;
+        if(espera>12_000 || agora().getTime()+espera>=prazo-margemEtapaMs)break;
         await aguardar(espera);
         continue;
       }
+      reservasProntasSemProgresso=0;
       await processar(r); etapas++;
     }
     const limpar=await db.olistSyncConfiguracao.findMany({where:{OR:[{ultimaLimpezaEm:null},{ultimaLimpezaEm:{lt:new Date(agora().getTime()-86_400_000)}}]},orderBy:{id:"asc"},take:5,select:{id:true}});
