@@ -47,6 +47,7 @@ async function main() {
       }
       const { reserva, markdown, rotinaNome = "Rotina de automatização" } = trabalho;
       const fim = new AbortController();
+      const signal = AbortSignal.any([fim.signal, parar.signal]);
       const cwd = await mkdtemp(join(tmpdir(), "erp-automatizacao-"));
       const iniciado = Date.now();
       const raizEvidencias = process.env.AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR ||
@@ -65,9 +66,9 @@ async function main() {
           }
           return valida;
         },
-        esperar: (ms) => esperar(ms, undefined, { signal: fim.signal }).catch(() => {}),
+        esperar: (ms) => esperar(ms, undefined, { signal }).catch(() => {}),
         agora: () => performance.now(),
-        signal: fim.signal,
+        signal,
       }).then((valida) => {
         if (!valida) {
           console.error(eventoWorker("RESERVA_PERDIDA", rotinaNome, iniciado));
@@ -87,7 +88,7 @@ async function main() {
         etapa = "EXECUTANDO";
         console.info(eventoWorker(etapa, rotinaNome, iniciado));
         await executarCodexCli({
-          executable, cwd, timeoutMs: browser ? 900_000 : 300_000, signal: fim.signal,
+          executable, cwd, timeoutMs: browser ? 900_000 : 300_000, signal,
           env: ambiente,
           args: [
             "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
@@ -116,13 +117,22 @@ async function main() {
           if (!validada.concluida) desfecho = validada.bloqueada ? "BLOQUEADA" : "FALHA";
         } else resultado = respostaSchema.parse(resposta).resultado;
       } catch (error) {
-        const falha = detalharFalhaExecucaoWorker(error);
-        const { codigo } = falha;
-        desfecho = ["AUTHENTICATION_ERROR", "CONFIGURATION_ERROR"].includes(codigo) ? "INDISPONIVEL"
-          : !browser && error instanceof ImageAnalysisProviderError && error.retriable ? "TEMPORARIA" : "FALHA";
-        resultado = falha.resultado;
-        resumoWhatsapp = falha.resumoWhatsapp;
-        console.error(eventoWorker("FALHA_EXECUTOR", rotinaNome, iniciado, desfecho, falha));
+        if (parar.signal.aborted && !fim.signal.aborted) {
+          // Uma rotina pode ter realizado ações externas antes do Ctrl+C.
+          // Tente registrar falha terminal enquanto esta reserva ainda pertence
+          // ao processo, sem pedir repetição automática por parada voluntária.
+          desfecho = "FALHA";
+          resultado = "Execução interrompida ao encerrar o worker. Confira ações parciais antes de executar novamente.";
+          resumoWhatsapp = resultado;
+        } else {
+          const falha = detalharFalhaExecucaoWorker(error);
+          const { codigo } = falha;
+          desfecho = ["AUTHENTICATION_ERROR", "CONFIGURATION_ERROR"].includes(codigo) ? "INDISPONIVEL"
+            : !browser && error instanceof ImageAnalysisProviderError && error.retriable ? "TEMPORARIA" : "FALHA";
+          resultado = falha.resultado;
+          resumoWhatsapp = falha.resumoWhatsapp;
+          console.error(eventoWorker("FALHA_EXECUTOR", rotinaNome, iniciado, desfecho, falha));
+        }
       } finally {
         await rm(cwd, { force: true, recursive: true }).catch(() => console.error("Falha ao limpar o diretório da execução."));
       }

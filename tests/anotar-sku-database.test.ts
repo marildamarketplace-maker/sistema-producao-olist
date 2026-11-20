@@ -38,6 +38,7 @@ test("Anotar SKU: PostgreSQL real, checkpoints, concorrência e API", { skip: !u
   const sql = new Client({ connectionString: url! }); await sql.connect(); t.after(() => sql.end());
   await sql.query(await readFile(new URL("../prisma/migrations/20261116214414_anotar_sku_async/migration.sql", import.meta.url), "utf8"));
   await sql.query(await readFile(new URL("../prisma/migrations/20261118001325_anotar_sku_periodo_alertas/migration.sql", import.meta.url), "utf8"));
+  await sql.query(await readFile(new URL("../prisma/migrations/20261120210023_trabalhos_ia/migration.sql", import.meta.url), "utf8"));
   const app = crypto.randomUUID(), outroApp = crypto.randomUUID(), user = crypto.randomUUID(), outroUser = crypto.randomUUID();
   await db.$executeRaw`INSERT INTO aplicativo(id,nome) VALUES (${app}::uuid,'Teste'), (${outroApp}::uuid,'Outro')`;
   await db.$executeRaw`INSERT INTO usuario(id,aplicativo_id,nome,email) VALUES (${user}::uuid,${app}::uuid,'Teste','sku@example.test'), (${outroUser}::uuid,${outroApp}::uuid,'Outro','outro@example.test')`;

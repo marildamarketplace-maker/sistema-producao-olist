@@ -1,11 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calcularPrevisaoValidacaoSync, inicioJanelaPrevisaoSync } from "../src/lib/olist-sync/previsao";
-import { consultaValidacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
+import { calcularPrevisaoValidacaoSync, calcularPrevisaoAplicacaoSync, inicioJanelaPrevisaoSync } from "../src/lib/olist-sync/previsao";
+import { consultaValidacoesRecentesSync, consultaFilaAplicacaoSync, consultaConfirmacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
 
 const agora = new Date("2026-11-17T21:00:00Z");
 const base = { execucaoId: "execucao", agora, iniciadaEm: new Date("2026-11-17T12:00:00Z"),
   contadores: { listados: 17_222, analisados: 6_878 }, validadosNaJanela: 600, listagemPendente: false, pausada: false };
+const aplicacao = {execucaoId:"execucao",agora,iniciadaEm:new Date("2026-11-17T12:00:00Z"),restantes:8_400,falhas:64,
+  confirmadosNaJanela:210,preparacaoPendente:false,pausada:false};
+
+test("aplicação prevê o fim da fila pelo ritmo recente de confirmações e separa falhas",()=>{
+  const p=calcularPrevisaoAplicacaoSync(aplicacao);
+  assert.equal(p.porMinuto,7);assert.equal(p.restantes,8_400);assert.equal(p.falhas,64);
+  assert.equal(p.tempoRestanteSegundos,72_000);assert.equal(p.terminoPrevisto,"2026-11-18T17:00:00.000Z");
+  assert.equal(p.janelaInicio,"2026-11-17T20:30:00.000Z");
+});
+test("início da aplicação recente usa tempo real decorrido e não a duração da auditoria",()=>{
+  const p=calcularPrevisaoAplicacaoSync({...aplicacao,iniciadaEm:new Date(agora.getTime()-300_000),confirmadosNaJanela:50});
+  assert.equal(p.porMinuto,10);
+});
+test("aplicação sem amostra, pausada, preparando ou sem fila não inventa data",()=>{
+  for(const [entrada,estado] of [
+    [{confirmadosNaJanela:0},"SEM_RITMO"],[{confirmadosNaJanela:4},"AMOSTRA_INSUFICIENTE"],
+    [{iniciadaEm:null},"AMOSTRA_INSUFICIENTE"],[{iniciadaEm:new Date(agora.getTime()-30_000)},"AMOSTRA_INSUFICIENTE"],
+    [{pausada:true},"PAUSADA"],[{preparacaoPendente:true},"PREPARANDO"],[{restantes:0},"FILA_CONCLUIDA"],
+    [{restantes:-1},"AMOSTRA_INSUFICIENTE"],[{restantes:NaN},"AMOSTRA_INSUFICIENTE"],
+  ] as const) {
+    const p=calcularPrevisaoAplicacaoSync({...aplicacao,...entrada});
+    assert.equal(p.estado,estado);assert.equal(p.terminoPrevisto,null);assert.equal(p.tempoRestanteSegundos,null);
+  }
+  const distante=calcularPrevisaoAplicacaoSync({...aplicacao,restantes:Number.MAX_SAFE_INTEGER,confirmadosNaJanela:5});
+  assert.equal(distante.terminoPrevisto,null);assert.equal(distante.tempoRestanteSegundos,null);
+});
+test("fila agrega operações por alvo e execução; confirmações são isoladas e limitadas por janela",()=>{
+  const fila=consultaFilaAplicacaoSync("grupo","execucao");
+  assert.match(fila.text,/o.configuracao_id=\$\d+::uuid/);assert.match(fila.text,/a.aplicativo_id=o.destino_app_id/);
+  assert.match(fila.text,/a.entidade=r.entidade/);assert.match(fila.text,/operacao_atual/);
+  assert.match(fila.text,/o.execucao_id<>/);assert.doesNotMatch(fila.text,/SELECT \*|payload_criptografado|precondicoes_json/i);
+  const recentes=consultaConfirmacoesRecentesSync("grupo","execucao",new Date(agora.getTime()-1_800_000),agora);
+  assert.deepEqual(recentes.values,["grupo","execucao",new Date(agora.getTime()-1_800_000).toISOString(),agora.toISOString()]);
+  assert.match(recentes.text,/tipo='ESCRITA_CONFIRMADA'/);assert.doesNotMatch(recentes.text,/metadados_json|SELECT \*/i);
+});
 
 test("previsão usa somente os últimos 30min e não a média desde o início", () => {
   const previsao = calcularPrevisaoValidacaoSync(base);

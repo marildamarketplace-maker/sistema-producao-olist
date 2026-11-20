@@ -32,7 +32,7 @@ async function fixture(t: TestContext) {
   const log = join(root, "commands.log"), workerEnv = join(root, "worker.env");
   await writeFile(workerEnv, "AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR=/pasta/configurada\n");
   await writeFile(join(bin, "npm"), '#!/bin/bash\nprintf "npm %s\\n" "$*" >> "$TEST_LOG"\nif [[ "$1" == ci && "${POSTGRES_DIRECT_URL:-}" != postgresql://worker:worker@127.0.0.1:1/worker_generate_only ]]; then exit 2; fi\nif [[ "${TEST_FAIL_NPM:-}" == true ]]; then exit 1; fi\n', { mode: 0o755 });
-  await writeFile(join(bin, "node"), '#!/bin/bash\nprintf "node\\n" >> "$TEST_LOG"\n', { mode: 0o755 });
+  await writeFile(join(bin, "node"), '#!/bin/bash\nif [[ "$*" == *scripts/iniciar-workers.ts* ]]; then printf "supervisor\\n" >> "$TEST_LOG"; else printf "node\\n" >> "$TEST_LOG"; fi\n', { mode: 0o755 });
   await mkdir(join(projeto, ".next"));
   await writeFile(join(projeto, ".next", "cache"), "regeneravel");
   const run = (failNpm = false) => spawnSync("bash", ["-c", `set -euo pipefail\n${funcao}\ncd -- "$project_dir"\npreparar_e_iniciar`], {
@@ -47,7 +47,7 @@ test("iniciador atualiza Git, limpa cache, recria dependências e preserva confi
   assert.equal(r.status, 0, r.stderr + r.stdout);
   await assert.rejects(access(join(f.projeto, ".next")));
   assert.equal(await readFile(f.workerEnv, "utf8"), "AUTOMATIZACAO_BROWSER_ARTIFACTS_DIR=/pasta/configurada\n");
-  assert.equal(await readFile(f.log, "utf8"), "npm cache verify\nnpm ci --include=dev\nnode\nnode\nnode\n");
+  assert.equal(await readFile(f.log, "utf8"), "npm cache verify\nnpm ci --include=dev\nnode\nnode\nsupervisor\n");
 });
 
 test("alteração local impede pull e instalação sem apagar arquivos", async (t) => {

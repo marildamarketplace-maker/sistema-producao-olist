@@ -135,7 +135,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     reset();
     handlers["olistSyncExecucao.findFirst"] = ({ where, select }) => {
       assert.equal(objeto(where).configuracaoId, GRUPO);
-      assert.deepEqual(objeto(objeto(where).status).in, ["PENDENTE", "AUDITANDO", "AGUARDANDO_RETRY"]);
+      assert.deepEqual(objeto(objeto(where).status).in, ["PENDENTE", "AUDITANDO", "APLICANDO", "AGUARDANDO_RETRY"]);
       assert.equal(objeto(select).etapas && objeto(objeto(select).etapas).take, 201);
       return { ...execucao, status: "AUDITANDO", iniciadaEm: new Date(Date.now() - 3_600_000),
         contadoresJson: { listados: 1_000, analisados: 400 }, etapas: [{ fase: "DETALHAR", status: "PENDENTE" }] };
@@ -155,6 +155,33 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.deepEqual(chamadasDe("olistSyncConfiguracao.findUnique")[0].args.select,
       { id: true, ativo: true, aplicativoPai: { select: { jobs: true } } }, "A previsão não lê participantes, políticas ou prontidão");
     assert.doesNotMatch(JSON.stringify(body), /Criptograf|metadados|token|cpfCnpj/);
+  });
+  await t.test("previsão de aplicação agrega fila antiga e ritmo de confirmações sem expor dados",async()=>{
+    reset();
+    handlers["olistSyncExecucao.findFirst"]=()=>({...execucao,modo:"APLICAR",status:"APLICANDO",iniciadaEm:new Date(Date.now()-86_400_000),contadoresJson:{criados:7_096},etapas:[{fase:"APLICAR",status:"PENDENTE"}]});
+    handlers["configuracaoJob.findUnique"]=({where})=>{assert.equal(objeto(where).chave,"aplicar-sincronizacao-olist");return {pausado:false};};
+    handlers["$queryRaw"]=({query})=>{
+      const q=objeto(query);assert.equal((q.values as unknown[])[0],GRUPO);assert.equal((q.values as unknown[])[1],EXECUCAO);
+      return String(q.text).includes("WITH alvos")?[{iniciada:new Date(Date.now()-3_600_000),restantes:600,falhas:64}]:[{total:300}];
+    };
+    const response=await GET(request("previsao?configuracaoId=externo"),contexto("previsao"));
+    assert.equal(response.status,200);assert.equal(response.headers.get("cache-control"),"private, no-store");
+    const body=await response.json();assert.equal(body.previsao,null);
+    assert.equal(body.previsaoAplicacao.porMinuto,10);assert.equal(body.previsaoAplicacao.restantes,600);assert.equal(body.previsaoAplicacao.falhas,64);
+    assert.equal(body.previsaoAplicacao.tempoRestanteSegundos,3_600);assert.equal(chamadasDe("$queryRaw").length,2);
+    assert.doesNotMatch(JSON.stringify(body),/payload|cursor|token|cpfCnpj|Criptograf/);
+    reset();usuarioApp=FILHO;
+    assert.equal((await GET(request("previsao"),contexto("previsao"))).status,403);assert.equal(chamadasDe("$queryRaw").length,0);
+  });
+  await t.test("aplicação pausada e preparação incompleta não consultam confirmações nem mostram data",async()=>{
+    for(const [pausado,fase,estado] of [[true,"APLICAR","PAUSADA"],[false,"COMPARAR","PREPARANDO"]] as const) {
+      reset();handlers["olistSyncExecucao.findFirst"]=()=>({...execucao,modo:"AUDITAR_E_APLICAR",status:"APLICANDO",iniciadaEm:new Date(Date.now()-3_600_000),etapas:[{fase,status:"PENDENTE"}]});
+      handlers["configuracaoJob.findUnique"]=()=>({pausado});
+      handlers["$queryRaw"]=()=>[{iniciada:new Date(Date.now()-3_600_000),restantes:10,falhas:0}];
+      const body=await (await GET(request("previsao"),contexto("previsao"))).json();
+      assert.equal(body.previsaoAplicacao.estado,estado);assert.equal(body.previsaoAplicacao.terminoPrevisto,null);
+      assert.equal(chamadasDe("$queryRaw").length,1);
+    }
   });
   await t.test("sem execução ativa, listagem incompleta e job pausado não contam o catálogo", async () => {
     reset();

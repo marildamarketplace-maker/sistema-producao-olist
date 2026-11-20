@@ -5,13 +5,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { permissionKeys, permissoesSincronizacaoParaAplicativo } from "../src/lib/permissions";
 import { paginasPermitidas } from "../src/lib/navigation";
 import { execucaoSyncAtiva, intervaloPollingSync, textoValorSync, type PendenciaSyncDetalheDto, type RegistroSyncDto } from "../src/lib/olist-sync/api-contract";
-import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, ResumoFilaSync } from "../src/components/olist-sync-ui";
-import { calcularPrevisaoValidacaoSync } from "../src/lib/olist-sync/previsao";
+import { ComparacaoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, PrevisaoAplicacaoSync, ResumoFilaSync } from "../src/components/olist-sync-ui";
+import { calcularPrevisaoValidacaoSync, calcularPrevisaoAplicacaoSync } from "../src/lib/olist-sync/previsao";
 import { DecisaoSyncDialog, ExecutarSyncDialog } from "../src/components/olist-sync-decisoes";
 import { ConfiguracaoIncrementalSync } from "../src/components/olist-sync-incremental";
 import type { ConfiguracaoSyncDto } from "../src/lib/olist-sync/api-contract";
 
 const todas = { podeVisualizarSincronizacaoOlist: true, podeExecutarSincronizacaoOlist: true, podeResolverSincronizacaoOlist: true, podeConfigurarSincronizacaoOlist: true };
+
+test("previsão da aplicação mostra término, tempo restante, fila e falhas fora da estimativa",()=>{
+  const previsao=calcularPrevisaoAplicacaoSync({execucaoId:"e",agora:new Date("2026-11-20T21:00:00Z"),iniciadaEm:new Date("2026-11-19T12:00:00Z"),
+    restantes:8_400,confirmadosNaJanela:210,falhas:64,pausada:false,preparacaoPendente:false});
+  const html=renderToStaticMarkup(React.createElement(PrevisaoAplicacaoSync,{previsao,falhou:false}));
+  assert.match(html,/Fim previsto da aplicação/);assert.match(html,/21\/11\/2026/);assert.match(html,/14:00:00/);
+  assert.match(html,/Tempo restante estimado/);assert.match(html,/20h 0min/);assert.match(html,/8.400 operações restantes/);
+  assert.match(html,/7 confirmações\/min/);assert.match(html,/64 falhas ou resultados inconclusivos fora da previsão/);
+  assert.match(html,/Calculada em/);assert.match(html,/Novas operações, pausas e falhas/);
+  const erro=renderToStaticMarkup(React.createElement(PrevisaoAplicacaoSync,{previsao:null,falhou:true}));
+  assert.match(erro,/Tente Atualizar novamente/);assert.doesNotMatch(erro,/<time/);
+});
 
 test("previsão informa data local, amostra e limite da estimativa sem depender de cor", () => {
   const previsao = calcularPrevisaoValidacaoSync({ execucaoId: "execucao", agora: new Date("2026-11-17T21:00:00Z"), iniciadaEm: new Date("2026-11-17T12:00:00Z"),

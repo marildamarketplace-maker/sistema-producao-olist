@@ -13,8 +13,8 @@ import { FalhaSync } from "@/lib/olist-sync/contrato";
 import { configuracaoSchema, decisaoSchema, execucaoSchema, filtrosSchema, objetoJson, observacaoProtegida, origemSchema, proximoHorarioSync } from "@/lib/olist-sync/validacao";
 
 import { declararOrigemSync, resolverPendenciaSync } from "@/services/olist-sync-review-service";
-import { contarValidacoesRecentesSync } from "@/repositories/olist-sync-previsao-repository";
-import { calcularPrevisaoValidacaoSync, inicioJanelaPrevisaoSync } from "@/lib/olist-sync/previsao";
+import { contarValidacoesRecentesSync, consultaFilaAplicacaoSync, consultaConfirmacoesRecentesSync } from "@/repositories/olist-sync-previsao-repository";
+import { calcularPrevisaoValidacaoSync, calcularPrevisaoAplicacaoSync, inicioJanelaPrevisaoSync } from "@/lib/olist-sync/previsao";
 import { adotarCoberturaLegada } from "@/repositories/olist-sync-cobertura-repository";
 
 export const dynamic="force-dynamic";
@@ -60,12 +60,24 @@ export async function GET(request:Request,contexto:Contexto) {
       const {config}=await escopoComConfiguracao(request,"visualizar",aplicativoPaiId=>prisma.olistSyncConfiguracao.findUnique({
         where:{aplicativoPaiId},select:{id:true,ativo:true,aplicativoPai:{select:{jobs:true}}}}));
       const agora=new Date();
-      const e=await prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:["PENDENTE","AUDITANDO","AGUARDANDO_RETRY"]},modo:{in:["AUDITAR","AUDITAR_E_APLICAR"]}},
-        select:{id:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:201}}});
+      const e=await prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:ESTADOS_EXECUCAO_SYNC_ATIVOS}},
+        select:{id:true,modo:true,status:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:201}}});
       if(!e)return json({previsao:null});
-      const permitidoNoPai=config.ativo && aplicativoTemJob(config.aplicativoPai.jobs,JOBS_SYNC.auditar.flag);
-      const job=permitidoNoPai?await prisma.configuracaoJob.findUnique({where:{chave:JOBS_SYNC.auditar.chave},select:{pausado:true}}):null;
+      const aplicando=e.modo==="APLICAR" || e.status==="APLICANDO";
+      const controle=aplicando?JOBS_SYNC.aplicar:JOBS_SYNC.auditar;
+      const permitidoNoPai=config.ativo && aplicativoTemJob(config.aplicativoPai.jobs,controle.flag);
+      const job=permitidoNoPai?await prisma.configuracaoJob.findUnique({where:{chave:controle.chave},select:{pausado:true}}):null;
       const pausada=!permitidoNoPai || !job || job.pausado;
+      if(aplicando) {
+        const [fila]=await prisma.$queryRaw<Array<{iniciada:Date|null;restantes:number;falhas:number}>>(consultaFilaAplicacaoSync(config.id,e.id));
+        const entrada={execucaoId:e.id,agora,iniciadaEm:fila?.iniciada??e.iniciadaEm,restantes:fila?.restantes??0,falhas:fila?.falhas??0,
+          preparacaoPendente:!e.etapas.some(s=>s.fase==="APLICAR") || e.etapas.length>200 || e.etapas.some(s=>["LISTAR","DETALHAR","COMPARAR"].includes(s.fase)&&s.status!=="CONCLUIDA"),
+          pausada:pausada || e.etapas.some(s=>s.fase==="APLICAR"&&["PAUSADA","FALHOU","CANCELADA"].includes(s.status))};
+        const previa=calcularPrevisaoAplicacaoSync({...entrada,confirmadosNaJanela:0});
+        if(previa.estado!=="SEM_RITMO")return json({previsao:null,previsaoAplicacao:previa});
+        const [amostra]=await prisma.$queryRaw<Array<{total:number}>>(consultaConfirmacoesRecentesSync(config.id,e.id,inicioJanelaPrevisaoSync(agora,entrada.iniciadaEm),agora));
+        return json({previsao:null,previsaoAplicacao:calcularPrevisaoAplicacaoSync({...entrada,confirmadosNaJanela:amostra?.total??0})});
+      }
       const listagemPendente=e.etapas.length===0 || e.etapas.length>200 || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
       const previa=calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
         validadosNaJanela:0,listagemPendente,pausada});

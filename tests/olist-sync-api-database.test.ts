@@ -3,7 +3,7 @@ import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { aplicarMigrationsOlistSync } from "./fixtures/olist-sync-migrations";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { consultaValidacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
+import { consultaValidacoesRecentesSync, consultaFilaAplicacaoSync, consultaConfirmacoesRecentesSync } from "../src/repositories/olist-sync-previsao-repository";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
 import { criarCriptografiaSync } from "../src/lib/olist-sync/cripto";
@@ -63,6 +63,55 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
       await db.olistSyncOperacao.deleteMany({where:{registroId:registro.id}});
       await db.olistSyncParticipante.deleteMany({where:{configuracaoId:config.id,aplicativoId:matriz}});
       await db.olistSyncRegistro.delete({where:{id:registro.id}});
+    }
+  });
+  await t.test("previsão da aplicação conta fila antiga, reconciliação e confirmações reais por escopo",async()=>{
+    const agora=new Date(),paiAnterior=await db.aplicativo.findUniqueOrThrow({where:{id:pai},select:{jobs:true}});
+    await db.aplicativo.update({where:{id:pai},data:{jobs:"APLICAR_SINCRONIZACAO_OLIST"},select:{id:true}});
+    const antiga=await db.olistSyncExecucao.create({data:{configuracaoId:config.id,chaveIdempotencia:randomUUID(),modo:"AUDITAR",status:"CONCLUIDA",versaoConfiguracao:1}});
+    const e=await db.olistSyncExecucao.create({data:{configuracaoId:config.id,chaveIdempotencia:randomUUID(),modo:"APLICAR",status:"APLICANDO",versaoConfiguracao:1,iniciadaEm:new Date(agora.getTime()-86_400_000)}});
+    const contato=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"CONTATO",chave:"previsao-fila"}});
+    const produto=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"PRODUTO",chave:"previsao-produto"}});
+    try {
+      const etapa=await db.olistSyncEtapa.create({data:{execucaoId:e.id,aplicativoId:b,entidade:"CONTATO",fase:"APLICAR",createdAt:new Date(agora.getTime()-3_600_000)}});
+      const estados=["AUTORIZADA","EM_APLICACAO","VERIFICANDO","RESULTADO_INCONCLUSIVO","RESULTADO_INCONCLUSIVO","FALHA_PERMANENTE","CONFIRMADA","PROPOSTA","RESULTADO_INCONCLUSIVO"];
+      for(const [indice,status] of estados.entries()) {
+        const operacao=await db.olistSyncOperacao.create({data:{configuracaoId:config.id,registroId:contato.id,sourceAppId:a,destinoAppId:b,acao:"CRIAR",revisao:indice+1,status,execucaoId:[0,3,7].includes(indice)?antiga.id:e.id}});
+        if(indice===8)await db.olistSyncEtapa.update({where:{id:etapa.id},data:{cursorJson:{operacaoId:operacao.id,fase:"VERIFICAR"}}});
+      }
+      await db.olistSyncOperacao.createMany({data:[
+        {configuracaoId:config.id,registroId:produto.id,sourceAppId:a,destinoAppId:b,acao:"CRIAR",revisao:1,status:"AUTORIZADA"},
+        {configuracaoId:config.id,registroId:contato.id,sourceAppId:b,destinoAppId:a,acao:"CRIAR",revisao:10,status:"AUTORIZADA"},
+      ]});
+      // Timestamp explícito segue o tipo timestamptz da migration, em ambos os fusos.
+      const eventos=[
+        ...Array.from({length:6},()=>({execucao_id:e.id,tipo:"ESCRITA_CONFIRMADA",created_at:new Date(agora.getTime()-300_000)})),
+        {execucao_id:antiga.id,tipo:"ESCRITA_CONFIRMADA",created_at:agora},
+        {execucao_id:e.id,tipo:"OUTRO_EVENTO",created_at:agora},
+        {execucao_id:e.id,tipo:"ESCRITA_CONFIRMADA",created_at:new Date(agora.getTime()-2_400_000)},
+        {execucao_id:e.id,tipo:"ESCRITA_CONFIRMADA",created_at:new Date(agora.getTime()+3_600_000)},
+      ];
+      await sql.query(`INSERT INTO olist_sync_evento(id,configuracao_id,execucao_id,tipo,created_at)
+        SELECT gen_random_uuid(),$1::uuid,v.execucao_id,v.tipo,v.created_at
+        FROM jsonb_to_recordset($2::jsonb) v(execucao_id uuid,tipo text,created_at timestamptz)`,[config.id,JSON.stringify(eventos)]);
+      const [fila]=await db.$queryRaw<Array<{restantes:number;falhas:number;iniciada:Date}>>(consultaFilaAplicacaoSync(config.id,e.id));
+      assert.equal(fila.restantes,5);assert.equal(fila.falhas,2);assert.equal(fila.iniciada.getTime(),agora.getTime()-3_600_000);
+      const [amostra]=await db.$queryRaw<Array<{total:number}>>(consultaConfirmacoesRecentesSync(config.id,e.id,new Date(agora.getTime()-1_800_000),agora));
+      assert.equal(amostra.total,6);
+      const body=await (await api.GET(req("GET",["previsao"]),contexto(["previsao"]))).json();
+      assert.equal(body.previsao,null);assert.equal(body.previsaoAplicacao.estado,"ESTIMADA");
+      assert.equal(body.previsaoAplicacao.restantes,5);assert.equal(body.previsaoAplicacao.confirmadosNaJanela,6);
+      assert.equal(body.previsaoAplicacao.tempoRestanteSegundos,1_500);assert.equal(body.previsaoAplicacao.falhas,2);
+      assert.doesNotMatch(JSON.stringify(body),/payload|cursor|metadados|precondicoes|cpfCnpj/);
+      await db.olistSyncEtapa.update({where:{id:etapa.id},data:{status:"PAUSADA"}});
+      const pausada=await (await api.GET(req("GET",["previsao"]),contexto(["previsao"]))).json();
+      assert.equal(pausada.previsaoAplicacao.estado,"PAUSADA");assert.equal(pausada.previsaoAplicacao.terminoPrevisto,null);
+    } finally {
+      await db.olistSyncOperacao.deleteMany({where:{registroId:{in:[contato.id,produto.id]}}});
+      await db.olistSyncEvento.deleteMany({where:{execucaoId:{in:[e.id,antiga.id]}}});
+      await db.olistSyncExecucao.deleteMany({where:{id:{in:[e.id,antiga.id]}}});
+      await db.olistSyncRegistro.deleteMany({where:{id:{in:[contato.id,produto.id]}}});
+      await db.aplicativo.update({where:{id:pai},data:{jobs:paiAnterior.jobs},select:{id:true}});
     }
   });
   await t.test("previsão agrega só validações completas recentes e usa índice em 50 mil observações", async () => {

@@ -157,10 +157,13 @@ export function criarRepositorioAnotarSku(db: PrismaClient) {
     },
     async excluir(escopo: EscopoSku, id: string) {
       return db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'ia:'+escopo.aplicativoId},0))::text`;
         await travarAplicativoSku(tx, escopo.aplicativoId);
         if (await tx.buscaSkuJob.findFirst({ where: { aplicativoId: escopo.aplicativoId, ...aberto } })) {
           throw new ErroAnotarSku("Conclua ou cancele a busca em aberto antes de excluir um resultado.");
         }
+        const relatorios = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM ia_trabalho WHERE aplicativo_id=${escopo.aplicativoId}::uuid AND origem_id=${id}::uuid AND tipo='anotar_sku.relatorio.v1' AND status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY') LIMIT 1`;
+        if (relatorios.length) throw new ErroAnotarSku("Conclua ou cancele o relatório IA antes de excluir esta busca.");
         const resultado = await tx.buscaSku.deleteMany({ where: { id, aplicativoId: escopo.aplicativoId } });
         if (!resultado.count) throw new ErroAnotarSku("Busca não encontrada.", 404);
       });

@@ -8,6 +8,6 @@ export default function AnotarSkuPage() {
   const escopo = `${usuario?.aplicativo_id}:${usuario?.id}`;
   return <AccessGuard permissions={["podeEscreverAnotarSku", "podeVisualizarAnotarSku"]}>
     <AnotarSkuClient key={escopo} escopo={escopo} token={session?.access_token ?? ""}
-      podeEscrever={Boolean(usuario?.podeEscreverAnotarSku)} podeVisualizar={Boolean(usuario?.podeVisualizarAnotarSku)} />
+      podeConfigurar={Boolean(usuario?.podeEditarConfiguracao)} podeEscrever={Boolean(usuario?.podeEscreverAnotarSku)} podeVisualizar={Boolean(usuario?.podeVisualizarAnotarSku)} />
   </AccessGuard>;
 }

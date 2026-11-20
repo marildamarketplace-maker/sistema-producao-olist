@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AlertCircle, CheckCircle2, Clock3, Download, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { AnotarSkuResultado } from "@/components/anotar-sku-resultado";
 import { AnotarSkuPeriodo } from "@/components/anotar-sku-periodo";
+import { ConfiguracaoSkuIa } from "@/components/trabalhos-ia/configuracao-sku";
+import { RelatorioSkuIa } from "@/components/trabalhos-ia/relatorio-sku";
+import { useTrabalhosIa, trabalhoIaAtivo } from "@/hooks/use-trabalhos-ia";
 import { PageHeader } from "@/components/page-header";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import { criarBuscaSkuSchema, ESTADOS_ABERTOS_SKU, SITUACOES_SKU, type JobSkuResumo, type EntradaBuscaSku } from "@/lib/anotar-sku/contrato";
@@ -63,8 +66,9 @@ function CartaoJob({ job, ocupado, pausado, gerenciar, visualizar, podeVisualiza
   </article>;
 }
 
-export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }: { token: string; podeEscrever: boolean; podeVisualizar: boolean; escopo: string }) {
+export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo, podeConfigurar = false }: { podeConfigurar?: boolean; token: string; podeEscrever: boolean; podeVisualizar: boolean; escopo: string }) {
   const [selecionadas, setSelecionadas] = useState(["0"]), [jobs, setJobs] = useState<JobSkuResumo[]>([]), [buscas, setBuscas] = useState<Busca[]>([]);
+  const ia = useTrabalhosIa(token, podeVisualizar ? buscas.map(b => b.id) : []);
   const [periodo, setPeriodo] = useState(() => periodoPadraoSku());
   const [emAberto, setEmAberto] = useState(false), [habilitado, setHabilitado] = useState(false), [carregando, setCarregando] = useState(true), [atualizando, setAtualizando] = useState(false);
   const [motivoPausa, setMotivoPausa] = useState<string | null>(null);
@@ -159,7 +163,7 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }:
   }, true); }
   const atual = jobs.find(j => ESTADOS_ABERTOS_SKU.includes(j.status)), anteriores = jobs.filter(j => !ESTADOS_ABERTOS_SKU.includes(j.status));
   return <div className="space-y-6">
-    <PageHeader title="Anotar SKU" description="Separe os SKUs de pedidos novos da Olist. A busca continua mesmo quando você sai desta tela." />
+    <PageHeader title="Anotar SKU" description="Separe os SKUs de pedidos novos da Olist. A busca continua mesmo quando você sai desta tela." actions={podeConfigurar && podeVisualizar ? <ConfiguracaoSkuIa token={token} /> : undefined} />
     {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{erro}</p>}
     {mensagem && <p ref={mensagemRef} tabIndex={-1} role="status" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:text-emerald-200">{mensagem}</p>}
     {erroAtualizacao && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><p className="min-w-0 flex-1">{erroAtualizacao} A falha de atualização da tela não cancela uma busca já registrada.</p><button type="button" className={botao} onClick={() => void atualizar(true)} disabled={atualizando}>Tentar atualizar</button></div>}
@@ -187,9 +191,11 @@ export function AnotarSkuClient({ token, podeEscrever, podeVisualizar, escopo }:
     </div>
     {podeVisualizar && <section className="space-y-4" aria-labelledby="sku-historico"><div><h2 id="sku-historico" className="text-lg font-semibold text-slate-900">Resultados salvos</h2><p className="mt-1 text-sm text-slate-600">Abra os SKUs ou baixe o arquivo. Somente buscas concluídas aparecem aqui.</p>{emAberto && podeEscrever && <p className="mt-2 text-xs text-slate-500">A exclusão fica disponível após concluir ou cancelar a busca em aberto.</p>}</div>
       {!carregando && buscas.length === 0 && <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">{erroAtualizacao && !historicoCarregado.current ? "Não foi possível carregar o histórico. Tente atualizar." : "Nenhum resultado salvo ainda."}</p>}
+      {ia.erro && <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><p>Acompanhamento IA: {ia.erro}</p><button type="button" className={`${botao} mt-2`} onClick={ia.atualizar}>Atualizar relatórios IA</button></div>}
       {buscas.map(busca => <article key={busca.id} className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h3 className="font-medium text-slate-900">Busca de {data(busca.createdAt)}</h3><p className="mt-1 break-words text-sm text-slate-600">{situacoes(busca.situacoes)}</p><p className="mt-1 text-sm text-slate-600">{descreverPeriodoSku(busca.periodoInicio, busca.periodoFim)}</p></div><p className="text-sm text-slate-700"><strong>{busca.quantidadePedidos}</strong> pedidos nos SKUs · <strong>{busca.quantidadeSkus}</strong> SKUs</p></div>
         {busca.pedidosForaPeriodo > 0 && <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><strong>{busca.pedidosForaPeriodo} pedido(s) fora do período.</strong> Não entram nos SKUs nem nos arquivos. Abra o resultado para conferir os IDs.</p>}
-        <div className="mt-4 flex flex-wrap gap-2"><button type="button" className={primario} disabled={Boolean(ocupado)} onClick={() => visualizar(busca.id)}>{ocupado === busca.id ? "Abrindo…" : busca.quantidadeSkus === 0 && busca.pedidosForaPeriodo > 0 ? "Ver alerta" : "Ver SKUs"}</button>{["csv", "xlsx", "pdf"].map(formato => <button key={formato} type="button" className={botao} disabled={Boolean(ocupado) || busca.quantidadeSkus === 0} onClick={() => baixar(busca.id, formato)}><Download className="h-4 w-4" aria-hidden="true" />{ocupado === `${busca.id}:${formato}` ? "Baixando…" : formato === "xlsx" ? "Excel" : formato.toUpperCase()}</button>)}{podeEscrever && <button type="button" className={`${botao} text-red-700 sm:ml-auto`} disabled={Boolean(ocupado) || emAberto} onClick={() => { setErroDialogo(null); setConfirmacao({ tipo: "excluir", id: busca.id }); }}>Excluir</button>}</div>
+        <div className="mt-4 flex flex-wrap gap-2"><button type="button" className={primario} disabled={Boolean(ocupado)} onClick={() => visualizar(busca.id)}>{ocupado === busca.id ? "Abrindo…" : busca.quantidadeSkus === 0 && busca.pedidosForaPeriodo > 0 ? "Ver alerta" : "Ver SKUs"}</button>{["csv", "xlsx", "pdf"].map(formato => <button key={formato} type="button" className={botao} disabled={Boolean(ocupado) || busca.quantidadeSkus === 0} onClick={() => baixar(busca.id, formato)}><Download className="h-4 w-4" aria-hidden="true" />{ocupado === `${busca.id}:${formato}` ? "Baixando…" : formato === "xlsx" ? "Excel" : formato.toUpperCase()}</button>)}{podeEscrever && <button type="button" className={`${botao} text-red-700 sm:ml-auto`} disabled={Boolean(ocupado) || emAberto || ia.trabalhos.some(t => t.origemId === busca.id && trabalhoIaAtivo(t))} onClick={() => { setErroDialogo(null); setConfirmacao({ tipo: "excluir", id: busca.id }); }}>Excluir</button>}</div>
+        <RelatorioSkuIa busca={busca.id} token={token} escopo={escopo} podeEscrever={podeEscrever} temItens={busca.quantidadeSkus > 0} trabalhos={ia.trabalhos.filter(t => t.origemId === busca.id)} atualizar={ia.atualizar} />
       </article>)}
     </section>}
     {detalhe && <Dialogo titulo="Resultado da busca" origem={origemDetalhe.current} fechar={() => setDetalhe(null)}>

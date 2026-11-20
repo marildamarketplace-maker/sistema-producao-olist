@@ -137,8 +137,8 @@ node --env-file="$worker_env" --input-type=module -e '
   await access(pasta, constants.R_OK | constants.W_OK | constants.X_OK);
   console.info("Pasta de evidências acessível: OK.");
 '
-printf '\n[5/5] Iniciando o worker. Mantenha este terminal aberto. Para parar, pressione Ctrl+C.\n'
-node --env-file="$worker_env" --import tsx scripts/automatizacao-worker.ts
+printf '\n[5/5] Iniciando os workers configurados. Mantenha este terminal aberto. Ctrl+C encerra os dois processos.\n'
+node --env-file="$worker_env" --import tsx scripts/iniciar-workers.ts
 
 }
 preparar_e_iniciar

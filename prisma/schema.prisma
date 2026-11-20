@@ -20,6 +20,9 @@ model Aplicativo {
   descricao                 String?
   aplicativoPai             Aplicativo?                   @relation("AplicativoFiliais", fields: [aplicativoPaiId], references: [id], onDelete: Restrict)
   filiais                   Aplicativo[]                  @relation("AplicativoFiliais")
+  configuracoesIa IaConfiguracao[]
+  workersIa IaWorker[]
+  trabalhosIa IaTrabalho[]
   habilidadesAutomatizacao  HabilidadeAutomatizacao[]
   baixasEstoqueOlist        BaixaEstoqueOlist[]
   buscasSku                 BuscaSku[]
@@ -563,6 +566,9 @@ model BuscaSku {
   itens             ItemBuscaSku[]
   job               BuscaSkuJob?
 
+  relatoriosIa IaRelatorioBusca[]
+
+  @@unique([id, aplicativoId], map: "buscas_sku_id_aplicativo_ia")
   @@index([aplicativoId, createdAt], map: "idx_buscas_sku_aplicativo_created_at")
   @@map("buscas_sku")
 }
@@ -639,6 +645,7 @@ model ItemBuscaSku {
   busca         BuscaSku   @relation(fields: [buscaId], references: [id], onDelete: Cascade)
 
   @@unique([aplicativoId, pedidoOlistId, sku], map: "uq_itens_busca_sku_aplicativo_pedido_sku")
+  @@index([aplicativoId, buscaId, sku, pedidoOlistId], map: "itens_busca_sku_ia_pagina")
   @@index([buscaId], map: "idx_itens_busca_sku_busca_id")
   @@index([aplicativoId, pedidoOlistId], map: "idx_itens_busca_sku_aplicativo_pedido")
   @@map("itens_busca_sku")
@@ -1704,4 +1711,104 @@ model OlistSyncEvento {
   @@index([execucaoId])
   @@index([tipo, createdAt])
   @@map("olist_sync_evento")
+}
+
+// Restrições de etapas/leases, RLS e trigger de exclusão: migration trabalhos_ia.
+model IaConfiguracao {
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  tipo String
+  prompt String
+  revisao Int
+  atualizadoPor String @map("atualizado_por") @db.Uuid
+  atualizadoEm DateTime @default(now()) @map("atualizado_em") @db.Timestamptz(6)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@id([aplicativoId, tipo])
+  @@map("ia_configuracao")
+}
+model IaWorker {
+  id String @id
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  grupo String
+  protocolo Int
+  tipos String[]
+  contatoEm DateTime @default(now()) @map("contato_em") @db.Timestamptz(6)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@index([aplicativoId, contatoEm], map: "ia_worker_disponibilidade")
+  @@map("ia_worker")
+}
+model IaTrabalho {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  solicitadoPor String @map("solicitado_por") @db.Uuid
+  tipo String
+  origemId String @map("origem_id") @db.Uuid
+  chave String @db.Uuid
+  status String @default("PENDENTE")
+  fase String @default("PREPARAR")
+  promptGeracao String @map("prompt_geracao")
+  promptRevisao String @map("prompt_revisao")
+  promptPersonalizado String @map("prompt_personalizado")
+  revisaoConfig Int @map("revisao_config")
+  cursor String?
+  total Int @default(0)
+  processados Int @default(0)
+  totalLotes Int @default(0) @map("total_lotes")
+  loteAtual Int @default(0) @map("lote_atual")
+  tentativas Int @default(0)
+  erro String?
+  reserva String? @db.Uuid
+  reservaAte DateTime? @map("reserva_ate") @db.Timestamptz(6)
+  worker String?
+  grupo String?
+  disponivelEm DateTime @default(now()) @map("disponivel_em") @db.Timestamptz(6)
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm DateTime @default(now()) @map("atualizado_em") @db.Timestamptz(6)
+  finalizadoEm DateTime? @map("finalizado_em") @db.Timestamptz(6)
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lotes IaLote[]
+  tentativasExecucao IaTentativa[]
+  relatorioBusca IaRelatorioBusca?
+  @@unique([aplicativoId, solicitadoPor, chave])
+  @@unique([id, aplicativoId])
+  @@unique([aplicativoId, tipo, origemId], map: "ia_trabalho_origem_ativa", where: raw("(status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY'))"))
+  @@index([aplicativoId, disponivelEm, criadoEm, id], map: "ia_trabalho_fila", where: raw("(status IN ('PENDENTE','PROCESSANDO','AGUARDANDO_RETRY'))"))
+  @@index([grupo, reservaAte], map: "ia_trabalho_reservas", where: raw("(status = 'PROCESSANDO')"))
+  @@index([aplicativoId, tipo, origemId, criadoEm(sort: Desc), id], map: "ia_trabalho_historico")
+  @@map("ia_trabalho")
+}
+model IaLote {
+  trabalhoId String @map("trabalho_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  numero Int
+  entrada Json
+  candidato Json?
+  revisado Json?
+  resultado Json?
+  trabalho IaTrabalho @relation(fields: [trabalhoId, aplicativoId], references: [id, aplicativoId], onDelete: Cascade, onUpdate: NoAction)
+  @@id([trabalhoId, numero])
+  @@map("ia_lote")
+}
+model IaTentativa {
+  id String @id @db.Uuid
+  trabalhoId String @map("trabalho_id") @db.Uuid
+  worker String
+  fase String
+  lote Int
+  status String @default("PROCESSANDO")
+  iniciadaEm DateTime @default(now()) @map("iniciada_em") @db.Timestamptz(6)
+  finalizadaEm DateTime? @map("finalizada_em") @db.Timestamptz(6)
+  codigo String?
+  trabalho IaTrabalho @relation(fields: [trabalhoId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([trabalhoId, iniciadaEm], map: "ia_tentativa_trabalho")
+  @@map("ia_tentativa")
+}
+model IaRelatorioBusca {
+  trabalhoId String @id @map("trabalho_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  buscaId String @map("busca_id") @db.Uuid
+  trabalho IaTrabalho @relation(fields: [trabalhoId, aplicativoId], references: [id, aplicativoId], onDelete: Cascade, onUpdate: NoAction)
+  busca BuscaSku @relation(fields: [buscaId, aplicativoId], references: [id, aplicativoId], onDelete: Cascade, onUpdate: NoAction)
+  @@unique([trabalhoId, aplicativoId])
+  @@index([aplicativoId, buscaId], map: "ia_relatorio_busca_origem")
+  @@map("ia_relatorio_busca")
 }

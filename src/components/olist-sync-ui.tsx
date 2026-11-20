@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import {
   ORIGENS_SYNC_LABEL, textoValorSync,
-  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto, type PrevisaoValidacaoSyncDto, type ResumoSyncDto,
+  type EmpresaSyncDto, type PendenciaSyncDetalheDto, type RegistroSyncDto, type PrevisaoValidacaoSyncDto, type PrevisaoAplicacaoSyncDto, type ResumoSyncDto,
 } from "@/lib/olist-sync/api-contract";
 
 export const syncButton = "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50";
@@ -60,6 +60,32 @@ export function PrevisaoValidacaoSync({ previsao, falhou }: { previsao: Previsao
       Calculada em {dataSync(previsao.calculadoEm)}. Atualizada somente ao carregar a página ou clicar em Atualizar.
     </p>}
     <p className="text-xs text-slate-500">Estimativa da leitura dos cadastros; comparação e aplicação podem levar tempo adicional.</p>
+  </div>;
+}
+
+export function PrevisaoAplicacaoSync({ previsao, falhou }: { previsao: PrevisaoAplicacaoSyncDto | null; falhou: boolean }) {
+  const mensagens = {
+    SEM_RITMO: "Sem confirmações nos últimos 30 minutos; previsão indisponível.",
+    AMOSTRA_INSUFICIENTE: "Aguardando pelo menos 5 confirmações e 1 minuto de aplicação para estimar o término.",
+    PREPARANDO: "Aguardando a preparação da fila para estimar o término da aplicação.",
+    FILA_CONCLUIDA: "Fila atual processada; aguardando o encerramento da execução.",
+    PAUSADA: "Aplicação pausada ou bloqueada; previsão indisponível.",
+  };
+  const segundos = previsao?.tempoRestanteSegundos;
+  const minutos = segundos == null ? null : Math.ceil(segundos / 60);
+  const tempo = minutos === null ? null : minutos < 60 ? `${minutos}min` : `${Math.floor(minutos / 60)}h ${minutos % 60}min`;
+  return <div className="mt-3 min-w-0 space-y-1 break-words text-sm text-slate-600">
+    {previsao?.terminoPrevisto ? <>
+      <p>Fim previsto da aplicação: <time className="font-medium text-slate-900" dateTime={previsao.terminoPrevisto}>{dataSync(previsao.terminoPrevisto)}</time></p>
+      <p>Tempo restante estimado: <span className="font-medium text-slate-900">{tempo}</span></p>
+    </> : <p>{previsao && previsao.estado !== "ESTIMADA" ? mensagens[previsao.estado]
+      : falhou ? "Não foi possível consultar a previsão. Tente Atualizar novamente." : "Previsão indisponível. Clique em Atualizar para consultar."}</p>}
+    {previsao && <>
+      <p className="text-xs text-slate-500">{previsao.restantes.toLocaleString("pt-BR")} operações restantes{previsao.porMinuto !== null && <> · {previsao.porMinuto.toLocaleString("pt-BR", {maximumFractionDigits:1})} confirmações/min · {previsao.confirmadosNaJanela.toLocaleString("pt-BR")} na janela de até 30 min</>}</p>
+      <p className="text-xs text-slate-500">Calculada em {dataSync(previsao.calculadoEm)}. Atualizada ao carregar a página ou clicar em Atualizar.</p>
+      {previsao.falhas > 0 && <p className="text-xs text-amber-800">{previsao.falhas.toLocaleString("pt-BR")} falhas ou resultados inconclusivos fora da previsão precisam de revisão.</p>}
+    </>}
+    <p className="text-xs text-slate-500">Estimativa da fila já autorizada, pelo ritmo recente. Novas operações, pausas e falhas podem alterar o término.</p>
   </div>;
 }
 

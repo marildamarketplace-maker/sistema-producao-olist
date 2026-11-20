@@ -79,6 +79,19 @@ export type PrevisaoValidacaoSyncDto = {
   terminoPrevisto: string | null;
   estado: "ESTIMADA" | "SEM_RITMO" | "AMOSTRA_INSUFICIENTE" | "LISTANDO" | "LEITURA_CONCLUIDA" | "PAUSADA";
 };
+export type PrevisaoAplicacaoSyncDto = {
+  execucaoId: string;
+  calculadoEm: string;
+  janelaInicio: string;
+  janelaFim: string;
+  confirmadosNaJanela: number;
+  restantes: number;
+  falhas: number;
+  porMinuto: number | null;
+  terminoPrevisto: string | null;
+  tempoRestanteSegundos: number | null;
+  estado: "ESTIMADA" | "SEM_RITMO" | "AMOSTRA_INSUFICIENTE" | "PREPARANDO" | "FILA_CONCLUIDA" | "PAUSADA";
+};
 export type ResumoSyncDto = {
   sincronizados: number;
   divergentes: number;

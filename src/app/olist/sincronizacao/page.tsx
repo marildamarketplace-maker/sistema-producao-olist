@@ -7,12 +7,12 @@ import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { ConfiguracaoSync } from "@/components/olist-sync-configuracao";
 import { DecisaoSyncDialog, ExecutarSyncDialog, OrigemSyncDialog } from "@/components/olist-sync-decisoes";
-import { dataSync, duracaoSync, DialogoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, ResumoFilaSync, StatusSync, syncButton, syncPanel, syncPrimary } from "@/components/olist-sync-ui";
+import { dataSync, duracaoSync, DialogoSync, OrigemSync, PaginacaoSync, PrevisaoValidacaoSync, PrevisaoAplicacaoSync, ResumoFilaSync, StatusSync, syncButton, syncPanel, syncPrimary } from "@/components/olist-sync-ui";
 import {
   ENTIDADES_SYNC_LABEL, ORIGENS_SYNC_LABEL, execucaoSyncAtiva, intervaloPollingSync,
   type ConfiguracaoSyncDto, type EntidadeSyncApi, type ExecucaoSyncDetalheDto, type ExecucaoSyncDto,
   type ModoExecucaoSync, type PaginaSyncDto, type PendenciaSyncDetalheDto, type PendenciaSyncDto,
-  type RegistroSyncDto, type ResumoSyncDto, type SalvarConfiguracaoSync, type PrevisaoValidacaoSyncDto,
+  type RegistroSyncDto, type ResumoSyncDto, type SalvarConfiguracaoSync, type PrevisaoValidacaoSyncDto, type PrevisaoAplicacaoSyncDto,
 } from "@/lib/olist-sync/api-contract";
 
 const ABAS = { resumo: "Visão geral", registros: "Registros", pendencias: "Pendências", execucoes: "Execuções", configuracao: "Configuração" } as const;
@@ -31,7 +31,7 @@ function SincronizacaoOlist() {
   const [registros, setRegistros] = useState<PaginaSyncDto<RegistroSyncDto>>({ ...VAZIO, itens: [] });
   const [pendencias, setPendencias] = useState<PaginaSyncDto<PendenciaSyncDto>>({ ...VAZIO, itens: [] });
   const [execucoes, setExecucoes] = useState<PaginaSyncDto<ExecucaoSyncDto>>({ ...VAZIO, itens: [] });
-  const [estimativa, setEstimativa] = useState<{ previsao: PrevisaoValidacaoSyncDto | null; falhou: boolean }>({ previsao: null, falhou: false });
+  const [estimativa, setEstimativa] = useState<{ previsao: PrevisaoValidacaoSyncDto | null; aplicacao: PrevisaoAplicacaoSyncDto | null; falhou: boolean }>({ previsao: null, aplicacao: null, falhou: false });
   const previsaoConsultada = useRef(false);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS);
   const [consulta, setConsulta] = useState<Filtros>(FILTROS);
@@ -76,8 +76,8 @@ function SincronizacaoOlist() {
       const consultarPrevisao = Boolean(token) && (atualizarPrevisao || !previsaoConsultada.current);
       const [configuracao, novoResumo, novaEstimativa] = await Promise.all([
         api<ConfiguracaoSyncDto>("configuracao", { signal }), api<ResumoSyncDto>("resumo", { signal }),
-        consultarPrevisao ? api<{ previsao: PrevisaoValidacaoSyncDto | null }>("previsao", { signal })
-          .then(dados => ({ previsao: dados.previsao, falhou: false }), () => ({ previsao: null, falhou: true })) : null,
+        consultarPrevisao ? api<{ previsao: PrevisaoValidacaoSyncDto | null; previsaoAplicacao?: PrevisaoAplicacaoSyncDto | null }>("previsao", { signal })
+          .then(dados => ({ previsao: dados.previsao, aplicacao: dados.previsaoAplicacao??null, falhou: false }), () => ({ previsao: null, aplicacao: null, falhou: true })) : null,
       ]);
       if (signal?.aborted) return;
       setConfig(configuracao); setResumo(novoResumo);
@@ -283,7 +283,9 @@ function SincronizacaoOlist() {
         {aba === "execucoes" && execucoes.itens.map((execucao) => <article key={execucao.id} className="rounded-lg border border-slate-200 p-4">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><StatusSync status={execucao.status} /><span className="text-xs text-slate-500">{execucao.modo.replaceAll("_", " ").toLowerCase()} · {execucao.origem.toLowerCase()}</span></div><p className="mt-2 break-all text-xs text-slate-500">{execucao.id}</p><p className="mt-1 text-xs text-slate-500">Criada: {dataSync(execucao.criadoEm)} · Finalizada: {dataSync(execucao.finalizadoEm)} · Duração: {duracaoSync(execucao.iniciadoEm, execucao.finalizadoEm)}</p></div><button type="button" className={syncButton} onClick={(event) => void abrirExecucao(execucao.id, event.currentTarget)} disabled={ocupado}>Detalhes</button></div>
           <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(execucao.contadores).map(([nome, valor]) => <div key={nome} className="text-sm"><dt className="inline text-slate-500">{nome.replaceAll("_", " ")}: </dt><dd className="inline font-medium">{valor}</dd></div>)}</dl>
-          {execucaoSyncAtiva(execucao.status) && execucao.modo !== "APLICAR" && <PrevisaoValidacaoSync previsao={estimativa.previsao?.execucaoId === execucao.id ? estimativa.previsao : null} falhou={estimativa.falhou} />}
+          {execucaoSyncAtiva(execucao.status) && (execucao.modo === "APLICAR" || execucao.status === "APLICANDO"
+            ? <PrevisaoAplicacaoSync previsao={estimativa.aplicacao?.execucaoId === execucao.id ? estimativa.aplicacao : null} falhou={estimativa.falhou} />
+            : <PrevisaoValidacaoSync previsao={estimativa.previsao?.execucaoId === execucao.id ? estimativa.previsao : null} falhou={estimativa.falhou} />)}
         </article>)}
         <PaginacaoSync offset={offset} total={lista.total} limit={LIMITE} ocupado={listaCarregando} mudar={setOffset} />
       </section>}

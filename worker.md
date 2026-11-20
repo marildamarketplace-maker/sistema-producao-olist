@@ -7,6 +7,35 @@ cd ~/sistema-producao-olist
 bash iniciar-worker.sh
 ```
 
+O mesmo iniciador abre **Rotinas** e **Trabalhos IA** no mesmo terminal. Para
+habilitar IA, adicione ao arquivo privado `~/.config/meury-worker/worker.env`:
+
+```dotenv
+TRABALHOS_IA_WORKER_TOKEN=CREDENCIAL_DE_IA_CADASTRADA_NO_SERVIDOR
+```
+
+O worker IA reaproveita `AUTOMATIZACAO_ERP_URL`, `AUTOMATIZACAO_CODEX_VERSION`,
+`CODEX_CLI_PATH` e a sessão Codex já configurados. Se o destino de IA for outro,
+defina `TRABALHOS_IA_ERP_URL`. A credencial precisa corresponder à entrada de
+`TRABALHOS_IA_WORKERS` no backend; não basta copiar o token de rotinas para
+esta variável. A migration e o backend de IA também precisam estar publicados.
+Consulte [Trabalhos IA](docs/trabalhos-ia.md) para preparar essa configuração.
+
+Sem a variável, inicia somente Rotinas e avisa que IA está desativada. **Ctrl+C
+encerra os dois processos**, inclusive a chamada Codex em andamento. Prefira
+parar quando as rotinas estiverem ociosas: uma ação externa já realizada não é
+desfeita pelo encerramento. Se um worker falhar, o outro continua e o terminal
+identifica qual interrompeu; corrija a causa e reinicie o iniciador.
+Quando a rotina é interrompida, o worker tenta registrar falha terminal antes de
+sair, usando a reserva que ainda possui. Se a API estiver indisponível, confira
+o histórico e possíveis ações parciais antes de uma retomada.
+Fechar o terminal também encerra os processos. O supervisor não reinicia
+automaticamente um worker que falhou e não faz chamadas de rede adicionais.
+
+Use o iniciador ou o serviço `meury-trabalhos-ia.service` como responsável pelo
+worker IA. Se optar pelo iniciador, encerre esse serviço antes de ativar a variável
+para evitar duas instalações consumindo a mesma fila.
+
 A cada início, o arquivo valida a branch e o upstream, bloqueia alterações locais
 ou commits que não estão no remoto, executa `git fetch` e `git pull --ff-only` e
 confirma que o checkout corresponde ao upstream. Se o próprio iniciador mudar,
@@ -27,7 +56,7 @@ não executa migrations, não atualiza o Codex CLI e não publica o ERP.
 
 Encerre primeiro qualquer worker anterior com Ctrl+C quando estiver ocioso. O
 bloqueio do iniciador impede duas instâncias iniciadas por ele, mas não identifica
-um worker aberto manualmente. Mantenha o terminal aberto durante a execução.
+workers abertos manualmente ou por systemd. Mantenha o terminal aberto durante a execução.
 O código precisa estar no remoto e o ERP publicado para que a atualização inclua
 as correções de imagens. O iniciador não envia alterações locais ao Git.
 

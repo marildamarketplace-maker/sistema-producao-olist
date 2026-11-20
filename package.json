@@ -20,6 +20,7 @@
     "worker:mockups": "node --import tsx scripts/mockups-worker.ts",
     "worker:estampas": "tsx scripts/estampas-worker.ts",
     "batch:estampas": "tsx scripts/estampas-batch.ts",
+    "worker:ia": "node --import tsx scripts/trabalhos-ia-worker.ts",
     "worker:automatizacao": "node --import tsx scripts/automatizacao-worker.ts"
   },
   "dependencies": {

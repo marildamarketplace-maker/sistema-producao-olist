@@ -96,7 +96,33 @@ test("UI real: previsão manual, polling e sincronização incremental", { skip:
   });
   const cdp = new ChromeDevTools(socket); conexao.cdp = cdp;
   await cdp.pedir("Page.enable");
+  // Mantém a aba de teste visível: o polling real suspende em abas ocultas,
+  // inclusive quando outra janela headless ganha foco durante a captura.
+  await cdp.pedir("Emulation.setFocusEmulationEnabled", { enabled: true });
   for (const largura of [390, 1280]) for (const tema of ["claro", "escuro"]) {
+    await t.test(`término da aplicação em ${largura}px, tema ${tema}, sem polling adicional`,async()=>{
+      await cdp.pedir("Emulation.setDeviceMetricsOverride",{width:largura,height:900,deviceScaleFactor:1,mobile:largura<600});
+      await cdp.pedir("Page.navigate",{url:`${pathToFileURL(path.join(pasta,"index.html")).href}?aplicacao=1&tema=${tema}`});
+      await ate(()=>cdp.avaliar<boolean>('!!window.olistSyncTeste && [...document.querySelectorAll("button")].some(b=>b.textContent==="Execuções")'),"Painel não carregou");
+      await cdp.avaliar(`document.documentElement.classList.toggle("dark",${tema==="escuro"})`);
+      await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Execuções").click()');
+      await ate(()=>cdp.avaliar<boolean>('document.querySelector("article")?.textContent.includes("Fim previsto da aplicação") ?? false'),"Previsão de aplicação não apareceu");
+      const texto=await cdp.avaliar<string>('document.querySelector("article").textContent');
+      assert.match(texto,/21\/11\/2026/);assert.match(texto,/20h 0min/);assert.match(texto,/8.400 operações restantes/);assert.match(texto,/64 falhas/);
+      assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=window.innerWidth'),true);
+      await aguardar(200);
+      assert.equal(await cdp.avaliar('window.olistSyncTeste.chamadas.filter(c=>c==="previsao").length'),1);
+      await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Atualizar").focus()');
+      await cdp.pedir("Input.dispatchKeyEvent",{type:"rawKeyDown",key:"Enter",code:"Enter",windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+      await cdp.pedir("Input.dispatchKeyEvent",{type:"char",key:"Enter",code:"Enter",text:"\r",unmodifiedText:"\r",windowsVirtualKeyCode:13});
+      await cdp.pedir("Input.dispatchKeyEvent",{type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+      await ate(()=>cdp.avaliar<boolean>('window.olistSyncTeste.chamadas.filter(c=>c==="previsao").length===2'),"Atualizar não recalculou previsão da aplicação");
+      const captura=await cdp.pedir("Page.captureScreenshot",{format:"png",captureBeyondViewport:true});
+      await writeFile(path.join(tmpdir(),`olist-aplicacao-previsao-${largura}-${tema}.png`),Buffer.from(String(captura.data),"base64"));
+      await cdp.avaliar('window.olistSyncTeste.concluir()');
+      await ate(()=>cdp.avaliar<boolean>('document.querySelector("article")?.textContent.includes("Concluída") ?? false'),"Conclusão não atualizou a lista");
+      assert.equal(await cdp.avaliar('document.querySelector("article")?.textContent.includes("Fim previsto da aplicação") ?? false'),false);
+    });
     await t.test(`previsão manual e conclusão em ${largura}px, tema ${tema}`, async () => {
       const navegadorLocal = cdp;
       await navegadorLocal.pedir("Emulation.setDeviceMetricsOverride", { width: largura, height: 900, deviceScaleFactor: 1, mobile: largura < 600 });
