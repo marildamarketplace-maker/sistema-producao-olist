@@ -127,9 +127,25 @@ async function main() {
   const limiteInformado = Number(argumento("limit"));
   const limite = Number.isInteger(limiteInformado) && limiteInformado > 0 ? limiteInformado : undefined;
   const resultado = await importarArquivos(diretorio, aplicativoId, limite);
+
+  const { prisma } = await import("@/lib/prisma");
+  let registrosCriados = 0;
+  try {
+    const cadastro = await prisma.mockupCatalogo.createMany({
+      data: resultado.registros.map((registro) => ({ aplicativoId, ...registro })),
+      skipDuplicates: true,
+    });
+    registrosCriados = cadastro.count;
+  } finally {
+    await prisma.$disconnect();
+  }
   console.log(JSON.stringify({
-    resumo: { arquivos: resultado.total, enviados: resultado.enviados, jaExistiam: resultado.jaExistiam },
-    registros: resultado.registros,
+    resumo: {
+      arquivos: resultado.total,
+      enviados: resultado.enviados,
+      jaExistiam: resultado.jaExistiam,
+      registrosCriados,
+    },
   }));
 }
 
