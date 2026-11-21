@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { Prisma } from "@prisma/client";
-import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import { pedidoFilaMockups } from "../src/lib/fila-mockups";
 
@@ -43,10 +42,8 @@ test("rejeita combinações inválidas, estampas extras e layouts duplicados", (
 test("API verifica autorização e existência antes de salvar e torna a repetição idempotente", async (t) => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia";
-  process.env.GOOGLE_CLOUD_MOCKUPS_BUCKET = "mockups-teste";
-  process.env.GOOGLE_CLOUD_CLIENT_EMAIL = "gcs@example.test";
-  process.env.GOOGLE_CLOUD_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  process.env.MOCKUPS_BLOB_STORE_ID = "store_mockups";
+  process.env.MOCKUPS_BLOB_READ_WRITE_TOKEN = "token-mockups-teste";
 
   let permitido = false;
   let usuarioId = "usuario";
@@ -55,7 +52,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   let totalAtivas = 2;
   let objetoAusente = false;
   let falharGravacao = false;
-  let consultasGoogle = 0;
+  let consultasStorage = 0;
   let escritas = 0;
   let salvo: { trabalhos: typeof trabalhos; observacao: string } | null = null;
   let statusOriginal = "PROCESSING";
@@ -87,7 +84,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
         assert.deepEqual(where, { aplicativoId_solicitadoPor_id: chave });
         if (select.resultados && salvo) return {
           ...salvo, status: statusOriginal,
-          resultados: [{ status: "COMPLETED", path: caminhoSalvo, bucket: "mockups-teste" }],
+          resultados: [{ status: "COMPLETED", path: caminhoSalvo, bucket: "store_mockups" }],
         };
         return salvo;
       },
@@ -106,22 +103,22 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
       },
     },
   } });
-  t.mock.method(globalThis, "fetch", async (input: string) => {
-    const url = new URL(input);
-    if (url.hostname === "oauth2.googleapis.com") return Response.json({ access_token: "token-gcs" });
-    consultasGoogle++;
-    const caminho = decodeURIComponent(url.pathname.split("/o/")[1] ?? "");
-    if (url.searchParams.get("alt") === "media") {
-      assert.equal(caminho, caminhoGerado);
-      return new Response("webp", { headers: { "Content-Type": "image/webp" } });
-    }
-    assert.ok([individual, outroIndividual, layout].some((id) => caminho === `mockups/tenant-correto/${id}.webp`));
-    return new Response(null, { status: objetoAusente ? 404 : 200 });
-  });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({
     data: { user: { id: "usuario", email: "teste@example.test" } }, error: null,
   }));
+  const { mockupBlobStorage } = await import("../src/services/mockupBlobStorageService");
+  t.mock.method(mockupBlobStorage, "existem", async (paths: string[]) => {
+    consultasStorage++;
+    assert.ok(paths.every((path) => [individual, outroIndividual, layout]
+      .some((id) => path === `mockups/tenant-correto/${id}.webp`)));
+    return !objetoAusente;
+  });
+  t.mock.method(mockupBlobStorage, "ler", async (path: string, contentType: string) => {
+    assert.equal(path, caminhoGerado);
+    assert.equal(contentType, "image/webp");
+    return new Response("webp").body!;
+  });
   const { GET, POST } = await import("../src/app/api/controle-midia/mockups/fila/route");
   const enviar = (dados: unknown = lote, token = true) => POST(new Request("https://example.test", {
     method: "POST",
@@ -132,7 +129,7 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   assert.equal((await enviar()).status, 403);
   permitido = true;
   assert.equal((await enviar({})).status, 400);
-  assert.equal(consultasGoogle, 0);
+  assert.equal(consultasStorage, 0);
 
   totalAtivas = 1;
   assert.equal((await enviar()).status, 422);
@@ -150,11 +147,11 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
   const response = await enviar({ ...lote, aplicativoId: "tenant-forjado" });
   assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), { loteId, quantidade: 4 });
-  const consultasAntesDoReenvio = consultasGoogle;
+  const consultasAntesDoReenvio = consultasStorage;
   assert.equal((await enviar()).status, 200);
   assert.equal((await enviar({ ...lote, trabalhos: [trabalhos[3]] })).status, 409);
   assert.equal((await enviar({ ...lote, observacao: "Cetim acetinado" })).status, 409);
-  assert.equal(consultasGoogle, consultasAntesDoReenvio);
+  assert.equal(consultasStorage, consultasAntesDoReenvio);
   assert.equal(escritas, 1);
 
   salvo = null;

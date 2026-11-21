@@ -8,30 +8,30 @@ import {
 } from "@/repositories/fila-mockups-worker-repository";
 import { carregarPreviewEstampa, CarregarPreviewEstampaError } from "@/services/carregarPreviewEstampaService";
 import type { GeradorMockupCodex } from "@/services/gerarMockupCodexService";
-import {
-  getGoogleStorageObjectInfo, GoogleStorageServiceError, lerGoogleStorageImagemPrivada, uploadToGoogleStorage, verificarGoogleStorageBucketPrivado,
-} from "@/services/googleStorageService";
+import { MockupBlobStorageError, mockupBlobStorage } from "@/services/mockupBlobStorageService";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 
 const MAX_TENTATIVAS = 3;
 const TIMEOUT_STORAGE = 45_000;
 const MAX_MODELO_BYTES = 32 * 1024 * 1024;
 
-type Opcoes = { bucket: string; gerador: Pick<GeradorMockupCodex, "gerar"> };
+type ArmazenamentoMockups = Pick<typeof mockupBlobStorage, "existe" | "ler" | "enviar">;
+type Opcoes = { storeId: string; gerador: Pick<GeradorMockupCodex, "gerar">; storage?: ArmazenamentoMockups };
 
 export async function processarProximaSaidaMockup(opcoes: Opcoes) {
+  const armazenamento = opcoes.storage ?? mockupBlobStorage;
   const reserva = await reservarSaidaMockup();
   if (!reserva) return null;
   const dados = { aplicativoId: reserva.aplicativoId, loteId: reserva.id, saida: reserva.proximaSaida + 1 };
   let resultado: SaidaMockup;
   try {
-    resultado = await gerarSaida(opcoes, reserva);
+    resultado = await gerarSaida(opcoes, armazenamento, reserva);
   } catch (error) {
     if (error instanceof ImageAnalysisProviderError && ["AUTHENTICATION_ERROR", "CONFIGURATION_ERROR"].includes(error.code)) {
       await reagendarSaidaMockup(reserva, 60_000, true);
       throw error;
     }
-    if (error instanceof GoogleStorageServiceError && [401, 403].includes(error.status ?? 0)) {
+    if (error instanceof MockupBlobStorageError && [401, 403].includes(error.status ?? 0)) {
       await reagendarSaidaMockup(reserva, 60_000, true);
       throw error;
     }
@@ -46,13 +46,13 @@ export async function processarProximaSaidaMockup(opcoes: Opcoes) {
   return { ...dados, status: ok ? resultado.status : "RESERVA_EXPIRADA", erro: resultado.erro };
 }
 
-async function gerarSaida({ bucket, gerador }: Opcoes, reserva: ReservaMockup): Promise<SaidaMockup> {
+async function gerarSaida({ storeId, gerador }: Opcoes, armazenamento: ArmazenamentoMockups, reserva: ReservaMockup): Promise<SaidaMockup> {
   const trabalho = trabalhoFilaMockups.safeParse(reserva.trabalhos[reserva.proximaSaida]);
   if (!trabalho.success) return { status: "FAILED", erro: "COMBINACAO_INVALIDA" };
   const { mockupId, estampaIds } = trabalho.data;
   const path = `mockups-gerados/${reserva.aplicativoId}/${reserva.solicitadoPor}/${reserva.id}/${reserva.proximaSaida + 1}.webp`;
-  if ((await getGoogleStorageObjectInfo(path, bucket, AbortSignal.timeout(TIMEOUT_STORAGE))).exists) {
-    return { status: "COMPLETED", bucket, path };
+  if (await armazenamento.existe(path)) {
+    return { status: "COMPLETED", bucket: storeId, path };
   }
   if (reserva.tentativas > MAX_TENTATIVAS) return { status: "FAILED", erro: "TENTATIVAS_ESGOTADAS" };
 
@@ -65,7 +65,7 @@ async function gerarSaida({ bucket, gerador }: Opcoes, reserva: ReservaMockup): 
   if (ordenadas.length !== estampaIds.length || ordenadas.some((item) => !item.previewUrl)) return { status: "FAILED", erro: "ESTAMPA_SEM_PREVIEW" };
 
   const [modelo, ...artes] = await Promise.all([
-    carregarModelo(bucket, `mockups/${reserva.aplicativoId}/${mockupId}.webp`),
+    carregarModelo(armazenamento, `mockups/${reserva.aplicativoId}/${mockupId}.webp`),
     ...ordenadas.map(async (item) => (await carregarPreviewEstampa({
       id: String(item.id), preview_url: item.previewUrl,
     })).buffer),
@@ -75,23 +75,22 @@ async function gerarSaida({ bucket, gerador }: Opcoes, reserva: ReservaMockup): 
     estampas: ordenadas.map(descreverEstampaMockup),
   });
   try {
-    await verificarGoogleStorageBucketPrivado(bucket, AbortSignal.timeout(TIMEOUT_STORAGE));
-    await uploadToGoogleStorage({
-      bucket, path, buffer: gerada.buffer, contentType: "image/webp", somenteNovo: true,
+    await armazenamento.enviar({
+      path, buffer: gerada.buffer, contentType: "image/webp", somenteNovo: true,
       signal: AbortSignal.timeout(TIMEOUT_STORAGE),
     });
   } catch (error) {
-    if (!(error instanceof GoogleStorageServiceError) || error.status !== 412) throw error;
-    return { status: "COMPLETED", bucket, path };
+    if (!(error instanceof MockupBlobStorageError) || error.status !== 412) throw error;
+    return { status: "COMPLETED", bucket: storeId, path };
   }
   return {
-    status: "COMPLETED", bucket, path, width: gerada.width, height: gerada.height,
+    status: "COMPLETED", bucket: storeId, path, width: gerada.width, height: gerada.height,
     bytes: gerada.buffer.length, threadId: gerada.threadId,
   };
 }
 
-async function carregarModelo(bucket: string, path: string) {
-  const stream = await lerGoogleStorageImagemPrivada(bucket, path, "image/webp", AbortSignal.timeout(TIMEOUT_STORAGE));
+async function carregarModelo(armazenamento: ArmazenamentoMockups, path: string) {
+  const stream = await armazenamento.ler(path, "image/webp", AbortSignal.timeout(TIMEOUT_STORAGE));
   const reader = stream.getReader();
   const partes: Uint8Array[] = [];
   let total = 0;
@@ -102,7 +101,7 @@ async function carregarModelo(bucket: string, path: string) {
       total += value.byteLength;
       if (total > MAX_MODELO_BYTES) {
         await reader.cancel();
-        throw new GoogleStorageServiceError("Modelo excede 32 MiB.", { status: 413 });
+        throw new MockupBlobStorageError("Modelo excede 32 MiB.", 413);
       }
       partes.push(value);
     }
@@ -115,7 +114,7 @@ function classificarFalha(error: unknown) {
   if (error instanceof ImageAnalysisProviderError || error instanceof CarregarPreviewEstampaError) {
     return { codigo: error.code, repetir: error.retriable };
   }
-  if (error instanceof GoogleStorageServiceError) {
+  if (error instanceof MockupBlobStorageError) {
     const status = error.status;
     return { codigo: status === 404 ? "MOCKUP_INDISPONIVEL" : "ARMAZENAMENTO", repetir: status === 429 || (status ?? 0) >= 500 };
   }

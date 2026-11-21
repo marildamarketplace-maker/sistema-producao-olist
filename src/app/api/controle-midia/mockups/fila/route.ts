@@ -7,7 +7,8 @@ import { pedidoFilaMockups, trabalhoFilaMockups } from "@/lib/fila-mockups";
 import { mockupPorId } from "@/lib/mockups-imagem";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
-import { existemGoogleStorageObjetos, lerGoogleStorageImagemPrivada, GoogleStorageServiceError } from "@/services/googleStorageService";
+import { GoogleStorageServiceError, lerGoogleStorageImagemPrivada } from "@/services/googleStorageService";
+import { getMockupBlobStoreId, MockupBlobStorageError, mockupBlobStorage } from "@/services/mockupBlobStorageService";
 
 const headersPrivados = { "Cache-Control": "private, no-store" };
 const MAX_CORPO = 512 * 1024;
@@ -41,7 +42,7 @@ function objeto(valor: Prisma.JsonValue | undefined): Prisma.JsonObject {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
-export async function GET(request: Request) {
+async function consultarFilaMockups(request: Request) {
   try {
     const escopo = await autorizarFila(request);
     if (escopo instanceof Response) return escopo;
@@ -66,7 +67,12 @@ export async function GET(request: Request) {
         || typeof resultado.bucket !== "string" || !resultado.bucket) {
         return erro("Imagem indisponível.", 404);
       }
-      const imagem = await lerGoogleStorageImagemPrivada(resultado.bucket, caminho, "image/webp", AbortSignal.timeout(30_000));
+      const imagem = resultado.bucket.startsWith("store_")
+        ? resultado.bucket === getMockupBlobStoreId()
+          ? await mockupBlobStorage.ler(caminho, "image/webp", AbortSignal.timeout(30_000))
+          : null
+        : await lerGoogleStorageImagemPrivada(resultado.bucket, caminho, "image/webp", AbortSignal.timeout(30_000));
+      if (!imagem) return erro("Imagem indisponível.", 404);
       return new Response(imagem, { headers: { ...headersPrivados, "Content-Type": "image/webp", "X-Content-Type-Options": "nosniff" } });
     }
     const combinacoes = trabalhos.map((valor) => {
@@ -98,12 +104,18 @@ export async function GET(request: Request) {
       }),
     }, { headers: headersPrivados });
   } catch (error) {
+    if (error instanceof MockupBlobStorageError && error.status === 404) return erro("Imagem indisponível.", 404);
+    if (error instanceof MockupBlobStorageError && error.status === 503) return erro(error.message, 503);
     if (error instanceof GoogleStorageServiceError && error.status === 404) return erro("Imagem indisponível.", 404);
     return erro("Não foi possível consultar o lote. Tente novamente.", 503);
   }
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
+  return consultarFilaMockups(request);
+}
+
+async function enviarFilaMockups(request: Request) {
   try {
     const escopo = await autorizarFila(request);
     if (escopo instanceof Response) return escopo;
@@ -167,12 +179,12 @@ export async function POST(request: Request) {
 
     const idsMockups = [...new Set(trabalhos.map(({ mockupId }) => mockupId))];
     if (idsMockups.some((id) => !mockupPorId(id))) return erro("Selecione mockups válidos.", 400);
-    const bucket = process.env.GOOGLE_CLOUD_MOCKUPS_BUCKET?.trim();
-    if (!bucket) return erro("O armazenamento de mockups ainda não foi configurado.", 503);
+    const storeId = getMockupBlobStoreId();
+    if (!storeId) return erro("O armazenamento de mockups ainda não foi configurado na Vercel.", 503);
 
     const [estampasAtivas, mockupsExistem] = await Promise.all([
       prisma.estampaCatalogoIa.count({ where: { id: { in: estampas.map(BigInt) }, isActive: true } }),
-      existemGoogleStorageObjetos(bucket, idsMockups.map((id) => `mockups/${escopo.aplicativoId}/${id}.webp`)),
+      mockupBlobStorage.existem(idsMockups.map((id) => `mockups/${escopo.aplicativoId}/${id}.webp`)),
     ]);
     if (estampasAtivas !== estampas.length || !mockupsExistem) {
       return erro("Uma estampa ou um mockup ficou indisponível. Revise a seleção.", 422);
@@ -192,4 +204,8 @@ export async function POST(request: Request) {
   } catch {
     return erro("Não foi possível salvar o lote na fila. Tente novamente.", 503);
   }
+}
+
+export async function POST(request: Request) {
+  return enviarFilaMockups(request);
 }

@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { setTimeout as esperar } from "node:timers/promises";
 import { MAX_ESTAMPAS_LAYOUT } from "@/lib/fila-mockups-contrato";
 import { GeradorMockupCodex, lerArquivoImagem } from "@/services/gerarMockupCodexService";
-import { GoogleStorageServiceError, verificarGoogleStorageBucketPrivado } from "@/services/googleStorageService";
+import { getMockupBlobStoreId, MockupBlobStorageError } from "@/services/mockupBlobStorageService";
 import { ImageAnalysisProviderError } from "@/services/image-analysis/ImageAnalysisProviderError";
 
 const ajuda = `Worker local de mockups
@@ -19,9 +19,9 @@ npm run worker:mockups -- --piloto saida.webp modelo.png estampa.png [outras-est
   Até ${MAX_ESTAMPAS_LAYOUT} estampas por layout. Grava um WebP novo sem acessar a fila ou o bucket.
 
 Requer Codex CLI autenticado via ChatGPT (codex login).
-A fila requer POSTGRES_PRISMA_URL e GOOGLE_CLOUD_MOCKUPS_BUCKET,
-além das credenciais Google Cloud e das migrations de fila_mockups aplicadas.
-Resultados de fila ficam no bucket privado, em mockups-gerados/.
+A fila requer POSTGRES_PRISMA_URL, MOCKUPS_BLOB_STORE_ID e um token de acesso
+à loja privada de mockups, além das migrations de fila_mockups aplicadas.
+Resultados de fila ficam na loja privada, em mockups-gerados/.
 Configurações opcionais: CODEX_CLI_PATH, MOCKUPS_CODEX_MODEL e MOCKUPS_CODEX_TIMEOUT_MS.`;
 
 async function main(args: string[]) {
@@ -48,19 +48,14 @@ async function main(args: string[]) {
 
   const watch = args.length === 1 && args[0] === "--watch";
   if (args.length && !watch) throw new ConfiguracaoWorkerError("Opção inválida. Consulte --help.");
-  const bucket = process.env.GOOGLE_CLOUD_MOCKUPS_BUCKET?.trim();
-  if (!bucket || !process.env.POSTGRES_PRISMA_URL
-    || !process.env.GOOGLE_CLOUD_CLIENT_EMAIL || !process.env.GOOGLE_CLOUD_PRIVATE_KEY) {
-    throw new ConfiguracaoWorkerError("Configure o banco e o bucket privado no .env antes de iniciar.");
+  const storeId = getMockupBlobStoreId();
+  const tokenConfigurado = Boolean(process.env.MOCKUPS_BLOB_READ_WRITE_TOKEN?.trim() || process.env.BLOB_READ_WRITE_TOKEN?.trim());
+  if (!storeId || !process.env.POSTGRES_PRISMA_URL
+    || (!tokenConfigurado && !process.env.VERCEL_OIDC_TOKEN?.trim())) {
+    throw new ConfiguracaoWorkerError("Configure o banco e o acesso à loja privada de mockups no .env antes de iniciar.");
   }
 
   await gerador.verificarDisponibilidade();
-  try {
-    await verificarGoogleStorageBucketPrivado(bucket, AbortSignal.timeout(45_000));
-  } catch {
-    throw new ConfiguracaoWorkerError("Verifique as credenciais e ative a prevenção de acesso público no bucket de mockups.");
-  }
-
   const { prisma } = await import("@/lib/prisma");
   const controller = new AbortController();
   const encerrar = () => controller.abort();
@@ -69,7 +64,7 @@ async function main(args: string[]) {
   try {
     const { processarProximaSaidaMockup } = await import("@/services/processarFilaMockupsService");
     while (!controller.signal.aborted) {
-      const resultado = await processarProximaSaidaMockup({ bucket, gerador });
+      const resultado = await processarProximaSaidaMockup({ storeId, gerador });
       if (resultado) console.info("[mockups-worker]", resultado);
       if (!watch) {
         if (!resultado) console.info("[mockups-worker] Nenhuma saída pronta.");
@@ -95,8 +90,8 @@ main(process.argv.slice(2)).catch((error) => {
     ? error.message
     : error && typeof error === "object" && "code" in error && error.code === "EEXIST"
       ? "O arquivo de piloto já existe. Escolha outro nome."
-      : error instanceof GoogleStorageServiceError
-        ? "Verifique as credenciais e as permissões do bucket privado de mockups."
+      : error instanceof MockupBlobStorageError
+        ? "Verifique o acesso à loja privada de mockups e as permissões do token."
         : "Falha na execução. Confira as migrations, a conexão e os arquivos de entrada.";
   console.error("[mockups-worker]", mensagem);
   process.exitCode = 1;

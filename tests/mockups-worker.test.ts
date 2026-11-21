@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,9 +67,6 @@ test("invoca ImageGen em ordem, exige artefato único do thread e valida o WebP"
 });
 
 test("worker preserva ordem, registra somente a reserva vigente e reutiliza upload após interrupção", async (t) => {
-  process.env.GOOGLE_CLOUD_CLIENT_EMAIL = "gcs@example.test";
-  process.env.GOOGLE_CLOUD_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   process.env.ESTAMPA_PREVIEW_ALLOWED_HOSTS = "storage.googleapis.com";
   const a = await criarPng("red");
   const b = await criarPng("blue");
@@ -88,6 +84,25 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   let uploads = 0;
   let chamadasGerador = 0;
   let falha: Error | null = null;
+  const storage = {
+    existe: async (pathname: string) => {
+      assert.equal(pathname, path());
+      return existe;
+    },
+    ler: async (pathname: string, contentType: string) => {
+      assert.equal(pathname, `mockups/${reserva.aplicativoId}/${mockupId}.webp`);
+      assert.equal(contentType, "image/webp");
+      return new Response(modelo).body!;
+    },
+    enviar: async (input: { path: string; buffer: Buffer; contentType: string; somenteNovo?: boolean }) => {
+      uploads++;
+      assert.equal(input.path, path());
+      assert.equal(input.contentType, "image/webp");
+      assert.equal(input.somenteNovo, true);
+      assert.deepEqual(input.buffer, modelo);
+      return { bucket: "store_mockups", path: input.path };
+    },
+  };
   const updates: { where: Record<string, unknown>; data: Record<string, unknown> }[] = [];
   Object.assign(globalThis, { prisma: {
     $queryRaw: async (sql: TemplateStringsArray, ...parametros: unknown[]) => {
@@ -114,32 +129,17 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       return { count: perdeuReserva ? 0 : 1 };
     } },
   } });
-  t.mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+  t.mock.method(globalThis, "fetch", async (input: string | URL) => {
     const url = new URL(input);
-    if (url.hostname === "oauth2.googleapis.com") return Response.json({ access_token: "token" });
     if (url.pathname.startsWith("/teste/")) {
       return new Response(new Uint8Array(url.pathname.endsWith("/1.png") ? a : b), { headers: { "Content-Type": "image/png" } });
     }
-    if (url.searchParams.get("fields") === "iamConfiguration") {
-      return Response.json({ iamConfiguration: { publicAccessPrevention: "enforced" } });
-    }
-    if (url.searchParams.get("alt") === "media") {
-      assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), `mockups/${reserva.aplicativoId}/${mockupId}.webp`);
-      return new Response(new Uint8Array(modelo), { headers: { "Content-Type": "image/webp" } });
-    }
-    if (init?.method === "POST") {
-      uploads++;
-      assert.equal(url.searchParams.get("ifGenerationMatch"), "0");
-      assert.equal(url.searchParams.get("name"), path());
-      return Response.json({});
-    }
-    assert.equal(decodeURIComponent(url.pathname.split("/o/")[1]), path());
-    return new Response(null, { status: existe ? 200 : 404 });
+    assert.fail(`Requisição externa inesperada: ${url.origin}${url.pathname}`);
   });
 
   const { processarProximaSaidaMockup } = await import("../src/services/processarFilaMockupsService");
   const processar = () => processarProximaSaidaMockup({
-    bucket: "privado", gerador: {
+    storeId: "store_mockups", storage, gerador: {
       gerar: async (base, estampas, layout, contexto) => {
         chamadasGerador++;
         assert.deepEqual([base, estampas, layout], [modelo, [b, a], true]);
@@ -161,7 +161,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
   assert.equal((await processar())?.status, "COMPLETED");
   assert.equal(updates.at(-1)?.data.status, "COMPLETED");
   assert.deepEqual(updates.at(-1)?.data.resultados, [{
-    status: "COMPLETED", bucket: "privado", path: path(), width: 1024, height: 1024, bytes: modelo.length, threadId,
+    status: "COMPLETED", bucket: "store_mockups", path: path(), width: 1024, height: 1024, bytes: modelo.length, threadId,
   }]);
 
   existe = true;
