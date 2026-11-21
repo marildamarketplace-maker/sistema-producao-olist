@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import sharp from "sharp";
 import {
   interpretarIdMockup, MOCKUP_CATEGORIA_MAX, MOCKUP_MAX_BYTES,
+  MOCKUP_STORAGE_MAX_BYTES,
   MOCKUP_NOME_MAX, MOCKUP_OBSERVACAO_MAX, type TipoMockup,
 } from "./mockups";
 
@@ -42,14 +43,30 @@ export async function prepararImagemMockup(request: Request) {
   }
 
   const original = Buffer.concat(partes, tamanho);
-  let imagem: Buffer;
+  let imagem = Buffer.alloc(0);
   try {
     const pipeline = sharp(original, { limitInputPixels: 16_000_000, failOn: "warning" });
     const { format, pages } = await pipeline.metadata();
     if (!format || !["jpeg", "png", "webp"].includes(format) || (pages ?? 1) !== 1) {
       throw new Error("Formato incompatível");
     }
-    imagem = await pipeline.rotate().webp({ lossless: true }).toBuffer();
+    const perfis = [
+      { dimensao: 2048, qualidade: 80 },
+      { dimensao: 1920, qualidade: 74 },
+      { dimensao: 1600, qualidade: 68 },
+      { dimensao: 1280, qualidade: 62 },
+    ];
+    for (const perfil of perfis) {
+      imagem = await sharp(original, { limitInputPixels: 16_000_000, failOn: "warning" })
+        .rotate()
+        .resize({ width: perfil.dimensao, height: perfil.dimensao, fit: "inside", withoutEnlargement: true })
+        .webp({ quality: perfil.qualidade, alphaQuality: 85, effort: 5, smartSubsample: true })
+        .toBuffer();
+      if (imagem.byteLength <= MOCKUP_STORAGE_MAX_BYTES) break;
+    }
+    if (imagem.byteLength > MOCKUP_STORAGE_MAX_BYTES) {
+      throw new MockupInvalido("Não foi possível reduzir a imagem para até 1 MB. Escolha uma imagem com menos detalhes ou resolução menor.", 413);
+    }
   } catch (error) {
     if (error instanceof MockupInvalido) throw error;
     throw new MockupInvalido("Use uma imagem JPG, PNG ou WebP estática e válida, de até 16 megapixels.", 415);

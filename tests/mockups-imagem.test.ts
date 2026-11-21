@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
-import { MOCKUP_MAX_BYTES } from "../src/lib/mockups";
+import { MOCKUP_MAX_BYTES, MOCKUP_STORAGE_MAX_BYTES, MOCKUP_STORAGE_MAX_DIMENSION } from "../src/lib/mockups";
 import { MockupInvalido, mockupPorId, prepararImagemMockup } from "../src/lib/mockups-imagem";
 
 function upload(body: Uint8Array<ArrayBuffer> | string, nome = "  Café / Coleção  ", tipo?: string) {
@@ -69,4 +69,17 @@ test("preserva imagens retangulares para manter o enquadramento do arquivo de or
       assert.deepEqual([dimensoes.width, dimensoes.height], [width, height]);
     }
   }
+});
+
+test("otimiza a imagem e limita o arquivo gravado no bucket a 1 MB", async () => {
+  const png = await sharp({
+    create: { width: 2400, height: 1200, channels: 3, background: { r: 185, g: 130, b: 85 } },
+  }).png().toBuffer();
+  const mockup = await prepararImagemMockup(upload(new Uint8Array(png), "Painel"));
+  const metadata = await sharp(mockup.imagem).metadata();
+
+  assert.equal(metadata.format, "webp");
+  assert.ok(mockup.imagem.byteLength <= MOCKUP_STORAGE_MAX_BYTES);
+  assert.ok(Math.max(metadata.width ?? 0, metadata.height ?? 0) <= MOCKUP_STORAGE_MAX_DIMENSION);
+  assert.equal((metadata.width ?? 0) / (metadata.height ?? 1), 2);
 });

@@ -1,4 +1,6 @@
 export const MOCKUP_MAX_BYTES = 4 * 1024 * 1024;
+export const MOCKUP_STORAGE_MAX_BYTES = 1 * 1024 * 1024;
+export const MOCKUP_STORAGE_MAX_DIMENSION = 2048;
 export const MOCKUP_FORMATOS = "image/jpeg,image/png,image/webp";
 export const MOCKUP_NOME_MAX = 100;
 export const MOCKUP_CATEGORIA_MAX = 80;

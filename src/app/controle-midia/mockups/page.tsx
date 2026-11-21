@@ -213,7 +213,7 @@ function CadastroMockups({ token }: { token: string }) {
               <label htmlFor="mockup-imagem" className="block text-sm font-medium">Imagem {editando ? "(opcional para substituir)" : ""}</label>
               <input id="mockup-imagem" type="file" accept={MOCKUP_FORMATOS} required={!editando} onChange={(event) => setImagem(event.target.files?.[0] ?? null)}
                 aria-describedby="mockup-formatos" className="input mt-1 min-h-11 w-full min-w-0" />
-              <p id="mockup-formatos" className="mt-1 text-xs text-slate-600">JPG, PNG ou WebP estático, até 4 MB e 16 megapixels. A proporção original da imagem é preservada.</p>
+              <p id="mockup-formatos" className="mt-1 text-xs text-slate-600">JPG, PNG ou WebP estático, até 4 MB e 16 megapixels. A imagem é otimizada em WebP, mantendo a proporção, com até 2048 px e 1 MB no bucket.</p>
             </div>
             <button className={`${botao} w-full bg-slate-900 text-white sm:w-auto`} type="submit">
               {salvando ? "Salvando…" : editando ? "Salvar alterações" : "Cadastrar no bucket"}
