@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { MOCKUP_FORMATOS, MOCKUP_MAX_BYTES, MOCKUP_NOME_MAX, MOCKUP_CATEGORIA_MAX, MOCKUP_OBSERVACAO_MAX, type Mockup, type TipoMockup } from "@/lib/mockups";
-import { VisualizacaoMockup } from "@/components/mockups/visualizacao-mockup";
+import { ImagemPrivadaMockup, VisualizacaoMockup } from "@/components/mockups/visualizacao-mockup";
 import { mensagemMockups, requisitarMockups } from "@/lib/mockups-client";
 
 const botao = "inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
@@ -63,7 +64,7 @@ function CadastroMockups({ token }: { token: string }) {
     try {
       const response = await requisitarMockups(token, `?detalhesId=${encodeURIComponent(mockup.id)}`);
       const { mockup: detalhes } = await response.json() as { mockup: Mockup };
-      setSelecionado(mockup);
+      setSelecionado(null);
       setEditando(mockup.id);
       setDados({
         nome: detalhes.nome,
@@ -72,6 +73,7 @@ function CadastroMockups({ token }: { token: string }) {
         observacaoPrompt: detalhes.observacaoPrompt ?? "",
       });
       setImagem(null);
+      document.getElementById("mockup-nome")?.focus();
     } catch (error) {
       setFeedback({ erro: mensagemMockups(error), sucesso: "" });
     } finally {
@@ -146,7 +148,7 @@ function CadastroMockups({ token }: { token: string }) {
       setMockups((atuais) => editando
         ? atuais.map((item) => item.id === mockup.id ? mockup : item)
         : [mockup, ...atuais.filter(({ id }) => id !== mockup.id)]);
-      setSelecionado(mockup);
+      setSelecionado(null);
       setEditando(null);
       setDados(estadoVazio);
       setImagem(null);
@@ -173,8 +175,44 @@ function CadastroMockups({ token }: { token: string }) {
   }
 
   return (
-    <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
-      <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-5">
+    <div className="grid min-w-0 items-start gap-6">
+      <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold text-slate-900">Arquivos cadastrados</h2>
+          <a href="#cadastro-mockup" className={`${botao} border border-slate-300`} onClick={novoCadastro}>Cadastrar novo arquivo</a>
+        </div>
+        <p className="text-sm text-slate-600">Compare as imagens abaixo. Clique em Ampliar imagem para ver os detalhes ou use Editar para alterar o cadastro.</p>
+        {erroLista && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erroLista}</p>}
+        {erroLista && !cursor && <button type="button" className={`${botao} border border-slate-300`} onClick={() => setRevisao((valor) => valor + 1)}>Tentar novamente</button>}
+        {carregando && <p role="status" className="text-sm text-slate-600">Carregando arquivos…</p>}
+        {!carregando && !erroLista && !mockups.length && <p className="text-sm text-slate-600">Nenhum arquivo cadastrado.</p>}
+        {mockups.length > 0 && (
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {mockups.map((mockup) => (
+              <li key={mockup.id} className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 p-3">
+                <ImagemPrivadaMockup nome={mockup.nome} token={token} rota={`?id=${encodeURIComponent(mockup.id)}`} miniatura />
+                <button type="button" aria-pressed={selecionado?.id === mockup.id} onClick={() => setSelecionado(mockup)}
+                  className="min-h-11 min-w-0 break-words text-left text-sm hover:underline focus-visible:outline focus-visible:outline-2 aria-pressed:font-semibold">
+                  <span className="block font-medium">{mockup.nome}</span>
+                  <span className="mt-1 block underline">Ampliar imagem</span>
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {mockup.tipo === "LAYOUT" ? "Layout" : mockup.tipo === "INFORMATIVO" ? "Informativo" : "Individual"}
+                    {mockup.categoria ? ` · ${mockup.categoria}` : ""}
+                  </span>
+                </button>
+                <div className="mt-auto flex flex-wrap gap-2">
+                  <button type="button" disabled={carregandoEdicaoId === mockup.id} className={`${botao} border border-slate-300 text-slate-800`}
+                    onClick={() => void iniciarEdicao(mockup)}>{carregandoEdicaoId === mockup.id ? "Carregando…" : "Editar"}</button>
+                  <button type="button" className={`${botao} border border-rose-300 text-rose-700 hover:bg-rose-50`} onClick={() => void excluir(mockup)}>Excluir</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {cursor && <button type="button" disabled={carregando} onClick={() => void carregarMais()} className={`${botao} border border-slate-300`}>Carregar mais</button>}
+        {selecionado && <PreviaCatalogo key={selecionado.id} mockup={selecionado} token={token} fechar={() => setSelecionado(null)} />}
+      </section>
+      <section id="cadastro-mockup" className="scroll-mt-4 min-w-0 rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-900">{editando ? "Editar arquivo" : "Cadastrar arquivo"}</h2>
           {editando && <button type="button" className={`${botao} border border-slate-300 text-slate-800`} onClick={novoCadastro}>Novo cadastro</button>}
@@ -223,37 +261,19 @@ function CadastroMockups({ token }: { token: string }) {
           <p role="status" className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">{feedback.sucesso}</p>
         </form>
       </section>
+    </div>
+  );
+}
 
-      <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-900">Arquivos cadastrados</h2>
-        {erroLista && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erroLista}</p>}
-        {erroLista && !cursor && <button type="button" className={`${botao} border border-slate-300`} onClick={() => setRevisao((valor) => valor + 1)}>Tentar novamente</button>}
-        {carregando && <p role="status" className="text-sm text-slate-600">Carregando arquivos…</p>}
-        {!carregando && !erroLista && !mockups.length && <p className="text-sm text-slate-600">Nenhum arquivo cadastrado.</p>}
-        {mockups.length > 0 && (
-          <ul className="max-h-[34rem] divide-y divide-slate-200 overflow-y-auto rounded-md border border-slate-200">
-            {mockups.map((mockup) => (
-              <li key={mockup.id} className="flex min-w-0 flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <button type="button" aria-pressed={selecionado?.id === mockup.id} onClick={() => setSelecionado(mockup)}
-                  className="min-h-11 min-w-0 break-words text-left text-sm hover:underline focus-visible:outline focus-visible:outline-2 aria-pressed:font-semibold">
-                  <span className="block">{mockup.nome}</span>
-                  <span className="mt-1 block text-xs text-slate-500">
-                    {mockup.tipo === "LAYOUT" ? "Layout" : mockup.tipo === "INFORMATIVO" ? "Informativo" : "Individual"}
-                    {mockup.categoria ? ` · ${mockup.categoria}` : ""}
-                  </span>
-                </button>
-                <div className="flex shrink-0 gap-2">
-                  <button type="button" disabled={carregandoEdicaoId === mockup.id} className={`${botao} border border-slate-300 text-slate-800`}
-                    onClick={() => void iniciarEdicao(mockup)}>{carregandoEdicaoId === mockup.id ? "Carregando…" : "Editar"}</button>
-                  <button type="button" className={`${botao} border border-rose-300 text-rose-700 hover:bg-rose-50`} onClick={() => void excluir(mockup)}>Excluir</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {cursor && <button type="button" disabled={carregando} onClick={() => void carregarMais()} className={`${botao} border border-slate-300`}>Carregar mais</button>}
-        {selecionado && <VisualizacaoMockup key={selecionado.id} mockup={selecionado} token={token} />}
-      </section>
+function PreviaCatalogo({ mockup, token, fechar }: { mockup: Mockup; token: string; fechar: () => void }) {
+  const modal = useModalFocus(fechar);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+      <div ref={modal} role="dialog" aria-modal="true" aria-label={`Prévia de ${mockup.nome}`} tabIndex={-1}
+        className="max-h-[85dvh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
+        <button type="button" className={`${botao} border border-slate-300`} onClick={fechar}>Fechar prévia</button>
+        <VisualizacaoMockup mockup={mockup} token={token} />
+      </div>
     </div>
   );
 }

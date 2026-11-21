@@ -18,7 +18,7 @@ import {
 } from "@/lib/fila-mockups-contrato";
 import { mensagemMockups, requisitarMockups } from "@/lib/mockups-client";
 import type { Mockup } from "@/lib/mockups";
-import { VisualizacaoMockup } from "./visualizacao-mockup";
+import { ImagemPrivadaMockup, VisualizacaoMockup } from "./visualizacao-mockup";
 
 const painel = "min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-5";
 const secundario = "inline-flex min-h-11 items-center justify-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50";
@@ -198,19 +198,20 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
             <p className="text-sm text-slate-600">Nenhum modelo carregado corresponde à busca.</p>
           )}
           {modelosFiltrados.length > 0 && (
-            <ul className="divide-y divide-slate-200">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {modelosFiltrados.map((mockup) => (
-                <li key={mockup.id} className="flex flex-wrap items-center justify-between gap-x-3">
+                <li key={mockup.id} className={`min-w-0 space-y-2 rounded-lg border p-3 ${modelosAtivos.includes(mockup.id) ? "border-slate-900 bg-slate-100 dark:border-slate-400" : "border-slate-200"}`}>
+                  <ImagemPrivadaMockup nome={mockup.nome} token={token} rota={`?id=${encodeURIComponent(mockup.id)}`} miniatura />
                   <label className={`${opcao} flex-1`}>
                     <input type="checkbox" className="h-4 w-4 shrink-0 accent-slate-900"
                       checked={individuais[estampaAtiva]?.includes(mockup.id) ?? false}
                       onChange={() => setIndividuais((atual) => ({
                         ...atual, [estampaAtiva]: alternarSelecao(atual[estampaAtiva] ?? [], mockup.id),
                       }))} />
-                    <span className="break-all">{mockup.nome}</span>
+                    <span className="min-w-0 break-words font-medium">{mockup.nome}<span className="mt-1 block text-xs font-normal text-slate-600">{mockup.categoria}{modelosAtivos.includes(mockup.id) ? " · Selecionado" : ""}</span></span>
                   </label>
                   <button type="button" className={secundario} onClick={() => setPreview(mockup)}
-                    aria-label={`Visualizar ${mockup.nome}`}>Visualizar</button>
+                    aria-label={`Ampliar ${mockup.nome}`}>Ampliar imagem</button>
                 </li>
               ))}
             </ul>
@@ -222,15 +223,22 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
           <p className="text-sm text-slate-600">Escolha o layout e marque até {MAX_ESTAMPAS_LAYOUT} estampas na ordem em que devem ser aplicadas.</p>
           {layout ? (
             <>
-              <label className="block text-sm font-medium">
-                Layout
-                <select className="input mt-1 min-h-11" value={layout.id} onChange={(event) => setLayoutAtivo(event.target.value)}>
-                  {layoutsDisponiveis.map(({ id, nome }) => (
-                    <option key={id} value={id}>{nome} ({layouts[id]?.length ?? 0} estampas)</option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" className={secundario} onClick={() => setPreview(layout)}>Visualizar layout</button>
+              <div role="group" aria-label="Escolher layout" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {layoutsDisponiveis.map((modelo) => (
+                  <div key={modelo.id} className={`min-w-0 space-y-2 rounded-lg border p-3 ${layout.id === modelo.id ? "border-slate-900 bg-slate-100 dark:border-slate-400" : "border-slate-200"}`}>
+                    <ImagemPrivadaMockup nome={modelo.nome} token={token} rota={`?id=${encodeURIComponent(modelo.id)}`} miniatura />
+                    <label className={opcao}>
+                      <input type="radio" name="layout-ativo" value={modelo.id} checked={layout.id === modelo.id}
+                        onChange={() => setLayoutAtivo(modelo.id)} className="h-4 w-4 shrink-0 accent-slate-900" />
+                      <span className="min-w-0 break-words font-medium">{modelo.nome}
+                        <span className="mt-1 block text-xs font-normal text-slate-600">{layouts[modelo.id]?.length ?? 0} estampas vinculadas{layout.id === modelo.id ? " · Em edição" : ""}</span>
+                      </span>
+                    </label>
+                    <button type="button" className={secundario} onClick={() => setPreview(modelo)} aria-label={`Ampliar ${modelo.nome}`}>Ampliar imagem</button>
+                  </div>
+                ))}
+              </div>
+              <h3 className="break-words text-sm font-semibold">Estampas para {layout.nome}</h3>
               <ul className="divide-y divide-slate-200">
                 {estampas.map(({ id, codigo }) => {
                   const ordem = (layouts[layout.id] ?? []).indexOf(id);
