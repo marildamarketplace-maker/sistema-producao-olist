@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { interpretarIdMockup, MOCKUP_MAX_BYTES, MOCKUP_NOME_MAX } from "./mockups";
+import {
+  interpretarIdMockup, MOCKUP_CATEGORIA_MAX, MOCKUP_MAX_BYTES,
+  MOCKUP_NOME_MAX, MOCKUP_OBSERVACAO_MAX, type TipoMockup,
+} from "./mockups";
 
 export class MockupInvalido extends Error {
   constructor(message: string, readonly status = 400) {
@@ -10,8 +13,11 @@ export class MockupInvalido extends Error {
 
 export async function prepararImagemMockup(request: Request) {
   const nome = lerNome(request.headers.get("x-mockup-nome"));
-  const tipo = request.headers.get("x-mockup-tipo") ?? "INDIVIDUAL";
-  if (tipo !== "INDIVIDUAL" && tipo !== "LAYOUT") throw new MockupInvalido("Tipo de mockup inválido.");
+  const tipoHeader = request.headers.get("x-mockup-tipo") ?? "INDIVIDUAL";
+  if (!tipoValido(tipoHeader)) throw new MockupInvalido("Tipo de mockup inválido.");
+  const tipo: TipoMockup = tipoHeader;
+  const categoria = lerCampo(request.headers.get("x-mockup-categoria"), MOCKUP_CATEGORIA_MAX, "Categoria");
+  const observacaoPrompt = lerCampo(request.headers.get("x-mockup-observacao-prompt"), MOCKUP_OBSERVACAO_MAX, "Observação do prompt");
   if (Number(request.headers.get("content-length")) > MOCKUP_MAX_BYTES) {
     throw new MockupInvalido("Selecione uma imagem de até 4 MB.", 413);
   }
@@ -39,12 +45,9 @@ export async function prepararImagemMockup(request: Request) {
   let imagem: Buffer;
   try {
     const pipeline = sharp(original, { limitInputPixels: 16_000_000, failOn: "warning" });
-    const { format, pages, width, height } = await pipeline.metadata();
+    const { format, pages } = await pipeline.metadata();
     if (!format || !["jpeg", "png", "webp"].includes(format) || (pages ?? 1) !== 1) {
       throw new Error("Formato incompatível");
-    }
-    if (width !== height) {
-      throw new MockupInvalido("A imagem do mockup precisa ser quadrada (1:1), com largura e altura iguais.", 422);
     }
     imagem = await pipeline.rotate().webp({ lossless: true }).toBuffer();
   } catch (error) {
@@ -53,8 +56,13 @@ export async function prepararImagemMockup(request: Request) {
   }
 
   const hash = createHash("sha256").update(original).digest("hex");
-  const id = `${tipo === "LAYOUT" ? "layout-" : ""}${hash}-${Buffer.from(nome).toString("base64url")}`;
-  return { id, nome, tipo, imagem };
+  const prefixo = tipo === "LAYOUT" ? "layout-" : tipo === "INFORMATIVO" ? "info-" : "";
+  const id = `${prefixo}${hash}-${Buffer.from(nome).toString("base64url")}`;
+  return { id, nome, tipo, categoria, observacaoPrompt, imagem };
+}
+
+function tipoValido(value: string): value is TipoMockup {
+  return value === "INDIVIDUAL" || value === "LAYOUT" || value === "INFORMATIVO";
 }
 
 function lerNome(valor: string | null) {
@@ -68,6 +76,19 @@ function lerNome(valor: string | null) {
     throw new MockupInvalido("Informe um nome de até 100 caracteres para o mockup.");
   }
   return nome;
+}
+
+function lerCampo(valor: string | null, maximo: number, nome: string) {
+  let texto: string;
+  try {
+    texto = decodeURIComponent(valor ?? "").trim().normalize("NFC");
+  } catch {
+    throw new MockupInvalido(`${nome} inválida.`);
+  }
+  if (texto.length > maximo || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(texto)) {
+    throw new MockupInvalido(`${nome} excede o limite permitido.`);
+  }
+  return texto;
 }
 
 export function mockupPorId(id: string) {

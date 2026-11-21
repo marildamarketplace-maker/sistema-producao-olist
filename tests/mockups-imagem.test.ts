@@ -58,16 +58,15 @@ test("classifica layouts sem alterar os identificadores dos mockups individuais 
   await assert.rejects(prepararImagemMockup(upload(bytes, "Vitrine", "OUTRO")), { status: 400 });
 });
 
-test("rejeita imagens retangulares no cadastro de individuais e layouts", async () => {
+test("preserva imagens retangulares para manter o enquadramento do arquivo de origem", async () => {
   for (const [width, height] of [[10, 20], [20, 10]]) {
     const png = await sharp({
       create: { width, height, channels: 3, background: "white" },
     }).png().toBuffer();
     for (const tipo of ["INDIVIDUAL", "LAYOUT"]) {
-      await assert.rejects(prepararImagemMockup(upload(new Uint8Array(png), "Vitrine", tipo)), {
-        status: 422,
-        message: /quadrada/,
-      });
+      const mockup = await prepararImagemMockup(upload(new Uint8Array(png), "Vitrine", tipo));
+      const dimensoes = await sharp(mockup.imagem).metadata();
+      assert.deepEqual([dimensoes.width, dimensoes.height], [width, height]);
     }
   }
 });

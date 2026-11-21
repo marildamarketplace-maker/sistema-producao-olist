@@ -1,6 +1,6 @@
 import {
   BlobAccessError, BlobNotFoundError, BlobPreconditionFailedError, BlobServiceNotAvailable,
-  BlobServiceRateLimited, BlobStoreNotFoundError, get, head, list, put,
+  BlobServiceRateLimited, BlobStoreNotFoundError, del, get, head, list, put,
 } from "@vercel/blob";
 import { headers } from "next/headers";
 
@@ -113,6 +113,15 @@ export const mockupBlobStorage = {
       if (error instanceof BlobPreconditionFailedError) {
         throw new MockupBlobStorageError("Imagem já existente.", 412, { cause: error });
       }
+      throw normalizarErro(error);
+    }
+  },
+
+  async remover(path: string) {
+    try {
+      await del(caminhoValido(path), await credenciais());
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) return;
       throw normalizarErro(error);
     }
   },

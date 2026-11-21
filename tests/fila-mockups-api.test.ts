@@ -75,6 +75,14 @@ test("API verifica autorização e existência antes de salvar e torna a repeti�
         return Math.min(totalAtivas, where.id.in.length);
       },
     },
+    mockupCatalogo: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({
+        id,
+        nome: id === individual ? "Individual" : id === layout ? "Layout" : "Outro individual",
+        tipo: id === layout ? "LAYOUT" : "INDIVIDUAL",
+        storagePath: `mockups/tenant-correto/${id}.webp`,
+      })),
+    },
     filaMockup: {
       findUnique: async ({ where, select }: {
         where: { aplicativoId_solicitadoPor_id: typeof chave }; select: { resultados?: boolean };

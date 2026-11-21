@@ -4,18 +4,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
-import { MOCKUP_FORMATOS, MOCKUP_MAX_BYTES, MOCKUP_NOME_MAX, type Mockup } from "@/lib/mockups";
+import { MOCKUP_FORMATOS, MOCKUP_MAX_BYTES, MOCKUP_NOME_MAX, MOCKUP_CATEGORIA_MAX, MOCKUP_OBSERVACAO_MAX, type Mockup, type TipoMockup } from "@/lib/mockups";
 import { VisualizacaoMockup } from "@/components/mockups/visualizacao-mockup";
 import { mensagemMockups, requisitarMockups } from "@/lib/mockups-client";
 
-const botao = "min-h-11 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
+const botao = "inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
+const estadoVazio = { nome: "", tipo: "INDIVIDUAL" as TipoMockup, categoria: "", observacaoPrompt: "" };
 
 export default function MockupsPage() {
   const { session } = useAuth();
   return (
-    <AccessGuard permissions={["podeVisualizarCategoriasMidia"]}>
+    <AccessGuard permissions={["podeVisualizarCategoriasMidia", "podeCriarMockups"]}>
       <div className="space-y-8">
-        <PageHeader title="Mockups" description="Cadastre e consulte suas imagens de mockup na nuvem." />
+        <PageHeader title="Mockups" description="Cadastre e gerencie mockups e informativos na nuvem." />
         {session?.access_token && <CadastroMockups key={session.user.id} token={session.access_token} />}
       </div>
     </AccessGuard>
@@ -29,16 +30,20 @@ function CadastroMockups({ token }: { token: string }) {
   const [erroLista, setErroLista] = useState("");
   const [revisao, setRevisao] = useState(0);
   const [salvando, setSalvando] = useState(false);
+  const [carregandoEdicaoId, setCarregandoEdicaoId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState({ erro: "", sucesso: "" });
   const [selecionado, setSelecionado] = useState<Mockup | null>(null);
+  const [editando, setEditando] = useState<string | null>(null);
+  const [dados, setDados] = useState(estadoVazio);
+  const [imagem, setImagem] = useState<File | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setCarregando(true);
     setErroLista("");
-    requisitarMockups(token, "", { signal: controller.signal })
+    requisitarMockups(token, "?incluirInformativos=1", { signal: controller.signal })
       .then((response) => response.json())
-      .then((data) => {
+      .then((data: { mockups: Mockup[]; cursor: string | null }) => {
         if (controller.signal.aborted) return;
         setMockups(data.mockups);
         setCursor(data.cursor);
@@ -52,12 +57,42 @@ function CadastroMockups({ token }: { token: string }) {
     return () => controller.abort();
   }, [token, revisao]);
 
+  async function iniciarEdicao(mockup: Mockup) {
+    setCarregandoEdicaoId(mockup.id);
+    setFeedback({ erro: "", sucesso: "" });
+    try {
+      const response = await requisitarMockups(token, `?detalhesId=${encodeURIComponent(mockup.id)}`);
+      const { mockup: detalhes } = await response.json() as { mockup: Mockup };
+      setSelecionado(mockup);
+      setEditando(mockup.id);
+      setDados({
+        nome: detalhes.nome,
+        tipo: detalhes.tipo,
+        categoria: detalhes.categoria ?? "",
+        observacaoPrompt: detalhes.observacaoPrompt ?? "",
+      });
+      setImagem(null);
+    } catch (error) {
+      setFeedback({ erro: mensagemMockups(error), sucesso: "" });
+    } finally {
+      setCarregandoEdicaoId(null);
+    }
+  }
+
+  function novoCadastro() {
+    setSelecionado(null);
+    setEditando(null);
+    setDados(estadoVazio);
+    setImagem(null);
+    setFeedback({ erro: "", sucesso: "" });
+  }
+
   async function carregarMais() {
     if (!cursor || carregando) return;
     setCarregando(true);
     setErroLista("");
     try {
-      const response = await requisitarMockups(token, `?cursor=${encodeURIComponent(cursor)}`);
+      const response = await requisitarMockups(token, `?incluirInformativos=1&cursor=${encodeURIComponent(cursor)}`);
       const data = await response.json() as { mockups: Mockup[]; cursor: string | null };
       setMockups((atuais) => [...atuais, ...data.mockups.filter((item) => !atuais.some(({ id }) => id === item.id))]);
       setCursor(data.cursor);
@@ -71,28 +106,51 @@ function CadastroMockups({ token }: { token: string }) {
   async function salvar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (salvando) return;
-    const form = event.currentTarget;
-    const dados = new FormData(form);
-    const nome = String(dados.get("nome") ?? "").trim();
-    const imagem = dados.get("imagem");
     setFeedback({ erro: "", sucesso: "" });
-    if (!nome || !(imagem instanceof File) || !imagem.size || imagem.size > MOCKUP_MAX_BYTES) {
-      setFeedback({ erro: "Informe o nome e selecione uma imagem de até 4 MB.", sucesso: "" });
+    if (!dados.nome.trim()) {
+      setFeedback({ erro: "Informe o nome do arquivo.", sucesso: "" });
+      return;
+    }
+    if (!editando && !imagem) {
+      setFeedback({ erro: "Selecione uma imagem para cadastrar.", sucesso: "" });
+      return;
+    }
+    if (imagem && (!imagem.size || imagem.size > MOCKUP_MAX_BYTES)) {
+      setFeedback({ erro: "Selecione uma imagem de até 4 MB.", sucesso: "" });
       return;
     }
 
+    const headers = {
+      "x-mockup-nome": encodeURIComponent(dados.nome.trim()),
+      "x-mockup-tipo": dados.tipo,
+      "x-mockup-categoria": encodeURIComponent(dados.categoria.trim()),
+      "x-mockup-observacao-prompt": encodeURIComponent(dados.observacaoPrompt.trim()),
+    };
     setSalvando(true);
     try {
-      const response = await requisitarMockups(token, "", {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "x-mockup-nome": encodeURIComponent(nome), "x-mockup-tipo": String(dados.get("tipo")) },
-        body: imagem,
-      });
+      let response: Response;
+      if (editando && imagem) {
+        response = await requisitarMockups(token, `?id=${encodeURIComponent(editando)}`, {
+          method: "PATCH", headers: { ...headers, "Content-Type": "application/octet-stream" }, body: imagem,
+        });
+      } else if (editando) {
+        response = await requisitarMockups(token, `?id=${encodeURIComponent(editando)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados),
+        });
+      } else {
+        response = await requisitarMockups(token, "", {
+          method: "POST", headers: { ...headers, "Content-Type": "application/octet-stream" }, body: imagem,
+        });
+      }
       const { mockup } = await response.json() as { mockup: Mockup };
-      setMockups((atuais) => [mockup, ...atuais.filter(({ id }) => id !== mockup.id)]);
+      setMockups((atuais) => editando
+        ? atuais.map((item) => item.id === mockup.id ? mockup : item)
+        : [mockup, ...atuais.filter(({ id }) => id !== mockup.id)]);
       setSelecionado(mockup);
-      setFeedback({ erro: "", sucesso: "Mockup salvo na nuvem." });
-      form.reset();
+      setEditando(null);
+      setDados(estadoVazio);
+      setImagem(null);
+      setFeedback({ erro: "", sucesso: editando ? "Alterações salvas." : "Mockup cadastrado na nuvem." });
     } catch (error) {
       setFeedback({ erro: mensagemMockups(error), sucesso: "" });
     } finally {
@@ -100,66 +158,100 @@ function CadastroMockups({ token }: { token: string }) {
     }
   }
 
+  async function excluir(mockup: Mockup) {
+    if (!window.confirm(`Excluir “${mockup.nome}” do catálogo e do bucket?`)) return;
+    setFeedback({ erro: "", sucesso: "" });
+    try {
+      await requisitarMockups(token, `?id=${encodeURIComponent(mockup.id)}`, { method: "DELETE" });
+      setMockups((atuais) => atuais.filter(({ id }) => id !== mockup.id));
+      if (selecionado?.id === mockup.id) setSelecionado(null);
+      if (editando === mockup.id) novoCadastro();
+      setFeedback({ erro: "", sucesso: "Arquivo excluído do catálogo e do bucket." });
+    } catch (error) {
+      setFeedback({ erro: mensagemMockups(error), sucesso: "" });
+    }
+  }
+
   return (
     <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
       <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-900">Cadastrar mockup</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold text-slate-900">{editando ? "Editar arquivo" : "Cadastrar arquivo"}</h2>
+          {editando && <button type="button" className={`${botao} border border-slate-300 text-slate-800`} onClick={novoCadastro}>Novo cadastro</button>}
+        </div>
         <form onSubmit={salvar} className="mt-4">
           <fieldset disabled={salvando} className="min-w-0 space-y-4">
             <div>
-              <label htmlFor="mockup-nome" className="block text-sm font-medium">Nome do mockup</label>
-              <input id="mockup-nome" name="nome" required maxLength={MOCKUP_NOME_MAX} className="input mt-1 min-h-11 w-full" />
+              <label htmlFor="mockup-nome" className="block text-sm font-medium">Nome do arquivo</label>
+              <input id="mockup-nome" value={dados.nome} onChange={(event) => setDados((atual) => ({ ...atual, nome: event.target.value }))}
+                required maxLength={MOCKUP_NOME_MAX} className="input mt-1 min-h-11 w-full" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="mockup-tipo" className="block text-sm font-medium">Tipo</label>
+                <select id="mockup-tipo" value={dados.tipo} disabled={Boolean(editando)}
+                  onChange={(event) => setDados((atual) => ({ ...atual, tipo: event.target.value as TipoMockup }))} className="input mt-1 min-h-11 w-full">
+                  <option value="INDIVIDUAL">Individual</option>
+                  <option value="LAYOUT">Layout</option>
+                  <option value="INFORMATIVO">Informativo</option>
+                </select>
+                {editando && <p className="mt-1 text-xs text-slate-500">O tipo é fixado no cadastro para preservar a compatibilidade com lotes já criados.</p>}
+              </div>
+              <div>
+                <label htmlFor="mockup-categoria" className="block text-sm font-medium">Categoria / produto</label>
+                <input id="mockup-categoria" value={dados.categoria} onChange={(event) => setDados((atual) => ({ ...atual, categoria: event.target.value }))}
+                  maxLength={MOCKUP_CATEGORIA_MAX} className="input mt-1 min-h-11 w-full" placeholder="Ex.: Lenço, Painel, Forro redondo" />
+              </div>
             </div>
             <div>
-              <label htmlFor="mockup-tipo" className="block text-sm font-medium">Tipo</label>
-              <select id="mockup-tipo" name="tipo" className="input mt-1 min-h-11">
-                <option value="INDIVIDUAL">Individual</option>
-                <option value="LAYOUT">Layout</option>
-              </select>
+              <label htmlFor="mockup-observacao" className="block text-sm font-medium">Observação para o prompt</label>
+              <textarea id="mockup-observacao" value={dados.observacaoPrompt} onChange={(event) => setDados((atual) => ({ ...atual, observacaoPrompt: event.target.value }))}
+                maxLength={MOCKUP_OBSERVACAO_MAX} rows={4} className="input mt-1 w-full" placeholder="Explique onde e como a estampa deve ser aplicada, incluindo dobras, quadros ou repetição." />
+              <p className="mt-1 text-xs text-slate-600">Instruções específicas anexadas ao prompt de geração deste mockup.</p>
             </div>
             <div>
-              <label htmlFor="mockup-imagem" className="block text-sm font-medium">Imagem</label>
-              <input id="mockup-imagem" name="imagem" type="file" required accept={MOCKUP_FORMATOS}
+              <label htmlFor="mockup-imagem" className="block text-sm font-medium">Imagem {editando ? "(opcional para substituir)" : ""}</label>
+              <input id="mockup-imagem" type="file" accept={MOCKUP_FORMATOS} required={!editando} onChange={(event) => setImagem(event.target.files?.[0] ?? null)}
                 aria-describedby="mockup-formatos" className="input mt-1 min-h-11 w-full min-w-0" />
-              <p id="mockup-formatos" className="mt-1 text-xs text-slate-600">Imagem quadrada (1:1). JPG, PNG ou WebP estático, até 4 MB e 16 megapixels.</p>
+              <p id="mockup-formatos" className="mt-1 text-xs text-slate-600">JPG, PNG ou WebP estático, até 4 MB e 16 megapixels. A proporção original da imagem é preservada.</p>
             </div>
             <button className={`${botao} w-full bg-slate-900 text-white sm:w-auto`} type="submit">
-              {salvando ? "Salvando na nuvem…" : "Salvar mockup"}
+              {salvando ? "Salvando…" : editando ? "Salvar alterações" : "Cadastrar no bucket"}
             </button>
           </fieldset>
           {feedback.erro && <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{feedback.erro}</p>}
-          <p role="status" className="text-sm text-emerald-700 dark:text-emerald-300">{feedback.sucesso}</p>
+          <p role="status" className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">{feedback.sucesso}</p>
         </form>
       </section>
 
       <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-900">Mockups cadastrados</h2>
+        <h2 className="font-semibold text-slate-900">Arquivos cadastrados</h2>
         {erroLista && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erroLista}</p>}
-        {erroLista && !cursor && (
-          <button type="button" className={`${botao} border border-slate-300`} onClick={() => setRevisao((valor) => valor + 1)}>
-            Tentar novamente
-          </button>
-        )}
-        {carregando && <p role="status" className="text-sm text-slate-600">Carregando mockups…</p>}
-        {!carregando && !erroLista && !mockups.length && <p className="text-sm text-slate-600">Nenhum mockup cadastrado.</p>}
+        {erroLista && !cursor && <button type="button" className={`${botao} border border-slate-300`} onClick={() => setRevisao((valor) => valor + 1)}>Tentar novamente</button>}
+        {carregando && <p role="status" className="text-sm text-slate-600">Carregando arquivos…</p>}
+        {!carregando && !erroLista && !mockups.length && <p className="text-sm text-slate-600">Nenhum arquivo cadastrado.</p>}
         {mockups.length > 0 && (
-          <ul className="max-h-72 divide-y divide-slate-200 overflow-y-auto rounded-md border border-slate-200">
+          <ul className="max-h-[34rem] divide-y divide-slate-200 overflow-y-auto rounded-md border border-slate-200">
             {mockups.map((mockup) => (
-              <li key={mockup.id}>
-                <button type="button" aria-pressed={selecionado?.id === mockup.id}
-                  onClick={() => setSelecionado(mockup)}
-                  className="min-h-11 w-full break-words px-3 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:-outline-offset-2 aria-pressed:bg-slate-100 dark:hover:bg-slate-800 dark:aria-pressed:bg-slate-800">
-                  {mockup.nome} · {mockup.tipo === "LAYOUT" ? "Layout" : "Individual"}
+              <li key={mockup.id} className="flex min-w-0 flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <button type="button" aria-pressed={selecionado?.id === mockup.id} onClick={() => setSelecionado(mockup)}
+                  className="min-h-11 min-w-0 break-words text-left text-sm hover:underline focus-visible:outline focus-visible:outline-2 aria-pressed:font-semibold">
+                  <span className="block">{mockup.nome}</span>
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {mockup.tipo === "LAYOUT" ? "Layout" : mockup.tipo === "INFORMATIVO" ? "Informativo" : "Individual"}
+                    {mockup.categoria ? ` · ${mockup.categoria}` : ""}
+                  </span>
                 </button>
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" disabled={carregandoEdicaoId === mockup.id} className={`${botao} border border-slate-300 text-slate-800`}
+                    onClick={() => void iniciarEdicao(mockup)}>{carregandoEdicaoId === mockup.id ? "Carregando…" : "Editar"}</button>
+                  <button type="button" className={`${botao} border border-rose-300 text-rose-700 hover:bg-rose-50`} onClick={() => void excluir(mockup)}>Excluir</button>
+                </div>
               </li>
             ))}
           </ul>
         )}
-        {cursor && (
-          <button type="button" disabled={carregando} onClick={() => void carregarMais()} className={`${botao} border border-slate-300`}>
-            Carregar mais
-          </button>
-        )}
+        {cursor && <button type="button" disabled={carregando} onClick={() => void carregarMais()} className={`${botao} border border-slate-300`}>Carregar mais</button>}
         {selecionado && <VisualizacaoMockup key={selecionado.id} mockup={selecionado} token={token} />}
       </section>
     </div>

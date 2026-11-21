@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { MAX_SAIDAS_MOCKUPS } from "@/lib/fila-mockups-contrato";
 import { pedidoFilaMockups, trabalhoFilaMockups } from "@/lib/fila-mockups";
-import { mockupPorId } from "@/lib/mockups-imagem";
+import { interpretarIdMockup } from "@/lib/mockups";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { GoogleStorageServiceError, lerGoogleStorageImagemPrivada } from "@/services/googleStorageService";
@@ -89,14 +89,20 @@ async function consultarFilaMockups(request: Request) {
     }) : [];
     const codigos = new Map(estampas.map(({ id, codigo, variante }) =>
       [String(id), variante ? `${codigo}-${variante}` : codigo]));
+    const idsMockups = combinacoes.flatMap(({ trabalho }) =>
+      typeof trabalho.mockupId === "string" ? [trabalho.mockupId] : []);
+    const modelos = idsMockups.length ? await prisma.mockupCatalogo.findMany({
+      where: { aplicativoId: escopo.aplicativoId, id: { in: [...new Set(idsMockups)] }, ativo: true },
+      select: { id: true, nome: true },
+    }) : [];
+    const nomesMockups = new Map(modelos.map(({ id, nome }) => [id, nome]));
     return NextResponse.json({
       status: lote.status,
       saidas: combinacoes.map(({ trabalho, ids }, indice) => {
         const resultado = objeto(resultados[indice]);
-        const modelo = typeof trabalho.mockupId === "string" ? mockupPorId(trabalho.mockupId) : null;
         return {
           numero: indice + 1,
-          nome: modelo?.nome ?? "Mockup",
+          nome: typeof trabalho.mockupId === "string" ? nomesMockups.get(trabalho.mockupId) ?? "Mockup" : "Mockup",
           estampas: ids.map((id) => codigos.get(id) ?? `Estampa #${id}`),
           status: resultado.status === "COMPLETED" || resultado.status === "FAILED" ? resultado.status : "PENDING",
           erro: typeof resultado.erro === "string" ? resultado.erro : undefined,
@@ -178,14 +184,26 @@ async function enviarFilaMockups(request: Request) {
     if (existente) return existente;
 
     const idsMockups = [...new Set(trabalhos.map(({ mockupId }) => mockupId))];
-    if (idsMockups.some((id) => !mockupPorId(id))) return erro("Selecione mockups válidos.", 400);
+    if (idsMockups.some((id) => !interpretarIdMockup(id))) return erro("Selecione mockups válidos.", 400);
     const storeId = getMockupBlobStoreId();
     if (!storeId) return erro("O armazenamento de mockups ainda não foi configurado na Vercel.", 503);
 
-    const [estampasAtivas, mockupsExistem] = await Promise.all([
+    const [estampasAtivas, modelos] = await Promise.all([
       prisma.estampaCatalogoIa.count({ where: { id: { in: estampas.map(BigInt) }, isActive: true } }),
-      mockupBlobStorage.existem(idsMockups.map((id) => `mockups/${escopo.aplicativoId}/${id}.webp`)),
+      prisma.mockupCatalogo.findMany({
+        where: { aplicativoId: escopo.aplicativoId, id: { in: idsMockups }, ativo: true },
+        select: { id: true, tipo: true, storagePath: true },
+      }),
     ]);
+    const porId = new Map(modelos.map((modelo) => [modelo.id, modelo]));
+    const modelosValidos = porId.size === idsMockups.length
+      && trabalhos.every(({ mockupId, estampaIds }) => {
+        const modelo = porId.get(mockupId);
+        return modelo && (modelo.tipo === "LAYOUT" || (modelo.tipo === "INDIVIDUAL" && estampaIds.length === 1));
+      })
+      && trabalhos.every((trabalho, indice) => trabalhos.every((outro, outroIndice) =>
+        indice === outroIndice || trabalho.mockupId !== outro.mockupId || porId.get(trabalho.mockupId)?.tipo !== "LAYOUT"));
+    const mockupsExistem = modelosValidos && await mockupBlobStorage.existem(modelos.map(({ storagePath }) => storagePath));
     if (estampasAtivas !== estampas.length || !mockupsExistem) {
       return erro("Uma estampa ou um mockup ficou indisponível. Revise a seleção.", 422);
     }
