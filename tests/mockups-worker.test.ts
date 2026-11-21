@@ -90,7 +90,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       return existe;
     },
     ler: async (pathname: string, contentType: string) => {
-      assert.equal(pathname, `mockups/${reserva.aplicativoId}/${mockupId}.webp`);
+      assert.equal(pathname, `private/modelos/${mockupId}.webp`);
       assert.equal(contentType, "image/webp");
       return new Response(modelo).body!;
     },
@@ -111,6 +111,11 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       assert.match(sql.join(""), /FOR UPDATE SKIP LOCKED/);
       return semTrabalho ? [] : [reserva];
     },
+    mockupCatalogo: { findUnique: async ({ where }: { where: { aplicativoId_id: { aplicativoId: string; id: string } } }) => {
+      assert.equal(where.aplicativoId_id.aplicativoId, reserva.aplicativoId);
+      assert.equal(where.aplicativoId_id.id, mockupId);
+      return { tipo: "LAYOUT", observacaoPrompt: "Layout: uma estampa por quadro", storagePath: `private/modelos/${mockupId}.webp`, ativo: true };
+    } },
     estampaCatalogoIa: { findMany: async () => [
       { id: BigInt(1), previewUrl: "https://storage.googleapis.com/teste/1.png", codigo: "MV1", variante: "A", cores: ["vermelho"] },
       { id: BigInt(2), previewUrl: "https://storage.googleapis.com/teste/2.png", codigo: "MV2", variante: "B",
@@ -143,7 +148,7 @@ test("worker preserva ordem, registra somente a reserva vigente e reutiliza uplo
       gerar: async (base, estampas, layout, contexto) => {
         chamadasGerador++;
         assert.deepEqual([base, estampas, layout], [modelo, [b, a], true]);
-        assert.equal(contexto?.observacao, "Oxford fosco");
+        assert.equal(contexto?.observacao, "Layout: uma estampa por quadro\n\nOxford fosco");
         assert.deepEqual(contexto?.estampas?.map(({ codigo, variante }) => [codigo, variante]), [["MV2", "B"], ["MV1", "A"]]);
         const prompt = montarPromptFilaMockups(["layout.png", "mv2.png", "mv1.png"], layout, contexto);
         assert.match(prompt, /"posicao": 1,\s*"imagemDeReferencia": 2,\s*"codigo": "MV2"/);

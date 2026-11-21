@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { trabalhoFilaMockups } from "@/lib/fila-mockups";
 import { camposEstampaPrompt, descreverEstampaMockup } from "@/lib/prompt-fila-mockups";
-import { interpretarIdMockup } from "@/lib/mockups";
 import {
   registrarSaidaMockup, reagendarSaidaMockup,
   reservarSaidaMockup, type ReservaMockup, type SaidaMockup,
@@ -50,6 +49,16 @@ async function gerarSaida({ storeId, gerador }: Opcoes, armazenamento: Armazenam
   const trabalho = trabalhoFilaMockups.safeParse(reserva.trabalhos[reserva.proximaSaida]);
   if (!trabalho.success) return { status: "FAILED", erro: "COMBINACAO_INVALIDA" };
   const { mockupId, estampaIds } = trabalho.data;
+  const registroModelo = await prisma.mockupCatalogo.findUnique({
+    where: { aplicativoId_id: { aplicativoId: reserva.aplicativoId, id: mockupId } },
+    select: { tipo: true, observacaoPrompt: true, storagePath: true, ativo: true },
+  });
+  if (!registroModelo?.ativo || (registroModelo.tipo !== "INDIVIDUAL" && registroModelo.tipo !== "LAYOUT")) {
+    return { status: "FAILED", erro: "MOCKUP_INDISPONIVEL" };
+  }
+  if (registroModelo.tipo === "INDIVIDUAL" && estampaIds.length !== 1) {
+    return { status: "FAILED", erro: "COMBINACAO_INVALIDA" };
+  }
   const path = `mockups-gerados/${reserva.aplicativoId}/${reserva.solicitadoPor}/${reserva.id}/${reserva.proximaSaida + 1}.webp`;
   if (await armazenamento.existe(path)) {
     return { status: "COMPLETED", bucket: storeId, path };
@@ -64,14 +73,15 @@ async function gerarSaida({ storeId, gerador }: Opcoes, armazenamento: Armazenam
   const ordenadas = estampaIds.map((id) => porId.get(id)).filter((item) => item !== undefined);
   if (ordenadas.length !== estampaIds.length || ordenadas.some((item) => !item.previewUrl)) return { status: "FAILED", erro: "ESTAMPA_SEM_PREVIEW" };
 
-  const [modelo, ...artes] = await Promise.all([
-    carregarModelo(armazenamento, `mockups/${reserva.aplicativoId}/${mockupId}.webp`),
+  const [modeloBuffer, ...artes] = await Promise.all([
+    carregarModelo(armazenamento, registroModelo.storagePath),
     ...ordenadas.map(async (item) => (await carregarPreviewEstampa({
       id: String(item.id), preview_url: item.previewUrl,
     })).buffer),
   ]);
-  const gerada = await gerador.gerar(modelo, artes, interpretarIdMockup(mockupId)?.tipo === "LAYOUT", {
-    observacao: reserva.observacao,
+  const observacao = [registroModelo.observacaoPrompt.trim(), reserva.observacao.trim()].filter(Boolean).join("\n\n");
+  const gerada = await gerador.gerar(modeloBuffer, artes, registroModelo.tipo === "LAYOUT", {
+    observacao,
     estampas: ordenadas.map(descreverEstampaMockup),
   });
   try {

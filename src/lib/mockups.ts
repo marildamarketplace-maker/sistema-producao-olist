@@ -1,9 +1,17 @@
 export const MOCKUP_MAX_BYTES = 4 * 1024 * 1024;
 export const MOCKUP_FORMATOS = "image/jpeg,image/png,image/webp";
 export const MOCKUP_NOME_MAX = 100;
+export const MOCKUP_CATEGORIA_MAX = 80;
+export const MOCKUP_OBSERVACAO_MAX = 1500;
 
-export type TipoMockup = "INDIVIDUAL" | "LAYOUT";
-export type Mockup = { id: string; nome: string; tipo: TipoMockup };
+export type TipoMockup = "INDIVIDUAL" | "LAYOUT" | "INFORMATIVO";
+export type Mockup = {
+  id: string;
+  nome: string;
+  tipo: TipoMockup;
+  categoria?: string;
+  observacaoPrompt?: string;
+};
 
 export function interpretarIdMockup(id: string): { tipo: TipoMockup; nomeCodificado: string } | null {
   const match = /^(layout-)?[a-f0-9]{64}-([A-Za-z0-9_-]{1,536})$/.exec(id);
