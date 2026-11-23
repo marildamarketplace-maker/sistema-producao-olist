@@ -49,6 +49,8 @@ export interface IdentidadeContaSync {
 export interface ResultadoMutacaoSync { id: string | null }
 
 export interface OpcoesConsultaSync {
+  /** Nome original usado como filtro remoto, validado contra a chave por nome. */
+  nomeContato?: string;
   /** Cache privado de identidade por credencial; escritas sempre validam /info. */
   reutilizarIdentidade?: boolean;
   /** Executados para cada HTTP, inclusive /info; nunca recebem dados pessoais. */

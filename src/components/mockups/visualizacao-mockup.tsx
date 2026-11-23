@@ -8,12 +8,13 @@ export function VisualizacaoMockup({ mockup, token }: { mockup: Mockup; token: s
   return <ImagemPrivadaMockup nome={mockup.nome} token={token} rota={`?id=${encodeURIComponent(mockup.id)}`} />;
 }
 
-export function ImagemPrivadaMockup({ nome, token, rota, arquivo, miniatura = false }: {
+export function ImagemPrivadaMockup({ nome, token, rota, arquivo, miniatura = false, onAmpliar }: {
   nome: string;
   token: string;
   rota: string;
   arquivo?: string;
   miniatura?: boolean;
+  onAmpliar?: () => void;
 }) {
   const quadro = useRef<HTMLDivElement>(null);
   const [visivel, setVisivel] = useState(!miniatura);
@@ -72,9 +73,17 @@ export function ImagemPrivadaMockup({ nome, token, rota, arquivo, miniatura = fa
         </div>
       ) : url ? (
         <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={nome} className={miniatura ? "h-full w-full rounded-md object-contain"
-            : "max-h-96 w-full rounded-md border border-slate-200 bg-slate-100 object-contain"} />
+          {onAmpliar ? (
+            <button type="button" onClick={onAmpliar} aria-label={`Ampliar imagem de ${nome}`} aria-haspopup="dialog"
+              className="h-full min-h-11 w-full min-w-0 cursor-zoom-in rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={nome} className="h-full w-full rounded-md object-contain" />
+            </button>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={url} alt={nome} className={miniatura ? "h-full w-full rounded-md object-contain"
+              : "max-h-96 w-full rounded-md border border-slate-200 bg-slate-100 object-contain"} />
+          )}
           {arquivo && <a href={url} download={arquivo}
             className="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 text-sm font-medium hover:bg-slate-100">
             Baixar WebP

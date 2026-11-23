@@ -82,8 +82,33 @@ export function normalizarDocumento(valor: unknown): string | null {
   return null;
 }
 
+/** Documento do contato é dado da Olist: só normaliza a representação.
+ * Não verifica tamanho fiscal, sequência repetida ou dígitos verificadores.
+ * O limite textual protege o contrato; não consulta nem infere titularidade. */
+export function normalizarDocumentoContato(valor: unknown): string | null {
+  if (typeof valor !== "string" || valor.length > 32) return null;
+  return valor.replace(/[.\/\-\s]/g, "").toUpperCase() || null;
+}
+
 export function normalizarNome(nome: string): string {
   return nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+// Identidade por nome é restrita a contatos com documento realmente vazio.
+// Preserva acentos e pontuação: não usa similaridade para unir pessoas.
+export const VERSAO_IDENTIDADE_CONTATO = 3;
+export function chaveContatoPorNome(nome: unknown): string | null {
+  if (typeof nome !== "string" || nome.length > 200 || /[*\p{Cc}]/u.test(nome)) return null;
+  const normalizado = nome.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+  return normalizado.length >= 2 && /\p{L}/u.test(normalizado) ? `nome:${normalizado}` : null;
+}
+
+export function chaveContatoSync(campos: CamposSync): string | null {
+  const documento = normalizarDocumentoContato(campos.cpfCnpj);
+  if (documento) return documento;
+  if (campos.cpfCnpj !== null && campos.cpfCnpj !== undefined &&
+    (typeof campos.cpfCnpj !== "string" || campos.cpfCnpj.trim() !== "")) return null;
+  return chaveContatoPorNome(campos.nome);
 }
 
 /** Apenas indício para revisão; nunca é uma chave de correspondência. */
@@ -190,9 +215,13 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
     campos = projetarTextos(fonte, TEXTOS_CONTATO, completo);
     for (const campo of ["telefone", "celular", "telefoneAdicional"] as const)
       if (campo in campos) campos[campo] = normalizarTelefoneContato(campos[campo]);
-    chave = normalizarDocumento(fonte.cpfCnpj);
+    chave = entidade === "CONTATO" ? normalizarDocumentoContato(fonte.cpfCnpj) : normalizarDocumento(fonte.cpfCnpj);
     if (chave) campos.cpfCnpj = chave;
     nome = texto(fonte.nome) ?? "";
+    if (entidade === "CONTATO" && completo && !chave && situacao !== "E") {
+      chave = chaveContatoSync(campos);
+      if (chave?.startsWith("nome:")) campos.cpfCnpj = null;
+    }
     for (const campo of ["endereco", "enderecoCobranca"] as const) {
       if (completo || campo in fonte) campos[campo] = estruturaTextos(fonte[campo], ENDERECO);
     }
@@ -330,10 +359,10 @@ export function prepararPayload(entidade: EntidadeSync, campos: CamposSync, opco
     return payload;
   }
   const payload = projetarTextos(campos, TEXTOS_CONTATO, false);
-  const documento = normalizarDocumento(payload.cpfCnpj);
-  if (!documento || typeof payload.nome !== "string" || !payload.nome.trim()) throw new FalhaSync("OBRIGATORIOS", "O contato precisa de nome e documento válido.");
-  if ((documento.length === 11 && payload.tipoPessoa !== "F") || (documento.length === 14 && payload.tipoPessoa !== "J")) {
-    throw new FalhaSync("IDENTIDADE_INCOMPATIVEL", "O tipo de pessoa não corresponde ao documento.");
+  const documento = normalizarDocumentoContato(payload.cpfCnpj);
+  if (!chaveContatoSync(payload) || typeof payload.nome !== "string" || !payload.nome.trim()) throw new FalhaSync("OBRIGATORIOS", "O contato precisa de documento preenchido ou, quando ausente, nome não anonimizado.");
+  if (!["F", "J", "E", "X"].includes(String(payload.tipoPessoa))) {
+    throw new FalhaSync("IDENTIDADE_INCOMPATIVEL", "O tipo de pessoa não corresponde ao contrato de contatos.");
   }
   payload.cpfCnpj = documento;
   if (campos.tiposContato !== undefined) payload.tiposContato = tiposSemanticosContatoSync(campos.tiposContato);

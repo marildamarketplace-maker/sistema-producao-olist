@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { EntidadeSync } from "./contrato";
 import { VERSAO_OBSERVACAO_CONTATO } from "./tipos-contato";
+import { VERSAO_IDENTIDADE_CONTATO } from "./dominio";
 
 export const VERSAO_CONTRATO_INCREMENTAL = 1;
 export const SOBREPOSICAO_INCREMENTAL_MS = 24 * 60 * 60 * 1000;
@@ -42,7 +43,7 @@ export function lerPlanoColeta(valor: unknown): PlanoColetaSync | null {
 
 // Horários, permissões e limites não mudam a semântica dos snapshots coletados.
 export function assinaturaEscopoSync(entidade: EntidadeSync, participantesIds: readonly string[]): string {
-  return createHash("sha256").update(JSON.stringify({ contrato: VERSAO_CONTRATO_INCREMENTAL, entidade, ...(entidade === "CONTATO" ? { projecaoContato: VERSAO_OBSERVACAO_CONTATO } : {}),
+  return createHash("sha256").update(JSON.stringify({ contrato: VERSAO_CONTRATO_INCREMENTAL, entidade, ...(entidade === "CONTATO" ? { projecaoContato: VERSAO_OBSERVACAO_CONTATO, identidadeContato: VERSAO_IDENTIDADE_CONTATO } : {}),
     participantes: [...new Set(participantesIds)].sort() })).digest("hex");
 }
 

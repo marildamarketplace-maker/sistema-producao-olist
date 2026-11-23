@@ -9,6 +9,7 @@ test("API cadastra, consulta, atualiza e exclui mockups com escopo e prompt", as
 
   const aplicativoId = "tenant-mockups";
   const usuarioId = "usuario-mockups";
+  let consultaLista: Record<string, unknown> = {};
   let salvo: Record<string, unknown> | null = null;
   let usoAtivo = false;
   let removido = false;
@@ -22,6 +23,7 @@ test("API cadastra, consulta, atualiza e exclui mockups com escopo e prompt", as
       }),
     },
     mockupCatalogo: {
+      findMany: async (query: Record<string, unknown>) => { consultaLista = query; return []; },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         salvo = { ...data, ativo: true };
         return data;
@@ -49,6 +51,31 @@ test("API cadastra, consulta, atualiza e exclui mockups com escopo e prompt", as
   t.mock.method(mockupBlobStorage, "remover", async () => { removido = true; });
 
   const { POST, GET, PATCH, DELETE } = await import("../src/app/api/controle-midia/mockups/route");
+  const listar = (query: string) => GET(new Request(`https://example.test/api/controle-midia/mockups?${query}`, {
+    headers: { Authorization: "Bearer teste" },
+  }));
+  const filtrada = await listar("incluirInformativos=1&nome=Forro&categoria=Mesa&tipo=LAYOUT");
+  assert.equal(filtrada.status, 200);
+  assert.deepEqual(consultaLista.where, { AND: [
+    { aplicativoId, ativo: true },
+    { nome: { contains: "Forro", mode: "insensitive" } },
+    { categoria: { contains: "Mesa", mode: "insensitive" } },
+    { tipo: "LAYOUT" },
+  ] });
+  assert.equal(consultaLista.take, 25);
+  assert.deepEqual(consultaLista.select, { id: true, nome: true, tipo: true, categoria: true, createdAt: true });
+  assert.deepEqual(consultaLista.orderBy, [{ createdAt: "desc" }, { id: "desc" }]);
+  const cursor = Buffer.from(JSON.stringify({ createdAt: "2026-11-23T12:00:00.000Z", id: "ultimo" })).toString("base64url");
+  assert.equal((await listar(`nome=Forro&cursor=${cursor}`)).status, 200);
+  const condicoes = (consultaLista.where as { AND: unknown[] }).AND;
+  assert.ok(condicoes.some((item) => JSON.stringify(item).includes('"contains":"Forro"')));
+  assert.ok(condicoes.some((item) => JSON.stringify(item).includes('"id":{"lt":"ultimo"}')));
+  for (const query of ["tipo=INVALIDO", `nome=${"a".repeat(181)}`, `categoria=${"a".repeat(501)}`]) {
+    assert.equal((await listar(query)).status, 400);
+  }
+  assert.equal((await listar("incluirInformativos=1")).status, 200);
+  assert.deepEqual(consultaLista.where, { AND: [{ aplicativoId, ativo: true }] });
+
   const png = await sharp({ create: { width: 12, height: 8, channels: 3, background: "white" } }).png().toBuffer();
   const headers = {
     Authorization: "Bearer teste",

@@ -83,8 +83,8 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
       for (const estado of estados) {
         const atual = observacaoProtegida(c.decifrar(estado.dadosCriptografados!, `${config.id}:estado:${estado.aplicativoId}:${p.entidade}:${estado.remoteId}`));
         const ativo = p.entidade === "FORMA_PAGAMENTO" ? atual.situacao === "1" : ["A", "B"].includes(atual.situacao);
-        if (!atual.completo || !ativo || (p.entidade === "CONTATO" && atual.chave !== null))
-          throw new ErroRepositorioSync("O vínculo manual exige cadastros ativos e completos; contatos com documento válido usam esse documento como identidade.");
+        if (!atual.completo || !ativo || (p.entidade === "CONTATO" && atual.chave !== null && !atual.chave.startsWith("nome:")))
+          throw new ErroRepositorioSync("O vínculo manual exige cadastros ativos e completos; contatos com documento preenchido usam esse documento como identidade.");
       }
       const registroId = randomUUID(), chave = `manual:${registroId}`;
       await tx.olistSyncRegistro.create({ data: { id: registroId, configuracaoId: config.id, entidade: p.entidade, chave, nome: "Equivalência declarada", origemTipo: "DESCONHECIDA", origemRegistradaEm: new Date() }, select: { id: true } });

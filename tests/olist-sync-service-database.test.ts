@@ -61,7 +61,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       }
       if (["/produtos","/formas-pagamento","/contatos"].some(recurso=>caminho.pathname.endsWith(recurso)) && r.metodo==="GET") {
         const codigo=caminho.searchParams.get("codigo"), offset=Number(caminho.searchParams.get("offset")??0), limit=Number(caminho.searchParams.get("limit")??100);
-        const itens=[...conta.values()].filter(item=>!codigo||item.sku===codigo);
+        const nome=caminho.searchParams.get("nome");
+        const itens=[...conta.values()].filter(item=>(!codigo||item.sku===codigo)&&(!nome||String(item.nome??"").toLocaleLowerCase("pt-BR").includes(nome.toLocaleLowerCase("pt-BR"))));
         return { status:200,dados:{itens:itens.slice(offset,offset+limit),paginacao:{total:itens.length,offset,limit}} };
       }
       const id=caminho.pathname.split("/").at(-1)!;
@@ -265,9 +266,132 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     const estados=await db.olistSyncEstado.findMany();assert.equal(estados.length,2);
     assert.ok(estados.every(estado=>estado.registroId===registro.id&&estado.chave===registro.chave&&estado.status==="SINCRONIZADO"));assert.equal(escritas().length,0);
   });
-  await t.test("vínculo manual de contatos sobrevive à reauditoria sem liberar escrita sem documento",async()=>{
+  for(const retorno of ["E","404"] as const)await t.test(`contato sem documento excluído (${retorno}) encerra só sua pendência e reabre se restaurado`,async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
-    for(const [app,id] of [[a,10],[b,20]] as const)contas.get(app)!.set(String(id),{id,nome:"Contato equivalente",cpfCnpj:"",tipoPessoa:"F",situacao:"B"});
+    const contato={id:10,nome:"J******e",cpfCnpj:"",tipoPessoa:"F",situacao:"B"};
+    contas.get(a)!.set("10",contato);contas.get(b)!.set("20",{...contato,id:20});
+    await terminar((await enfileirar("AUDITAR")).id);
+    const chaveDedupe=cripto.hash(`sem-chave:${a}:CONTATO:10`,`${config.id}:pendencia`);
+    const p=await db.olistSyncPendencia.findUniqueOrThrow({where:{configuracaoId_chaveDedupe:{configuracaoId:config.id,chaveDedupe}}});
+    const outra=await db.olistSyncPendencia.findFirstOrThrow({where:{aplicativoId:b}});
+    const falha=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,aplicativoId:a,entidade:"CONTATO",tipo:"OLIST_400",severidade:"ALTA",chaveDedupe:"outra-falha-na-mesma-conta"}});
+    if(retorno==="E")contas.get(a)!.set("10",{...contato,situacao:"E"});else contas.get(a)!.delete("10");
+    await terminar((await enfileirar()).id);
+    const resolvida=await db.olistSyncPendencia.findUniqueOrThrow({where:{id:p.id}});
+    assert.equal(resolvida.status,"RESOLVIDA");assert.equal(resolvida.versao,p.versao+1);assert.ok(resolvida.decididoEm);
+    assert.deepEqual(resolvida.decisaoJson,{acao:"ENCERRAR_CONTATO_REMOVIDO",origem:"AUDITORIA_OLIST"});
+    const estado=await db.olistSyncEstado.findFirstOrThrow({where:{aplicativoId:a,remoteId:"10"}});
+    assert.equal(estado.presente,false);assert.equal(estado.status,"INATIVO_EXCLUIDO");assert.equal(estado.detalhePendente,false);
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:outra.id}})).status,"AGUARDANDO_REVISAO");
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:falha.id}})).status,"AGUARDANDO_REVISAO");
+    await terminar((await enfileirar()).id);
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:p.id}})).versao,resolvida.versao,"Exclusão repetida é idempotente");
+    contas.get(a)!.set("10",contato);await terminar((await enfileirar()).id);
+    const reaberta=await db.olistSyncPendencia.findUniqueOrThrow({where:{id:p.id}});
+    assert.equal(reaberta.status,"AGUARDANDO_REVISAO");assert.equal(reaberta.decididoEm,null);
+    assert.equal((await db.olistSyncEstado.findUniqueOrThrow({where:{id:estado.id}})).presente,true);
+    assert.equal(escritas().length,0,"Não recria nem altera contatos na Olist");
+  });
+  for(const retorno of ["I","503"] as const)await t.test(`contato sem documento com ${retorno} não encerra pendência como se excluído`,async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    contas.get(a)!.set("10",{id:10,nome:"A******a",cpfCnpj:"",tipoPessoa:"F",situacao:"B"});
+    await terminar((await enfileirar("AUDITAR")).id);
+    const pendencia=await db.olistSyncPendencia.findFirstOrThrow({where:{aplicativoId:a}});
+    if(retorno==="I")contas.get(a)!.get("10")!.situacao="I";
+    else responder=async(r,app)=>app===a&&new URL(r.url).pathname.endsWith("/contatos/10")?{status:503,dados:{}}:undefined;
+    await terminar((await enfileirar("AUDITAR")).id);
+    const atual=await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}});
+    assert.equal(atual.status,"AGUARDANDO_REVISAO");assert.equal(atual.decididoEm,null);
+    assert.equal((await db.olistSyncEstado.findFirstOrThrow({where:{aplicativoId:a,remoteId:"10"}})).presente,true);
+    assert.equal(escritas().length,0);
+  });
+  for(const respostaPerdida of [false,true])await t.test(`contato sem documento cria por nome e não duplica em retomada (resposta perdida: ${respostaPerdida})`,async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    const origem={id:10,nome:"Eva do Pilar Santos Melo",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]};
+    contas.get(a)!.set("10",origem);
+    const observada=observarRegistro("CONTATO",origem,{completo:true});
+    const antiga={id:observada.id,nome:observada.nome,situacao:observada.situacao,campos:observada.campos,alteradoEm:null,completo:true,chave:null,pendencias:["IDENTIDADE_AUSENTE_OU_INVALIDA"]};
+    await db.olistSyncEstado.create({data:{configuracaoId:config.id,aplicativoId:a,entidade:"CONTATO",remoteId:"10",chave:null,metadadosJson:{completo:true},dadosCriptografados:cripto.cifrar(antiga,`${config.id}:estado:${a}:CONTATO:10`)}});
+    const chaveDedupe=cripto.hash(`sem-chave:${a}:CONTATO:10`,`${config.id}:pendencia`);
+    const pendente=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,aplicativoId:a,entidade:"CONTATO",tipo:"IDENTIDADE_REQUER_REVISAO",severidade:"ALTA",chaveDedupe}});
+    postIncerto=respostaPerdida;const execucao=await enfileirar();
+    await avancarAte(async()=>await db.olistSyncEtapa.count({where:{execucaoId:execucao.id,aplicativoId:b,cursorJson:{path:["fase"],equals:"FONTES_NOME"}}})>0,"busca de homônimos aguarda em checkpoint próprio");
+    const etapaNome=await db.olistSyncEtapa.findFirstOrThrow({where:{execucaoId:execucao.id,aplicativoId:b,fase:"APLICAR"}});
+    const janelaFonte=await db.olistSyncParticipante.findUniqueOrThrow({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:a}}});
+    assert.equal(etapaNome.disponivelEm.getTime(),janelaFonte.proximaChamadaEm!.getTime(),"Busca respeita a janela da fonte, não só a do destino");
+    await terminar(execucao.id);
+    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,1);
+    assert.equal([...contas.get(b)!.values()][0].cpfCnpj,null);
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendente.id}})).status,"RESOLVIDA");
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);
+    assert.ok(chamadas.some(r=>new URL(r.url).searchParams.has("nome")));
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,1,"Reauditoria não repete a criação");
+    assert.equal(await db.olistSyncEstado.count({where:{presente:true,registroId:{not:null}}}),2);
+  });
+  await t.test("contatos já existentes sem documento são comparados pelo nome sem novo POST",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    for(const [app,id]of [[a,10],[b,20]]as const)contas.get(app)!.set(String(id),{id,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]});
+    await terminar((await enfileirar()).id);
+    assert.equal(escritas().length,0);assert.equal(await db.olistSyncRegistro.count(),1);
+    assert.equal(await db.olistSyncEstado.count({where:{status:"SINCRONIZADO"}}),2);
+  });
+  await t.test("homônimos sem documento na mesma empresa bloqueiam antes de escrever",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    for(const id of [10,11])contas.get(a)!.set(String(id),{id,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]});
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{tipo:"IDENTIDADE_DUPLICADA",status:"AGUARDANDO_REVISAO"}}));
+  });
+  await t.test("homônimo criado na origem após auditoria bloqueia a aplicação por nome",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    const contato={id:10,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]};
+    contas.get(a)!.set("10",contato);await terminar((await enfileirar("AUDITAR")).id);
+    contas.get(a)!.set("11",{...contato,id:11});
+    await terminar((await enfileirar("APLICAR")).id);assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{tipo:"IDENTIDADE_DUPLICADA",status:"AGUARDANDO_REVISAO"}}));
+  });
+  await t.test("nome sem documento não é unido a CPF preenchido nem gera criação reversa duplicada",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    contas.get(a)!.set("10",{id:10,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]});
+    contas.get(b)!.set("20",{id:20,nome:"Eva Santos",cpfCnpj:"52998224725",tipoPessoa:"F",situacao:"B",tipos:[]});
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{tipo:{in:["POSSIVEL_DUPLICIDADE","IDENTIDADE_INCOMPATIVEL"]},status:"AGUARDANDO_REVISAO"}}));
+  });
+  for(const respostaPerdida of [false,true])await t.test(`contato com DV inválido é sincronizado e encerra revisão antiga (resposta perdida: ${respostaPerdida})`,async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    const origem={id:10,nome:"Contato Teste",cpfCnpj:"52998224726",tipoPessoa:"F",situacao:"B",tipos:[]};
+    contas.get(a)!.set("10",origem);
+    const obs=observarRegistro("CONTATO",origem,{completo:true});
+    const antiga={id:obs.id,nome:obs.nome,situacao:obs.situacao,campos:obs.campos,alteradoEm:null,completo:true,chave:null,pendencias:["IDENTIDADE_AUSENTE_OU_INVALIDA"]};
+    await db.olistSyncEstado.create({data:{configuracaoId:config.id,aplicativoId:a,entidade:"CONTATO",remoteId:"10",chave:null,metadadosJson:{completo:true},dadosCriptografados:cripto.cifrar(antiga,`${config.id}:estado:${a}:CONTATO:10`)}});
+    const pendente=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,aplicativoId:a,entidade:"CONTATO",tipo:"IDENTIDADE_REQUER_REVISAO",severidade:"ALTA",chaveDedupe:cripto.hash(`sem-chave:${a}:CONTATO:10`,`${config.id}:pendencia`)}});
+    postIncerto=respostaPerdida;
+    await terminar((await enfileirar()).id);
+    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,1);
+    assert.equal([...contas.get(b)!.values()][0].cpfCnpj,origem.cpfCnpj);
+    assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendente.id}})).status,"RESOLVIDA");
+    assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);
+    assert.ok(chamadas.some(r=>new URL(r.url).searchParams.get("cpfCnpj")===origem.cpfCnpj));
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,1);
+  });
+  await t.test("documento sem validação local mantém bloqueio de duplicidade e rejeição real da Olist",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    const origem={id:10,nome:"Contato Teste",cpfCnpj:"00000000000",tipoPessoa:"F",situacao:"B",tipos:[]};
+    for(const id of [10,11])contas.get(a)!.set(String(id),{...origem,id});
+    await terminar((await enfileirar()).id);
+    assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{tipo:"IDENTIDADE_DUPLICADA",status:"AGUARDANDO_REVISAO"}}));
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    contas.get(a)!.set("10",origem);
+    responder=async(r,app)=>app===b&&r.metodo==="POST"?{status:400,dados:{}}:undefined;
+    await terminar((await enfileirar()).id);
+    assert.equal(escritas().length,1);
+    assert.equal((await db.olistSyncOperacao.findFirstOrThrow()).status,"FALHA_PERMANENTE");
+    assert.ok(await db.olistSyncPendencia.count({where:{tipo:"OLIST_400",status:"AGUARDANDO_REVISAO"}}));
+    await terminar((await enfileirar("APLICAR")).id);assert.equal(escritas().length,1,"Rejeição permanente não repete POST");
+  });
+  await t.test("vínculo manual de contatos mascarados sobrevive à reauditoria sem liberar escrita",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    for(const [app,id] of [[a,10],[b,20]] as const)contas.get(app)!.set(String(id),{id,nome:"C******e",cpfCnpj:null,tipoPessoa:"F",situacao:"B"});
     await terminar((await enfileirar("AUDITAR")).id);
     const pendencia=await db.olistSyncPendencia.findFirstOrThrow({where:{configuracaoId:config.id,entidade:"CONTATO",chaveDedupe:cripto.hash(`sem-chave:${a}:CONTATO:10`,`${config.id}:pendencia`)}});
     const atualConfig=await repo.obterConfiguracao(pai);assert.ok(atualConfig);
@@ -284,10 +408,10 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     const estados=await db.olistSyncEstado.findMany({where:{entidade:"CONTATO"}});
     assert.equal(estados.length,2);assert.ok(estados.every(estado=>estado.registroId===registro.id&&estado.chave===registro.chave&&estado.status==="SINCRONIZADO"));
     assert.equal(await db.olistSyncRegistro.count(),1);assert.equal(escritas().length,0);
-    contas.get(a)!.get("10")!.nome="Contato alterado sem documento";
+    contas.get(a)!.get("10")!.nome="C******o";
     await terminar((await enfileirar()).id);
-    assert.equal(escritas().length,0,"Vínculo manual não libera o contrato de escrita sem CPF/CNPJ válido.");
-    assert.equal(contas.get(b)!.get("20")!.nome,"Contato equivalente");
+    assert.equal(escritas().length,0,"Vínculo manual não libera escrita de contato sem documento e com nome mascarado.");
+    assert.equal(contas.get(b)!.get("20")!.nome,"C******e");
     assert.equal(await db.olistSyncRegistro.count(),1);
   });
   await t.test("falhas transitórias de detalhe esgotam tentativas sem criação parcial",async()=>{

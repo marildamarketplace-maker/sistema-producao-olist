@@ -201,7 +201,7 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {modelosFiltrados.map((mockup) => (
                 <li key={mockup.id} className={`min-w-0 space-y-2 rounded-lg border p-3 ${modelosAtivos.includes(mockup.id) ? "border-slate-900 bg-slate-100 dark:border-slate-400" : "border-slate-200"}`}>
-                  <ImagemPrivadaMockup nome={mockup.nome} token={token} rota={`?id=${encodeURIComponent(mockup.id)}`} miniatura />
+                  <ImagemPrivadaMockup nome={mockup.nome} token={token} rota={`?id=${encodeURIComponent(mockup.id)}`} miniatura onAmpliar={() => setPreview(mockup)} />
                   <label className={`${opcao} flex-1`}>
                     <input type="checkbox" className="h-4 w-4 shrink-0 accent-slate-900"
                       checked={individuais[estampaAtiva]?.includes(mockup.id) ?? false}
@@ -210,8 +210,6 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
                       }))} />
                     <span className="min-w-0 break-words font-medium">{mockup.nome}<span className="mt-1 block text-xs font-normal text-slate-600">{mockup.categoria}{modelosAtivos.includes(mockup.id) ? " · Selecionado" : ""}</span></span>
                   </label>
-                  <button type="button" className={secundario} onClick={() => setPreview(mockup)}
-                    aria-label={`Ampliar ${mockup.nome}`}>Ampliar imagem</button>
                 </li>
               ))}
             </ul>
@@ -226,7 +224,7 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
               <div role="group" aria-label="Escolher layout" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {layoutsDisponiveis.map((modelo) => (
                   <div key={modelo.id} className={`min-w-0 space-y-2 rounded-lg border p-3 ${layout.id === modelo.id ? "border-slate-900 bg-slate-100 dark:border-slate-400" : "border-slate-200"}`}>
-                    <ImagemPrivadaMockup nome={modelo.nome} token={token} rota={`?id=${encodeURIComponent(modelo.id)}`} miniatura />
+                    <ImagemPrivadaMockup nome={modelo.nome} token={token} rota={`?id=${encodeURIComponent(modelo.id)}`} miniatura onAmpliar={() => setPreview(modelo)} />
                     <label className={opcao}>
                       <input type="radio" name="layout-ativo" value={modelo.id} checked={layout.id === modelo.id}
                         onChange={() => setLayoutAtivo(modelo.id)} className="h-4 w-4 shrink-0 accent-slate-900" />
@@ -234,7 +232,6 @@ function FormularioFila({ token, estampas }: { token: string; estampas: EstampaS
                         <span className="mt-1 block text-xs font-normal text-slate-600">{layouts[modelo.id]?.length ?? 0} estampas vinculadas{layout.id === modelo.id ? " · Em edição" : ""}</span>
                       </span>
                     </label>
-                    <button type="button" className={secundario} onClick={() => setPreview(modelo)} aria-label={`Ampliar ${modelo.nome}`}>Ampliar imagem</button>
                   </div>
                 ))}
               </div>

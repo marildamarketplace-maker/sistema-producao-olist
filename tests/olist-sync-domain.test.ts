@@ -3,7 +3,7 @@ import test from "node:test";
 import { FalhaSync, type CamposSync, type ReplicaComparacao } from "../src/lib/olist-sync/contrato";
 import { criarCriptografiaSync, serializarCanonico } from "../src/lib/olist-sync/cripto";
 import {
-  avaliarReplicas, gerarHashesCampos, identificadorRemoto, inferirOrigem, normalizarDocumento,
+  avaliarReplicas, chaveContatoPorNome, chaveContatoSync, gerarHashesCampos, identificadorRemoto, inferirOrigem, normalizarDocumento, normalizarDocumentoContato,
   observarRegistro, prepararImagens, prepararPayload, prepararVariacao, similaridadeNomes,
 } from "../src/lib/olist-sync/dominio";
 
@@ -16,7 +16,56 @@ const produto = (campos: Record<string, unknown> = {}) => observarRegistro("PROD
 const replica = (aplicativoId: string, campos: Record<string, unknown> = {}): ReplicaComparacao => ({ aplicativoId, observacao: produto(campos) });
 const avaliar = (replicas: ReplicaComparacao[], hashesBase: Record<string, string> | null = null, visaoCompleta = true) => avaliarReplicas({ entidade: "PRODUTO", replicas, hashesBase, visaoCompleta, hash });
 
-test("CPF/CNPJ confiáveis preservam zeros e validam os dígitos, inclusive CNPJ alfanumérico", () => {
+test("contato usa nome exato normalizado só quando CPF/CNPJ está ausente",()=>{
+  for(const cpfCnpj of [null,undefined,"","  "]) {
+    const obs=observarRegistro("CONTATO",{id:10,nome:"  Éva   Santos ",cpfCnpj,tipoPessoa:"F",situacao:"B"},{completo:true});
+    assert.equal(obs.chave,"nome:éva santos");assert.equal(obs.campos.cpfCnpj,null);
+    assert.ok(!obs.pendencias.includes("IDENTIDADE_AUSENTE_OU_INVALIDA"));
+    const payload=prepararPayload("CONTATO",obs.campos,{operacao:"CRIAR"});
+    assert.equal(payload.cpfCnpj,null);assert.equal(payload.nome,"  Éva   Santos ");assert.equal(payload.situacao,"B");
+  }
+  assert.equal(chaveContatoPorNome("ÉVA SANTOS"),chaveContatoPorNome("Éva Santos"));
+  assert.notEqual(chaveContatoPorNome("Éva Santos"),chaveContatoPorNome("Eva Santos"));
+  assert.notEqual(chaveContatoPorNome("Ana-Maria"),chaveContatoPorNome("Ana Maria"));
+  assert.equal(chaveContatoSync({nome:"Éva Santos",cpfCnpj:"52998224725"}),"52998224725");
+});
+
+test("contato não valida o documento localmente nem troca documento preenchido por nome",()=>{
+  for(const cpfCnpj of ["00000000000","ISENTO","52998224726","12ABC34501DE36","123"]) {
+    const obs=observarRegistro("CONTATO",{id:10,nome:"Eva Santos",cpfCnpj,tipoPessoa:"F",situacao:"B"},{completo:true});
+    assert.equal(obs.chave,cpfCnpj);assert.equal(obs.campos.cpfCnpj,cpfCnpj);
+    assert.ok(!obs.pendencias.includes("IDENTIDADE_AUSENTE_OU_INVALIDA"));
+    assert.equal(prepararPayload("CONTATO",obs.campos,{operacao:"CRIAR"}).cpfCnpj,cpfCnpj);
+  }
+  assert.equal(normalizarDocumentoContato(" 00.000.000/0000-00 "),"00000000000000");
+  assert.equal(normalizarDocumentoContato("12.abc.345/01de-36"),"12ABC34501DE36");
+  for(const valor of [null,undefined,"", "  ","---",123,"1".repeat(33)])assert.equal(normalizarDocumentoContato(valor),null);
+  const obs=observarRegistro("CONTATO",{id:10,nome:"Eva Santos",cpfCnpj:"529.982.247-26",tipoPessoa:"J",situacao:"B"},{completo:true});
+  const decisao=avaliarReplicas({entidade:"CONTATO",replicas:[{aplicativoId:"a",observacao:obs},{aplicativoId:"b",observacao:null}],hashesBase:null,visaoCompleta:true,hash});
+  assert.equal(decisao.status,"PROPAGAR");
+  const payload=prepararPayload("CONTATO",obs.campos,{operacao:"CRIAR"});
+  assert.equal(payload.cpfCnpj,"52998224726");assert.equal(payload.tipoPessoa,"J","O módulo não infere tipo pela quantidade de dígitos");
+  assert.throws(()=>prepararPayload("CONTATO",{...obs.campos,tipoPessoa:"fora-do-contrato"},{operacao:"CRIAR"}),FalhaSync);
+});
+
+test("nome mascarado e resumo sem documento não ganham identidade por nome",()=>{
+  for(const nome of ["J******e","A*a","", "  ","123", "A\nSilva"]) {
+    assert.equal(chaveContatoPorNome(nome),null);
+    assert.equal(observarRegistro("CONTATO",{id:10,nome,cpfCnpj:null,situacao:"B"},{completo:true}).chave,null);
+  }
+  assert.equal(observarRegistro("CONTATO",{id:10,nome:"Eva Santos",cpfCnpj:null,situacao:"E"},{completo:true}).chave,null);
+  assert.equal(observarRegistro("CONTATO",{id:10,nome:"Eva Santos",cpfCnpj:null}).chave,null);
+  assert.equal(observarRegistro("VENDEDOR",{id:10,contato:{nome:"Eva Santos",cpfCnpj:null},situacao:"B"},{completo:true}).chave,null);
+});
+
+test("contato sem documento pode propagar pelo nome sem inventar CPF/CNPJ",()=>{
+  const obs=observarRegistro("CONTATO",{id:10,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B"},{completo:true});
+  const decisao=avaliarReplicas({entidade:"CONTATO",replicas:[{aplicativoId:"a",observacao:obs},{aplicativoId:"b",observacao:null}],hashesBase:null,visaoCompleta:true,hash});
+  assert.equal(decisao.status,"PROPAGAR");assert.deepEqual(decisao.aplicativosCriar,["b"]);
+  assert.equal(decisao.campos?.cpfCnpj,null);
+});
+
+test("identidade da conta mantém validação de CPF/CNPJ, separada dos contatos", () => {
   assert.equal(normalizarDocumento("529.982.247-25"), "52998224725");
   assert.equal(normalizarDocumento("04.252.011/0001-10"), "04252011000110");
   // Exemplo oficial da Receita/Serpro: manual-dv-cnpj.pdf.

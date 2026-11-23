@@ -4,7 +4,7 @@ import {
   CAPACIDADES_SYNC, FalhaSync, type CamposSync, type ClienteSync, type EntidadeSync,
   type IdentidadeContaSync, type JsonValue, type OpcoesConsultaSync, type OpcoesListagemSync, type OpcoesMutacaoSync, type PaginaSync, type ResultadoMutacaoSync,
 } from "./contrato";
-import { identificadorRemoto, normalizarDocumento, observarRegistro, prepararImagens, prepararPayload, prepararVariacao } from "./dominio";
+import { chaveContatoPorNome, identificadorRemoto, normalizarDocumento, normalizarDocumentoContato, observarRegistro, prepararImagens, prepararPayload, prepararVariacao } from "./dominio";
 import { serializarCanonico } from "./cripto";
 import { cotaDaRespostaSync, interpretarCotaSync, type CotaLeituraSync } from "./ritmo";
 import { interpretarTipoContatoSync, MAXIMO_TIPOS_CONTATO, payloadTiposContatoSync } from "./tipos-contato";
@@ -269,7 +269,23 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     async buscarPorChave(aplicativoId, entidade, chave, opcoes) {
       const caminho = caminhoEntidade(entidade);
       if (entidade !== "PRODUTO" && entidade !== "CONTATO") throw new FalhaSync("BUSCA_NAO_SUPORTADA", "Esta entidade exige mapeamento humano.");
-      const normalizada = entidade === "CONTATO" ? normalizarDocumento(chave) : chave;
+      if (entidade === "CONTATO" && chave.startsWith("nome:")) {
+        const nome = opcoes?.nomeContato ?? chave.slice(5);
+        if (chaveContatoPorNome(nome) !== chave) throw new FalhaSync("IDENTIDADE_INVALIDA", "O nome não corresponde à identidade do contato.");
+        // Um termo evita perder equivalências por espaços repetidos. O filtro
+        // parcial do provedor nunca estabelece vínculo: a igualdade é local.
+        const termo = nome.normalize("NFKC").trim().split(/\s+/).sort((a,b)=>b.length-a.length)[0];
+        const resposta = await requisitar(aplicativoId,"GET",caminho,{nome:termo,offset:"0",limit:"100"},undefined,opcoes);
+        const pagina = interpretarPagina(entidade,resposta.dados,100);
+        if (pagina.total !== null && pagina.total > pagina.itens.length || pagina.itens.length >= 100)
+          throw new FalhaSync("BUSCA_TRUNCADA","A busca por nome não comprovou a ausência de duplicidades.");
+        const encontrados = pagina.itens.filter(item=>chaveContatoPorNome(item.nome)===chave);
+        if (encontrados.some(item=>!("cpfCnpj" in item.campos) || item.campos.cpfCnpj !== null && item.campos.cpfCnpj !== "" &&
+          (typeof item.campos.cpfCnpj !== "string" || item.campos.cpfCnpj.trim() !== "")))
+          throw new FalhaSync("IDENTIDADE_INCOMPATIVEL","Existe contato com o mesmo nome e documento preenchido ou não comprovado. Revise o vínculo.");
+        return encontrados;
+      }
+      const normalizada = entidade === "CONTATO" ? normalizarDocumentoContato(chave) : chave;
       if (!normalizada || !normalizada.trim() || normalizada.length > 255) throw new FalhaSync("IDENTIDADE_INVALIDA", "A chave de correspondência é inválida.");
       const resposta = await requisitar(aplicativoId, "GET", caminho, { [entidade === "PRODUTO" ? "codigo" : "cpfCnpj"]: normalizada, offset: "0", limit: "100" }, undefined, opcoes);
       const pagina = interpretarPagina(entidade, resposta.dados, 100);

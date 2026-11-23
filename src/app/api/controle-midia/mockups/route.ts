@@ -125,9 +125,19 @@ export async function GET(request: Request) {
     const cursorParam = params.get("cursor");
     const cursor = cursorParam ? cursors(cursorParam) : null;
     if (cursorParam && !cursor) return erro("Página inválida.", 400);
+    const filtros = z.object({
+      nome: z.string().trim().max(MOCKUP_NOME_MAX),
+      categoria: z.string().trim().max(MOCKUP_CATEGORIA_MAX),
+      tipo: z.enum(["", "INDIVIDUAL", "LAYOUT", "INFORMATIVO"]),
+    }).safeParse({ nome: params.get("nome") ?? "", categoria: params.get("categoria") ?? "", tipo: params.get("tipo") ?? "" });
+    if (!filtros.success) return erro("Filtros inválidos.", 400);
+    const { nome, categoria, tipo } = filtros.data;
     const incluirInformativos = params.get("incluirInformativos") === "1";
     const condicoes = [
       { aplicativoId: escopo.aplicativoId, ativo: true },
+      ...(nome ? [{ nome: { contains: nome, mode: "insensitive" as const } }] : []),
+      ...(categoria ? [{ categoria: { contains: categoria, mode: "insensitive" as const } }] : []),
+      ...(tipo ? [{ tipo }] : []),
       ...(incluirInformativos ? [] : [{ tipo: { in: ["INDIVIDUAL", "LAYOUT"] } }]),
       ...(cursor ? [{ OR: [
         { createdAt: { lt: cursor.createdAt } },

@@ -7,6 +7,45 @@ const produto = { id: 100, sku: "001-a", descricao: "Toalha", tipo: "S", situaca
 const pagina = (itens: unknown[] = [produto], total = itens.length) => ({ itens, paginacao: { total, offset: 0, limit: 100 } });
 const falha = (codigo: string, inconclusivo?: boolean) => (erro: unknown) => erro instanceof FalhaSync && erro.codigo === codigo && (inconclusivo === undefined || erro.inconclusivo === inconclusivo);
 
+test("documento de contato sem DV válido chega à busca, POST e PUT sem alteração dos dígitos",async()=>{
+  const cpfCnpj="52998224726";
+  const busca=mock([{status:200,dados:pagina([{id:10,nome:"Contato",cpfCnpj}])}]);
+  assert.deepEqual((await busca.cliente.buscarPorChave("a","CONTATO","529.982.247-26")).map(item=>item.id),["10"]);
+  assert.equal(new URL(busca.chamadas[0].url).searchParams.get("cpfCnpj"),cpfCnpj);
+  for(const atualizar of [false,true]) {
+    const m=mock([{status:200,dados:{cpfCnpj:"04252011000110",razaoSocial:"Conta"}},{status:200,dados:{id:10}}]);
+    const campos={nome:"Contato",cpfCnpj:"529.982.247-26",tipoPessoa:"F"};
+    if(atualizar)await m.cliente.atualizar("a","CONTATO","10",campos,{validarConta:()=>true});
+    else await m.cliente.criar("a","CONTATO",campos,{validarConta:()=>true});
+    assert.equal((m.chamadas[1].payload as Record<string,unknown>).cpfCnpj,cpfCnpj);
+  }
+  const rejeitada=mock([{status:400,dados:{mensagem:"documento rejeitado"}}]);
+  await assert.rejects(rejeitada.cliente.criar("a","CONTATO",{nome:"Contato",cpfCnpj,tipoPessoa:"F"}),falha("OLIST_400",false));
+  assert.equal(rejeitada.chamadas.length,1);
+});
+
+test("busca por nome usa filtro limitado e igualdade exata, preservando todos os homônimos",async()=>{
+  const m=mock([{status:200,dados:pagina([
+    {id:10,nome:"Éva Santos",cpfCnpj:null},
+    {id:20,nome:"  ÉVA   SANTOS ",cpfCnpj:""},
+    {id:30,nome:"Éva Santos Silva",cpfCnpj:null},
+  ])}]);
+  const encontrados=await m.cliente.buscarPorChave("a","CONTATO","nome:éva santos");
+  assert.deepEqual(encontrados.map(o=>o.id),["10","20"]);
+  const url=new URL(m.chamadas[0].url);assert.equal(url.searchParams.get("nome"),"santos");
+  assert.equal(url.searchParams.has("cpfCnpj"),false);assert.equal(url.searchParams.get("limit"),"100");
+});
+
+test("busca por nome não comprova ausência com documento preenchido, omitido ou resultado truncado",async()=>{
+  for(const campos of [{cpfCnpj:"52998224725"},{cpfCnpj:"invalido"},{}]) {
+    const m=mock([{status:200,dados:pagina([{id:10,nome:"Eva Santos",...campos}])}]);
+    await assert.rejects(m.cliente.buscarPorChave("a","CONTATO","nome:eva santos"),falha("IDENTIDADE_INCOMPATIVEL"));
+  }
+  const truncada=mock([{status:200,dados:pagina([{id:10,nome:"Eva Santos",cpfCnpj:null}],101)}]);
+  await assert.rejects(truncada.cliente.buscarPorChave("a","CONTATO","nome:eva santos"),falha("BUSCA_TRUNCADA"));
+  const invalida=mock([]);await assert.rejects(invalida.cliente.buscarPorChave("a","CONTATO","nome:J******e"),falha("IDENTIDADE_INVALIDA"));assert.equal(invalida.chamadas.length,0);
+});
+
 test("catálogo de tipos usa paginação limitada, identidade protegida e headers de cota", async () => {
   const m = mock([{ status: 200, dados: { cpfCnpj: "52998224725", razaoSocial: "Conta" } },
     { status: 200, dados: pagina([{ id: 87, nome: "Cliente", perfilContato: 0 }]), cotaLeitura: { limite: 60, restante: 59, resetSegundos: 10 } }]);
@@ -394,7 +433,7 @@ test("identidade da conta diferente bloqueia POST e PUT antes de qualquer escrit
 });
 
 test("info com contrato inválido não valida nem envia a mutação protegida", async () => {
-  for (const dados of [{}, { cpfCnpj: "invalido", razaoSocial: "Conta" }, { cpfCnpj: "52998224725", razaoSocial: " " }, "<html>erro</html>"]) {
+  for (const dados of [{}, { cpfCnpj: "invalido", razaoSocial: "Conta" }, { cpfCnpj: "52998224726", razaoSocial: "Conta" }, { cpfCnpj: "52998224725", razaoSocial: " " }, "<html>erro</html>"]) {
     let validacoes = 0;
     const m = mock([{ status: 200, dados }]);
     await assert.rejects(m.cliente.criar("a", "PRODUTO", produto, { validarConta: () => { validacoes++; return true; } }), falha("CONTRATO", false));

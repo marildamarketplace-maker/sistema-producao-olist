@@ -20,7 +20,7 @@
     },
     {
       "path": "/api/cron/baixa-estoque-olist",
-      "schedule": "0 9 * * *"
+      "schedule": "0 23 * * *"
     },
     {
       "path": "/api/cron/validador-estoque",
