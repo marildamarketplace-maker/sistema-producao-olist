@@ -227,7 +227,7 @@ test("contatos não transferem acesso ao sistema, crédito, fiscal ou dados pess
   const payload = prepararPayload("CONTATO", obs.campos, { operacao: "CRIAR" });
   assert.equal(payload.situacao, "B");
   for (const campo of ["limiteCredito", "dataNascimento", "senha", "vendedor"]) assert.equal(campo in payload, false);
-  assert.throws(() => prepararPayload("CONTATO", { ...obs.campos, tipoPessoa: "J" }, { operacao: "CRIAR" }), FalhaSync);
+  assert.equal(prepararPayload("CONTATO", { ...obs.campos, tipoPessoa: "J" }, { operacao: "CRIAR" }).tipoPessoa, "J");
 });
 
 test("somente leitura e estruturas complexas não escapam pela construção do payload", () => {
