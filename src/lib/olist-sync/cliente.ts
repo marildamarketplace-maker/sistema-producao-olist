@@ -134,14 +134,15 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     return resposta;
   }
 
-  function validarResposta(metodo: "GET" | "POST" | "PUT", resposta: RespostaHttpSync) {
+  function validarResposta(metodo: "GET" | "POST" | "PUT", resposta: RespostaHttpSync, origemConsulta: "CONTA" | "RECURSO" = "RECURSO") {
     if (resposta.status < 200 || resposta.status >= 300) {
       const temporaria = resposta.status === 408 || resposta.status === 429 || resposta.status >= 500;
       const inconclusivo = metodo !== "GET" && (resposta.status === 408 || resposta.status >= 500 || resposta.status >= 300 && resposta.status < 400);
       const autenticacao = resposta.status === 401 || resposta.status === 403;
       throw new FalhaSync(inconclusivo ? "MUTACAO_INCONCLUSIVA" : `OLIST_${resposta.status}`,
         inconclusivo ? "O resultado da alteração precisa ser reconciliado antes de outra tentativa." : autenticacao ? "Reconecte a integração Olist antes de continuar." : "A Olist não concluiu a solicitação.",
-        temporaria && !inconclusivo, inconclusivo, resposta.status, retryAfterSync(resposta.retryAfter), cotaDaRespostaSync(resposta) ?? undefined);
+        temporaria && !inconclusivo, inconclusivo, resposta.status, retryAfterSync(resposta.retryAfter), cotaDaRespostaSync(resposta) ?? undefined,
+        metodo === "GET" ? origemConsulta : null);
     }
     if (resposta.status === 202) throw new FalhaSync("MUTACAO_INCONCLUSIVA", "A Olist ainda não confirmou a conclusão da solicitação.", false, metodo !== "GET", resposta.status);
     return resposta;
@@ -157,7 +158,7 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     if (!identidade) {
       const info = validarResposta("GET", await executarRequisicao("GET", {
         url: "https://api.tiny.com.br/public-api/v3/info", token: preparado.token,
-      }, undefined, opcoes));
+      }, undefined, opcoes), "CONTA");
       identidade = interpretarIdentidade(info.dados);
     }
     let permitida = false;
@@ -198,7 +199,7 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
       catch { throw new FalhaSync("CONEXAO_OLIST", "Reconecte a integração Olist antes de continuar.", false, false, 401); }
       resposta = await executarRequisicao(metodo, { ...preparado, token }, payload);
     }
-    return validarResposta(metodo, resposta);
+    return validarResposta(metodo, resposta, caminho === "info" ? "CONTA" : "RECURSO");
   }
 
   function caminhoEntidade(entidade: EntidadeSync, id?: string) {
@@ -272,10 +273,10 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
       if (entidade === "CONTATO" && chave.startsWith("nome:")) {
         const nome = opcoes?.nomeContato ?? chave.slice(5);
         if (chaveContatoPorNome(nome) !== chave) throw new FalhaSync("IDENTIDADE_INVALIDA", "O nome não corresponde à identidade do contato.");
-        // Um termo evita perder equivalências por espaços repetidos. O filtro
-        // parcial do provedor nunca estabelece vínculo: a igualdade é local.
-        const termo = nome.normalize("NFKC").trim().split(/\s+/).sort((a,b)=>b.length-a.length)[0];
-        const resposta = await requisitar(aplicativoId,"GET",caminho,{nome:termo,offset:"0",limit:"100"},undefined,opcoes);
+        // O sobrenome isolado pode exceder o tempo de consulta da Olist.
+        // Usa o nome completo; o filtro remoto nunca substitui a igualdade local.
+        const nomeCompleto = nome.normalize("NFKC").trim().replace(/\s+/g," ");
+        const resposta = await requisitar(aplicativoId,"GET",caminho,{nome:nomeCompleto,offset:"0",limit:"100"},undefined,opcoes);
         const pagina = interpretarPagina(entidade,resposta.dados,100);
         if (pagina.total !== null && pagina.total > pagina.itens.length || pagina.itens.length >= 100)
           throw new FalhaSync("BUSCA_TRUNCADA","A busca por nome não comprovou a ausência de duplicidades.");

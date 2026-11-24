@@ -532,6 +532,11 @@ export function criarServicoOlistSync(db: PrismaClient, cliente: ClienteSync, op
     async function consultar<T>(alvo:string, executar:()=>Promise<T>):Promise<T|null> {
       try { return await chamada(r,alvo,executar,false,true); }
       catch(error) {
+        if(error instanceof FalhaSync && error.status===400 && error.origemConsulta==="RECURSO" && !error.recuperavel && !error.inconclusivo) {
+          // Nenhuma escrita ocorreu nesta consulta. Isola só esta operação;
+          // resultados de envios anteriores continuam em reconciliação.
+          await bloquear("CONSULTA_OLIST_400",reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return null;
+        }
         if(error instanceof FalhaSync && entidade==="CONTATO" && campos && chaveContatoSync(campos)?.startsWith("nome:") && ["IDENTIDADE_INCOMPATIVEL","BUSCA_TRUNCADA"].includes(error.codigo)) {
           await bloquear(error.codigo,reconciliando?"RESULTADO_INCONCLUSIVO":"OBSOLETA");return null;
         }

@@ -24,7 +24,7 @@ test("documento de contato sem DV válido chega à busca, POST e PUT sem altera�
   assert.equal(rejeitada.chamadas.length,1);
 });
 
-test("busca por nome usa filtro limitado e igualdade exata, preservando todos os homônimos",async()=>{
+test("busca por nome completo usa filtro limitado e igualdade exata, preservando homônimos",async()=>{
   const m=mock([{status:200,dados:pagina([
     {id:10,nome:"Éva Santos",cpfCnpj:null},
     {id:20,nome:"  ÉVA   SANTOS ",cpfCnpj:""},
@@ -32,8 +32,25 @@ test("busca por nome usa filtro limitado e igualdade exata, preservando todos os
   ])}]);
   const encontrados=await m.cliente.buscarPorChave("a","CONTATO","nome:éva santos");
   assert.deepEqual(encontrados.map(o=>o.id),["10","20"]);
-  const url=new URL(m.chamadas[0].url);assert.equal(url.searchParams.get("nome"),"santos");
+  const url=new URL(m.chamadas[0].url);assert.equal(url.searchParams.get("nome"),"éva santos");
   assert.equal(url.searchParams.has("cpfCnpj"),false);assert.equal(url.searchParams.get("limit"),"100");
+});
+
+test("busca por nome completo não repete consulta ampla após timeout 400",async()=>{
+  const m=mock([{status:400,dados:{mensagem:"Sua consulta levou muito tempo. Por favor, ajuste seus filtros ou tente novamente mais tarde."}}]);
+  await assert.rejects(m.cliente.buscarPorChave("a","CONTATO","nome:eva do pilar santos melo"),erro=>
+    erro instanceof FalhaSync && erro.codigo==="OLIST_400" && erro.origemConsulta==="RECURSO" && !erro.recuperavel && !erro.inconclusivo);
+  assert.equal(m.chamadas.length,1);
+  assert.equal(new URL(m.chamadas[0].url).searchParams.get("nome"),"eva do pilar santos melo");
+});
+
+test("origem da consulta separa erro de info de erro no cadastro sem expor resposta",async()=>{
+  for(const protegida of [false,true]) {
+    const m=mock([{status:400,dados:{mensagem:"corpo privado"}}]);
+    const consulta=()=>protegida?m.cliente.buscarPorChave("a","CONTATO","nome:eva santos",{validarConta:()=>true}):m.cliente.identidadeConta("a");
+    await assert.rejects(consulta,erro=>erro instanceof FalhaSync && erro.origemConsulta==="CONTA" && erro.codigo==="OLIST_400" && !erro.message.includes("privado"));
+    assert.equal(m.chamadas.length,1);assert.ok(m.chamadas[0].url.endsWith("/info"));
+  }
 });
 
 test("busca por nome não comprova ausência com documento preenchido, omitido ou resultado truncado",async()=>{

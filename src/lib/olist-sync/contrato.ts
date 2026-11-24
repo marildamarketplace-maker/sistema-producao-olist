@@ -94,6 +94,8 @@ export class FalhaSync extends Error {
     public readonly status: number | null = null,
     public readonly retryAfterMs = 0,
     public readonly cotaLeitura?: CotaLeituraSync,
+    /** Distingue falha de um registro de falha na identidade da conta. */
+    public readonly origemConsulta: "CONTA" | "RECURSO" | null = null,
   ) {
     super(mensagem);
     this.name = "FalhaSync";

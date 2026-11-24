@@ -62,7 +62,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       if (["/produtos","/formas-pagamento","/contatos"].some(recurso=>caminho.pathname.endsWith(recurso)) && r.metodo==="GET") {
         const codigo=caminho.searchParams.get("codigo"), offset=Number(caminho.searchParams.get("offset")??0), limit=Number(caminho.searchParams.get("limit")??100);
         const nome=caminho.searchParams.get("nome");
-        const itens=[...conta.values()].filter(item=>(!codigo||item.sku===codigo)&&(!nome||String(item.nome??"").toLocaleLowerCase("pt-BR").includes(nome.toLocaleLowerCase("pt-BR"))));
+        const normalizarNome=(valor:string)=>valor.normalize("NFKC").trim().replace(/\s+/g," ").toLocaleLowerCase("pt-BR");
+        const itens=[...conta.values()].filter(item=>(!codigo||item.sku===codigo)&&(!nome||normalizarNome(String(item.nome??"")).includes(normalizarNome(nome))));
         return { status:200,dados:{itens:itens.slice(offset,offset+limit),paginacao:{total:itens.length,offset,limit}} };
       }
       const id=caminho.pathname.split("/").at(-1)!;
@@ -325,6 +326,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendente.id}})).status,"RESOLVIDA");
     assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);
     assert.ok(chamadas.some(r=>new URL(r.url).searchParams.has("nome")));
+    assert.ok(chamadas.filter(r=>new URL(r.url).searchParams.has("nome")).every(r=>new URL(r.url).searchParams.get("nome")===origem.nome));
     await terminar((await enfileirar()).id);assert.equal(escritas().length,1,"Reauditoria não repete a criação");
     assert.equal(await db.olistSyncEstado.count({where:{presente:true,registroId:{not:null}}}),2);
   });
@@ -345,7 +347,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
     const contato={id:10,nome:"Eva Santos",cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]};
     contas.get(a)!.set("10",contato);await terminar((await enfileirar("AUDITAR")).id);
-    contas.get(a)!.set("11",{...contato,id:11});
+    contas.get(a)!.set("11",{...contato,id:11,nome:"  EVA   SANTOS "});
     await terminar((await enfileirar("APLICAR")).id);assert.equal(escritas().length,0);
     assert.ok(await db.olistSyncPendencia.count({where:{tipo:"IDENTIDADE_DUPLICADA",status:"AGUARDANDO_REVISAO"}}));
   });
@@ -355,6 +357,45 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     contas.get(b)!.set("20",{id:20,nome:"Eva Santos",cpfCnpj:"52998224725",tipoPessoa:"F",situacao:"B",tipos:[]});
     await terminar((await enfileirar()).id);assert.equal(escritas().length,0);
     assert.ok(await db.olistSyncPendencia.count({where:{tipo:{in:["POSSIVEL_DUPLICIDADE","IDENTIDADE_INCOMPATIVEL"]},status:"AGUARDANDO_REVISAO"}}));
+  });
+  for(const faseFalha of ["FONTE","DESTINO","CONFIRMACAO"]as const)await t.test(`400 na consulta de ${faseFalha} isola só o contato e continua a fila`,async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    for(const [id,nome]of [[10,"Contato Primeiro Teste"],[11,"Contato Segundo Teste"]]as const)
+      contas.get(a)!.set(String(id),{id,nome,cpfCnpj:null,tipoPessoa:"F",situacao:"B",tipos:[]});
+    await terminar((await enfileirar("AUDITAR")).id);
+    const operacoes=await db.olistSyncOperacao.findMany({where:{status:"AUTORIZADA"},orderBy:{id:"asc"},select:{id:true,precondicoesJson:true}});
+    assert.equal(operacoes.length,2);
+    const replicas=(operacoes[0].precondicoesJson as {replicas:Record<string,{remoteId:string}>}).replicas;
+    const nomeFalho=String(contas.get(a)!.get(replicas[a].remoteId)!.nome);
+    let falhas=0;
+    responder=async(r,app)=>{
+      const u=new URL(r.url);
+      if(r.metodo!=="GET"||u.searchParams.get("nome")!==nomeFalho)return;
+      const criado=[...contas.get(b)!.values()].some(item=>item.nome===nomeFalho);
+      if(faseFalha==="FONTE"?app===a:app===b&&(faseFalha==="DESTINO"||criado)) {
+        falhas++;return {status:400,dados:{mensagem:"Sua consulta levou muito tempo."}};
+      }
+    };
+    postIncerto=faseFalha==="CONFIRMACAO";
+    const execucao=await enfileirar("APLICAR");
+    assert.equal((await terminar(execucao.id)).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(falhas,1);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:execucao.id,status:"FALHOU"}}),0);
+    const isolada=await db.olistSyncOperacao.findUniqueOrThrow({where:{id:operacoes[0].id}});
+    assert.equal(isolada.erroCodigo,"CONSULTA_OLIST_400");
+    assert.equal(isolada.status,faseFalha==="CONFIRMACAO"?"RESULTADO_INCONCLUSIVO":"OBSOLETA");
+    assert.equal(isolada.tentativas,faseFalha==="CONFIRMACAO"?1:0);
+    assert.equal((await db.olistSyncOperacao.findUniqueOrThrow({where:{id:operacoes[1].id}})).status,"CONFIRMADA");
+    assert.equal(await db.olistSyncPendencia.count({where:{tipo:"CONSULTA_OLIST_400",status:"AGUARDANDO_REVISAO"}}),1);
+    assert.equal(escritas().length,faseFalha==="CONFIRMACAO"?2:1);
+    const escritasAntes=escritas().length;
+    if(faseFalha==="CONFIRMACAO")responder=null;
+    await terminar((await enfileirar("APLICAR")).id);
+    assert.equal(escritas().length,escritasAntes,"Retomada não reenvia POST aceito ou operação isolada");
+    if(faseFalha==="CONFIRMACAO") {
+      assert.equal((await db.olistSyncOperacao.findUniqueOrThrow({where:{id:isolada.id}})).status,"CONFIRMADA");
+      assert.equal(await db.olistSyncPendencia.count({where:{tipo:"CONSULTA_OLIST_400",status:"AGUARDANDO_REVISAO"}}),0);
+    }
   });
   for(const respostaPerdida of [false,true])await t.test(`contato com DV inválido é sincronizado e encerra revisão antiga (resposta perdida: ${respostaPerdida})`,async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
