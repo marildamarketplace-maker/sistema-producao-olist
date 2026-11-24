@@ -1,5 +1,5 @@
 /** DTOs públicos: nenhum token, documento completo ou payload de escrita em listagens. */
-export type EntidadeSyncApi = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR";
+export type EntidadeSyncApi = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR" | "SERVICO";
 export type ModoExecucaoSync = "AUDITAR" | "AUDITAR_E_APLICAR" | "APLICAR";
 export type OrigemSyncTipo = "DESCONHECIDA" | "OBSERVADA_PELO_MODULO" | "DECLARADA_POR_USUARIO";
 export type ProntidaoSync = {
@@ -150,7 +150,7 @@ export type DeclararOrigemSyncInput = {
 };
 
 export const ENTIDADES_SYNC_LABEL: Record<EntidadeSyncApi, string> = {
-  PRODUTO: "Produtos e variações", CONTATO: "Contatos", FORMA_PAGAMENTO: "Formas de pagamento", VENDEDOR: "Vendedores",
+  PRODUTO: "Produtos e variações", CONTATO: "Contatos", FORMA_PAGAMENTO: "Formas de pagamento", VENDEDOR: "Vendedores", SERVICO: "Serviços",
 };
 export const ORIGENS_SYNC_LABEL: Record<OrigemSyncTipo, string> = {
   DESCONHECIDA: "Origem desconhecida", OBSERVADA_PELO_MODULO: "Origem observada", DECLARADA_POR_USUARIO: "Origem declarada",

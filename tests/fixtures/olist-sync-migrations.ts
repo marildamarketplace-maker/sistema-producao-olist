@@ -9,6 +9,8 @@ const migrations = [
   "20261116000100_olist_sync_multiempresa",
   "20261117000100_olist_sync_incremental",
   "20261117000200_olist_sync_previsao",
+  "20261124214945_olist_sync_recibos_paginacao",
+  "20261124220308_olist_sync_servicos",
 ] as const;
 
 export async function aplicarMigrationsOlistSync(sql: ExecutorMigrations): Promise<void> {

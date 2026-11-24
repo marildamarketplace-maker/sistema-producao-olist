@@ -3,9 +3,9 @@ import type { ReferenciaTipoContatoSync, TipoContatoSync } from "./tipos-contato
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type CamposSync = Record<string, JsonValue>;
-export type EntidadeSync = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR";
+export type EntidadeSync = "PRODUTO" | "CONTATO" | "FORMA_PAGAMENTO" | "VENDEDOR" | "SERVICO";
 
-export const ENTIDADES_SYNC: readonly EntidadeSync[] = ["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"];
+export const ENTIDADES_SYNC: readonly EntidadeSync[] = ["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR", "SERVICO"];
 
 export interface ObservacaoRemota {
   /** Metadado de transporte; não compõe conteúdo, hashes ou ciphertext. */
@@ -51,6 +51,9 @@ export interface ResultadoMutacaoSync { id: string | null }
 export interface OpcoesConsultaSync {
   /** Nome original usado como filtro remoto, validado contra a chave por nome. */
   nomeContato?: string;
+  nomeServico?: string;
+  /** Sonda de colisão para origem codificada; nomes de outros códigos não são equivalências. */
+  codigoServicoReferencia?: string;
   /** Cache privado de identidade por credencial; escritas sempre validam /info. */
   reutilizarIdentidade?: boolean;
   /** Executados para cada HTTP, inclusive /info; nunca recebem dados pessoais. */
@@ -64,6 +67,8 @@ export interface OpcoesConsultaSync {
 
 export interface OpcoesMutacaoSync extends Omit<OpcoesConsultaSync, "antesDeConsultar" | "reutilizarIdentidade"> {
   catalogoTiposContato?: readonly TipoContatoSync[];
+  componentesProduto?: ReadonlyMap<string, string>;
+  somenteProducao?: boolean;
   /** Verifica autorização e reserva após a leitura remota, antes de enviar a escrita. */
   antesDeEscrever?: () => Promise<void>;
 }
@@ -82,6 +87,7 @@ export const CAPACIDADES_SYNC = {
   PRODUTO: { listar: true, detalhar: true, criar: true, atualizar: true, incremental: true },
   CONTATO: { listar: true, detalhar: true, criar: true, atualizar: true, incremental: true },
   FORMA_PAGAMENTO: { listar: true, detalhar: true, criar: false, atualizar: false, incremental: false },
+  SERVICO: { listar: true, detalhar: true, criar: true, atualizar: true, incremental: false },
   VENDEDOR: { listar: true, detalhar: false, criar: false, atualizar: false, incremental: false },
 } as const;
 

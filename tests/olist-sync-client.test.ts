@@ -3,7 +3,7 @@ import test from "node:test";
 import { FalhaSync } from "../src/lib/olist-sync/contrato";
 import { criarClienteSync, retryAfterSync, type DependenciasClienteSync, type RequisicaoSync, type RespostaHttpSync } from "../src/lib/olist-sync/cliente";
 
-const produto = { id: 100, sku: "001-a", descricao: "Toalha", tipo: "S", situacao: "A" };
+const produto = { id: 100, sku: "001-a", descricao: "Ref Toalha", tipo: "S", situacao: "A" };
 const pagina = (itens: unknown[] = [produto], total = itens.length) => ({ itens, paginacao: { total, offset: 0, limit: 100 } });
 const falha = (codigo: string, inconclusivo?: boolean) => (erro: unknown) => erro instanceof FalhaSync && erro.codigo === codigo && (inconclusivo === undefined || erro.inconclusivo === inconclusivo);
 
@@ -240,14 +240,14 @@ test("identidade da conta lê /info e exige documento verificável", async () =>
 
 test("POST envia somente campos permitidos e retorna ID confirmado", async () => {
   const m = mock([{ status: 200, dados: { id: 901 } }]);
-  assert.deepEqual(await m.cliente.criar("a", "PRODUTO", { sku: "001-A", descricao: "Produto", tipo: "S", estoque: { inicial: 99 }, precos: { preco: 500 }, ncm: "111" }), { id: "901" });
-  assert.deepEqual(m.chamadas[0].payload, { sku: "001-A", descricao: "Produto", tipo: "S" });
+  assert.deepEqual(await m.cliente.criar("a", "PRODUTO", { sku: "001-A", descricao: "Ref Produto", tipo: "S", estoque: { inicial: 99 }, precos: { preco: 500 }, ncm: "111" }), { id: "901" });
+  assert.deepEqual(m.chamadas[0].payload, { sku: "001-A", descricao: "Ref Produto", tipo: "S" });
 });
 
 test("POST/PUT com 401 nunca renovam nem repetem a escrita", async () => {
   for (const metodo of ["criar", "atualizar"] as const) {
     const m = mock([{ status: 401, dados: {} }]);
-    const payload = { sku: "001-A", descricao: "Produto", tipo: "S" };
+    const payload = { sku: "001-A", descricao: "Ref Produto", tipo: "S" };
     await assert.rejects(metodo === "criar" ? m.cliente.criar("a", "PRODUTO", payload) : m.cliente.atualizar("a", "PRODUTO", "1", payload), falha("OLIST_401", false));
     assert.equal(m.chamadas.length, 1);
     assert.equal(m.tokens.length, 1);
@@ -256,24 +256,24 @@ test("POST/PUT com 401 nunca renovam nem repetem a escrita", async () => {
 
 test("rejeição explícita 429 pode voltar para fila sem repetição no transporte", async () => {
   const m = mock([{ status: 429, dados: {}, retryAfter: "60" }]);
-  await assert.rejects(m.cliente.criar("a", "PRODUTO", { sku: "A", descricao: "Produto", tipo: "S" }), erro => erro instanceof FalhaSync && erro.recuperavel && !erro.inconclusivo && erro.retryAfterMs === 60_000);
+  await assert.rejects(m.cliente.criar("a", "PRODUTO", { sku: "A", descricao: "Ref Produto", tipo: "S" }), erro => erro instanceof FalhaSync && erro.recuperavel && !erro.inconclusivo && erro.retryAfterMs === 60_000);
   assert.equal(m.chamadas.length, 1);
 });
 
 test("POST com timeout, 5xx ou sucesso sem ID fica inconclusivo e não pode ser repetido automaticamente", async () => {
   for (const resposta of [new Error("ETIMEDOUT token=secreto"), { status: 500, dados: { segredo: "x" } }, { status: 408, dados: {} }, { status: 200, dados: {} }, { status: 202, dados: { id: 1 } }]) {
     const m = mock([resposta]);
-    await assert.rejects(m.cliente.criar("a", "PRODUTO", { sku: "001-A", descricao: "Produto", tipo: "S" }), erro => erro instanceof FalhaSync && erro.inconclusivo && !erro.recuperavel && !erro.message.includes("secreto"));
+    await assert.rejects(m.cliente.criar("a", "PRODUTO", { sku: "001-A", descricao: "Ref Produto", tipo: "S" }), erro => erro instanceof FalhaSync && erro.inconclusivo && !erro.recuperavel && !erro.message.includes("secreto"));
     assert.equal(m.chamadas.length, 1);
   }
 });
 
 test("PUT 204 confirma; falha ambígua exige reconciliação e campos protegidos são omitidos", async () => {
   const m = mock([{ status: 204, dados: undefined }]);
-  assert.deepEqual(await m.cliente.atualizar("a", "PRODUTO", "10", { sku: "001-A", descricao: "Novo", tipo: "S", estoque: { saldo: 10 }, precos: { preco: 1 } }), { id: "10" });
-  assert.deepEqual(m.chamadas[0].payload, { sku: "001-A", descricao: "Novo" });
+  assert.deepEqual(await m.cliente.atualizar("a", "PRODUTO", "10", { sku: "001-A", descricao: "Ref Novo", tipo: "S", estoque: { saldo: 10 }, precos: { preco: 1 } }), { id: "10" });
+  assert.deepEqual(m.chamadas[0].payload, { sku: "001-A", descricao: "Ref Novo" });
   const erro = mock([new Error("Timeout")]);
-  await assert.rejects(erro.cliente.atualizar("a", "PRODUTO", "10", { sku: "001-A", descricao: "Novo", tipo: "S" }), falha("MUTACAO_INCONCLUSIVA", true));
+  await assert.rejects(erro.cliente.atualizar("a", "PRODUTO", "10", { sku: "001-A", descricao: "Ref Novo", tipo: "S" }), falha("MUTACAO_INCONCLUSIVA", true));
 });
 
 test("subrecursos requerem contrato e IDs do destino explícitos, sem transferir IDs da origem", async () => {
@@ -631,7 +631,7 @@ test("cache opt-in é por aplicativo/credencial, tem TTL absoluto e não dispens
   agora=60_000;await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,2);
   token="token-b";await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,3);
   await cliente.detalhar("b","PRODUTO","100",opcoes);assert.equal(infos,4);
-  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},opcoes);assert.equal(infos,5);
+  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Ref Toalha",tipo:"S"},opcoes);assert.equal(infos,5);
   await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,5);
   agora=-1;await cliente.detalhar("a","PRODUTO","100",opcoes);assert.equal(infos,6);
   assert.equal(caminhos.filter(c=>!c.endsWith("/info")).length,8);
@@ -660,10 +660,10 @@ test("cadência envolve cada HTTP, publica só metadados e precede guard e marca
   const opcoes={validarConta:()=>true,antesDeRequisicao:async(m:string)=>{eventos.push("espera "+m);},
     aposResposta:(m:string,r:object)=>{assert.deepEqual(Object.keys(r).sort(),["cotaLeitura","retryAfterMs","status"]);eventos.push("resposta "+m);},
     antesDeEscrever:async()=>{eventos.push("guard");}};
-  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},opcoes);
+  await cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Ref Toalha",tipo:"S"},opcoes);
   assert.deepEqual(eventos,["espera GET","GET","resposta GET","espera POST","guard","POST","resposta POST"]);
   eventos.length=0;
-  await assert.rejects(cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Toalha",tipo:"S"},
+  await assert.rejects(cliente.criar("a","PRODUTO",{sku:"001-a",descricao:"Ref Toalha",tipo:"S"},
     {...opcoes,antesDeRequisicao:async m=>{if(m!=="GET")throw new FalhaSync("COTA_OLIST","Aguarde",true);}}),falha("COTA_OLIST",false));
   assert.ok(!eventos.includes("guard")&&!eventos.includes("POST"));
 });

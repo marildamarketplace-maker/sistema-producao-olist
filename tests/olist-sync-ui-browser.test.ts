@@ -175,6 +175,12 @@ test("UI real: previsão manual, polling e sincronização incremental", { skip:
       await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Configuração").click()');
       await ate(() => cdp.avaliar<boolean>('!!document.querySelector("details")'), "Configuração incremental não apareceu");
       assert.match(await cdp.avaliar<string>('document.body.innerText'), /Alterações por lote, entidade e destino/);
+      const servico='[...document.querySelectorAll("label")].find(l => l.textContent.startsWith("Serviços")).querySelector("input")';
+      assert.equal(await cdp.avaliar(`${servico}.checked`), false, "Serviços não devem ser habilitados por padrão");
+      assert.equal(await cdp.avaliar(`${servico}.closest("label").getBoundingClientRect().height >= 44`), true);
+      await cdp.avaliar(`${servico}.click()`);
+      await ate(() => cdp.avaliar<boolean>(`${servico}.checked`), "Serviços não foram selecionados");
+      assert.equal(await cdp.avaliar('[...document.querySelectorAll("details h4")].some(h => h.textContent.includes("Serviços"))'), false, "Serviços não oferecem validação incremental");
       assert.match(await cdp.avaliar<string>('document.body.innerText'), /a fila continua na mesma execução, sem repetir a coleta/);
       for (const escuro of [false, true]) {
         await cdp.avaliar(`document.documentElement.classList.toggle("dark", ${escuro})`);
@@ -186,7 +192,8 @@ test("UI real: previsão manual, polling e sincronização incremental", { skip:
       await cdp.avaliar('const fuso = document.querySelector("details input"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(fuso,"America/Sao_Paulo"); fuso.dispatchEvent(new Event("input",{bubbles:true})); const evidencia = document.querySelector("details textarea"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value").set.call(evidencia,"Cadastro antigo atualizado, inativação, exclusão, limites de data e paginação conferidos."); evidencia.dispatchEvent(new Event("input",{bubbles:true}))');
       await cdp.avaliar('[...document.querySelectorAll("button")].find(b => b.textContent === "Salvar configuração").click()');
       await ate(() => cdp.avaliar<boolean>('window.olistSyncTeste.mutacoes.some(m => m.recurso === "configuracao")'), "Validação não foi enviada");
-      const dados = await cdp.avaliar<{ incrementalValidacoes: { aplicativoId: string; entidade: string; validado: boolean; fusoHorario: string; versaoContrato: number; evidencia: string }[] }>('window.olistSyncTeste.mutacoes.find(m => m.recurso === "configuracao").dados');
+      const dados = await cdp.avaliar<{ entidades: string[]; incrementalValidacoes: { aplicativoId: string; entidade: string; validado: boolean; fusoHorario: string; versaoContrato: number; evidencia: string }[] }>('window.olistSyncTeste.mutacoes.find(m => m.recurso === "configuracao").dados');
+      assert.ok(dados.entidades.includes("SERVICO"), "Configuração salva deve incluir Serviços");
       assert.equal(dados.incrementalValidacoes.length, 1);
       assert.equal(dados.incrementalValidacoes[0].aplicativoId, "00000000-0000-0000-0000-000000000004");
       assert.equal(dados.incrementalValidacoes[0].entidade, "PRODUTO"); assert.equal(dados.incrementalValidacoes[0].validado, true);

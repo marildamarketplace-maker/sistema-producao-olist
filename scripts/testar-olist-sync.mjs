@@ -10,7 +10,7 @@ if (argumentos.length > 1 || !modos.has(modo)) {
   console.error("Uso: node scripts/testar-olist-sync.mjs [--unit|--database|--all]");
   process.exitCode = 2;
 } else {
-  const variaveis = ["OLIST_SYNC_TEST_DATABASE_URL", "OLIST_SYNC_API_TEST_DATABASE_URL", "OLIST_SYNC_SERVICE_TEST_DATABASE_URL", "OLIST_SYNC_CONCURRENCY_TEST_DATABASE_URL", "OLIST_SYNC_INCREMENTAL_TEST_DATABASE_URL"];
+  const variaveis = ["OLIST_SYNC_TEST_DATABASE_URL", "OLIST_SYNC_API_TEST_DATABASE_URL", "OLIST_SYNC_SERVICE_TEST_DATABASE_URL", "OLIST_SYNC_CONCURRENCY_TEST_DATABASE_URL", "OLIST_SYNC_INCREMENTAL_TEST_DATABASE_URL", "OLIST_SYNC_SERVICOS_TEST_DATABASE_URL"];
   let valido = true;
   if (modo !== "--unit") {
     const destinos = new Set();

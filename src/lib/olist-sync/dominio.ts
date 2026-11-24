@@ -5,12 +5,17 @@ import {
 import { serializarCanonico } from "./cripto";
 import { referenciasTiposContatoSync, tiposSemanticosContatoSync } from "./tipos-contato";
 
+import { nomeProdutoElegivelSync, observarProducaoSync, producaoCanonicaSync } from "./produtos";
+
+import { chaveServicoSync, nomeServicoSync } from "./servicos";
+
+const TEXTOS_SERVICO = ["codigo", "nome", "unidade", "descricaoComplementar", "observacoes"] as const;
 const TEXTOS_PRODUTO = ["sku", "descricao", "descricaoComplementar", "unidade", "unidadePorCaixa", "gtin", "garantia"] as const;
 const TEXTOS_CONTATO = ["nome", "fantasia", "tipoPessoa", "cpfCnpj", "telefone", "celular", "telefoneAdicional", "email", "emailNfe", "site"] as const;
 const ENDERECO = ["endereco", "numero", "complemento", "bairro", "municipio", "cep", "uf", "pais"] as const;
 const DIMENSOES = ["largura", "altura", "comprimento", "diametro", "pesoLiquido", "pesoBruto"] as const;
 const SEO = ["titulo", "descricao", "linkVideo", "slug"] as const;
-const IDENTIDADE = new Set(["sku", "cpfCnpj", "tipoPessoa", "tipo", "tipoVariacao", "grade", "unidade"]);
+const IDENTIDADE = new Set(["codigo", "sku", "cpfCnpj", "tipoPessoa", "tipo", "tipoVariacao", "grade", "unidade"]);
 
 function objeto(valor: unknown): valor is Record<string, unknown> {
   return !!valor && typeof valor === "object" && !Array.isArray(valor);
@@ -180,6 +185,11 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
   if (!objeto(payload)) return falhaContrato();
   const completo = opcoes.completo ?? false;
   const id = identificadorRemoto(payload.id);
+  if (entidade === "PRODUTO" && !nomeProdutoElegivelSync(payload.descricao)) {
+    // Só identidade de transporte para avançar a página e retirar eventual legado.
+    // Nenhum outro campo do produto ignorado é interpretado ou persistido.
+    return { id, chave: typeof payload.sku === "string" && payload.sku.trim() ? payload.sku : null, nome: typeof payload.descricao === "string" ? payload.descricao : "", situacao: "", alteradoEm: null, completo, campos: {}, pendencias: [] };
+  }
   const pendencias: string[] = [];
   let campos: CamposSync;
   let chave: string | null = null;
@@ -202,13 +212,27 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
     if ("tipoVariacao" in payload) campos.tipoVariacao = texto(payload.tipoVariacao);
     if (tipo && !["S", "V", "K", "F", "M"].includes(tipo)) pendencias.push("TIPO_PRODUTO_DESCONHECIDO");
     if (completo && !tipo) pendencias.push("TIPO_PRODUTO_AUSENTE");
-    if (["K", "F", "V"].includes(tipo ?? "") || paiId || payload.tipoVariacao === "V") pendencias.push("ESTRUTURA_REQUER_MAPEAMENTO");
+    if (["K", "V"].includes(tipo ?? "") || paiId || payload.tipoVariacao === "V") pendencias.push("ESTRUTURA_REQUER_MAPEAMENTO");
+    if (completo && tipo === "F") {
+      try {
+        const producao = observarProducaoSync(payload.producao);
+        if (producao.produtos.some(p => p.sku === chave)) throw new FalhaSync("PRODUCAO_CICLICA", "Um fabricado não pode ser seu próprio componente.");
+        campos.producao = producao;
+      }
+      catch (erro) { if (!(erro instanceof FalhaSync)) throw erro; campos.producao = null; pendencias.push(erro.codigo); }
+    }
     for (const referencia of ["marca", "categoria"] as const) {
       if (objeto(payload[referencia]) && payload[referencia].id) pendencias.push(`REFERENCIA_${referencia.toUpperCase()}`);
     }
     if (Array.isArray(payload.fornecedores) && payload.fornecedores.length) pendencias.push("REFERENCIA_FORNECEDORES");
     if (objeto(payload.dimensoes) && objeto(payload.dimensoes.embalagem) && payload.dimensoes.embalagem.id) pendencias.push("REFERENCIA_EMBALAGEM");
     if (Array.isArray(payload.anexos) && payload.anexos.length) pendencias.push("IMAGENS_REQUEREM_VALIDACAO");
+  } else if (entidade === "SERVICO") {
+    campos = projetarTextos(payload, TEXTOS_SERVICO, completo);
+    chave = chaveServicoSync(campos);
+    if (chave?.startsWith("nome:")) campos.codigo = null;
+    nome = texto(payload.nome) ?? "";
+    if (!nomeServicoSync(nome)) pendencias.push("NOME_OBRIGATORIO");
   } else if (entidade === "CONTATO" || entidade === "VENDEDOR") {
     const fonte = entidade === "VENDEDOR" ? payload.contato : payload;
     if (!objeto(fonte)) return falhaContrato();
@@ -271,7 +295,7 @@ export function inferirOrigem(replicas: ReplicaComparacao[], visaoCompleta: bool
 }
 
 function estaAtivo(entidade: EntidadeSync, situacao: string): boolean {
-  return entidade === "PRODUTO" ? situacao === "A" : entidade === "FORMA_PAGAMENTO" ? situacao === "1" : situacao === "B" || situacao === "A";
+  return entidade === "PRODUTO" || entidade === "SERVICO" ? situacao === "A" : entidade === "FORMA_PAGAMENTO" ? situacao === "1" : situacao === "B" || situacao === "A";
 }
 
 export function avaliarReplicas(entrada: {
@@ -288,6 +312,7 @@ export function avaliarReplicas(entrada: {
   if (!entrada.visaoCompleta || replicas.length < 2 || presentes.some(item => !item.observacao.completo)) motivos.push("AUDITORIA_INCOMPLETA");
   if (new Set(replicas.map(replica => replica.aplicativoId)).size !== replicas.length) motivos.push("REPLICA_DUPLICADA");
   if (!presentes.length) motivos.push("REGISTRO_AUSENTE");
+  if (entidade === "PRODUTO" && presentes.some(p => !nomeProdutoElegivelSync(p.observacao.nome))) motivos.push("PRODUTO_FORA_ESCOPO");
   if (replicas.some(replica => replica.existia && !replica.observacao)) motivos.push("REGISTRO_REMOVIDO");
   if (presentes.some(item => !estaAtivo(entidade, item.observacao.situacao))) motivos.push("REGISTRO_INATIVO");
   const chaves = new Set(presentes.map(item => item.observacao.chave));
@@ -340,19 +365,29 @@ export function avaliarReplicas(entrada: {
 
 /** Reconstrói o payload: nunca espalha o objeto obtido da outra conta. */
 export function prepararPayload(entidade: EntidadeSync, campos: CamposSync, opcoes: { operacao: "CRIAR" | "ATUALIZAR" }): CamposSync {
-  if (entidade !== "PRODUTO" && entidade !== "CONTATO") throw new FalhaSync("SOMENTE_LEITURA", "A API desta entidade permite somente auditoria.");
+  if (entidade !== "PRODUTO" && entidade !== "CONTATO" && entidade !== "SERVICO") throw new FalhaSync("SOMENTE_LEITURA", "A API desta entidade permite somente auditoria.");
+  if (entidade === "SERVICO") {
+    const payload = projetarTextos(campos, TEXTOS_SERVICO, false);
+    const chave = chaveServicoSync(payload);
+    if (!chave || !nomeServicoSync(payload.nome)) throw new FalhaSync("OBRIGATORIOS", "O serviço precisa de nome válido e código, quando preenchido.");
+    if (chave.startsWith("nome:")) payload.codigo = null;
+    if (opcoes.operacao === "CRIAR") payload.situacao = "A";
+    return payload;
+  }
   if (entidade === "PRODUTO") {
     const payload = projetarTextos(campos, TEXTOS_PRODUTO, false);
     if (typeof payload.sku !== "string" || !payload.sku.trim() || typeof payload.descricao !== "string" || !payload.descricao.trim()) {
       throw new FalhaSync("OBRIGATORIOS", "O produto precisa de SKU e descrição para sincronização.");
     }
-    if ((opcoes.operacao === "CRIAR" || campos.tipo !== undefined) && campos.tipo !== "S" && campos.tipo !== "M") throw new FalhaSync("ESTRUTURA_REQUER_MAPEAMENTO", "A estrutura do produto exige validação e mapeamento de dependências.");
+    if (!nomeProdutoElegivelSync(payload.descricao)) throw new FalhaSync("PRODUTO_FORA_ESCOPO", "Somente produtos com a palavra Ref no nome podem ser sincronizados.");
+    if ((opcoes.operacao === "CRIAR" || campos.tipo !== undefined) && campos.tipo !== "S" && campos.tipo !== "M" && campos.tipo !== "F") throw new FalhaSync("ESTRUTURA_REQUER_MAPEAMENTO", "A estrutura do produto exige validação e mapeamento de dependências.");
     if (campos.tipoVariacao === "V" || (Array.isArray(campos.grade) && campos.grade.length)) {
       throw new FalhaSync("VARIACAO_REQUER_VALIDACAO", "Variações devem utilizar o contrato específico validado.");
     }
     if (opcoes.operacao === "CRIAR" && Array.isArray(campos.imagens) && campos.imagens.length) {
       throw new FalhaSync("IMAGENS_REQUEREM_VALIDACAO", "A criação deste produto exige validação e aplicação das imagens pelo subrecurso específico.");
     }
+    if (campos.tipo === "F") payload.producao = producaoCanonicaSync(campos.producao);
     if ("dimensoes" in campos) payload.dimensoes = dimensoes(campos.dimensoes);
     if ("seo" in campos) payload.seo = seo(campos.seo);
     if (opcoes.operacao === "CRIAR") payload.tipo = campos.tipo;

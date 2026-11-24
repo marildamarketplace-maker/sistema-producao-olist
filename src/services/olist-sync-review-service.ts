@@ -11,6 +11,8 @@ import { prepararPayload, gerarHashesCampos } from "@/lib/olist-sync/dominio";
 import type { CamposSync } from "@/lib/olist-sync/contrato";
 import { decisaoSchema, entidadeSync, objetoJson, observacaoProtegida, origemSchema } from "@/lib/olist-sync/validacao";
 
+import { nomeProdutoElegivelSync, primeiraEscritaProdutoSync, VERSAO_PRODUTOS_SYNC } from "@/lib/olist-sync/produtos";
+
 type DeclaracaoOrigem = z.infer<typeof origemSchema>;
 type DecisaoPendencia = z.infer<typeof decisaoSchema>;
 
@@ -68,8 +70,8 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
     if (["APROVAR", "VINCULAR"].includes(input.acao) && (membros.length < 2 || membros.some(m => !aplicativoElegivelSync(atualConfig, m.aplicativo))))
       throw new ErroRepositorioSync("A aprovação e o vínculo exigem ao menos dois filhos habilitados sem bloqueios no grupo.", 400);
     if (input.acao === "VINCULAR") {
-      if (p.entidade === "PRODUTO" || !input.vinculos)
-        throw new ErroRepositorioSync("Informe ao menos dois IDs locais da mesma entidade. Produtos são vinculados exclusivamente pelo SKU.", 400);
+      if (["PRODUTO", "SERVICO"].includes(p.entidade) || !input.vinculos)
+        throw new ErroRepositorioSync("Informe ao menos dois IDs locais da mesma entidade. Produtos e serviços usam a identidade automática do cadastro.", 400);
       if (input.vinculos.some(v => !membros.some(m => m.aplicativoId === v.aplicativoId)))
         throw new ErroRepositorioSync("Os vínculos devem pertencer aos filhos habilitados.", 400);
       const estados = await tx.olistSyncEstado.findMany({ where: { configuracaoId: config.id, entidade: p.entidade, OR: input.vinculos.map(v => ({ aplicativoId: v.aplicativoId, remoteId: v.registroOlistId })) }, select: { id: true, registroId: true, aplicativoId: true, remoteId: true, dadosCriptografados: true, metadadosJson: true, presente: true, detalhePendente: true }, take: 20 });
@@ -103,7 +105,7 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
       await marcarAfetadosSync(tx, { grupo: config.id, execucao: dona, entidade: entidadeSync(p.entidade), registroIds: [registroId] });
     }
     if (input.acao === "APROVAR") {
-      if (!p.registroId || !input.aplicativoFonteId || !["PRODUTO", "CONTATO"].includes(p.entidade) || /DUPLIC|IDENTIDADE|INCONCLUSIVO|REFERENCIA_|ESTRUTURA|VARIACAO|INATIVO|REMOVIDO/.test(p.tipo))
+      if (!p.registroId || !input.aplicativoFonteId || !["PRODUTO", "CONTATO", "SERVICO"].includes(p.entidade) || /DUPLIC|IDENTIDADE|INCONCLUSIVO|REFERENCIA_|ESTRUTURA|VARIACAO|INATIVO|REMOVIDO/.test(p.tipo))
         throw new ErroRepositorioSync("Este conflito exige correção do cadastro e nova auditoria.");
       await tx.$queryRaw`SELECT id FROM olist_sync_registro WHERE id=${p.registroId}::uuid FOR UPDATE`;
       const registro = await tx.olistSyncRegistro.findUniqueOrThrow({ where: { id: p.registroId }, select: { revisao: true } });
@@ -114,6 +116,7 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
       if (!fonte?.dadosCriptografados)
         throw new ErroRepositorioSync("Escolha uma empresa participante com observação completa.");
       const obs = observacaoProtegida(c.decifrar(fonte.dadosCriptografados, `${config.id}:estado:${fonte.aplicativoId}:${p.entidade}:${fonte.remoteId}`));
+      if (p.entidade === "PRODUTO" && !nomeProdutoElegivelSync(obs.nome)) throw new ErroRepositorioSync("Somente produtos com Ref no nome podem ser sincronizados.");
       if (!obs.completo || obs.pendencias.length)
         throw new ErroRepositorioSync("A origem possui dependências ou identidade pendentes.");
       const prova = objetoJson(detalhePendencia.cobertura), temProva = typeof prova.assinaturaEscopo === "string" && prova.versaoContrato === VERSAO_CONTRATO_INCREMENTAL;
@@ -149,7 +152,8 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
         if ((!temProva && estado.ultimaExecucaoId !== auditoria.id) || !estado.dadosCriptografados || !estado.presente || estado.detalhePendente)
           throw new ErroRepositorioSync("Há uma réplica removida ou sem observação atual. Reaudite o grupo.");
         const atual = observacaoProtegida(c.decifrar(estado.dadosCriptografados, `${config.id}:estado:${estado.aplicativoId}:${p.entidade}:${estado.remoteId}`));
-        const ativo = p.entidade === "PRODUTO" ? atual.situacao === "A" : ["A", "B"].includes(atual.situacao);
+        const ativo = p.entidade === "PRODUTO" || p.entidade === "SERVICO" ? atual.situacao === "A" : ["A", "B"].includes(atual.situacao);
+        if (p.entidade === "PRODUTO" && !nomeProdutoElegivelSync(atual.nome)) throw new ErroRepositorioSync("Reaudite os produtos para retirar os cadastros sem Ref.");
         if (!atual.completo || !ativo || atual.chave !== obs.chave || atual.pendencias.length)
           throw new ErroRepositorioSync("Uma réplica possui identidade, situação ou dependências pendentes.");
         if (p.entidade === "PRODUTO" && (atual.tipo !== obs.tipo || atual.paiId !== obs.paiId && Boolean(atual.paiId) !== Boolean(obs.paiId)))
@@ -164,12 +168,15 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
         throw new ErroRepositorioSync("Há uma escrita pendente de reconciliação para este registro.");
       await tx.olistSyncOperacao.updateMany({ where: { registroId: p.registroId, status: { in: ["PROPOSTA", "AUTORIZADA"] } }, data: { status: "OBSOLETA" } });
       for (const membro of membros.filter(p => p.aplicativoId !== fonte.aplicativoId)) {
-        const destino = estados.find(s => s.aplicativoId === membro.aplicativoId), acao = destino ? "ATUALIZAR" : "CRIAR";
-        prepararPayload(entidade, obs.campos, { operacao: acao });
+        const destino = estados.find(s => s.aplicativoId === membro.aplicativoId);
+        const anteriores = destino?.dadosCriptografados ? observacaoProtegida(c.decifrar(destino.dadosCriptografados, `${config.id}:estado:${destino.aplicativoId}:${p.entidade}:${destino.remoteId}`)).campos : undefined;
+        const escrita = entidade === "PRODUTO" ? primeiraEscritaProdutoSync(obs.campos, anteriores) : { campos: obs.campos, somenteProducao: false };
+        const acao = !destino ? "CRIAR" : "ATUALIZAR";
+        prepararPayload(entidade, obs.campos, { operacao: destino ? "ATUALIZAR" : "CRIAR" });
         if (destino && serializarCanonico(objetoJson(destino.hashesJson)) === serializarCanonico(gerarHashesCampos(obs.campos, v => c.hash(v, `${config.id}:campo`))))
           continue;
         const operacaoId = randomUUID();
-        await tx.olistSyncOperacao.create({ data: { id: operacaoId, configuracaoId: config.id, registroId: p.registroId, execucaoId: p.execucaoId, sourceAppId: fonte.aplicativoId, destinoAppId: membro.aplicativoId, acao, revisao, status: "AUTORIZADA", precondicoesJson: { replicas, ...(entidade === "CONTATO" ? { versaoObservacaoContato: VERSAO_OBSERVACAO_CONTATO } : {}), versaoConfiguracao: config.versao, fontesPorCampo: Object.fromEntries(Object.keys(obs.campos).map(k => [k, [fonte.aplicativoId]])) }, payloadCriptografado: c.cifrar(obs.campos, `${config.id}:operacao:${operacaoId}`) }, select: { id: true } });
+        await tx.olistSyncOperacao.create({ data: { id: operacaoId, configuracaoId: config.id, registroId: p.registroId, execucaoId: p.execucaoId, sourceAppId: fonte.aplicativoId, destinoAppId: membro.aplicativoId, acao, revisao, status: "AUTORIZADA", precondicoesJson: { replicas, somenteProducao: escrita.somenteProducao, ...(entidade === "PRODUTO" ? { versaoProdutos: VERSAO_PRODUTOS_SYNC } : {}), ...(escrita.producaoPendente ? { producaoPendenteCriptografada: c.cifrar(escrita.producaoPendente, `${config.id}:operacao:${operacaoId}:producao`) } : {}), ...(entidade === "CONTATO" ? { versaoObservacaoContato: VERSAO_OBSERVACAO_CONTATO } : {}), versaoConfiguracao: config.versao, fontesPorCampo: Object.fromEntries(Object.keys(obs.campos).map(k => [k, [fonte.aplicativoId]])) }, payloadCriptografado: c.cifrar(escrita.campos, `${config.id}:operacao:${operacaoId}`) }, select: { id: true } });
       }
       await tx.olistSyncRegistro.update({ where: { id: p.registroId }, data: { revisao }, select: { id: true } });
     }

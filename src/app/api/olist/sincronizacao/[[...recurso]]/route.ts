@@ -23,6 +23,8 @@ const repo=criarOlistSyncRepository(prisma);
 const json=(body:unknown,init?:ResponseInit)=>NextResponse.json(body,{...init,headers:{...init?.headers,"Cache-Control":"private, no-store"}});
 const selectExecucao={id:true,modo:true,status:true,origem:true,createdAt:true,iniciadaEm:true,finalizadaEm:true,contadoresJson:true} as const;
 const selectPendencia={id:true,registroId:true,entidade:true,tipo:true,severidade:true,status:true,versao:true,createdAt:true} as const;
+// Cinco entidades com até 20 coletas, uma comparação e 20 aplicações cada.
+const MAXIMO_ETAPAS_EXECUCAO_SYNC=205;
 function execucaoDto(e:{id:string;modo:string;status:string;origem:string;createdAt:Date;iniciadaEm:Date|null;finalizadaEm:Date|null;contadoresJson:Prisma.JsonValue}) {
   return {id:e.id,modo:e.modo,status:e.status,origem:e.origem,criadoEm:e.createdAt,iniciadoEm:e.iniciadaEm,finalizadoEm:e.finalizadaEm,contadores:e.contadoresJson};
 }
@@ -61,7 +63,7 @@ export async function GET(request:Request,contexto:Contexto) {
         where:{aplicativoPaiId},select:{id:true,ativo:true,aplicativoPai:{select:{jobs:true}}}}));
       const agora=new Date();
       const e=await prisma.olistSyncExecucao.findFirst({where:{configuracaoId:config.id,status:{in:ESTADOS_EXECUCAO_SYNC_ATIVOS}},
-        select:{id:true,modo:true,status:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:201}}});
+        select:{id:true,modo:true,status:true,iniciadaEm:true,contadoresJson:true,etapas:{select:{fase:true,status:true},take:MAXIMO_ETAPAS_EXECUCAO_SYNC+1}}});
       if(!e)return json({previsao:null});
       const aplicando=e.modo==="APLICAR" || e.status==="APLICANDO";
       const controle=aplicando?JOBS_SYNC.aplicar:JOBS_SYNC.auditar;
@@ -71,14 +73,14 @@ export async function GET(request:Request,contexto:Contexto) {
       if(aplicando) {
         const [fila]=await prisma.$queryRaw<Array<{iniciada:Date|null;restantes:number;falhas:number}>>(consultaFilaAplicacaoSync(config.id,e.id));
         const entrada={execucaoId:e.id,agora,iniciadaEm:fila?.iniciada??e.iniciadaEm,restantes:fila?.restantes??0,falhas:fila?.falhas??0,
-          preparacaoPendente:!e.etapas.some(s=>s.fase==="APLICAR") || e.etapas.length>200 || e.etapas.some(s=>["LISTAR","DETALHAR","COMPARAR"].includes(s.fase)&&s.status!=="CONCLUIDA"),
+          preparacaoPendente:!e.etapas.some(s=>s.fase==="APLICAR") || e.etapas.length>MAXIMO_ETAPAS_EXECUCAO_SYNC || e.etapas.some(s=>["LISTAR","DETALHAR","COMPARAR"].includes(s.fase)&&s.status!=="CONCLUIDA"),
           pausada:pausada || e.etapas.some(s=>s.fase==="APLICAR"&&["PAUSADA","FALHOU","CANCELADA"].includes(s.status))};
         const previa=calcularPrevisaoAplicacaoSync({...entrada,confirmadosNaJanela:0});
         if(previa.estado!=="SEM_RITMO")return json({previsao:null,previsaoAplicacao:previa});
         const [amostra]=await prisma.$queryRaw<Array<{total:number}>>(consultaConfirmacoesRecentesSync(config.id,e.id,inicioJanelaPrevisaoSync(agora,entrada.iniciadaEm),agora));
         return json({previsao:null,previsaoAplicacao:calcularPrevisaoAplicacaoSync({...entrada,confirmadosNaJanela:amostra?.total??0})});
       }
-      const listagemPendente=e.etapas.length===0 || e.etapas.length>200 || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
+      const listagemPendente=e.etapas.length===0 || e.etapas.length>MAXIMO_ETAPAS_EXECUCAO_SYNC || e.etapas.some(s=>s.fase==="LISTAR" && s.status!=="CONCLUIDA");
       const previa=calcularPrevisaoValidacaoSync({execucaoId:e.id,agora,iniciadaEm:e.iniciadaEm,contadores:e.contadoresJson,
         validadosNaJanela:0,listagemPendente,pausada});
       // Os demais estados já são conhecidos sem contar observações recentes.
@@ -97,7 +99,7 @@ export async function GET(request:Request,contexto:Contexto) {
         prisma.aplicativo.findUniqueOrThrow({where:{id:config.aplicativoPaiId},select:{nome:true}}),
         prisma.aplicativo.findMany({where:{aplicativoPaiId:config.aplicativoPaiId},select:{id:true,nome:true,aplicativoPaiId:true},orderBy:[{nome:"asc"},{id:"asc"}],take:100}),
         prisma.configuracaoJob.findMany({where:{chave:{in:Object.values(JOBS_SYNC).map(j=>j.chave)}},select:{chave:true,pausado:true}}),
-        prisma.olistSyncCobertura.findMany({where:{configuracaoId:config.id,participante:{habilitado:true}},select:{aplicativoId:true,entidade:true,incrementalValidado:true,incrementalFuso:true,incrementalContaIdentidade:true,incrementalVersaoContrato:true,incrementalValidadoEm:true,completaEm:true,incrementalEm:true,watermarkConfirmado:true},orderBy:[{aplicativoId:"asc"},{entidade:"asc"}],take:80}),
+        prisma.olistSyncCobertura.findMany({where:{configuracaoId:config.id,participante:{habilitado:true}},select:{aplicativoId:true,entidade:true,incrementalValidado:true,incrementalFuso:true,incrementalContaIdentidade:true,incrementalVersaoContrato:true,incrementalValidadoEm:true,completaEm:true,incrementalEm:true,watermarkConfirmado:true},orderBy:[{aplicativoId:"asc"},{entidade:"asc"}],take:100}),
       ]);
       const coberturaPorEscopo=new Map(coberturas.map(c=>[`${c.aplicativoId}:${c.entidade}`,c]));
       return json({id:config.id,aplicativoPaiId:config.aplicativoPaiId,aplicativoPaiNome:pai.nome,versao:config.versao,ativo:config.ativo,entidades:config.entidades,
@@ -130,7 +132,7 @@ export async function GET(request:Request,contexto:Contexto) {
     }
     if(recurso==="execucoes") {
       if(id) {
-        const e=await prisma.olistSyncExecucao.findFirst({where:{id,configuracaoId:config.id},select:{...selectExecucao,etapas:{select:{id:true,entidade:true,aplicativoId:true,fase:true,status:true,tentativas:true,disponivelEm:true},orderBy:[{entidade:"asc"},{aplicativoId:"asc"},{fase:"asc"},{id:"asc"}],take:200}}});
+        const e=await prisma.olistSyncExecucao.findFirst({where:{id,configuracaoId:config.id},select:{...selectExecucao,etapas:{select:{id:true,entidade:true,aplicativoId:true,fase:true,status:true,tentativas:true,disponivelEm:true},orderBy:[{entidade:"asc"},{aplicativoId:"asc"},{fase:"asc"},{id:"asc"}],take:MAXIMO_ETAPAS_EXECUCAO_SYNC}}});
         if(!e)throw new ErroRepositorioSync("Execução não encontrada.",404);
         // Projeta somente a janela pública: não transfere o lote/cursor nem hashes internos.
         const planos=await prisma.$queryRaw<{id:string;modo:string|null;iniciadaEm:string|null;desde:string|null;confirmacoesDivergentes:boolean}[]>`
@@ -140,7 +142,7 @@ export async function GET(request:Request,contexto:Contexto) {
             coalesce(etapa.erro_codigo='CONFIRMACOES_DIVERGENTES',false) AS "confirmacoesDivergentes"
           FROM olist_sync_etapa etapa JOIN olist_sync_execucao execucao ON execucao.id=etapa.execucao_id
           WHERE etapa.execucao_id=${id}::uuid AND execucao.configuracao_id=${config.id}::uuid
-          ORDER BY etapa.entidade, etapa.aplicativo_id, etapa.fase, etapa.id LIMIT 200`;
+          ORDER BY etapa.entidade, etapa.aplicativo_id, etapa.fase, etapa.id LIMIT ${MAXIMO_ETAPAS_EXECUCAO_SYNC}`;
         const planoPorEtapa=new Map(planos.map(p=>[p.id,p]));
         return json({...execucaoDto(e),etapas:e.etapas.map(s=>{
           const plano=planoPorEtapa.get(s.id);
@@ -165,8 +167,8 @@ export async function GET(request:Request,contexto:Contexto) {
         const estadoFiltro:Prisma.OlistSyncEstadoWhereInput=p.registroId?{registroId:p.registroId}:typeof detalhe.aplicativoId==="string"&&typeof detalhe.remoteId==="string"?{aplicativoId:detalhe.aplicativoId,remoteId:detalhe.remoteId,entidade:p.entidade}:{id:"00000000-0000-0000-0000-000000000000"};
         const estados=await prisma.olistSyncEstado.findMany({where:{configuracaoId:config.id,...estadoFiltro,participante:{habilitado:true}},select:{aplicativoId:true,remoteId:true,dadosCriptografados:true,participante:{select:{aplicativo:{select:{nome:true}}}}},take:20});
         const comparacao=estados.flatMap(s=>s.dadosCriptografados?[{aplicativoId:s.aplicativoId,nome:s.participante.aplicativo.nome,registroOlistId:s.remoteId,campos:observacaoProtegida(c.decifrar(s.dadosCriptografados,`${config.id}:estado:${s.aplicativoId}:${p.entidade}:${s.remoteId}`)).campos}]:[]);
-        const aprovavel=p.registroId&&["PRODUTO","CONTATO"].includes(p.entidade)&&!/DUPLIC|IDENTIDADE|INCONCLUSIVO|REFERENCIA_|ESTRUTURA|VARIACAO|INATIVO|REMOVIDO/.test(p.tipo);
-        return json({...pendenciaDto(p),comparacao,acoesPermitidas:p.status==="AGUARDANDO_REVISAO"?[...(aprovavel?["APROVAR"]:[]),...(!p.registroId&&p.entidade!=="PRODUTO"?["VINCULAR"]:[]),"REJEITAR","IGNORAR","REAUDITAR"]:[]});
+        const aprovavel=p.registroId&&["PRODUTO","CONTATO","SERVICO"].includes(p.entidade)&&!/DUPLIC|IDENTIDADE|INCONCLUSIVO|REFERENCIA_|ESTRUTURA|VARIACAO|INATIVO|REMOVIDO/.test(p.tipo);
+        return json({...pendenciaDto(p),comparacao,acoesPermitidas:p.status==="AGUARDANDO_REVISAO"?[...(aprovavel?["APROVAR"]:[]),...(!p.registroId&&!["PRODUTO","SERVICO"].includes(p.entidade)?["VINCULAR"]:[]),"REJEITAR","IGNORAR","REAUDITAR"]:[]});
       }
       const where:Prisma.OlistSyncPendenciaWhereInput={configuracaoId:config.id,entidade:filtros.entidade,status:filtros.status,severidade:filtros.severidade,tipo:filtros.tipo,...(filtros.aplicativoId?{OR:[
         {aplicativoId:filtros.aplicativoId},

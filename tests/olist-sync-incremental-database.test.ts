@@ -77,7 +77,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
     },
   });
   const servico = criarServicoOlistSync(db, cliente, { agora: () => new Date(agora), aguardar: async ms => { agora += ms; }, cripto });
-  const produto = (id: number, indice = 0): CamposSync => ({ id, sku: `SKU-${String(indice).padStart(5, "0")}`, descricao: `Produto ${indice}`, tipo: "S", situacao: "A", dataAlteracao: new Date(agora - 3 * dia).toISOString(), estoque: { saldo: 10 } });
+  const produto = (id: number, indice = 0): CamposSync => ({ id, sku: `SKU-${String(indice).padStart(5, "0")}`, descricao: `Ref Produto ${indice}`, tipo: "S", situacao: "A", dataAlteracao: new Date(agora - 3 * dia).toISOString(), estoque: { saldo: 10 } });
   const escritas = () => chamadas.filter(c => c.requisicao.metodo !== "GET");
   const listas = () => chamadas.filter(c => new URL(c.requisicao.url).pathname.endsWith("/produtos") && !new URL(c.requisicao.url).searchParams.has("codigo"));
   async function reset(quantidade = 1) {
@@ -126,9 +126,9 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   const estados = () => db.olistSyncEstado.findMany({ where: { configuracaoId: grupo }, orderBy: [{ aplicativoId: "asc" }, { remoteId: "asc" }], select: { id: true, dadosCriptografados: true, fingerprint: true, presente: true, hashesJson: true } });
   const registros = () => db.olistSyncRegistro.findMany({ where: { configuracaoId: grupo }, orderBy: { chave: "asc" }, select: { id: true, revisao: true, hashesBaseJson: true, aplicativoOrigemId: true, origemTipo: true } });
   async function conflitoIncremental() {
-    await reset(); contas.get(a)!.get("100")!.descricao = "Cadastro inicial A";
+    await reset(); contas.get(a)!.get("100")!.descricao = "Ref Cadastro inicial A";
     const completa = await enfileirar(true); await terminar(completa.id); await validarIncremental();
-    agora += 2 * dia; chamadas.length = 0; alterar(a, "100", { descricao: "Cadastro A alterado no delta" });
+    agora += 2 * dia; chamadas.length = 0; alterar(a, "100", { descricao: "Ref Cadastro A alterado no delta" });
     const incremental = await enfileirar(); await terminar(incremental.id);
     const pendencia = await db.olistSyncPendencia.findFirstOrThrow({ where: { execucaoId: incremental.id, status: "AGUARDANDO_REVISAO" } });
     assert.equal((await db.olistSyncEstado.findFirstOrThrow({ where: { aplicativoId: b } })).ultimaExecucaoId, completa.id);
@@ -185,7 +185,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   await t.test("delta com alterações respeita 30/min e exclui a cota do fingerprint e payload",async()=>{
     await baseline(3);const anteriores=await estados();
     for(const app of [a,b])cotas.set(app,{limite:60,restante:59,resetSegundos:60});
-    for(let i=0;i<3;i++)alterar(a,String(100+i),{descricao:`Atualizado ${i}`});
+    for(let i=0;i<3;i++)alterar(a,String(100+i),{descricao:`Ref Atualizado ${i}`});
     const e=await enfileirar();await consumirComRitmo(e.id);
     const detalhes=chamadas.filter(c=>/\/produtos\/\d+$/.test(new URL(c.requisicao.url).pathname));
     assert.equal(detalhes.length,3);
@@ -217,7 +217,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
     await repo.cancelarExecucao(e.id,pai);
   });
   await t.test("429 no delta preserva a janela, bloqueia a conta e só confirma marco após recuperação",async()=>{
-    await baseline();alterar(a,"100",{descricao:"Atualização pendente"});
+    await baseline();alterar(a,"100",{descricao:"Ref Atualização pendente"});
     const antes=await db.olistSyncCobertura.findFirstOrThrow({where:{configuracaoId:grupo,aplicativoId:a}});
     const e=await enfileirar();
     interceptar=async(r,app)=>app===a&&new URL(r.url).pathname.endsWith("/produtos/100")
@@ -253,15 +253,15 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   });
 
   await t.test("delta unilateral usa réplica completa anterior e confirma atualização", async () => {
-    await baseline(); alterar(a, "100", { descricao: "Nova descrição" });
+    await baseline(); alterar(a, "100", { descricao: "Ref Nova descrição" });
     const execucao = await enfileirar(false, "AUDITAR_E_APLICAR"); await terminar(execucao.id);
-    assert.equal(contas.get(b)!.get("1000")!.descricao, "Nova descrição"); assert.equal(escritas().length, 1);
+    assert.equal(contas.get(b)!.get("1000")!.descricao, "Ref Nova descrição"); assert.equal(escritas().length, 1);
     assert.equal((await db.olistSyncOperacao.findFirstOrThrow()).status, "CONFIRMADA");
     assert.equal(await db.olistSyncAfetado.count({ where: { execucaoId: execucao.id } }), 1);
   });
 
   await t.test("deltas bilaterais conflitantes não elegem vencedor nem avançam base", async () => {
-    await baseline(); const antes = await registros(); alterar(a, "100", { descricao: "Valor A" }); alterar(b, "1000", { descricao: "Valor B" });
+    await baseline(); const antes = await registros(); alterar(a, "100", { descricao: "Ref Valor A" }); alterar(b, "1000", { descricao: "Ref Valor B" });
     await terminar((await enfileirar(false, "AUDITAR_E_APLICAR")).id);
     assert.equal(escritas().length, 0); assert.deepEqual((await registros())[0].hashesBaseJson, antes[0].hashesBaseJson);
     assert.ok(await db.olistSyncPendencia.count({ where: { tipo: { startsWith: "CONFLITO" }, status: "AGUARDANDO_REVISAO" } }));
@@ -280,7 +280,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
     await t.test(`aprovação do delta rejeita alteração posterior de ${alteracao}`, async () => {
       const { pendencia, aprovar } = await conflitoIncremental();
       const estado = await db.olistSyncEstado.findFirstOrThrow({ where: { aplicativoId: b } });
-      await db.olistSyncEstado.update({ where: { id: estado.id }, data: alteracao === "hashes" ? { hashesJson: { descricao: "outra-versao" } } : alteracao === "presença" ? { presente: false } : { fingerprint: "outra-observacao" } });
+      await db.olistSyncEstado.update({ where: { id: estado.id }, data: alteracao === "hashes" ? { hashesJson: { descricao: "Ref outra-versao" } } : alteracao === "presença" ? { presente: false } : { fingerprint: "outra-observacao" } });
       await assert.rejects(aprovar(), /mudou|removida|observação|Reaudite/i);
       assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({ where: { id: pendencia.id } })).status, "AGUARDANDO_REVISAO");
       assert.equal(await db.olistSyncOperacao.count({ where: { status: "AUTORIZADA" } }), 0);
@@ -297,7 +297,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   });
 
   await t.test("resumo parcial não apaga snapshot completo enquanto o detalhe está pendente", async () => {
-    await baseline(); const antes = await estados(); alterar(a, "100", { descricao: "Alteração aguardando detalhe" }); const e = await enfileirar();
+    await baseline(); const antes = await estados(); alterar(a, "100", { descricao: "Ref Alteração aguardando detalhe" }); const e = await enfileirar();
     for (let i = 0; i < 20; i++) {
       if (await db.olistSyncEstado.count({ where: { aplicativoId: a, detalhePendente: true } })) break;
       await passo();
@@ -360,7 +360,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
 
   await t.test("watermark confirmado usa início da coleta e conserva sobreposição de 24 horas", async () => {
     await baseline(); const anterior = await db.olistSyncCobertura.findMany({ where: { configuracaoId: grupo } });
-    alterar(a, "100", { descricao: "Novo" }); const inicio = agora; const e = await enfileirar(); await terminar(e.id);
+    alterar(a, "100", { descricao: "Ref Novo" }); const inicio = agora; const e = await enfileirar(); await terminar(e.id);
     const coberturas = await db.olistSyncCobertura.findMany({ where: { configuracaoId: grupo } });
     for (const cobertura of coberturas) {
       const lista = listas().find(c => c.requisicao.token === cobertura.aplicativoId)!; const ultima = anterior.find(c => c.aplicativoId === cobertura.aplicativoId)!;
@@ -432,7 +432,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
 
   await t.test("falha no detalhe não avança watermark da conta nem transforma réplica em ausente", async () => {
     await baseline(); const anterior = await db.olistSyncCobertura.findFirstOrThrow({ where: { configuracaoId: grupo, aplicativoId: a } });
-    alterar(a, "100", { descricao: "Não coletado" });
+    alterar(a, "100", { descricao: "Ref Não coletado" });
     interceptar = async (r, app) => app === a && r.metodo === "GET" && r.url.endsWith("/produtos/100") ? { status: 503, dados: {} } : undefined;
     const e = await enfileirar(); await terminar(e.id);
     const atual = await db.olistSyncCobertura.findUniqueOrThrow({ where: { id: anterior.id } });
@@ -443,7 +443,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
 
   for (const desfecho of ["alterado", "removido"] as const) {
     await t.test(`delta vazio recupera detalhe antigo pendente e confirma cadastro ${desfecho}`, async () => {
-      await baseline(); alterar(a, "100", { descricao: "Detalhe pendente da execução anterior" });
+      await baseline(); alterar(a, "100", { descricao: "Ref Detalhe pendente da execução anterior" });
       interceptar = async (r, app) => app === a && r.metodo === "GET" && r.url.endsWith("/produtos/100") ? { status: 503, dados: {} } : undefined;
       await terminar((await enfileirar()).id);
       assert.equal((await db.olistSyncEstado.findFirstOrThrow({ where: { aplicativoId: a } })).detalhePendente, true);
@@ -463,7 +463,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   for (const falha of ["total ausente", "página vazia prematura", "ID repetido entre páginas"] as const) {
     await t.test(`paginação com ${falha} não confirma cobertura nem autoriza escrita`, async () => {
       await baseline(); const anterior = await db.olistSyncCobertura.findFirstOrThrow({ where: { configuracaoId: grupo, aplicativoId: a } });
-      alterar(a, "100", { descricao: "Aguardando cobertura válida" });
+      alterar(a, "100", { descricao: "Ref Aguardando cobertura válida" });
       interceptar = async (r, app) => {
         const caminho = new URL(r.url);
         if (app !== a || r.metodo !== "GET" || !caminho.pathname.endsWith("/produtos")) return;
@@ -480,7 +480,7 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
   }
 
   await t.test("cancelamento com alterações coletadas não perde a comparação na execução seguinte", async () => {
-    await baseline(); alterar(a, "100", { descricao: "Pendente de comparação" });
+    await baseline(); alterar(a, "100", { descricao: "Ref Pendente de comparação" });
     const e = await enfileirar();
     for (let i = 0; i < 50 && !await db.olistSyncEtapa.count({ where: { execucaoId: e.id, fase: "COMPARAR", status: "PENDENTE" } }); i++) await passo();
     assert.equal(await db.olistSyncEtapa.count({ where: { execucaoId: e.id, fase: "COMPARAR", status: "PENDENTE" } }), 1);
@@ -491,11 +491,11 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
     // repetir. A fila durável é a autoridade para esse trabalho interrompido.
     contas.get(a)!.get("100")!.dataAlteracao = new Date(agora - 10 * dia).toISOString();
     await terminar((await enfileirar(false, "AUDITAR_E_APLICAR")).id);
-    assert.equal(contas.get(b)!.get("1000")!.descricao, "Pendente de comparação"); assert.equal(escritas().length, 1);
+    assert.equal(contas.get(b)!.get("1000")!.descricao, "Ref Pendente de comparação"); assert.equal(escritas().length, 1);
   });
 
   await t.test("falha após comparar um lote transfere também itens já processados de uma comparação incompleta", async () => {
-    await baseline(26);for (let i = 0; i < 26; i++) alterar(a, String(100 + i), { descricao: `Alteração ${i}` });
+    await baseline(26);for (let i = 0; i < 26; i++) alterar(a, String(100 + i), { descricao: `Ref Alteração ${i}` });
     const e = await enfileirar();
     for (let i = 0; i < 200 && !await db.olistSyncAfetado.count({ where: { execucaoId: e.id, processadoEm: { not: null } } }); i++) await passo();
     assert.equal(await db.olistSyncAfetado.count({ where: { execucaoId: e.id, processadoEm: { not: null } } }), 25);
@@ -515,8 +515,8 @@ test("Olist sync incremental: cobertura, consistência e custo de coleta", { ski
     for (const percentual of [0, 1, 100]) {
       chamadas.length = 0; agora += 2 * dia;
       for (let i = 0; i < percentual; i++) {
-        alterar(a, String(100 + i), { descricao: `Revisão ${percentual} do produto ${i}` });
-        alterar(b, String(1000 + i), { descricao: `Revisão ${percentual} do produto ${i}` });
+        alterar(a, String(100 + i), { descricao: `Ref Revisão ${percentual} do produto ${i}` });
+        alterar(b, String(1000 + i), { descricao: `Ref Revisão ${percentual} do produto ${i}` });
       }
       const e = await enfileirar(); await terminar(e.id);
       const gets = chamadas.filter(c => c.requisicao.metodo === "GET").length;

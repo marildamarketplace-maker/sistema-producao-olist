@@ -195,7 +195,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
   });
   await t.test("aprovação exige auditoria completa de todos os participantes",async()=>{
     const c=criarCriptografiaSync(),registro=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"PRODUTO",chave:"SEM-AUDITORIA"}});
-    const observacao={id:"1",chave:"SEM-AUDITORIA",nome:"Produto simples",situacao:"A",alteradoEm:null,completo:true,campos:{sku:"SEM-AUDITORIA",descricao:"Produto simples",tipo:"S"},pendencias:[]};
+    const observacao={id:"1",chave:"SEM-AUDITORIA",nome:"Ref Produto simples",situacao:"A",alteradoEm:null,completo:true,campos:{sku:"SEM-AUDITORIA",descricao:"Ref Produto simples",tipo:"S"},pendencias:[]};
     await db.olistSyncEstado.create({data:{configuracaoId:config.id,registroId:registro.id,aplicativoId:a,entidade:"PRODUTO",remoteId:"1",chave:"SEM-AUDITORIA",dadosCriptografados:c.cifrar(observacao,`${config.id}:estado:${a}:PRODUTO:1`)}});
     const p=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,registroId:registro.id,entidade:"PRODUTO",tipo:"DIVERGENCIA",severidade:"ALTA",chaveDedupe:"SEM-AUDITORIA"}});
     const response=await post(["pendencias",p.id,"decisao"],{versao:1,acao:"APROVAR",motivo:"Escolher o cadastro conferido pela equipe",aplicativoFonteId:a});assert.equal(response.status,409);
@@ -207,7 +207,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
     await db.olistSyncEtapa.createMany({data:[a,b].map(aplicativoId=>({execucaoId:e.id,aplicativoId,entidade:"PRODUTO",fase:"DETALHAR",status:"CONCLUIDA"}))});
     const registro=await db.olistSyncRegistro.create({data:{configuracaoId:config.id,entidade:"PRODUTO",chave:"MANUAL-APROVADO",aplicativoOrigemId:b,registroOlistOrigemId:"202",origemTipo:"DECLARADA_POR_USUARIO",origemRegistradaEm:new Date()}});
     for(const app of [a,b]){
-      const remoteId=app===a?"201":"202",campos={sku:"MANUAL-APROVADO",tipo:"S",descricao:app===a?"Nome aprovado":"Nome divergente"};
+      const remoteId=app===a?"201":"202",campos={sku:"MANUAL-APROVADO",tipo:"S",descricao:app===a?"Ref Nome aprovado":"Ref Nome divergente"};
       const obs={id:remoteId,chave:campos.sku,nome:campos.descricao,tipo:"S",situacao:"A",alteradoEm:null,completo:true,campos,pendencias:[]};
       await db.olistSyncEstado.create({data:{configuracaoId:config.id,registroId:registro.id,aplicativoId:app,entidade:"PRODUTO",remoteId,chave:campos.sku,ultimaExecucaoId:e.id,hashesJson:gerarHashesCampos(campos,v=>c.hash(v,`${config.id}:campo`)),dadosCriptografados:c.cifrar(obs,`${config.id}:estado:${app}:PRODUTO:${remoteId}`)}});
     }
@@ -405,7 +405,7 @@ test("Olist sync API com PostgreSQL real: decisões atômicas, origem e isolamen
     await db.olistSyncEtapa.createMany({ data: [a, b].map(aplicativoId => ({ execucaoId: e.id, aplicativoId, entidade: "PRODUTO", fase: "DETALHAR", status: "CONCLUIDA" })) });
     const registro = await db.olistSyncRegistro.create({ data: { configuracaoId: config.id, entidade: "PRODUTO", chave: "POLITICA-REVISAO" } });
     for (const app of [a, b]) {
-      const remoteId = app === a ? "750001" : "750002", campos = { sku: "POLITICA-REVISAO", tipo: "S", descricao: app === a ? "Nome aprovado" : "Nome divergente" };
+      const remoteId = app === a ? "750001" : "750002", campos = { sku: "POLITICA-REVISAO", tipo: "S", descricao: app === a ? "Ref Nome aprovado" : "Ref Nome divergente" };
       const observacao = { id: remoteId, chave: campos.sku, nome: campos.descricao, tipo: "S", situacao: "A", alteradoEm: null, completo: true, campos, pendencias: [] };
       await db.olistSyncEstado.create({ data: { configuracaoId: config.id, registroId: registro.id, aplicativoId: app, entidade: "PRODUTO", remoteId, chave: campos.sku, ultimaExecucaoId: e.id,
         hashesJson: gerarHashesCampos(campos, valor => cripto.hash(valor, `${config.id}:campo`)), dadosCriptografados: cripto.cifrar(observacao, `${config.id}:estado:${app}:PRODUTO:${remoteId}`) } });

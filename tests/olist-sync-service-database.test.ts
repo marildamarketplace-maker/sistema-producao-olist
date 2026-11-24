@@ -66,13 +66,24 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
         const itens=[...conta.values()].filter(item=>(!codigo||item.sku===codigo)&&(!nome||normalizarNome(String(item.nome??"")).includes(normalizarNome(nome))));
         return { status:200,dados:{itens:itens.slice(offset,offset+limit),paginacao:{total:itens.length,offset,limit}} };
       }
+      const expandirProducao=(valor:unknown):CamposSync=>{
+        const producao=valor as {produtos:Array<{produto:{id:number};quantidade:number}>;etapas:string[]};
+        return {etapas:producao.etapas,produtos:producao.produtos.map(item=>({produto:conta.get(String(item.produto.id))??item.produto,quantidade:item.quantidade}))};
+      };
+      if(caminho.pathname.endsWith("/fabricado")) {
+        const produtoId=caminho.pathname.split("/").at(-2)!;
+        assert.equal(r.metodo,"PUT");assert.ok(conta.has(produtoId));
+        conta.set(produtoId,{...conta.get(produtoId),producao:expandirProducao(r.payload)});
+        return {status:204,dados:null};
+      }
       const id=caminho.pathname.split("/").at(-1)!;
       if(r.metodo==="GET") return conta.has(id)?{status:200,dados:conta.get(id)}:{status:404,dados:{}};
       assert.ok(r.payload && !Array.isArray(r.payload) && typeof r.payload==="object");
       for(const campo of ["estoque","precos","custos","tributacao","ncm"]) assert.equal(campo in r.payload,false,`Campo protegido enviado: ${campo}`);
       if (app===rejeitarDestino) return {status:422,dados:{}};
+      const payloadProduto=r.payload.producao?{...r.payload,producao:expandirProducao(r.payload.producao)}:r.payload;
       const dadosContato=caminho.pathname.includes("/contatos") && Array.isArray(r.payload.tipos)
-        ? {...r.payload,tipos:r.payload.tipos.map(id=>({id,descricao:tipos.get(app)?.find(tipo=>tipo.id===id)?.nome??null}))}:r.payload;
+        ? {...r.payload,tipos:r.payload.tipos.map(id=>({id,descricao:tipos.get(app)?.find(tipo=>tipo.id===id)?.nome??null}))}:payloadProduto;
       if(r.metodo==="POST") {
         if(post429) {post429=false;return {status:429,dados:{},retryAfter:"60"};}
         const criado=String(proximoId++);conta.set(criado,{id:Number(criado),situacao:"A",...dadosContato});
@@ -84,7 +95,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   };
   const cliente = criarClienteSync(transporte);
   const servico=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
-  const produto=(id:number,sku="001-A",descricao="Toalha"):CamposSync=>({id,sku,descricao,tipo:"S",situacao:"A",estoque:{saldo:10},precos:{preco:50},ncm:"1234"});
+  const produto=(id:number,sku="001-A",descricao="Ref Toalha"):CamposSync=>({id,sku,descricao:descricao.startsWith("Ref ")?descricao:`Ref ${descricao}`,tipo:"S",situacao:"A",estoque:{saldo:10},precos:{preco:50},ncm:"1234"});
   async function reset() {
     await sql.query("TRUNCATE olist_sync_registro,olist_sync_execucao CASCADE");
     await db.configuracaoJob.updateMany({data:{pausado:false}});
@@ -159,11 +170,11 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     const aposCriacao=await db.olistSyncEstado.findMany({select:{aplicativoId:true,status:true}});
     assert.equal(aposCriacao.length,2);
     assert.ok(aposCriacao.every(estado=>estado.status==="SINCRONIZADO"),"A fonte também participa da base comum confirmada.");
-    const replica=[...contas.get(b)!.values()][0];replica.descricao="Atualização da antiga réplica";
+    const replica=[...contas.get(b)!.values()][0];replica.descricao="Ref Atualização da antiga réplica";
     await terminar((await enfileirar()).id);
     const aposAtualizacao=await db.olistSyncEstado.findMany({select:{aplicativoId:true,status:true}});
     assert.equal(aposAtualizacao.length,2);assert.ok(aposAtualizacao.every(estado=>estado.status==="SINCRONIZADO"));
-    assert.equal(contas.get(a)!.get("10")!.descricao,"Atualização da antiga réplica");
+    assert.equal(contas.get(a)!.get("10")!.descricao,"Ref Atualização da antiga réplica");
     assert.equal(escritas().length,2);
   });
   await t.test("POST com resposta perdida reconcilia por chave sem reenviar nem duplicar",async()=>{
@@ -188,8 +199,8 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   await t.test("sem base não escolhe vencedor; após base propaga unilateral preservando origem desconhecida",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));contas.get(b)!.set("20",produto(20));await terminar((await enfileirar()).id);
     const registro=await db.olistSyncRegistro.findFirstOrThrow();assert.equal(registro.origemTipo,"DESCONHECIDA");assert.equal(escritas().length,0);
-    contas.get(a)!.get("10")!.descricao="Toalha nova";await terminar((await enfileirar()).id);
-    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.get("20")!.descricao,"Toalha nova");
+    contas.get(a)!.get("10")!.descricao="Ref Toalha nova";await terminar((await enfileirar()).id);
+    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Toalha nova");
     assert.equal((await db.olistSyncRegistro.findFirstOrThrow()).origemTipo,"DESCONHECIDA");
     assert.deepEqual(contas.get(b)!.get("20")!.estoque,{saldo:10});assert.deepEqual(contas.get(b)!.get("20")!.precos,{preco:50});
   });
@@ -220,11 +231,11 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     const registro=await db.olistSyncRegistro.findFirstOrThrow();
     await db.olistSyncConfiguracao.update({where:{id:config.id},data:{aplicativosBloqueados:[...config.aplicativosBloqueados,terceiro]}});
     await db.olistSyncRegistro.update({where:{id:registro.id},data:{aplicativoOrigemId:terceiro,registroOlistOrigemId:"HISTORICO",origemTipo:"DECLARADA_POR_USUARIO",origemRegistradaEm:new Date()}});
-    contas.get(a)!.get("10")!.descricao="Atualização permitida";
+    contas.get(a)!.get("10")!.descricao="Ref Atualização permitida";
     await terminar((await enfileirar()).id);
     const atual=await db.olistSyncRegistro.findUniqueOrThrow({where:{id:registro.id}});
     assert.equal(atual.aplicativoOrigemId,terceiro);assert.equal(atual.registroOlistOrigemId,"HISTORICO");assert.equal(atual.origemTipo,"DECLARADA_POR_USUARIO");
-    assert.equal([...contas.get(b)!.values()][0].descricao,"Atualização permitida");
+    assert.equal([...contas.get(b)!.values()][0].descricao,"Ref Atualização permitida");
     assert.ok(credenciaisSolicitadas.every(app=>[a,b].includes(app)),"O histórico não deve conceder sequer a leitura das credenciais.");
     assert.ok(chamadas.every(chamada=>[a,b].includes(chamada.token)),"Proveniência não concede acesso à conta excluída.");
   });
@@ -232,7 +243,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:terceiro}},data:{habilitado:true}});
     for(const [app,id] of [[a,10],[b,20],[terceiro,30]] as const)contas.get(app)!.set(String(id),produto(id));
     await terminar((await enfileirar()).id);const antes=await db.olistSyncRegistro.findFirstOrThrow();
-    contas.get(a)!.get("10")!.descricao="Mudança parcial";rejeitarDestino=b;await terminar((await enfileirar()).id);
+    contas.get(a)!.get("10")!.descricao="Ref Mudança parcial";rejeitarDestino=b;await terminar((await enfileirar()).id);
     const depois=await db.olistSyncRegistro.findFirstOrThrow();assert.deepEqual(depois.hashesBaseJson,antes.hashesBaseJson);
     assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);assert.equal(await db.olistSyncOperacao.count({where:{status:"FALHA_PERMANENTE"}}),1);
   });
@@ -255,7 +266,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();contas.get(a)!.set("10",produto(10,"001-A","Texto A"));contas.get(b)!.set("20",produto(20,"001-A","Texto B"));await terminar((await enfileirar()).id);
     const pendencia=await db.olistSyncPendencia.findFirstOrThrow();await db.olistSyncPendencia.update({where:{id:pendencia.id},data:{status:"IGNORADA",decididoPor:usuario,decididoEm:new Date()}});
     await terminar((await enfileirar()).id);assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}})).status,"IGNORADA");
-    contas.get(a)!.get("10")!.descricao="Texto A alterado";await terminar((await enfileirar()).id);
+    contas.get(a)!.get("10")!.descricao="Ref Texto A alterado";await terminar((await enfileirar()).id);
     assert.equal((await db.olistSyncPendencia.findUniqueOrThrow({where:{id:pendencia.id}})).status,"AGUARDANDO_REVISAO");assert.equal(escritas().length,0);
   });
   await t.test("vínculo manual de formas persiste em auditorias e permite comparação sem escrita",async()=>{
@@ -474,11 +485,11 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();await habilitarTerceiro();
     for(const [app,id] of [[a,10],[b,20],[terceiro,30]] as const)contas.get(app)!.set(String(id),produto(id));
     await terminar((await enfileirar()).id);const base=await db.olistSyncRegistro.findFirstOrThrow();
-    contas.get(a)!.get("10")!.descricao="Mudança para todas";const e=await enfileirar();
+    contas.get(a)!.get("10")!.descricao="Ref Mudança para todas";const e=await enfileirar();
     // Adia apenas a etapa de C: B continua autorizado a consultar a conta C.
     await adiarDestino(e.id,terceiro);await aguardarConfirmacao(e.id,b);await liberarDestino(e.id,terceiro);await terminar(e.id);
-    assert.equal(contas.get(b)!.get("20")!.descricao,"Mudança para todas");
-    assert.equal(contas.get(terceiro)!.get("30")!.descricao,"Mudança para todas");
+    assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Mudança para todas");
+    assert.equal(contas.get(terceiro)!.get("30")!.descricao,"Ref Mudança para todas");
     assert.equal(await db.olistSyncOperacao.count({where:{execucaoId:e.id,status:"CONFIRMADA"}}),2);
     assert.notDeepEqual((await db.olistSyncRegistro.findFirstOrThrow()).hashesBaseJson,base.hashesBaseJson);
     assert.equal(escritas().length,2);
@@ -487,13 +498,13 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();await habilitarTerceiro();
     for(const [app,id] of [[a,10],[b,20],[terceiro,30]] as const)contas.get(app)!.set(String(id),produto(id));
     await terminar((await enfileirar()).id);const base=await db.olistSyncRegistro.findFirstOrThrow();
-    contas.get(a)!.get("10")!.descricao="Alteração autorizada";
+    contas.get(a)!.get("10")!.descricao="Ref Alteração autorizada";
     const e=await enfileirar();await adiarDestino(e.id,terceiro);await aguardarConfirmacao(e.id,b);
-    assert.equal(contas.get(b)!.get("20")!.descricao,"Alteração autorizada");
-    contas.get(b)!.get("20")!.descricao="Edição externa posterior à confirmação";
+    assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Alteração autorizada");
+    contas.get(b)!.get("20")!.descricao="Ref Edição externa posterior à confirmação";
     await liberarDestino(e.id,terceiro);await terminar(e.id);
-    assert.equal(contas.get(terceiro)!.get("30")!.descricao,"Toalha");
-    assert.equal(contas.get(b)!.get("20")!.descricao,"Edição externa posterior à confirmação");
+    assert.equal(contas.get(terceiro)!.get("30")!.descricao,"Ref Toalha");
+    assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Edição externa posterior à confirmação");
     assert.equal(escritas().length,1);
     const bloqueada=await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id,destinoAppId:terceiro}});
     assert.notEqual(bloqueada.status,"CONFIRMADA");assert.equal(bloqueada.erroCodigo,"FONTE_ALTERADA");
@@ -504,11 +515,11 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     contas.get(a)!.set("10",{...produto(10),descricaoComplementar:"Complemento inicial"});
     contas.get(b)!.set("20",{...produto(20),descricaoComplementar:"Complemento inicial"});
     await terminar((await enfileirar()).id);
-    contas.get(a)!.get("10")!.descricao="Descrição nova";
+    contas.get(a)!.get("10")!.descricao="Ref Descrição nova";
     contas.get(b)!.get("20")!.descricaoComplementar="Complemento novo";
     const e=await enfileirar();await adiarDestino(e.id,b);await aguardarConfirmacao(e.id,a);await liberarDestino(e.id,b);await terminar(e.id);
     for(const [app,id] of [[a,"10"],[b,"20"]] as const) {
-      assert.equal(contas.get(app)!.get(id)!.descricao,"Descrição nova");
+      assert.equal(contas.get(app)!.get(id)!.descricao,"Ref Descrição nova");
       assert.equal(contas.get(app)!.get(id)!.descricaoComplementar,"Complemento novo");
       assert.deepEqual(contas.get(app)!.get(id)!.estoque,{saldo:10});
     }
@@ -532,9 +543,9 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar()).id);
     const inicial=await db.olistSyncRegistro.findFirstOrThrow(), replica=[...contas.get(b)!.values()][0];
     assert.equal(inicial.aplicativoOrigemId,a);assert.equal(inicial.registroOlistOrigemId,"10");
-    replica.descricao="Atualização feita na réplica";const e=await enfileirar();await terminar(e.id);
+    replica.descricao="Ref Atualização feita na réplica";const e=await enfileirar();await terminar(e.id);
     const final=await db.olistSyncRegistro.findFirstOrThrow();
-    assert.equal(contas.get(a)!.get("10")!.descricao,"Atualização feita na réplica");assert.equal(final.ultimaFonteAppId,b);
+    assert.equal(contas.get(a)!.get("10")!.descricao,"Ref Atualização feita na réplica");assert.equal(final.ultimaFonteAppId,b);
     assert.equal(final.aplicativoOrigemId,a);assert.equal(final.registroOlistOrigemId,"10");assert.equal(final.origemTipo,"OBSERVADA_PELO_MODULO");
     assert.equal(final.origemExecucaoId,inicial.origemExecucaoId);assert.deepEqual(final.origemRegistradaEm,inicial.origemRegistradaEm);
     assert.equal(escritas().length,2);
@@ -571,7 +582,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       contas.get(a)!.set(String(id),produto(id,`SKU-${id}`,`Produto ${id}`));
       contas.get(b)!.set(String(1000+id),produto(1000+id,`SKU-${id}`,`Produto ${id}`));
     }
-    const e=await enfileirar("AUDITAR");assert.equal((await terminar(e.id,400)).status,"CONCLUIDA");
+    const e=await enfileirar("AUDITAR");assert.equal((await terminar(e.id,400)).status,"CONCLUIDA",JSON.stringify({ops:await db.olistSyncOperacao.findMany({select:{acao:true,status:true,erroCodigo:true}}),pendencias:await db.olistSyncPendencia.findMany({select:{tipo:true}})}));
     assert.equal(await db.olistSyncEstado.count({where:{ultimaExecucaoId:e.id}}),202);assert.equal(await db.olistSyncRegistro.count(),101);
     for(const app of [a,b]) {
       const paginas=chamadas.filter(r=>r.token===app&&new URL(r.url).pathname.endsWith("/produtos"));
@@ -743,7 +754,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   });
   await t.test("PUT com resposta perdida após commit é reconciliado por leitura e não repetido",async()=>{
     await reset();contas.get(a)!.set("10",produto(10));contas.get(b)!.set("20",produto(20));await terminar((await enfileirar()).id);
-    contas.get(a)!.get("10")!.descricao="Descrição após PUT";let respostaPerdida=false;
+    contas.get(a)!.get("10")!.descricao="Ref Descrição após PUT";let respostaPerdida=false;
     responder=async(r,app)=>{
       if(r.metodo!=="PUT"||respostaPerdida)return undefined;
       assert.ok(r.payload&&typeof r.payload==="object"&&!Array.isArray(r.payload));respostaPerdida=true;
@@ -752,7 +763,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     };
     const e=await enfileirar();await terminar(e.id);
     assert.equal(respostaPerdida,true);assert.equal(escritas().length,1);assert.equal(escritas()[0].metodo,"PUT");
-    assert.equal(contas.get(b)!.get("20")!.descricao,"Descrição após PUT");assert.equal((await db.olistSyncOperacao.findFirstOrThrow()).status,"CONFIRMADA");
+    assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Descrição após PUT");assert.equal((await db.olistSyncOperacao.findFirstOrThrow()).status,"CONFIRMADA");
     assert.deepEqual(contas.get(b)!.get("20")!.estoque,{saldo:10});
   });
   await t.test("POST sem resposta nem efeito fica em quarentena em novas auditorias e aplicações",async()=>{
@@ -796,7 +807,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       assert.equal((await consumirAteFinal((await enfileirar("AUDITAR")).id)).status,"CONCLUIDA");
       // Dezenove réplicas têm a mesma mudança, apenas B precisa de PUT. Isso
       // exige validar 19 fontes sem inflar o teste com 19 aplicações diferentes.
-      for(const app of apps.filter(app=>app!==b))for(const produto of contas.get(app)!.values())produto.descricao="Descrição compartilhada atualizada";
+      for(const app of apps.filter(app=>app!==b))for(const produto of contas.get(app)!.values())produto.descricao="Ref Descrição compartilhada atualizada";
       await consumirAteFinal((await enfileirar("AUDITAR")).id);
       const proposta=await db.olistSyncOperacao.findFirstOrThrow({where:{status:"AUTORIZADA"}});
       assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
@@ -808,7 +819,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       assert.equal((await consumirAteFinal(execucao.id)).status,"CONCLUIDA");
       assert.equal((await db.olistSyncOperacao.findUniqueOrThrow({where:{id:proposta.id}})).status,"CONFIRMADA");
       assert.equal(escritas().length,1);assert.equal(escritas()[0].metodo,"PUT");
-      assert.equal(contas.get(b)!.get("11")!.descricao,"Descrição compartilhada atualizada");
+      assert.equal(contas.get(b)!.get("11")!.descricao,"Ref Descrição compartilhada atualizada");
       assert.equal(await db.olistSyncEstado.count({where:{status:"SINCRONIZADO"}}),20);
       assert.ok(agora-inicio>120_000,"O cenário precisa atravessar a antiga janela fixa.");
     } finally {
@@ -939,7 +950,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   await t.test("três confirmações realmente divergentes suspendem novas escritas daquele destino",async()=>{
     await reset();for(let n=1;n<=4;n++)contas.get(a)!.set(String(n),produto(n,`SKU-${n}`,["Azulejo","Martelo","Camiseta","Livro"][n-1]));
     responder=async(r,app)=>app===b&&r.metodo==="GET"&&/\/produtos\/\d+$/.test(new URL(r.url).pathname)
-      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,descricao:"Alteração externa"}}:undefined;
+      ?{status:200,dados:{...contas.get(b)!.get(new URL(r.url).pathname.split('/').at(-1)!)!,descricao:"Ref Alteração externa"}}:undefined;
     const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA_COM_PENDENCIAS");
     assert.equal(escritas().length,3);assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),1);
     assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,status:"PAUSADA",erroCodigo:"CONFIRMACOES_DIVERGENTES"}}),1);
@@ -1015,7 +1026,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   });
   await t.test("lotes de uma alteração continuam na mesma execução sem reler ou pedir revisão humana",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
-    contas.get(a)!.set("10",produto(10,"ABC-1","Toalha azul"));contas.get(a)!.set("11",produto(11,"XYZ-9","Caixa madeira"));
+    contas.get(a)!.set("10",produto(10,"ABC-1","Ref Toalha azul"));contas.get(a)!.set("11",produto(11,"XYZ-9","Ref Caixa madeira"));
     const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
     assert.equal(escritas().length,2);
     assert.equal(await db.olistSyncOperacao.count({where:{status:"AUTORIZADA"}}),0);
@@ -1049,7 +1060,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   });
   await t.test("propostas antigas bloqueadas só por volume são reavaliadas e continuam sem aprovação manual",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{limiteAlteracoes:1}});
-    contas.get(a)!.set("10",produto(10,"ABC-1","Toalha azul"));contas.get(a)!.set("11",produto(11,"XYZ-9","Caixa madeira"));
+    contas.get(a)!.set("10",produto(10,"ABC-1","Ref Toalha azul"));contas.get(a)!.set("11",produto(11,"XYZ-9","Ref Caixa madeira"));
     const audit=await enfileirar("AUDITAR");await terminar(audit.id);
     await db.olistSyncOperacao.updateMany({where:{status:"AUTORIZADA"},data:{status:"PROPOSTA",erroCodigo:"LIMITE_ALTERACOES"}});
     await db.olistSyncPendencia.create({data:{configuracaoId:config.id,aplicativoId:b,entidade:"PRODUTO",tipo:"LIMITE_ALTERACOES",severidade:"ALTA",chaveDedupe:"limite-legado"}});
@@ -1219,5 +1230,247 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await consumidor.executar(agora+240_000);assert.equal(esperas,0);assert.equal(chamadas.length,0);
     await db.olistSyncEtapa.updateMany({where:{execucaoId:e.id},data:{disponivelEm:new Date(agora+10_000)}});
     await consumidor.executar(agora+125_000);assert.equal(esperas,0);assert.equal(chamadas.length,0);
+  });
+  await t.test("páginas inteiras sem Ref são ignoradas sem perder cobertura nem gravar dados",async()=>{
+    await reset();
+    for(let id=1;id<=101;id++)contas.get(a)!.set(String(id),{id,descricao:"Reforma",sku:`IGN-${id}`,tipo:"S",dimensoes:"inválido"});
+    contas.get(a)!.set("200",produto(200,"VALIDO"));
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA");
+    assert.equal(await db.olistSyncRegistro.count(),1);assert.equal(await db.olistSyncEstado.count(),2);assert.equal(await db.olistSyncPendencia.count(),0);
+    assert.equal(chamadas.filter(r=>r.metodo==="GET"&&/\/produtos\/(?:[1-9]|[1-9]\d|10[01])$/.test(new URL(r.url).pathname)).length,0);
+    assert.equal(contas.get(b)!.size,1);
+  });
+
+  await t.test("produto renomeado sem Ref sai do banco local e revoga proposta antiga",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar("AUDITAR")).id);
+    assert.equal(await db.olistSyncOperacao.count(),1);
+    contas.get(a)!.get("10")!.descricao="Sem marcação";
+    await terminar((await enfileirar("AUDITAR")).id);
+    assert.deepEqual(await Promise.all([db.olistSyncRegistro.count(),db.olistSyncEstado.count(),db.olistSyncPendencia.count(),db.olistSyncOperacao.count()]),[0,0,0,0]);
+    assert.equal(escritas().length,0);assert.ok(contas.get(a)!.has("10"));
+  });
+
+  await t.test("coleta completa remove legado sem Ref já ausente da API e preserva Ref Unicode",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar("AUDITAR")).id);
+    contas.get(a)!.clear();
+    await db.olistSyncEstado.updateMany({data:{nome:"Cadastro ignorado antigo",presente:false,detalhePendente:false}});
+    contas.get(a)!.set("30",{...produto(30,"UNICODE"),descricao:"Ｒｅｆ 30"});
+    await terminar((await enfileirar("AUDITAR")).id);
+    assert.equal(await db.olistSyncRegistro.count({where:{chave:"001-A"}}),0);
+    assert.equal(await db.olistSyncEstado.count({where:{remoteId:"10"}}),0);
+    assert.equal(await db.olistSyncRegistro.count({where:{chave:"UNICODE"}}),1);
+    await terminar((await enfileirar("AUDITAR")).id);
+    assert.equal(await db.olistSyncRegistro.count({where:{chave:"UNICODE"}}),1);assert.equal(escritas().length,0);
+  });
+
+  function fabricado(id:number, componente:CamposSync, quantidade=1):CamposSync {
+    return {...produto(id,"FAB-01","Ref Lenço"),tipo:"F",producao:{produtos:[{produto:{id:componente.id,sku:componente.sku,descricao:componente.descricao},quantidade}],etapas:["Cortar","Costurar"]}};
+  }
+  function prepararFabricados() {
+    const mpA:CamposSync={...produto(11,"MP-01","Ref Tecido"),tipo:"M"},mpB:CamposSync={...produto(21,"MP-01","Ref Tecido"),tipo:"M"};
+    contas.get(a)!.set("11",mpA);contas.get(b)!.set("21",mpB);
+    contas.get(a)!.set("10",fabricado(10,mpA));contas.get(b)!.set("20",fabricado(20,mpB));
+    return {mpA,mpB};
+  }
+
+  await t.test("simples, matéria-prima e fabricado são criados com IDs locais na composição",async()=>{
+    await reset();const {mpA}=prepararFabricados();contas.get(b)!.clear();contas.get(a)!.set("12",produto(12,"SIMPLES","Ref Avulso"));
+    const e=await enfileirar();assert.equal((await terminar(e.id,400)).status,"CONCLUIDA",JSON.stringify({ops:await db.olistSyncOperacao.findMany({select:{acao:true,status:true,erroCodigo:true}}),pendencias:await db.olistSyncPendencia.findMany({select:{tipo:true}})}));
+    assert.equal(contas.get(b)!.size,3);
+    const post=escritas().find(r=>(r.payload as CamposSync).tipo==="F");assert.ok(post);
+    const estrutura=(post.payload as {producao:{produtos:Array<{produto:{id:number};quantidade:number}>}}).producao;
+    const destino=[...contas.get(b)!.values()].find(p=>p.sku===mpA.sku)!;
+    assert.equal(estrutura.produtos[0].produto.id,destino.id);assert.notEqual(destino.id,mpA.id);
+    const segunda=await enfileirar();await terminar(segunda.id);assert.equal(escritas().length,3);
+  });
+
+  for(const cadastro of [false,true])await t.test(`fabricado atualiza composição${cadastro?" e cadastro com confirmações separadas":" pelo endpoint específico"}`,async()=>{
+    await reset();const {mpA}=prepararFabricados();await terminar((await enfileirar()).id);assert.equal(escritas().length,0);
+    const novo=fabricado(10,mpA,2.5);if(cadastro)novo.descricao="Ref Lenço novo";
+    contas.get(a)!.set("10",novo);const e=await enfileirar();assert.equal((await terminar(e.id,400)).status,"CONCLUIDA",JSON.stringify({ops:await db.olistSyncOperacao.findMany({select:{acao:true,status:true,erroCodigo:true}}),pendencias:await db.olistSyncPendencia.findMany({select:{tipo:true}})}));
+    const puts=escritas();assert.equal(puts.length,cadastro?2:1);assert.ok(puts.at(-1)!.url.endsWith("/produtos/20/fabricado"));
+    assert.deepEqual(puts.at(-1)!.payload,{produtos:[{produto:{id:21,tipo:"P"},quantidade:2.5}],etapas:["Cortar","Costurar"]});
+    if(cadastro)assert.equal(contas.get(b)!.get("20")!.descricao,"Ref Lenço novo");
+    assert.equal(await db.olistSyncOperacao.count({where:{status:{not:"CONFIRMADA"}}}),0);
+    const antes=escritas().length;await terminar((await enfileirar()).id);assert.equal(escritas().length,antes);
+  });
+
+  await t.test("componente sem Ref bloqueia fabricação sem gravar seu cadastro ou estrutura parcial",async()=>{
+    await reset();const mp={...produto(11,"IGNORADO"),descricao:"Tecido sem marcação",tipo:"M"};
+    contas.get(a)!.set("11",mp);contas.get(a)!.set("10",fabricado(10,mp));
+    const e=await enfileirar();assert.equal((await terminar(e.id)).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(escritas().length,0);assert.equal(await db.olistSyncEstado.count(),1);
+    assert.equal(await db.olistSyncRegistro.count({where:{chave:"IGNORADO"}}),0);
+    const estado=await db.olistSyncEstado.findFirstOrThrow();
+    const observado=cripto.decifrar(estado.dadosCriptografados!,`${config.id}:estado:${a}:PRODUTO:10`);
+    assert.equal(JSON.stringify(observado).includes("IGNORADO"),false);
+    assert.equal((await db.olistSyncPendencia.findFirstOrThrow()).tipo,"COMPONENTE_FORA_ESCOPO");
+  });
+
+  await t.test("SKU existente no destino sem Ref impede criação duplicada",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));contas.get(b)!.set("20",{...produto(20),descricao:"Produto sem marcação"});
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,0);assert.equal(contas.get(b)!.size,1);
+    assert.equal(await db.olistSyncEstado.count({where:{aplicativoId:b}}),0);
+  });
+
+  await t.test("fonte que perde Ref depois da auditoria não escapa por proposta autorizada",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));const e=await enfileirar();await aguardarEscrita(e.id);
+    contas.get(a)!.get("10")!.descricao="Sem marcação";
+    // O cursor volta à leitura da fonte, como na retomada após espera de cota.
+    await db.olistSyncEtapa.updateMany({where:{execucaoId:e.id,fase:"APLICAR"},data:{cursorJson:{}}});
+    await terminar(e.id);assert.equal(escritas().length,0);assert.equal(await db.olistSyncEstado.count(),0);assert.equal(await db.olistSyncRegistro.count(),0);
+  });
+
+  await t.test("POST de fabricado com resposta perdida é reconciliado sem nova criação",async()=>{
+    await reset();prepararFabricados();contas.get(b)!.delete("20");
+    interceptar=async r=>{if(r.metodo==="POST"&&(r.payload as CamposSync)?.tipo==="F")postIncerto=true;};
+    const e=await enfileirar();assert.equal((await terminar(e.id,400)).status,"CONCLUIDA");
+    assert.equal(escritas().length,1);assert.equal(contas.get(b)!.size,2);assert.equal((await db.olistSyncOperacao.findFirstOrThrow()).status,"CONFIRMADA");
+  });
+
+  for(const etapa of ["CADASTRO","FABRICADO"])await t.test(`resposta perdida em ${etapa} confirma etapas do fabricado sem repetir PUT`,async()=>{
+    await reset();const {mpA,mpB}=prepararFabricados();await terminar((await enfileirar()).id);
+    contas.get(a)!.set("10",{...fabricado(10,mpA,3),descricao:"Ref Lenço novo"});let perdeu=false;
+    responder=async(r,app)=>{
+      if(app!==b||r.metodo!=="PUT"||perdeu)return undefined;
+      const composicao=r.url.endsWith("/fabricado");if(composicao!==(etapa==="FABRICADO"))return undefined;
+      perdeu=true;
+      contas.get(b)!.set("20",composicao?{...fabricado(20,mpB,3),descricao:"Ref Lenço novo"}:{...contas.get(b)!.get("20"),...r.payload as CamposSync});
+      throw new Error("Resposta perdida após commit remoto simulado");
+    };
+    const e=await enfileirar();assert.equal((await terminar(e.id,400)).status,"CONCLUIDA");
+    assert.ok(perdeu);assert.equal(escritas().length,2);assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),1);
+    assert.equal(escritas().filter(r=>r.url.endsWith("/fabricado")).length,1);
+  });
+
+  await t.test("fabricados em três empresas aceitam avanços intermediários da mesma revisão",async()=>{
+    await reset();const {mpA}=prepararFabricados();
+    await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:terceiro}},data:{habilitado:true}});
+    const mpC:CamposSync={...produto(31,"MP-01","Ref Tecido"),tipo:"M"};
+    contas.get(terceiro)!.set("31",mpC);contas.get(terceiro)!.set("30",fabricado(30,mpC));
+    await terminar((await enfileirar()).id);
+    contas.get(a)!.set("10",{...fabricado(10,mpA,4),descricao:"Ref Lenço novo"});
+    const e=await enfileirar();
+    await avancarAte(async()=>await db.olistSyncOperacao.count({where:{execucaoId:e.id}})===2,"propostas de fabricação");
+    await adiarDestino(e.id,terceiro);await aguardarConfirmacao(e.id,b);await liberarDestino(e.id,terceiro);
+    assert.equal((await terminar(e.id,400)).status,"CONCLUIDA");
+    assert.equal(escritas().length,4);assert.equal(await db.olistSyncOperacao.count({where:{status:"CONFIRMADA"}}),2);
+    assert.equal(contas.get(terceiro)!.get("30")!.descricao,"Ref Lenço novo");
+  });
+  for(const status of ["EM_APLICACAO","VERIFICANDO","RESULTADO_INCONCLUSIVO"])await t.test(`descarte de uma réplica preserva ${status} de outra empresa`,async()=>{
+    await reset();
+    await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:terceiro}},data:{habilitado:true}});
+    for(const [app,id] of [[a,10],[b,20],[terceiro,30]] as const)contas.get(app)!.set(String(id),produto(id));
+    await terminar((await enfileirar("AUDITAR")).id);
+    contas.get(b)!.get("20")!.descricao="Ref mudança da empresa B";
+    await terminar((await enfileirar("AUDITAR")).id);
+    const op=await db.olistSyncOperacao.findFirstOrThrow({where:{destinoAppId:terceiro,status:"AUTORIZADA"}});
+    await db.olistSyncOperacao.update({where:{id:op.id},data:{status,remoteId:"30"}});
+    const pendente=await db.olistSyncPendencia.create({data:{configuracaoId:config.id,registroId:op.registroId,aplicativoId:terceiro,execucaoId:op.execucaoId,entidade:"PRODUTO",tipo:"RESULTADO_INCONCLUSIVO",severidade:"ALTA",chaveDedupe:randomUUID()}});
+    contas.get(a)!.get("10")!.descricao="Cadastro sem marcação";
+    await terminar((await enfileirar("AUDITAR")).id);
+    assert.equal(await db.olistSyncOperacao.count({where:{id:op.id,status}}),1);
+    assert.equal(await db.olistSyncPendencia.count({where:{id:pendente.id,status:"AGUARDANDO_REVISAO"}}),1);
+    assert.ok(contas.get(terceiro)!.get("30")!.descricao!.toString().includes("Ref"));
+    assert.equal(escritas().length,0);
+  });
+  await t.test("limpeza de legado confirma nome atual e preserva origem declarada",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar("AUDITAR")).id);
+    const reg=await db.olistSyncRegistro.findFirstOrThrow();
+    await db.olistSyncRegistro.update({where:{id:reg.id},data:{nome:"Nome antigo sem marcação",origemTipo:"DECLARADA_POR_USUARIO",origemMotivo:"Origem histórica confirmada pelo responsável",origemRegistradaPor:usuario}});
+    await db.olistSyncEstado.updateMany({data:{nome:"Nome antigo sem marcação"}});
+    await terminar((await enfileirar("AUDITAR")).id);
+    const novo=await db.olistSyncRegistro.findFirstOrThrow({where:{chave:reg.chave}});
+    assert.equal(novo.id,reg.id);assert.equal(novo.origemTipo,"DECLARADA_POR_USUARIO");
+    assert.equal(escritas().length,0);
+  });
+  await t.test("duplicidade de produto ignorado entre páginas não certifica cobertura",async()=>{
+    await reset();
+    contas.get(a)!.set("500",produto(500,"OCULTO","Ref produto real"));
+    contas.get(b)!.set("600",produto(600,"OCULTO","Ref produto real"));
+    responder=async(r,app)=>{
+      const u=new URL(r.url);
+      if(app!==a||r.metodo!=="GET"||!u.pathname.endsWith("/produtos")||u.searchParams.has("codigo"))return undefined;
+      const offset=Number(u.searchParams.get("offset"));
+      const itens=offset===0?Array.from({length:100},(_,i)=>({id:i+1,sku:`IGN-${i}`,descricao:"Reforma",tipo:"S",situacao:"A"})):[{id:1,sku:"IGN-0",descricao:"Reforma",tipo:"S",situacao:"A"}];
+      return {status:200,dados:{itens,paginacao:{total:101,offset,limit:100}}};
+    };
+    const e=await enfileirar();const resultado=await terminar(e.id,300);
+    assert.equal(resultado.status,"CONCLUIDA_COM_PENDENCIAS");
+    const reg=await db.olistSyncRegistro.findFirstOrThrow({where:{chave:"OCULTO"}});
+    assert.equal(reg.aplicativoOrigemId,null);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,aplicativoId:a,erroCodigo:"COBERTURA_INCOMPLETA",status:"FALHOU"}}),1);
+    assert.equal(await db.olistSyncReciboPagina.count(),0);assert.equal(escritas().length,0);
+
+  });
+
+  await t.test("falha de leitura do legado não apaga registros nem origem declarada",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar("AUDITAR")).id);
+    const reg=await db.olistSyncRegistro.findFirstOrThrow();
+    await db.olistSyncRegistro.update({where:{id:reg.id},data:{origemTipo:"DECLARADA_POR_USUARIO",origemRegistradaPor:usuario,origemMotivo:"Histórico confirmado"}});
+    await db.olistSyncEstado.updateMany({data:{nome:"Nome antigo"}});
+    responder=async(r,app)=>app===a&&r.metodo==="GET"&&r.url.endsWith("/produtos/10")?{status:503,dados:{}}:undefined;
+    const e=await enfileirar("AUDITAR");assert.equal((await terminar(e.id,300)).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal((await db.olistSyncRegistro.findUniqueOrThrow({where:{id:reg.id}})).origemTipo,"DECLARADA_POR_USUARIO");
+    assert.equal(await db.olistSyncEstado.count(),1);assert.equal(escritas().length,0);
+  });
+
+  await t.test("recibos são opacos, isolados por etapa e retomáveis sem guardar produtos ignorados",async()=>{
+    await reset();
+    for(let id=1;id<=101;id++)contas.get(a)!.set(String(id),{id,sku:`IGN-${id}`,descricao:"Sem marcação",tipo:"S",situacao:"A"});
+    const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>await db.olistSyncReciboPagina.count()===100,"recibos da primeira página");
+    assert.equal(await db.olistSyncEstado.count(),0);assert.equal(await db.olistSyncRegistro.count(),0);
+    const recibos=await db.olistSyncReciboPagina.findMany({take:101});
+    assert.equal(recibos.length,100);
+    for(const recibo of recibos) {
+      assert.match(recibo.digest,/^[a-f0-9]{64}$/);
+      assert.deepEqual(Object.keys(recibo).sort(),["digest","etapaId"]);
+    }
+    assert.notEqual(cripto.hash("1",`${config.id}:pagina:${recibos[0].etapaId}`),cripto.hash("1",`${config.id}:pagina:${randomUUID()}`));
+    const reiniciado=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
+    for(let i=0;i<30;i++) {
+      agora+=6_001;const reserva=await repo.reservarEtapa({agora:new Date(agora)});if(reserva)await reiniciado.processar(reserva);
+      const atual=await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}});if(atual.status==="CONCLUIDA")break;
+    }
+    assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA");
+    assert.equal(await db.olistSyncReciboPagina.count(),0);
+    const seguranca=await sql.query("SELECT relrowsecurity,has_table_privilege('anon',oid,'SELECT') AS anon,has_table_privilege('authenticated',oid,'INSERT') AS authenticated FROM pg_class WHERE oid='olist_sync_recibo_pagina'::regclass");
+    assert.deepEqual(seguranca.rows[0],{relrowsecurity:true,anon:false,authenticated:false});
+  });
+  await t.test("404 da identidade durante revisão do legado não equivale a produto removido",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));await terminar((await enfileirar("AUDITAR")).id);
+    const reg=await db.olistSyncRegistro.findFirstOrThrow();await db.olistSyncEstado.updateMany({data:{nome:"Nome antigo"}});
+    const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>await db.olistSyncEtapa.count({where:{execucaoId:e.id,aplicativoId:a,cursorJson:{path:["identidadeVerificada"],equals:true}}})>0,"identidade inicial verificada");
+    responder=async(r,app)=>app===a&&r.url.endsWith("/info")?{status:404,dados:{}}:undefined;
+    assert.equal((await terminar(e.id)).status,"CONCLUIDA_COM_PENDENCIAS");
+    assert.equal(await db.olistSyncRegistro.count({where:{id:reg.id}}),1);assert.equal(await db.olistSyncEstado.count(),1);assert.equal(escritas().length,0);
+  });
+
+  await t.test("limite de coleta é validado antes de registrar produtos ou recibos",async()=>{
+    await reset();
+    responder=async(r,app)=>app===a&&r.metodo==="GET"&&new URL(r.url).pathname.endsWith("/produtos")
+      ?{status:200,dados:{itens:[produto(10)],paginacao:{total:100_001}}}:undefined;
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(await db.olistSyncEtapa.count({where:{execucaoId:e.id,aplicativoId:a,erroCodigo:"LIMITE_COLETA_PRODUTOS"}}),1);
+    assert.equal(await db.olistSyncReciboPagina.count(),0);assert.equal(await db.olistSyncEstado.count(),0);assert.equal(escritas().length,0);
+  });
+
+  await t.test("destino que perde Ref após POST incerto mantém apuração e não é recriado",async()=>{
+    await reset();contas.get(a)!.set("10",produto(10));postIncerto=true;
+    interceptar=async(r,app)=>{
+      if(app===b&&r.metodo==="GET"&&/\/produtos\/\d+$/.test(new URL(r.url).pathname)) {
+        const id=new URL(r.url).pathname.split("/").at(-1)!;
+        if(contas.get(b)!.has(id))contas.get(b)!.get(id)!.descricao="Sem marcação";
+      }
+    };
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,1);assert.equal(await db.olistSyncEstado.count({where:{aplicativoId:b}}),0);
+    const op=await db.olistSyncOperacao.findFirstOrThrow();assert.equal(op.status,"RESULTADO_INCONCLUSIVO");
+    assert.equal(op.erroCodigo,"PRODUTO_FORA_ESCOPO");
+    await terminar((await enfileirar("APLICAR")).id);assert.equal(escritas().length,1);
+    assert.equal(await db.olistSyncOperacao.count({where:{id:op.id,status:"RESULTADO_INCONCLUSIVO"}}),1);
   });
 });

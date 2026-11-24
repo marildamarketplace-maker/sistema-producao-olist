@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { criarCriptografiaSync } from "../src/lib/olist-sync/cripto";
+import type { ConfiguracaoSyncDto, EntidadeSyncApi, ExecucaoSyncDetalheDto } from "../src/lib/olist-sync/api-contract";
 
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-key";
@@ -136,7 +137,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     handlers["olistSyncExecucao.findFirst"] = ({ where, select }) => {
       assert.equal(objeto(where).configuracaoId, GRUPO);
       assert.deepEqual(objeto(objeto(where).status).in, ["PENDENTE", "AUDITANDO", "APLICANDO", "AGUARDANDO_RETRY"]);
-      assert.equal(objeto(select).etapas && objeto(objeto(select).etapas).take, 201);
+      assert.equal(objeto(select).etapas && objeto(objeto(select).etapas).take, 206);
       return { ...execucao, status: "AUDITANDO", iniciadaEm: new Date(Date.now() - 3_600_000),
         contadoresJson: { listados: 1_000, analisados: 400 }, etapas: [{ fase: "DETALHAR", status: "PENDENTE" }] };
     };
@@ -181,6 +182,24 @@ void test("API de sincronização: autorização, isolamento, validação e trab
       const body=await (await GET(request("previsao"),contexto("previsao"))).json();
       assert.equal(body.previsaoAplicacao.estado,estado);assert.equal(body.previsaoAplicacao.terminoPrevisto,null);
       assert.equal(chamadasDe("$queryRaw").length,1);
+    }
+  });
+  await t.test("previsão admite 205 etapas e conserva sentinela para execução acima do limite", async () => {
+    for (const total of [205, 206]) {
+      reset();
+      const etapas = Array.from({ length: total }, (_, indice) => ({
+        fase: indice < 105 ? "DETALHAR" : "APLICAR", status: indice < 105 ? "CONCLUIDA" : "PENDENTE",
+      }));
+      handlers["olistSyncExecucao.findFirst"] = ({ select }) => ({ ...execucao, modo: "AUDITAR_E_APLICAR", status: "APLICANDO",
+        iniciadaEm: new Date(Date.now() - 3_600_000), etapas: etapas.slice(0, Number(objeto(objeto(select).etapas).take)) });
+      handlers["$queryRaw"] = ({ query }) => String(objeto(query).text).includes("WITH alvos")
+        ? [{ iniciada: new Date(Date.now() - 3_600_000), restantes: 600, falhas: 0 }] : [{ total: 300 }];
+      const response = await GET(request("previsao"), contexto("previsao"));
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.previsaoAplicacao.estado, total === 205 ? "ESTIMADA" : "PREPARANDO");
+      assert.equal(chamadasDe("$queryRaw").length, total === 205 ? 2 : 1);
+      assert.equal(objeto(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.select).etapas).take, 206);
     }
   });
   await t.test("sem execução ativa, listagem incompleta e job pausado não contam o catálogo", async () => {
@@ -283,7 +302,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     for (const campo of ["detalhesCriptografados", "decisaoJson", "motivo"]) assert.equal(pendenciaSelect[campo], undefined, campo);
     const etapaSelect = objeto(objeto(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.select).etapas).select);
     for (const campo of ["cursorJson", "erroMensagem", "erroCodigo", "leaseDono"]) assert.equal(etapaSelect[campo], undefined, campo);
-    assert.equal(objeto(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.select).etapas).take, 200);
+    assert.equal(objeto(objeto(chamadasDe("olistSyncExecucao.findFirst")[0].args.select).etapas).take, 205);
   });
 
   await t.test("detalhe projeta só modo e janela públicos sem carregar cursor, conta ou lote", async () => {
@@ -295,9 +314,36 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     const body = await response.json();
     assert.deepEqual(body.etapas[0].plano, { modo: "INCREMENTAL", iniciadaEm: agora.toISOString(), desde: "2026-11-15T12:00:00Z" });
     const consulta = chamadasDe("$queryRaw")[0].args;
-    assert.deepEqual(consulta.values, [EXECUCAO, GRUPO]);
-    assert.match(String(consulta.sql), /desdeUtc/); assert.match(String(consulta.sql), /LIMIT 200/);
+    assert.deepEqual(consulta.values, [EXECUCAO, GRUPO, 205]);
+    assert.match(String(consulta.sql), /desdeUtc/); assert.match(String(consulta.sql), /LIMIT \?/);
     assert.doesNotMatch(String(consulta.sql), /contaIdentidade|assinaturaEscopo|SELECT\s+\*/);
+  });
+
+  await t.test("detalhe de execução apresenta todas as 205 etapas e seus planos públicos", async () => {
+    reset();
+    const entidades: EntidadeSyncApi[] = ["CONTATO", "FORMA_PAGAMENTO", "PRODUTO", "SERVICO", "VENDEDOR"];
+    const etapas = entidades.flatMap(entidade => [
+      ...Array.from({ length: 20 }, (_, indice) => ({ id: `${entidade}-coleta-${indice}`, aplicativoId: FILHO, entidade,
+        fase: "DETALHAR", status: "CONCLUIDA", tentativas: 0, disponivelEm: agora })),
+      { id: `${entidade}-comparar`, aplicativoId: null, entidade, fase: "COMPARAR", status: "CONCLUIDA", tentativas: 0, disponivelEm: agora },
+      ...Array.from({ length: 20 }, (_, indice) => ({ id: `${entidade}-aplicar-${indice}`, aplicativoId: FILHO, entidade,
+        fase: "APLICAR", status: "PENDENTE", tentativas: 0, disponivelEm: agora })),
+    ]);
+    handlers["olistSyncExecucao.findFirst"] = ({ select }) => ({ ...execucao,
+      etapas: etapas.slice(0, Number(objeto(objeto(select).etapas).take)) });
+    handlers["$queryRaw"] = ({ sql, values }) => {
+      const literal = /LIMIT\s+(\d+)/.exec(String(sql));
+      const limite = literal ? Number(literal[1]) : Number((values as unknown[]).at(-1));
+      return etapas.slice(0, limite).map(etapa => ({ id: etapa.id, modo: "COMPLETA", iniciadaEm: agora.toISOString(), desde: null }));
+    };
+    const caminho = `execucoes/${EXECUCAO}`;
+    const response = await GET(request(caminho), contexto(caminho));
+    assert.equal(response.status, 200);
+    const body: ExecucaoSyncDetalheDto = await response.json();
+    assert.equal(body.etapas.length, 205);
+    assert.deepEqual(body.etapas.map(etapa => etapa.id), etapas.map(etapa => etapa.id));
+    assert.ok(body.etapas.every(etapa => etapa.plano?.modo === "COMPLETA" && etapa.plano.iniciadaEm === agora.toISOString()));
+    assert.doesNotMatch(JSON.stringify(body), /cursorJson|payload|criptografado|contaIdentidade/);
   });
 
   await t.test("declaração incremental vincula identidade atual sob lock, exige evidência e preserva baseline", async () => {
@@ -386,9 +432,47 @@ void test("API de sincronização: autorização, isolamento, validação e trab
       assert.equal(body.incremental.completaCadaDias, 15); assert.equal(body.incremental.sobreposicaoHoras, 24);
       assert.ok(!JSON.stringify(body).includes("conta-atual")); assert.ok(!JSON.stringify(body).includes("conta-anterior"));
       const consulta = chamadasDe("olistSyncCobertura.findMany")[0].args;
-      assert.equal(consulta.take, 80); assert.equal(objeto(consulta.where).configuracaoId, GRUPO);
+      assert.equal(consulta.take, 100); assert.equal(objeto(consulta.where).configuracaoId, GRUPO);
       assert.equal(objeto(consulta.select).assinaturaEscopo, undefined);
     }
+  });
+
+  await t.test("GET configuração preserva coberturas de 20 empresas com as cinco entidades", async () => {
+    reset();
+    const entidades: EntidadeSyncApi[] = ["CONTATO", "FORMA_PAGAMENTO", "PRODUTO", "SERVICO", "VENDEDOR"];
+    const aplicativos = Array.from({ length: 20 }, (_, indice) => ({
+      id: `00000000-0000-4000-8000-${String(indice + 100).padStart(12, "0")}`,
+      nome: `Empresa ${indice + 1}`, aplicativoPaiId: PAI,
+    }));
+    const participantes = aplicativos.map(app => ({ id: app.id, aplicativoId: app.id, habilitado: true,
+      contaIdentidade: `conta-${app.id}`, proximaChamadaEm: null, aplicativo: app }));
+    const coberturas = aplicativos.flatMap((app, indice) => entidades.map(entidade => ({
+      aplicativoId: app.id, entidade, incrementalValidado: entidade === "CONTATO" || entidade === "PRODUTO",
+      incrementalFuso: "America/Sao_Paulo", incrementalContaIdentidade: `conta-${app.id}`, incrementalVersaoContrato: 1,
+      incrementalValidadoEm: agora, completaEm: new Date(agora.getTime() + indice * 1000),
+      incrementalEm: entidade === "CONTATO" || entidade === "PRODUTO" ? agora : null, watermarkConfirmado: agora,
+    })));
+    handlers["olistSyncConfiguracao.findUnique"] = () => ({ ...configuracao(), entidades, participantes });
+    handlers["aplicativo.findMany"] = () => aplicativos;
+    // Respeita o limite da consulta para reproduzir truncamento no banco.
+    handlers["olistSyncCobertura.findMany"] = ({ take }) => coberturas.slice(0, Number(take));
+
+    const response = await GET(request("configuracao"), contexto("configuracao"));
+    assert.equal(response.status, 200);
+    const body: ConfiguracaoSyncDto = await response.json();
+    assert.deepEqual(body.incremental.coberturas, coberturas.map(c => ({
+      aplicativoId: c.aplicativoId, entidade: c.entidade, contaIdentificada: true, validado: c.incrementalValidado,
+      fusoHorario: c.incrementalFuso, validadoEm: c.incrementalValidadoEm.toISOString(),
+      completaEm: c.completaEm.toISOString(), incrementalEm: c.incrementalEm?.toISOString() ?? null,
+      watermarkConfirmado: c.watermarkConfirmado.toISOString(),
+    })));
+    assert.equal(body.incremental.coberturas.length, 100);
+    assert.equal(body.incremental.coberturas.filter(c => c.validado).length, 40);
+    const consultas = chamadasDe("olistSyncCobertura.findMany");
+    assert.equal(consultas.length, 1);
+    assert.equal(consultas[0].args.take, 100);
+    assert.deepEqual(consultas[0].args.where, { configuracaoId: GRUPO, participante: { habilitado: true } });
+    assert.ok(!JSON.stringify(body).includes("conta-00000000"));
   });
 
   await t.test("nega não autenticados e filhos mesmo com todas as flags", async () => {
@@ -458,6 +542,24 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     const where = objeto(chamadasDe("olistSyncEstado.findMany")[0].args.where);
     assert.equal(where.configuracaoId, GRUPO); assert.deepEqual(where.participante, { habilitado: true });
     assert.equal(body.detalhesCriptografados, undefined);
+  });
+
+  await t.test("serviços aceitam filtro e revisão de conflito, sem vínculo manual por IDs", async () => {
+    reset();
+    const filtrada = await GET(request("pendencias?entidade=SERVICO"), contexto("pendencias"));
+    assert.equal(filtrada.status, 200);
+    assert.equal(objeto(chamadasDe("olistSyncPendencia.findMany")[0].args.where).entidade, "SERVICO");
+    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, entidade: "SERVICO" });
+    const conflito = await GET(request(`pendencias/${PENDENCIA}`), contexto(`pendencias/${PENDENCIA}`));
+    assert.equal(conflito.status, 200);
+    const revisao = await conflito.json();
+    assert.ok(revisao.acoesPermitidas.includes("APROVAR"));
+    assert.ok(!revisao.acoesPermitidas.includes("VINCULAR"));
+    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, entidade: "SERVICO", registroId: null, tipo: "IDENTIDADE_REQUER_REVISAO" });
+    const semIdentidade = await GET(request(`pendencias/${PENDENCIA}`), contexto(`pendencias/${PENDENCIA}`));
+    const identificacao = await semIdentidade.json();
+    assert.ok(!identificacao.acoesPermitidas.includes("APROVAR"));
+    assert.ok(!identificacao.acoesPermitidas.includes("VINCULAR"));
   });
 
   await t.test("edição não aceita filhos externos, flags globais ou versão obsoleta", async () => {

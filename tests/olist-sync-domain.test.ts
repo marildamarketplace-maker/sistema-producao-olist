@@ -11,7 +11,7 @@ const chaves = { OLIST_SYNC_DATA_KEY: Buffer.alloc(32, 1).toString("base64"), OL
 const cripto = criarCriptografiaSync(chaves);
 const hash = (valor: Parameters<typeof cripto.hash>[0]) => cripto.hash(valor, "grupo-teste");
 const produto = (campos: Record<string, unknown> = {}) => observarRegistro("PRODUTO", {
-  id: 123, sku: "001-a", descricao: "Toalha floral", tipo: "S", situacao: "A", unidade: "UN", ...campos,
+  id: 123, sku: "001-a", descricao: "Ref Toalha floral", tipo: "S", situacao: "A", unidade: "UN", ...campos,
 }, { completo: true });
 const replica = (aplicativoId: string, campos: Record<string, unknown> = {}): ReplicaComparacao => ({ aplicativoId, observacao: produto(campos) });
 const avaliar = (replicas: ReplicaComparacao[], hashesBase: Record<string, string> | null = null, visaoCompleta = true) => avaliarReplicas({ entidade: "PRODUTO", replicas, hashesBase, visaoCompleta, hash });
@@ -98,7 +98,7 @@ test("observação e payload excluem estoque, preços, custo, fiscal e IDs inter
 });
 
 test("listagem não é suficiente para estabelecer uma base", () => {
-  const resumo = observarRegistro("PRODUTO", { id: 1, sku: "001-a", descricao: "Toalha floral", tipo: "S", situacao: "A" });
+  const resumo = observarRegistro("PRODUTO", { id: 1, sku: "001-a", descricao: "Ref Toalha floral", tipo: "S", situacao: "A" });
   assert.equal(resumo.completo, false);
   assert.equal("garantia" in resumo.campos, false);
   assert.ok(avaliar([{ aplicativoId: "a", observacao: resumo }, replica("b")]).motivos.includes("AUDITORIA_INCOMPLETA"));
@@ -121,24 +121,24 @@ test("origem única só é observada após visão completa e nunca substitui ori
 });
 
 test("divergência inicial requer revisão sem usar data ou ordem como vencedor", () => {
-  const decisao = avaliar([replica("a", { descricao: "Versão antiga", dataAlteracao: "2020-01-01" }), replica("b", { descricao: "Versão nova", dataAlteracao: "2030-01-01" })]);
+  const decisao = avaliar([replica("a", { descricao: "Ref Versão antiga", dataAlteracao: "2020-01-01" }), replica("b", { descricao: "Ref Versão nova", dataAlteracao: "2030-01-01" })]);
   assert.equal(decisao.status, "AGUARDANDO_REVISAO");
   assert.ok(decisao.motivos.includes("DIVERGENCIA_INICIAL:descricao"));
 });
 
 test("alteração unilateral com base aceita propaga para N réplicas", () => {
   const base = gerarHashesCampos(produto().campos, hash);
-  const decisao = avaliar([replica("a", { descricao: "Nova descrição" }), replica("b"), replica("c")], base);
+  const decisao = avaliar([replica("a", { descricao: "Ref Nova descrição" }), replica("b"), replica("c")], base);
   assert.equal(decisao.status, "PROPAGAR");
-  assert.equal(decisao.campos?.descricao, "Nova descrição");
+  assert.equal(decisao.campos?.descricao, "Ref Nova descrição");
   assert.deepEqual(decisao.aplicativosAtualizar, ["b", "c"]);
   assert.deepEqual(decisao.fontesPorCampo.descricao, ["a"]);
 });
 
 test("edições independentes de campos podem convergir com origem por campo", () => {
-  const decisao = avaliar([replica("a", { descricao: "Nova descrição" }), replica("b", { garantia: "12 meses" }), replica("c")], gerarHashesCampos(produto().campos, hash));
+  const decisao = avaliar([replica("a", { descricao: "Ref Nova descrição" }), replica("b", { garantia: "12 meses" }), replica("c")], gerarHashesCampos(produto().campos, hash));
   assert.equal(decisao.status, "PROPAGAR");
-  assert.equal(decisao.campos?.descricao, "Nova descrição");
+  assert.equal(decisao.campos?.descricao, "Ref Nova descrição");
   assert.equal(decisao.campos?.garantia, "12 meses");
   assert.deepEqual(decisao.fontesPorCampo.descricao, ["a"]);
   assert.deepEqual(decisao.fontesPorCampo.garantia, ["b"]);
@@ -232,8 +232,8 @@ test("contatos não transferem acesso ao sistema, crédito, fiscal ou dados pess
 
 test("somente leitura e estruturas complexas não escapam pela construção do payload", () => {
   for (const entidade of ["FORMA_PAGAMENTO", "VENDEDOR"] as const) assert.throws(() => prepararPayload(entidade, { nome: "teste" }, { operacao: "CRIAR" }), FalhaSync);
-  for (const tipo of ["K", "F", "V"]) assert.throws(() => prepararPayload("PRODUTO", { sku: "A", descricao: "B", tipo }, { operacao: "CRIAR" }), FalhaSync);
-  assert.throws(() => prepararPayload("PRODUTO", { sku: "A", descricao: "B", tipo: "S", tipoVariacao: "V" }, { operacao: "ATUALIZAR" }), FalhaSync);
+  for (const tipo of ["K", "F", "V"]) assert.throws(() => prepararPayload("PRODUTO", { sku: "A", descricao: "Ref B", tipo }, { operacao: "CRIAR" }), FalhaSync);
+  assert.throws(() => prepararPayload("PRODUTO", { sku: "A", descricao: "Ref B", tipo: "S", tipoVariacao: "V" }, { operacao: "ATUALIZAR" }), FalhaSync);
 });
 
 test("imagens e variações exigem contrato validado e removem IDs/estoque/preços", () => {
@@ -275,7 +275,7 @@ test("configuração criptográfica falha fechada e rejeita JSON não canônico"
 });
 
 test("merge com três empresas não depende da ordem das réplicas", () => {
-  const a = replica("a", { descricao: "Descrição nova" });
+  const a = replica("a", { descricao: "Ref Descrição nova" });
   const b = replica("b", { garantia: "Garantia nova" });
   const c = replica("c");
   const base = gerarHashesCampos(produto().campos, hash);
@@ -283,7 +283,7 @@ test("merge com três empresas não depende da ordem das réplicas", () => {
   for (const ordem of ordens) {
     const decisao = avaliar(ordem, base);
     assert.equal(decisao.status, "PROPAGAR");
-    assert.equal(decisao.campos?.descricao, "Descrição nova");
+    assert.equal(decisao.campos?.descricao, "Ref Descrição nova");
     assert.equal(decisao.campos?.garantia, "Garantia nova");
     assert.deepEqual(decisao.fontesPorCampo.descricao, ["a"]);
     assert.deepEqual(decisao.fontesPorCampo.garantia, ["b"]);
@@ -293,8 +293,8 @@ test("merge com três empresas não depende da ordem das réplicas", () => {
 
 test("conflito concorrente bloqueia também criação em uma terceira empresa", () => {
   const decisao = avaliar([
-    replica("a", { descricao: "Escolha A" }),
-    replica("b", { descricao: "Escolha B" }),
+    replica("a", { descricao: "Ref Escolha A" }),
+    replica("b", { descricao: "Ref Escolha B" }),
     { aplicativoId: "c", observacao: null },
   ], gerarHashesCampos(produto().campos, hash));
   assert.equal(decisao.status, "AGUARDANDO_REVISAO");
@@ -341,14 +341,14 @@ test("campo ausente em uma réplica não é confundido com limpeza explícita", 
 });
 
 test("projeção e preparação de payload não modificam o cadastro recebido", () => {
-  const entrada = { id: 123, sku: "001-a", descricao: "Produto", tipo: "S", situacao: "A",
+  const entrada = { id: 123, sku: "001-a", descricao: "Ref Produto", tipo: "S", situacao: "A",
     dimensoes: { pesoBruto: 2, embalagem: { id: 99, tipo: 2 } }, estoque: { saldo: 73 } };
   const antes = structuredClone(entrada);
   const observacao = observarRegistro("PRODUTO", entrada, { completo: true });
   const payload = prepararPayload("PRODUTO", observacao.campos, { operacao: "ATUALIZAR" });
   assert.deepEqual(entrada, antes);
-  payload.descricao = "Alteração isolada";
-  assert.equal(observacao.campos.descricao, "Produto");
+  payload.descricao = "Ref Alteração isolada";
+  assert.equal(observacao.campos.descricao, "Ref Produto");
   assert.equal(entrada.dimensoes.embalagem.id, 99);
 });
 

@@ -194,7 +194,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
         const disponivel = await disponibilidade(tx, entrada.configuracaoId, entrada.modo === "APLICAR" ? "aplicar" : "auditar");
         if (!disponivel.habilitado || !disponivel.configuracao) throw new ErroRepositorioSync(disponivel.motivo ?? "Job indisponível.", 503);
         const c = disponivel.configuracao;
-        if (entrada.modo === "APLICAR" && !c.entidades.some(e => ["PRODUTO", "CONTATO"].includes(e)))
+        if (entrada.modo === "APLICAR" && !c.entidades.some(e => ["PRODUTO", "CONTATO", "SERVICO"].includes(e)))
           throw new ErroRepositorioSync("Não há entidades habilitadas que suportem aplicação de alterações.");
         await exigirUsuario(tx, c, entrada.solicitadoPor, entrada.origem);
         if (entrada.origem === "AGENDADA") {
@@ -205,7 +205,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
           throw new ErroRepositorioSync("Já existe uma execução ativa neste grupo.");
         const execucao = await tx.olistSyncExecucao.create({ data: { configuracaoId: c.id, chaveIdempotencia: entrada.idempotencia, modo: entrada.modo,
           origem: entrada.origem, solicitadoPor: entrada.solicitadoPor, completa: entrada.completa, versaoConfiguracao: c.versao }, select: execucaoSelect });
-        await tx.olistSyncEtapa.createMany({ data: c.entidades.filter(entidade => entrada.modo !== "APLICAR" || ["PRODUTO", "CONTATO"].includes(entidade))
+        await tx.olistSyncEtapa.createMany({ data: c.entidades.filter(entidade => entrada.modo !== "APLICAR" || ["PRODUTO", "CONTATO", "SERVICO"].includes(entidade))
           .flatMap(entidade => c.participantes.filter(p => p.habilitado).map(p => ({ execucaoId: execucao.id, entidade, aplicativoId: p.aplicativoId, fase: entrada.modo === "APLICAR" ? "APLICAR" : "LISTAR" }))) });
         if (entrada.modo !== "APLICAR") await transferirAfetadosPendentes(tx, { grupo: c.id, execucao: execucao.id, entidades: c.entidades });
         return execucao;
@@ -328,6 +328,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
         const retry = !atual.execucao.cancelamentoSolicitado && atrasoMs !== null && atual.tentativas < 5;
         await tx.olistSyncEtapa.update({ where: { id: atual.id }, data: { ...liberacao, status: atual.execucao.cancelamentoSolicitado ? "CANCELADA" : retry ? "AGUARDANDO_RETRY" : "FALHOU", erroCodigo: codigo,
           disponivelEm: new Date(Date.now() + (retry ? Math.min(Math.max(atrasoMs!, 1000), 3_600_000) : 0)) }, select: { id: true } });
+        if(!retry)await tx.olistSyncReciboPagina.deleteMany({where:{etapaId:atual.id}});
         return true;
       });
     },
@@ -366,6 +367,11 @@ export function criarOlistSyncRepository(db: PrismaClient) {
       return db.$transaction(async tx => {
         let removidos = 0;
         const corte = (dias: number) => new Date(agora.getTime() - dias * 86_400_000);
+        removidos += await tx.$executeRaw`DELETE FROM olist_sync_recibo_pagina WHERE (etapa_id,digest) IN (
+          SELECT p.etapa_id,p.digest FROM olist_sync_recibo_pagina p JOIN olist_sync_etapa s ON s.id=p.etapa_id
+          JOIN olist_sync_execucao e ON e.id=s.execucao_id WHERE e.configuracao_id=${configuracaoId}::uuid
+          AND (s.status IN ('CONCLUIDA','FALHOU','CANCELADA') OR e.status IN ('CONCLUIDA','CONCLUIDA_COM_PENDENCIAS','FALHOU','CANCELADA'))
+          ORDER BY p.etapa_id,p.digest LIMIT 1000)`;
         removidos += await tx.$executeRaw`DELETE FROM olist_sync_evento WHERE id IN (SELECT id FROM olist_sync_evento WHERE configuracao_id=${configuracaoId}::uuid AND created_at<${corte(30)} AND tipo NOT IN ('DECISAO_HUMANA','ORIGEM_DECLARADA','ORIGEM_CORRIGIDA') ORDER BY created_at,id LIMIT 500)`;
         removidos += await tx.$executeRaw`DELETE FROM olist_sync_evento WHERE id IN (SELECT id FROM olist_sync_evento WHERE configuracao_id=${configuracaoId}::uuid AND created_at<${corte(365)} AND tipo IN ('DECISAO_HUMANA','ORIGEM_DECLARADA','ORIGEM_CORRIGIDA') ORDER BY created_at,id LIMIT 500)`;
         await tx.$executeRaw`UPDATE olist_sync_operacao SET payload_criptografado=NULL,resultado_criptografado=NULL WHERE id IN (SELECT id FROM olist_sync_operacao WHERE configuracao_id=${configuracaoId}::uuid AND status IN ('CONFIRMADA','OBSOLETA','FALHA_PERMANENTE') AND updated_at<${corte(30)} AND (payload_criptografado IS NOT NULL OR resultado_criptografado IS NOT NULL) ORDER BY updated_at,id LIMIT 500)`;

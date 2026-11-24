@@ -3,7 +3,7 @@ import type { EntidadeSync, JsonValue, CamposSync, ObservacaoRemota } from "./co
 import { FalhaSync, ENTIDADES_SYNC } from "./contrato";
 import { referenciasTiposContatoSync } from "./tipos-contato";
 
-export const entidadeSchema = z.enum(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"]);
+export const entidadeSchema = z.enum(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR", "SERVICO"]);
 export const validacaoIncrementalSchema = z.object({
   aplicativoId: z.guid(), entidade: z.enum(["PRODUTO", "CONTATO"]), validado: z.boolean(),
   fusoHorario: z.string().trim().min(1).max(100).refine(fuso => {
@@ -13,7 +13,7 @@ export const validacaoIncrementalSchema = z.object({
 }).strict().refine(v => !v.validado || (v.evidencia?.length ?? 0) >= 20, { message: "Descreva os ensaios realizados nesta conta e entidade." });
 export const configuracaoSchema = z.object({
   versao: z.number().int().positive(), ativo: z.boolean(),
-  entidades: z.array(entidadeSchema).min(1).max(4).refine(v => new Set(v).size === v.length),
+  entidades: z.array(entidadeSchema).min(1).max(5).refine(v => new Set(v).size === v.length),
   participantesIds: z.array(z.guid()).min(2).max(20).refine(v => new Set(v).size === v.length),
   horaDiaria: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   limiteAlteracoes: z.number().int().min(1).max(100),

@@ -1644,12 +1644,23 @@ model OlistSyncEtapa {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   execucao OlistSyncExecucao @relation(fields:[execucaoId], references:[id], onDelete:Cascade)
+  recibosPagina OlistSyncReciboPagina[]
 
   @@unique([execucaoId, entidade, fase], map: "olist_sync_etapa_grupo_unica", where: raw("(aplicativo_id IS NULL)"))
   @@unique([execucaoId, entidade, aplicativoId, fase])
   @@index([status, disponivelEm, id])
   @@index([status, leaseAte])
   @@map("olist_sync_etapa")
+}
+
+// Metadados temporários de transporte: nenhum ID remoto, nome ou SKU.
+model OlistSyncReciboPagina {
+  etapaId String @map("etapa_id") @db.Uuid
+  digest String @db.Char(64)
+  etapa OlistSyncEtapa @relation(fields:[etapaId], references:[id], onDelete:Cascade)
+
+  @@id([etapaId, digest])
+  @@map("olist_sync_recibo_pagina")
 }
 
 model OlistSyncOperacao {

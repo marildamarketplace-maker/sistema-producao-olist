@@ -9,7 +9,11 @@ import { serializarCanonico } from "./cripto";
 import { cotaDaRespostaSync, interpretarCotaSync, type CotaLeituraSync } from "./ritmo";
 import { interpretarTipoContatoSync, MAXIMO_TIPOS_CONTATO, payloadTiposContatoSync } from "./tipos-contato";
 
-const RECURSOS = { PRODUTO: "produtos", CONTATO: "contatos", FORMA_PAGAMENTO: "formas-pagamento", VENDEDOR: "vendedores" } as const;
+import { payloadProducaoSync } from "./produtos";
+
+import { chaveServicoSync, nomeServicoSync } from "./servicos";
+
+const RECURSOS = { PRODUTO: "produtos", CONTATO: "contatos", FORMA_PAGAMENTO: "formas-pagamento", VENDEDOR: "vendedores", SERVICO: "servicos" } as const;
 const MAXIMO_RESPOSTA = 2 * 1024 * 1024;
 
 export interface RequisicaoSync {
@@ -82,7 +86,7 @@ function interpretarPagina(entidade: EntidadeSync, payload: unknown, limit: numb
   if (!objeto(payload) || !Array.isArray(payload.itens) || payload.itens.length > limit || !objeto(payload.paginacao)) return contratoInvalido();
   const total = payload.paginacao.total;
   if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total < payload.itens.length) return contratoInvalido();
-  const itens = payload.itens.map(item => observarRegistro(entidade, item, { completo: entidade === "FORMA_PAGAMENTO" || entidade === "VENDEDOR" }));
+  const itens = payload.itens.map(item => observarRegistro(entidade, item, { completo: entidade === "FORMA_PAGAMENTO" || entidade === "VENDEDOR" || entidade === "SERVICO" }));
   if (new Set(itens.map(item => item.id)).size !== itens.length) return contratoInvalido();
   return { itens, total };
 }
@@ -269,6 +273,27 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     },
     async buscarPorChave(aplicativoId, entidade, chave, opcoes) {
       const caminho = caminhoEntidade(entidade);
+      if (entidade === "SERVICO") {
+        if (!chave.startsWith("codigo:") && !chave.startsWith("nome:")) throw new FalhaSync("IDENTIDADE_INVALIDA", "A referência do serviço é inválida.");
+        const porNome = chave.startsWith("nome:");
+        const valor = porNome ? opcoes?.nomeServico ?? chave.slice(5) : chave.slice(7);
+        if (!valor || valor.length > (porNome ? 200 : 255) || (porNome ? `nome:${nomeServicoSync(valor)}` !== chave : chaveServicoSync({codigo:valor,nome:"Serviço"}) !== chave))
+          throw new FalhaSync("IDENTIDADE_INVALIDA", "A referência do serviço é inválida.");
+        const filtro=porNome?valor.normalize("NFKC").trim().replace(/\s+/g," "):valor;
+        const resposta = await requisitar(aplicativoId,"GET",caminho,{[porNome?"nome":"codigo"]:filtro,offset:"0",limit:"100"},undefined,opcoes);
+        const pagina = interpretarPagina(entidade,resposta.dados,100);
+        if (pagina.total === null || pagina.total > pagina.itens.length || pagina.itens.length >= 100)
+          throw new FalhaSync("BUSCA_TRUNCADA", "A busca não comprovou a ausência de serviços duplicados.");
+        const encontrados = pagina.itens.filter(item=>porNome?nomeServicoSync(item.nome)===nomeServicoSync(valor):chaveServicoSync(item.campos)===chave);
+        const codigoReferencia=opcoes?.codigoServicoReferencia;
+        if(codigoReferencia!==undefined && chaveServicoSync({codigo:codigoReferencia})!==`codigo:${codigoReferencia}`)
+          throw new FalhaSync("IDENTIDADE_INVALIDA", "O código de referência do serviço é inválido.");
+        const relevantes=porNome && codigoReferencia!==undefined
+          ? encontrados.filter(item=>!item.chave?.startsWith("codigo:") || item.chave===`codigo:${codigoReferencia}`) : encontrados;
+        if (porNome && relevantes.some(item=>item.chave!==chave && !(codigoReferencia!==undefined && item.chave===`codigo:${codigoReferencia}`)))
+          throw new FalhaSync("IDENTIDADE_INCOMPATIVEL", "Há serviço com o mesmo nome e código preenchido ou não comprovado.");
+        return relevantes;
+      }
       if (entidade !== "PRODUTO" && entidade !== "CONTATO") throw new FalhaSync("BUSCA_NAO_SUPORTADA", "Esta entidade exige mapeamento humano.");
       if (entidade === "CONTATO" && chave.startsWith("nome:")) {
         const nome = opcoes?.nomeContato ?? chave.slice(5);
@@ -310,11 +335,16 @@ export function criarClienteSync(dependencias: DependenciasClienteSync = depende
     async criar(aplicativoId, entidade, payload, opcoes) {
       const caminho = caminhoEntidade(entidade);
       const seguro = prepararPayload(entidade, payload, { operacao: "CRIAR" });
+      if (entidade === "PRODUTO" && seguro.tipo === "F") seguro.producao = payloadProducaoSync(seguro.producao, opcoes?.componentesProduto);
       return mutar(aplicativoId, "POST", caminho, entidade === "CONTATO" ? payloadTiposContatoSync(seguro, opcoes?.catalogoTiposContato) : seguro, undefined, opcoes);
     },
     async atualizar(aplicativoId, entidade, id, payload, opcoes) {
       const caminho = caminhoEntidade(entidade, id);
       const seguro = prepararPayload(entidade, payload, { operacao: "ATUALIZAR" });
+      if (entidade === "PRODUTO") {
+        if (opcoes?.somenteProducao) return mutar(aplicativoId, "PUT", `${caminho}/fabricado`, payloadProducaoSync(seguro.producao, opcoes.componentesProduto), id, opcoes);
+        delete seguro.producao;
+      }
       return mutar(aplicativoId, "PUT", caminho, entidade === "CONTATO" ? payloadTiposContatoSync(seguro, opcoes?.catalogoTiposContato) : seguro, id, opcoes);
     },
     async listarImagens(aplicativoId, produtoId) {
