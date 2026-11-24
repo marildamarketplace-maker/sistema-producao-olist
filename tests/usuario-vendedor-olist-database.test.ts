@@ -96,10 +96,17 @@ test("vendedores por conta: migração, ponte, hierarquia, versão e escrita fin
     await transaction(()=>substituirVendedoresOlist(client,usuarioId,pai,[],atual));
     assert.deepEqual((await linhas()).rows,[]);
     await db.query("INSERT INTO envio_fornecedor VALUES (null,'INCERTO')");
-    const contracao = await readFile(new URL("../docs/sql/vendedor-olist-contracao.sql",import.meta.url),"utf8");
+    await db.query("INSERT INTO fornecedores VALUES ($1,$2,700)",[id(10),usuarioId]);
+    const antesContracao = await db.query("SELECT usuario_id,aplicativo_id,vendedor_olist_id FROM usuario_vendedor_olist ORDER BY usuario_id,aplicativo_id");
+    const contracao = await readFile(new URL("../prisma/migrations/20261124230059_remove_usuario_vendedor_olist/migration.sql",import.meta.url),"utf8");
     await assert.rejects(db.exec(contracao),/Concilie/); await db.exec("ROLLBACK");
     await db.exec("DELETE FROM envio_fornecedor");
     await db.exec(contracao);
+    assert.deepEqual((await db.query("SELECT usuario_id,aplicativo_id,vendedor_olist_id FROM usuario_vendedor_olist ORDER BY usuario_id,aplicativo_id")).rows,antesContracao.rows,
+      "contração não recria vínculos removidos nem modifica os IDs normalizados");
+    assert.deepEqual((await db.query("SELECT vendedor_olist_id,meu_cliente_olist_id FROM fornecedores WHERE id=$1",[id(10)])).rows,
+      [{vendedor_olist_id:usuarioId,meu_cliente_olist_id:700}],"migration não altera o campo do fornecedor");
+    assert.equal((await db.query("SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='usuario' AND column_name='vendedor_olist_id'")).rows.length,0);
     await transaction(()=>alterarVendedorOlistLegado(client,usuarioId,pai,999));
     assert.equal(await obterVendedorDoUsuario(usuarioId,pai),999,"escrita normalizada funciona após remover as colunas");
     await transaction(()=>alterarVendedorOlistLegado(client,usuarioId,pai,null));
@@ -114,4 +121,16 @@ test("vendedores por conta: migração, ponte, hierarquia, versão e escrita fin
     if(modoAnterior===undefined) delete process.env.OLIST_VENDEDORES_COMPAT_LEGADO; else process.env.OLIST_VENDEDORES_COMPAT_LEGADO=modoAnterior;
     await db.close();
   }
+});
+
+test("remoção aborta sem expansão e preserva a coluna antiga", async () => {
+  const db = criarPostgresMemoria();
+  try {
+    await db.exec("CREATE TABLE usuario(id uuid PRIMARY KEY,vendedor_olist_id integer)");
+    const migration = await readFile(new URL("../prisma/migrations/20261124230059_remove_usuario_vendedor_olist/migration.sql",import.meta.url),"utf8");
+    await assert.rejects(db.exec(migration),/Aplique a expansão/);
+    await db.exec("ROLLBACK");
+    await db.query("INSERT INTO usuario VALUES ($1,123)",[usuarioId]);
+    assert.deepEqual((await db.query("SELECT vendedor_olist_id FROM usuario")).rows,[{vendedor_olist_id:123}]);
+  } finally { await db.close(); }
 });

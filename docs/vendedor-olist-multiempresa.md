@@ -73,9 +73,12 @@ o histórico deste repositório tem migrations com decisões independentes pende
    A aplicação passa a escrever somente na associação. Não voltar a executar uma versão
    que lê o escalar: a coluna antiga deixa de ser espelhada nesta etapa.
 5. **Contrair:** com o corte confirmado e tentativas diretas incertas conciliadas, aplicar
-   isoladamente `docs/sql/vendedor-olist-contracao.sql`. O script não está no diretório de
-   migrations automáticas. Ele remove a ponte, o escalar do usuário e o UUID obsoleto do
-   fornecedor; preserva configurações comerciais, snapshots, históricos, autoria e pedidos.
+   isoladamente `20261124230059_remove_usuario_vendedor_olist/migration.sql`. Esta migration
+   substitui o antigo script manual `docs/sql/vendedor-olist-contracao.sql` e não deve ser
+   aplicada junto da expansão ou por um deploy global. Ela remove somente a ponte e o
+   escalar do usuário; preserva a associação normalizada, os campos do fornecedor,
+   configurações comerciais, snapshots, históricos, autoria e pedidos. A coluna legada
+   `fornecedores.vendedor_olist_id` fica preservada para uma limpeza independente.
    Continuar com a configuração `false`; reativar a ponte após a contração causará erro.
 
 Antes da etapa 4 é possível retornar ao código anterior, mantendo o banco expandido.

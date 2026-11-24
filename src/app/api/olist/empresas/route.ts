@@ -10,7 +10,10 @@ export async function GET(request: Request) {
       where: { OR: [{ id: usuario.aplicativoId }, { aplicativoPaiId: usuario.aplicativoId }] },
       select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }],
     });
-    return NextResponse.json({ empresas, aplicativoId: usuario.aplicativoId }, { headers: { "Cache-Control": "private, no-store" } });
+    const filiais = empresas.filter((empresa) => empresa.id !== usuario.aplicativoId);
+    const opcoes = filiais.length ? filiais : empresas;
+    const aplicativoId = opcoes[0]?.id ?? usuario.aplicativoId;
+    return NextResponse.json({ empresas: opcoes, aplicativoId }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "Não foi possível consultar as empresas." }, { status: 500 });
   }

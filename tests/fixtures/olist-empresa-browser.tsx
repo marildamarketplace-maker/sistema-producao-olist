@@ -11,6 +11,7 @@ const listeners = new Set<() => void>();
 export function useAuth() { return useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => auth); }
 export function AccessGuard({ children }: { children: ReactNode }) { return children; }
 const params = new URLSearchParams(location.search);
+if (!params.has("persistir")) sessionStorage.clear();
 document.documentElement.classList.toggle("dark", params.get("tema") === "dark");
 const estado = {
   consultas: [] as string[], downloads: 0, cancelamentos: 0,
@@ -23,7 +24,7 @@ Object.assign(window, { empresaTeste: estado });
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.href);
   estado.consultas.push(url.pathname + url.search);
-  if (url.pathname === "/api/olist/empresas") return Response.json({ aplicativoId: "matriz", empresas: [{ id: "matriz", nome: "Empresa matriz com nome muito longo para testar o seletor" }, ...(params.has("unica") ? [] : [{ id: "filial", nome: "Filial" }])] });
+  if (url.pathname === "/api/olist/empresas") return Response.json({ aplicativoId: params.has("unica") ? "matriz" : "outra-filial", empresas: params.has("unica") ? [{ id: "matriz", nome: "Empresa única" }] : [{ id: "outra-filial", nome: "Filial com nome muito longo para testar o seletor" }, { id: "filial", nome: "Filial" }] });
   if (params.has("exportacao") && /^\/api\/olist\/pedidos\/\d+$/.test(url.pathname)) {
     return new Promise<Response>((resolve) => {
       init?.signal?.addEventListener("abort", () => { estado.cancelamentos++; }, { once: true });

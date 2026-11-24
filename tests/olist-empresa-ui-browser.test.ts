@@ -16,6 +16,7 @@ test("seis telas Olist: seletor no título, troca de empresa e empresa única", 
       await ate(() => cdp.avaliar<boolean>(`location.search===${JSON.stringify(query)} && Boolean(document.querySelector("header select"))`), "Seletor ausente").catch(async error => { console.error(await cdp.avaliar("document.body.innerText"), cdp.erros); throw error; });
       assert.equal(await cdp.avaliar('document.documentElement.scrollWidth <= innerWidth'), true);
       assert.equal(await cdp.avaliar('document.querySelector("header select").disabled'), false);
+      assert.equal(await cdp.avaliar(`Boolean(document.querySelector('header option[value="matriz"]'))`), false);
       assert.ok(await cdp.avaliar<number>('document.querySelector("header select").getBoundingClientRect().height') >= 44);
       await cdp.avaliar('const select=document.querySelector("header select"); select.focus(); select.value="filial"; select.dispatchEvent(new Event("change", {bubbles:true}));');
       await ate(() => cdp.avaliar<boolean>(`window.empresaTeste.consultas.some(u=>u.startsWith('/api/olist/${tela}?') && u.includes('aplicativoId=filial') && u.includes('offset=0'))`), "Consulta não seguiu a empresa");
@@ -31,7 +32,7 @@ test("seis telas Olist: seletor no título, troca de empresa e empresa única", 
   assert.equal(await cdp.avaliar('document.querySelector("header select").value'), "filial");
   assert.equal(await cdp.avaliar('document.querySelector("form input").value'), "Filtro preservado");
   await cdp.avaliar('window.empresaTeste.trocarUsuario()');
-  await ate(() => cdp.avaliar<boolean>('document.querySelector("header select")?.value === "matriz" && document.querySelector("form input")?.value === ""'), "Troca de identidade não limpou estado");
+  await ate(() => cdp.avaliar<boolean>('document.querySelector("header select")?.value === "outra-filial" && document.querySelector("form input")?.value === ""'), "Troca de identidade não limpou estado");
 
   await cdp.pedir("Page.navigate", { url: `${url}?tela=pedidos&exportacao=1` });
   await ate(() => cdp.avaliar<boolean>('location.search.includes("exportacao") && Boolean(document.querySelector("input[type=checkbox]"))'), "Pedidos não carregaram");
@@ -45,6 +46,20 @@ test("seis telas Olist: seletor no título, troca de empresa e empresa única", 
   await cdp.avaliar('new Promise(resolve=>setTimeout(resolve,50))');
   assert.equal(await cdp.avaliar('window.empresaTeste.downloads'), 0);
   assert.equal(await cdp.avaliar('window.empresaTeste.consultas.filter(u=>/^\\/api\\/olist\\/pedidos\\/\\d+/.test(u)).length'), 1);
+  for (const tela of ["produtos", "contatos", "pedidos", "formas-pagamento", "formas-recebimento", "vendedores"]) {
+    const query = `?tela=${tela}&persistir=1`;
+    await cdp.pedir("Page.navigate", { url: `${url}${query}` });
+    await ate(() => cdp.avaliar<boolean>(`location.search===${JSON.stringify(query)} && document.querySelector("header select")?.value === "filial"`), "Seleção não foi compartilhada entre telas");
+    await ate(() => cdp.avaliar<boolean>(`window.empresaTeste.consultas.some(u=>u.startsWith('/api/olist/${tela}?') && u.includes('aplicativoId=filial'))`), "Busca não usou empresa salva");
+    assert.equal(await cdp.avaliar('sessionStorage.getItem("olist_empresa:usuario-local:matriz")'), "filial");
+  }
+  await cdp.avaliar("window.provaReload = true");
+  await cdp.pedir("Page.reload");
+  await ate(() => cdp.avaliar<boolean>('!window.provaReload && document.querySelector("header select")?.value === "filial"'), "Reload perdeu seleção");
+  await cdp.avaliar('sessionStorage.setItem("olist_empresa:usuario-local:matriz", "empresa-invalida")');
+  await cdp.avaliar("window.provaReload = true");
+  await cdp.pedir("Page.reload");
+  await ate(() => cdp.avaliar<boolean>('!window.provaReload && document.querySelector("header select")?.value === "outra-filial" && sessionStorage.getItem("olist_empresa:usuario-local:matriz") === "outra-filial"'), "Empresa inválida não foi descartada");
   await cdp.pedir("Page.navigate", { url: `${url}?unica=1` });
   await ate(() => cdp.avaliar<boolean>('document.querySelector("header select")?.disabled === true'), "Empresa única não foi desabilitada");
   assert.deepEqual(cdp.erros, []);
