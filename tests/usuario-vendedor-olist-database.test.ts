@@ -107,8 +107,25 @@ test("vendedores por conta: migração, ponte, hierarquia, versão e escrita fin
     assert.deepEqual((await db.query("SELECT vendedor_olist_id,meu_cliente_olist_id FROM fornecedores WHERE id=$1",[id(10)])).rows,
       [{vendedor_olist_id:usuarioId,meu_cliente_olist_id:700}],"migration não altera o campo do fornecedor");
     assert.equal((await db.query("SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='usuario' AND column_name='vendedor_olist_id'")).rows.length,0);
+    // Regressão do formulário após aplicar a contração: sem env e com env=true
+    // antigo, salvar somente os IDs dos filhos não pode consultar a coluna removida.
+    for (const modo of [undefined,"true"]) {
+      if (modo === undefined) delete process.env.OLIST_VENDEDORES_COMPAT_LEGADO;
+      else process.env.OLIST_VENDEDORES_COMPAT_LEGADO=modo;
+      const versaoFilhos = Number((await db.query<{versao:number}>("SELECT vinculos_olist_versao AS versao FROM usuario WHERE id=$1",[usuarioId])).rows[0].versao);
+      await transaction(()=>substituirVendedoresOlist(client,usuarioId,pai,[
+        {aplicativoId:filhoA,vendedorOlistId:345005007},
+        {aplicativoId:filhoB,vendedorOlistId:366550419},
+      ],versaoFilhos));
+      assert.deepEqual((await linhas()).rows,[
+        {aplicativo_id:filhoA,vendedor_olist_id:345005007},
+        {aplicativo_id:filhoB,vendedor_olist_id:366550419},
+      ]);
+    }
     await transaction(()=>alterarVendedorOlistLegado(client,usuarioId,pai,999));
-    assert.equal(await obterVendedorDoUsuario(usuarioId,pai),999,"escrita normalizada funciona após remover as colunas");
+    assert.equal(await obterVendedorDoUsuario(usuarioId,pai),999,"formato legado também funciona após remover a coluna sem depender da flag");
+    const versaoFinal = Number((await db.query<{versao:number}>("SELECT vinculos_olist_versao AS versao FROM usuario WHERE id=$1",[usuarioId])).rows[0].versao);
+    await transaction(()=>substituirVendedoresOlist(client,usuarioId,pai,[],versaoFinal));
     await transaction(()=>alterarVendedorOlistLegado(client,usuarioId,pai,null));
     await db.query("UPDATE usuario SET aplicativo_id=$1 WHERE id=$2",[alheio,usuarioId]);
     assert.equal(await obterVendedorDoUsuario(usuarioId,pai),null,"proteção de hierarquia continua funcionando sem a coluna antiga");

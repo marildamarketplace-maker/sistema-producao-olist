@@ -41,18 +41,29 @@ test("usuários: edição por conta com carga sob demanda, conflitos, modal e is
       await ativar("Editar usuário", mobile);
       await ate(() => avaliar<boolean>('document.querySelectorAll("form input[inputmode=numeric]").length===2'), "Editor de vínculos não abriu");
       assert.equal(await avaliar('window.usuariosTeste.consultas.filter(c=>c.url.includes("recurso=aplicativos")).length'), 1);
-      await avaliar('const campo=document.querySelectorAll("form input[inputmode=numeric]")[1]; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(campo,"777"); campo.dispatchEvent(new Event("input",{bubbles:true}));');
+      for (const [indice, valor] of ["345005007", "366550419"].entries()) {
+        await avaliar(`(()=>{ const campo=document.querySelectorAll("form input[inputmode=numeric]")[${indice}]; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(campo,${JSON.stringify(valor)}); campo.dispatchEvent(new Event("input",{bubbles:true})); })()`);
+      }
       await ativar("Salvar usuário", mobile);
-      await ate(() => avaliar<boolean>('document.querySelector("[role=alert]")?.textContent.includes("vínculos foram alterados")'), "Conflito não foi apresentado");
-      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[1].value'), "777");
+      await ate(() => avaliar<boolean>('document.querySelector("article [role=alert]")?.textContent.includes("vínculos foram alterados")'), "Conflito não foi apresentado junto ao cadastro");
+      assert.equal(await avaliar('document.activeElement===document.querySelector("article [role=alert]")'), true);
+      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[1].value'), "366550419");
+      assert.equal(await avaliar('(()=>{const caixa=document.querySelector("article [role=alert]").getBoundingClientRect();return caixa.top>=0&&caixa.bottom<=innerHeight})()'), true);
+      await avaliar('window.usuariosTeste.falhaSalvarStatus=500');
+      await ativar("Salvar usuário", mobile);
+      await ate(() => avaliar<boolean>('document.querySelector("article [role=alert]")?.textContent.includes("confirmar o salvamento")'), "Falha de servidor não ficou visível no cadastro");
+      assert.equal(await avaliar('document.activeElement===document.querySelector("article [role=alert]")'), true);
+      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[0].value'), "345005007");
+      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[1].value'), "366550419");
       await avaliar('window.usuariosTeste.renovarToken()');
       await ate(() => avaliar<boolean>('Boolean(document.querySelectorAll("form input[inputmode=numeric]")[1])'), "Refresh descartou edição");
-      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[1].value'), "777");
+      assert.equal(await avaliar('document.querySelectorAll("form input[inputmode=numeric]")[1].value'), "366550419");
       await avaliar('window.usuariosTeste.falharSalvar=false');
       await ativar("Salvar usuário", mobile);
-      await ate(() => avaliar<boolean>('document.querySelector("[role=status]")?.textContent.includes("Usuário atualizado")'), "Salvamento não concluiu");
+      await ate(() => avaliar<boolean>('document.querySelector("article [role=status]")?.textContent.includes("Usuário atualizado")'), "Salvamento não concluiu junto ao cadastro");
+      assert.equal(await avaliar('document.activeElement===document.querySelector("article [role=status]")'), true);
       const perfil = await avaliar<{ vendedoresOlist: Array<{ aplicativoId: string; vendedorOlistId: number }>; vinculosOlistVersao: number; vendedorOlistId?: unknown }>('window.usuariosTeste.salvos.at(-1).profile');
-      assert.equal(perfil.vendedoresOlist[1].vendedorOlistId, 777); assert.equal(perfil.vinculosOlistVersao, 3); assert.equal(perfil.vendedorOlistId, undefined);
+      assert.equal(perfil.vendedoresOlist[0].vendedorOlistId, 345005007); assert.equal(perfil.vendedoresOlist[1].vendedorOlistId, 366550419); assert.equal(perfil.vinculosOlistVersao, 3); assert.equal(perfil.vendedorOlistId, undefined);
       await ativar("Criar usuário", mobile);
       await ate(() => avaliar<boolean>('Boolean(document.querySelector("dialog[open]"))'), "Modal não abriu");
       assert.equal(await avaliar('document.activeElement===document.querySelector("dialog input")'), true);

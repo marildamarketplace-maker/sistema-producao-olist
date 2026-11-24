@@ -20,7 +20,7 @@ const cadastro = {
   vendedoresOlist: [{ aplicativoId: app, vendedorOlistId: 10 }, { aplicativoId: filho, vendedorOlistId: 20 }],
 };
 const estado = {
-  falharSalvar: true, deferir: false,
+  falharSalvar: true, falhaSalvarStatus: 409, deferir: false,
   consultas: [] as Array<{ url: string; aplicativoId: string }>, salvos: [] as Array<Record<string, unknown>>,
   pendentes: [] as Array<{ concluir: () => void }>,
   trocarEscopo() { auth = { session: { access_token: "teste-outro" }, usuario: { id: "admin-b", aplicativo_id: appB } }; for (const listener of listeners) listener(); },
@@ -36,7 +36,9 @@ window.fetch = async (input, init) => {
   if (init?.method === "PATCH" || init?.method === "POST") {
     const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
     estado.salvos.push(payload);
-    if (estado.falharSalvar) return Response.json({ error: "Os vínculos foram alterados. Recarregue o usuário antes de salvar." }, { status: 409 });
+    if (estado.falharSalvar) return Response.json({ error: estado.falhaSalvarStatus === 409
+      ? "Os vínculos foram alterados. Recarregue o usuário antes de salvar."
+      : "Não foi possível confirmar o salvamento. Tente novamente." }, { status: estado.falhaSalvarStatus });
     if (payload.profile) {
       const perfil = payload.profile as typeof cadastro;
       Object.assign(cadastro, perfil, { vinculosOlistVersao: cadastro.vinculosOlistVersao + 1, vendedoresOlistQuantidade: perfil.vendedoresOlist.length });
@@ -54,7 +56,7 @@ window.fetch = async (input, init) => {
     return Response.json(resposta);
   }
   const pagina = Number(url.searchParams.get("pagina") ?? 1);
-  const { vendedoresOlist: _vendedores, ...resumo } = cadastro;
+  const resumo = Object.fromEntries(Object.entries(cadastro).filter(([chave]) => chave !== "vendedoresOlist"));
   return Response.json({ usuarios: [{ ...resumo, nome: aplicativoId === app ? cadastro.nome : "Usuário da conta B", email: aplicativoId === app ? cadastro.email : "conta-b@example.test" }], paginacao: { pagina, limite: 50, total: 51, totalPaginas: 2 } });
 };
 createRoot(document.getElementById("root")!).render(<UsuariosPage />);

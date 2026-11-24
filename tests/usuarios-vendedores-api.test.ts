@@ -21,6 +21,7 @@ process.env.OLIST_VENDEDORES_COMPAT_LEGADO = "true";
 test("usuários: cadastro normalizado, compatibilidade própria, paginação e autorização", async t => {
   const usuarios = new Map<string, Usuario>();
   let permitido = true, dentroTransacao = false, falharBanco = false, conflitoNoLock = false;
+  let ponteDisponivel = true;
   let authCriacoes = 0, authExclusoes = 0, authAtualizacoes = 0, opcoesConsultas = 0;
   const consultasLista: Array<Record<string, unknown>> = [];
   function reiniciar() {
@@ -94,6 +95,7 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
     $queryRaw: async (consulta: TemplateStringsArray | { values: unknown[] }, ...valores: unknown[]) => {
       assert.ok(dentroTransacao);
       if (Array.isArray(consulta)) {
+        if (consulta.join("").includes("pg_catalog.pg_attribute")) return [{ disponivel: ponteDisponivel }];
         const item = usuarios.get(String(valores[0])); assert.ok(item);
         if (conflitoNoLock) { item.vinculosOlistVersao++; conflitoNoLock = false; }
         return [{ vinculosOlistVersao: item.vinculosOlistVersao }];
@@ -109,6 +111,7 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
         for (const vinculo of vinculos) gravarVinculo(String(usuarioId), vinculo.aplicativoId, vinculo.vendedorOlistId);
         return vinculos.length;
       }
+      assert.equal(ponteDisponivel,true,"após a contração não pode tentar atualizar a coluna removida");
       const [vendedorId, usuarioId, aplicativoId] = valores;
       assert.ok(vendedorId === null || typeof vendedorId === "number");
       gravarVinculo(String(usuarioId), String(aplicativoId), vendedorId); return 1;
@@ -182,5 +185,24 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
     const response = await PATCH(request("PATCH", { usuarioId: alvo, profile: { ...perfil(), nome: "Nome atualizado" } }));
     assert.equal(response.status, 500); const body = await response.json(); assert.match(body.error, /Authentication/); assert.doesNotMatch(body.error, /diagnóstico interno/);
     assert.equal(authAtualizacoes, 1); assert.equal(usuarios.get(alvo)?.nome, "Vendedor");
+  });
+  await t.test("salva vínculo de filho após remover a coluna antiga sem depender da configuração de ambiente", async () => {
+    reiniciar(); ponteDisponivel=false;
+    const atualizacoesAntes=authAtualizacoes;
+    try {
+      for (const modo of [undefined,"true","false"]) {
+        if(modo===undefined) delete process.env.OLIST_VENDEDORES_COMPAT_LEGADO;
+        else process.env.OLIST_VENDEDORES_COMPAT_LEGADO=modo;
+        const response=await PATCH(request("PATCH",{usuarioId:alvo,profile:{
+          ...perfil(),vinculosOlistVersao:usuarios.get(alvo)?.vinculosOlistVersao,
+          vendedoresOlist:[{aplicativoId:filho,vendedorOlistId:345005007}],
+        }}));
+        assert.equal(response.status,200);
+        assert.deepEqual((await response.json()).usuario.vendedoresOlist,[{aplicativoId:filho,vendedorOlistId:345005007}]);
+        const salvo=await GET(request("GET",undefined,`?usuarioId=${alvo}`));
+        assert.deepEqual((await salvo.json()).usuario.vendedoresOlist,[{aplicativoId:filho,vendedorOlistId:345005007}]);
+      }
+      assert.equal(authAtualizacoes,atualizacoesAntes,"editar apenas vendedores não chama atualização do Authentication");
+    } finally { ponteDisponivel=true; process.env.OLIST_VENDEDORES_COMPAT_LEGADO="true"; }
   });
 });

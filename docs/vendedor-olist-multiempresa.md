@@ -66,7 +66,12 @@ o histórico deste repositório tem migrations com decisões independentes pende
    RLS e revogação de grants impedem acesso público à tabela nova.
 3. **Publicar código compatível:** a configuração padrão
    `OLIST_VENDEDORES_COMPAT_LEGADO=true` mantém escritas da conta própria pela ponte;
-   filhos são escritos na tabela. Todas as leituras novas usam a associação.
+   filhos são escritos na tabela. A ponte só é utilizada enquanto a coluna e seu trigger
+   de atualização estiverem presentes e ativos. Após a contração, a gravação usa a associação
+   mesmo se a configuração estiver ausente ou ainda estiver como `true`.
+   Essa verificação de catálogo ocorre apenas na mutação, dentro da transação e após o lock
+   do usuário, sem novas chamadas à Olist ou cache de estado da migração.
+   Todas as leituras novas usam a associação.
    Testar uma conta comum e um usuário do pai com dois filhos, além do envio pela fila.
 4. **Cortar escritores antigos:** retirar todas as instâncias e ferramentas antigas.
    Publicar `OLIST_VENDEDORES_COMPAT_LEGADO=false` em todas as instâncias novas.
@@ -79,7 +84,8 @@ o histórico deste repositório tem migrations com decisões independentes pende
    escalar do usuário; preserva a associação normalizada, os campos do fornecedor,
    configurações comerciais, snapshots, históricos, autoria e pedidos. A coluna legada
    `fornecedores.vendedor_olist_id` fica preservada para uma limpeza independente.
-   Continuar com a configuração `false`; reativar a ponte após a contração causará erro.
+   Continuar com a configuração `false` para dispensar a consulta de compatibilidade.
+   Versões antigas da aplicação que ainda tentam gravar na coluna removida deixam de funcionar.
 
 Antes da etapa 4 é possível retornar ao código anterior, mantendo o banco expandido.
 Após a etapa 4, um rollback para código antigo exige restaurar primeiro o valor próprio do

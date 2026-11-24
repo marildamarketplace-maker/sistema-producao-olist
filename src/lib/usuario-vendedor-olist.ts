@@ -46,12 +46,27 @@ async function versaoAtual(tx: Prisma.TransactionClient, usuarioId: string) {
   return usuario.vinculosOlistVersao;
 }
 
-// Durante a publicação gradual, escritores antigos ainda atualizam o escalar.
-// A ponte SQL é unidirecional e mantém a linha própria. Desligar antes da contração.
-function compatibilidadeLegada() { return process.env.OLIST_VENDEDORES_COMPAT_LEGADO !== "false"; }
+// A configuração é uma preferência da publicação gradual, não prova de que a
+// coluna/ponte ainda existem. Não tentar UPDATE e capturar 42703: isso abortaria
+// a transação PostgreSQL, impedindo a gravação normalizada dos filhos.
+async function compatibilidadeLegada(tx: Prisma.TransactionClient): Promise<boolean> {
+  if (process.env.OLIST_VENDEDORES_COMPAT_LEGADO === "false") return false;
+  const [estado] = await tx.$queryRaw<Array<{ disponivel: boolean }>>`SELECT
+    EXISTS(SELECT 1 FROM pg_catalog.pg_attribute
+      WHERE attrelid='public.usuario'::regclass AND attname='vendedor_olist_id' AND NOT attisdropped)
+    AND EXISTS(SELECT 1 FROM pg_catalog.pg_trigger
+      WHERE tgrelid='public.usuario'::regclass AND tgname='usuario_vendedor_olist_ponte_update'
+        AND NOT tgisinternal AND tgenabled IN ('O','A')) AS disponivel`;
+  if (typeof estado?.disponivel !== "boolean") {
+    throw new ErroVinculoVendedorOlist("Não foi possível verificar a configuração dos vínculos. Tente novamente.", 500);
+  }
+  return estado.disponivel;
+}
 
 async function gravarProprio(tx: Prisma.TransactionClient, usuarioId: string, aplicativoId: string, vendedorOlistId: number | null) {
-  if (compatibilidadeLegada()) {
+  // bloquearUsuario já mantém o lock do usuário: a contração não pode remover
+  // a coluna entre esta verificação e o UPDATE da ponte.
+  if (await compatibilidadeLegada(tx)) {
     await tx.$executeRaw`UPDATE usuario SET vendedor_olist_id=${vendedorOlistId} WHERE id=${usuarioId}::uuid AND aplicativo_id=${aplicativoId}::uuid`;
   } else if (vendedorOlistId === null) {
     await tx.usuarioVendedorOlist.deleteMany({ where: { usuarioId, aplicativoId } });

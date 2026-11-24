@@ -18,6 +18,7 @@ type UsuarioDetalhe = UsuarioResumo & PermissionSet & { vendedoresOlist: Entrada
 type AplicativoOpcao = { id: string; nome: string };
 type VinculoEdicao = { aplicativoId: string; vendedorOlistId: string };
 type Paginacao = { pagina: number; limite: number; total: number; totalPaginas: number };
+type FeedbackEdicao = { usuarioId: string; tipo: "erro" | "sucesso"; mensagem: string };
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50";
 const primario = "min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50";
 const permissoesVazias = () => Object.fromEntries(permissionKeys.map((permission) => [permission, false])) as PermissionSet;
@@ -79,12 +80,14 @@ function UsuariosPage() {
   const [salvando, setSalvando] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
+  const [feedbackEdicao, setFeedbackEdicao] = useState<FeedbackEdicao | null>(null);
   const dialogo = useRef<HTMLDialogElement>(null);
   const carregamento = useRef(0);
   const detalheRequest = useRef(0);
   const salvamento = useRef(false);
   const formularioErro = useRef<HTMLParagraphElement>(null);
   const criarBotao = useRef<HTMLButtonElement>(null);
+  const feedbackEdicaoRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     revisaoEscopo.current++;
@@ -94,8 +97,15 @@ function UsuariosPage() {
     setCarregandoAplicativos(false); setPagina(1); setExpandido(null); setEditando(null);
     setFormAberto(false); setForm({ nome: "", email: "", senha: "" });
     setVinculosNovos([]); setVinculosEdicao([]); setPermissoesNovo(permissoesVazias());
-    setSalvando(null); setCarregandoDetalhe(null); setErro(null); setMensagem(null);
+    setSalvando(null); setCarregandoDetalhe(null); setErro(null); setMensagem(null); setFeedbackEdicao(null);
   }, [escopo]);
+
+  useEffect(() => {
+    if (!feedbackEdicao) return;
+    const elemento = feedbackEdicaoRef.current;
+    elemento?.focus({ preventScroll: true });
+    elemento?.scrollIntoView({ block: "center" });
+  }, [feedbackEdicao]);
 
   const carregar = useCallback(async (signal?: AbortSignal) => {
     if (!token) return;
@@ -180,7 +190,7 @@ function UsuariosPage() {
   }
   async function expandir(usuario: UsuarioResumo) {
     if (expandido === usuario.id) { setExpandido(null); return; }
-    setExpandido(usuario.id); setEditando(null); setErro(null);
+    setExpandido(usuario.id); setEditando(null); setErro(null); setFeedbackEdicao(null);
     if (detalhes[usuario.id]) return;
     await recarregarDetalhe(usuario.id);
   }
@@ -220,7 +230,7 @@ function UsuariosPage() {
   async function abrirEdicao(usuario: UsuarioResumo) {
     const revisao = ++detalheRequest.current;
     const origem = revisaoEscopo.current;
-    setCarregandoDetalhe(usuario.id); setErro(null);
+    setCarregandoDetalhe(usuario.id); setErro(null); setFeedbackEdicao(null);
     try {
       const [detalhe] = await Promise.all([buscarDetalhe(usuario.id), carregarAplicativos()]);
       if (origem !== revisaoEscopo.current || revisao !== detalheRequest.current) return;
@@ -234,14 +244,19 @@ function UsuariosPage() {
     event.preventDefault();
     if (!token || salvamento.current) return;
     const origem = revisaoEscopo.current;
-    salvamento.current = true; setSalvando(usuarioId); setErro(null); setMensagem(null);
+    salvamento.current = true; setSalvando(usuarioId); setErro(null); setMensagem(null); setFeedbackEdicao(null);
     try {
       const response = await fetch("/api/usuarios", { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ usuarioId, profile: { ...edicao, vendedoresOlist: serializarVinculos(vinculosEdicao) } }) });
       const json = await response.json() as { usuario?: UsuarioDetalhe; error?: string };
       if (origem !== revisaoEscopo.current) return;
       if (!response.ok || !json.usuario) throw new Error(json.error ?? "Não foi possível editar o usuário.");
-      aplicarUsuario(json.usuario); setEditando(null); setMensagem("Usuário atualizado com sucesso.");
-    } catch (error) { if (origem === revisaoEscopo.current) setErro(error instanceof Error ? error.message : "Erro inesperado."); }
+      aplicarUsuario(json.usuario); setEditando(null);
+      setFeedbackEdicao({ usuarioId, tipo: "sucesso", mensagem: "Usuário atualizado com sucesso." });
+    } catch (error) {
+      if (origem === revisaoEscopo.current) setFeedbackEdicao({
+        usuarioId, tipo: "erro", mensagem: error instanceof Error ? error.message : "Não foi possível salvar o usuário. Tente novamente.",
+      });
+    }
     finally { if (origem === revisaoEscopo.current) { salvamento.current = false; setSalvando(null); } }
   }
   async function compartilharLogin(email: string) {
@@ -291,6 +306,7 @@ function UsuariosPage() {
                 <div className="min-w-0 md:col-span-2"><VendedoresDoUsuario vinculos={vinculosEdicao} aplicativos={aplicativos} carregando={carregandoAplicativos} disabled={salvando === usuario.id} aoAlterar={setVinculosEdicao} /></div>
                 <div className="flex flex-wrap gap-2 md:col-span-2"><button disabled={salvando === usuario.id} className={primario}>{salvando === usuario.id ? "Salvando..." : "Salvar usuário"}</button><button type="button" disabled={salvando === usuario.id} className={botao} onClick={() => void abrirEdicao(usuario)}>Recarregar dados salvos</button></div>
               </form> : <p className="text-sm text-slate-600">{detalhe.vendedoresOlistQuantidade ? "Edite o usuário para conferir e alterar os IDs por aplicativo." : "Nenhum vendedor Olist vinculado."}</p>}
+              {feedbackEdicao?.usuarioId === usuario.id && <p ref={feedbackEdicaoRef} tabIndex={-1} role={feedbackEdicao.tipo === "erro" ? "alert" : "status"} className={`break-words rounded-md border px-4 py-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${feedbackEdicao.tipo === "erro" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{feedbackEdicao.mensagem}</p>}
               <PermissoesUsuario permissoes={detalhe} disabled={salvando !== null} aoAlterar={(permission, value) => void atualizar(usuario.id, { permission, value })} />
             </> : <button type="button" className={botao} onClick={() => void recarregarDetalhe(usuario.id)}>Tentar carregar detalhes</button>}
           </div>}
