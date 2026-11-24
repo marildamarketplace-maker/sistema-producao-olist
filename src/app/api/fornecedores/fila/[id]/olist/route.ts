@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { obterVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -10,6 +11,7 @@ import { marcarEnvioInterrompido, enviarFornecedor, envioBloqueado, envioExpirad
 import { obterPedidoOlistApi } from "@/lib/olist";
 import { consultarCadastrosFilaOlist, validarCadastros, nome, ErroFilaOlist as ErroFila } from "@/lib/fila-olist-cadastros";
 import { getValidOlistAccessToken } from "@/lib/olist";
+import { destinoFornecedorWhere } from "@/lib/fila-fornecedor-destino";
 
 export const maxDuration = 120;
 
@@ -27,21 +29,21 @@ async function autorizar(request: Request, contexto: Contexto) {
   return { fila, usuarioId: auth.id, matrizId: usuario.aplicativoId };
 }
 async function filialValida(matrizId: string, filialId: string | null) {
-  if (!filialId || !z.guid().safeParse(filialId).success) throw new ErroFila("Salve uma filial antes de configurar o envio.");
-  const filial = await prisma.aplicativo.findFirst({ where: { id: filialId, aplicativoPaiId: matrizId }, select: { id: true, nome: true } });
-  if (!filial) throw new ErroFila("Filial não vinculada à matriz.", 403);
+  if (!filialId || !z.guid().safeParse(filialId).success) throw new ErroFila("Salve um aplicativo destinatário antes de configurar o envio.");
+  const filial = await prisma.aplicativo.findFirst({ where: destinoFornecedorWhere(matrizId, filialId), select: { id: true, nome: true } });
+  if (!filial) throw new ErroFila("Aplicativo destinatário não vinculado ao fornecedor.", 403);
   return filial;
 }
 function falha(error: unknown) {
   if (error instanceof z.ZodError) return NextResponse.json({ error: "Dados comerciais inválidos; gere outra prévia." }, { status: 400 });
   if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message }, { status: error instanceof ErroFila ? error.status : 409 });
-  return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da filial e tente atualizar a fila." }, { status: 502 });
+  return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da conta destinatária e tente atualizar a fila." }, { status: 502 });
 }
 const resposta = (value: unknown) => NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
 
 export async function GET(request: Request, contexto: Contexto) {
   try {
-    const { fila, matrizId } = await autorizar(request, contexto);
+    const { fila, matrizId, usuarioId } = await autorizar(request, contexto);
     const params = new URL(request.url).searchParams;
     const filial = await filialValida(matrizId, fila.aplicativoFilialId);
     const recurso = params.get("recurso") ?? "inicial";
@@ -50,7 +52,8 @@ export async function GET(request: Request, contexto: Contexto) {
       const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId: fila.solicitacaoProducaoId }, include: { aplicativo: { select: { nome: true } } } });
       const snapshot = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
       const configuracao = snapshot.success && snapshot.data.olist?.filialId === filial.id ? snapshot.data.olist : null;
-      return resposta({ filial, selecoes: configuracao?.selecoes ?? null, envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
+      return resposta({ filial, selecoes: configuracao?.selecoes ?? null,
+        vendedorOlistPadraoId: await obterVendedorDoUsuario(usuarioId, filial.id), envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
         aplicativoNome: envio.aplicativo?.nome, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId } : null });
     }
     return resposta(await consultarCadastrosFilaOlist(filial.id, params));

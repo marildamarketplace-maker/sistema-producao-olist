@@ -9,12 +9,19 @@ test("seleção Olist na revisão de origem: autorização, conta correta e snap
   process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
   let permitido = true, podeFilial = true, fornecedorValido = true, solicitacaoValida = true, filialValida = true, ativo = true;
   let chamadas = 0, posts = 0, gravacoes = 0;
+  let destinoAtual = filial;
   const logs: unknown[] = [];
   t.mock.method(console, "info", (...args: unknown[]) => { logs.push(args); });
   let ultimo: Record<string, any> | null = null;
   const tx = {
+    envioFornecedor: { findUnique: async () => null },
+    pedidoFornecedorSolicitacao: { findFirst: async () => null },
+    usuarioVendedorOlist: { findFirst: async ({ where }: { where: { usuarioId: string; aplicativoId: string } }) => {
+      assert.equal(where.usuarioId, usuarioId); assert.equal(where.aplicativoId, destinoAtual);
+      return null;
+    } },
     $queryRaw: async (sql: TemplateStringsArray, ...valores: unknown[]) => {
-      if (sql.join("").includes("FROM aplicativo")) { assert.deepEqual(valores, [filial, matriz]); return filialValida ? [{ id: filial }] : []; }
+      if (sql.join("").includes("FROM aplicativo")) { assert.deepEqual(valores, [destinoAtual, matriz, matriz]); return filialValida ? [{ id: destinoAtual }] : []; }
       return [{ id: solicitacaoId }];
     },
     usuario: {
@@ -24,12 +31,12 @@ test("seleção Olist na revisão de origem: autorização, conta correta e snap
     solicitacaoProducao: { findFirst: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: solicitacaoId, aplicativoId: origem, status: "em_producao" }); return solicitacaoValida ? { id: solicitacaoId, observacaoGeral: "Original" } : null; } },
     fornecedor: { findFirst: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: fornecedorId, aplicativoId: origem }); return fornecedorValido ? { aplicativoPaiId: matriz, aplicativoPai: { aplicativoPaiId: null } } : null; } },
     aplicativo: {
-      findFirst: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: filial, aplicativoPaiId: matriz }); return filialValida ? { id: filial, nome: "Filial" } : null; },
-      findUnique: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: filial }); return { id: filial, nome: "Filial", olistClientId: "fake", olistClientSecret: "fake" }; },
+      findFirst: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: destinoAtual, OR: [{ id: matriz }, { aplicativoPaiId: matriz }] }); return filialValida ? { id: destinoAtual, nome: destinoAtual === matriz ? "Conta própria" : "Filial" } : null; },
+      findUnique: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { id: destinoAtual }); return { id: destinoAtual, nome: "Filial", olistClientId: "fake", olistClientSecret: "fake" }; },
     },
-    integracaoOlistToken: { findUnique: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { aplicativoId_provider: { aplicativoId: filial, provider: "olist" } }); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }; } },
+    integracaoOlistToken: { findUnique: async ({ where }: { where: unknown }) => { assert.deepEqual(where, { aplicativoId_provider: { aplicativoId: destinoAtual, provider: "olist" } }); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }; } },
     formaPagamentoOlistPlano: {
-      findMany: async ({ where }: { where: { aplicativoId: string } }) => { assert.equal(where.aplicativoId, filial); return [{ planoPagamento: { id: id(9), nome: "30/60" } }]; },
+      findMany: async ({ where }: { where: { aplicativoId: string } }) => { assert.equal(where.aplicativoId, destinoAtual); return [{ planoPagamento: { id: id(9), nome: "30/60" } }]; },
     },
     itemSolicitacaoProducao: { findMany: async () => [{ produtoId: id(10), sku: "SKU-EST/6861-A/", quantidadeSolicitada: 2, tipoCorte: "LASER" }] },
     produtoOlistProdutoFornecedor: { findMany: async () => [{ produtoId: id(10), quantidadeUsada: 1.5, produtoFornecedor: { id: tecidoId, nome: "Oxford", referencia: "REF" } }] },
@@ -47,9 +54,15 @@ test("seleção Olist na revisão de origem: autorização, conta correta e snap
   t.mock.method(axios, "post", async () => { posts++; throw new Error("Nenhum pedido deve ser criado na etapa de origem."); });
   const { GET } = await import("../src/app/api/fornecedores/fila/olist/route");
   const { POST } = await import("../src/app/api/fornecedores/fila/route");
-  const req = (body?: unknown, extras = "") => new Request(`https://example.test/api?fornecedorId=${fornecedorId}&filialId=${filial}&solicitacaoId=${solicitacaoId}&${extras}`, { headers: { Authorization: "Bearer fake" }, method: body ? "POST" : "GET", ...(body ? { body: JSON.stringify(body) } : {}) });
+  const req = (body?: unknown, extras = "") => new Request(`https://example.test/api?fornecedorId=${fornecedorId}&filialId=${destinoAtual}&solicitacaoId=${solicitacaoId}&${extras}`, { headers: { Authorization: "Bearer fake" }, method: body ? "POST" : "GET", ...(body ? { body: JSON.stringify(body) } : {}) });
   const base = { fornecedorId, solicitacaoId, filialId: filial };
   const olist = { filialId: filial, selecoes: { clienteId: 100, tecidos: [{ tecidoId, id: 400, preco: 0 }] } };
+  await t.test("inicial resolve usuário e conta autorizados sem chamadas externas", async () => {
+    const response = await GET(req(undefined, "recurso=inicial"));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { filial: { id: filial, nome: "Filial" }, vendedorOlistPadraoId: null });
+    assert.equal(chamadas, 0); assert.equal(posts, 0);
+  });
   await t.test("exige sessão e as duas permissões antes de consultar conta externa", async () => {
     assert.equal((await GET(new Request(`https://example.test/?fornecedorId=${fornecedorId}&filialId=${filial}&solicitacaoId=${solicitacaoId}`))).status, 401);
     permitido = false; assert.equal((await GET(req())).status, 403); permitido = true;
@@ -86,6 +99,23 @@ test("seleção Olist na revisão de origem: autorização, conta correta e snap
     ativo = false; assert.equal((await POST(req({ ...base, olist }))).status, 400); ativo = true;
     assert.equal((await POST(req({ ...base, olist: { ...olist, selecoes: { tecidos: [{ tecidoId, id: 400, preco: -1 }] } } }))).status, 400);
     assert.equal(gravacoes, antes); assert.equal(posts, 0);
+  });
+  await t.test("origem pode escolher a conta própria do fornecedor sem filhos, mantendo autorização e snapshot", async () => {
+    destinoAtual = matriz;
+    const antes = chamadas;
+    const inicial = await GET(req(undefined, "recurso=inicial"));
+    assert.equal(inicial.status, 200);
+    assert.deepEqual(await inicial.json(), { filial: { id: matriz, nome: "Conta própria" }, vendedorOlistPadraoId: null });
+    assert.equal(chamadas, antes);
+    const dadosProprios = { filialId: matriz, selecoes: { clienteId: 100, tecidos: [{ tecidoId, id: 400, preco: 0 }] } };
+    podeFilial = false;
+    assert.equal((await GET(req(undefined, "recurso=inicial"))).status, 403);
+    assert.equal((await POST(req({ fornecedorId, solicitacaoId, filialId: matriz, olist: dadosProprios }))).status, 403);
+    podeFilial = true;
+    assert.equal((await POST(req({ fornecedorId, solicitacaoId, filialId: matriz, olist: dadosProprios }))).status, 201);
+    assert.deepEqual(ultimo?.dadosPedido.olist, dadosProprios);
+    assert.equal(ultimo?.aplicativoFilialId, matriz); assert.equal(ultimo?.status, "PENDENTE"); assert.equal(posts, 0);
+    destinoAtual = filial;
   });
   await t.test("sem filial/dados comerciais continua permitindo enviar para revisão posterior", async () => {
     podeFilial = false; const antes = chamadas;

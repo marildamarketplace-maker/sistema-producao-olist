@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { PageHeader } from "@/components/page-header";
+import { OlistPageHeader as PageHeader, OlistEmpresa, useEmpresaOlist } from "@/components/olist-empresa";
 import { useAuth } from "@/components/auth-provider";
 import { AccessGuard } from "@/components/access-guard";
 
@@ -49,6 +49,7 @@ function formatarObjeto(valor: unknown) {
 }
 
 function ProdutosOlistPage() {
+  const aplicativoId = useEmpresaOlist();
   const { session } = useAuth();
   const [itens, setItens] = useState<ProdutoOlist[]>([]);
   const [total, setTotal] = useState(0);
@@ -61,7 +62,7 @@ function ProdutosOlistPage() {
   const carregar = useCallback(async () => {
     setCarregando(true);
     setErro(null);
-    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset) });
+    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset), aplicativoId });
     Object.entries(consulta).forEach(([chave, valor]) => { if (valor.trim()) params.set(chave, valor.trim()); });
     try {
       const response = await fetch(`/api/olist/produtos?${params.toString()}`, {
@@ -78,7 +79,7 @@ function ProdutosOlistPage() {
     } finally {
       setCarregando(false);
     }
-  }, [consulta, offset, session?.access_token]);
+  }, [consulta, offset, session?.access_token, aplicativoId]);
 
   useEffect(() => { void carregar(); }, [carregar]);
 
@@ -117,5 +118,5 @@ function ProdutosOlistPage() {
 }
 
 export default function ProdutosOlistAccessPage() {
-  return <AccessGuard permissions={["podeVisualizarOlistProdutos"]}><ProdutosOlistPage /></AccessGuard>;
+  return <AccessGuard permissions={["podeVisualizarOlistProdutos"]}><OlistEmpresa><ProdutosOlistPage /></OlistEmpresa></AccessGuard>;
 }

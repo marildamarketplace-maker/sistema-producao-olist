@@ -1,71 +1,37 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { supabase } from "@/lib/supabase";
 
-type UsuarioVendedorOption = {
-  id: string;
-  nome: string;
-  email: string;
-  aplicativo_id: string;
-};
-
 type AplicativoPaiOption = { id: string; nome: string };
-
-type PlanoPagamentoOption = { id: string; nome: string };
-type FormaPagamentoOption = {
-  forma_olist_id: string;
-  forma_olist_nome: string | null;
-  planos: PlanoPagamentoOption[];
-};
 
 type Fornecedor = {
   id: string;
-  aplicativo_id: string | null;
   aplicativo_pai_id: string;
-  vendedor_olist_id: string | null;
-  meu_cliente_olist_id: number | null;
-  meu_forma_pagamento_olist_id: number | null;
-  meu_tipo_venda_enum: "venda" | "venda g" | "venda pc" | null;
-  meu_plano_pagamento_id: string | null;
   nome: string;
   endereco: string | null;
   created_at: string;
-  updated_at: string;
 };
 
 type FornecedorFormData = {
   aplicativo_pai_id: string;
-  vendedor_olist_id: string;
-  meu_cliente_olist_id: string;
-  meu_forma_pagamento_olist_id: string;
-  meu_tipo_venda_enum: string;
-  meu_plano_pagamento_id: string;
   nome: string;
   endereco: string;
 };
 
 const INITIAL_FORM: FornecedorFormData = {
   aplicativo_pai_id: "",
-  vendedor_olist_id: "",
-  meu_cliente_olist_id: "",
-  meu_forma_pagamento_olist_id: "",
-  meu_tipo_venda_enum: "",
-  meu_plano_pagamento_id: "",
   nome: "",
   endereco: "",
 };
 
 export default function FornecedoresPage() {
-  const { session } = useAuth();
+  const { session, usuario } = useAuth();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [aplicativosPai, setAplicativosPai] = useState<AplicativoPaiOption[]>([]);
-  const [usuariosVendedores, setUsuariosVendedores] = useState<UsuarioVendedorOption[]>([]);
-  const [planosPagamento, setPlanosPagamento] = useState<PlanoPagamentoOption[]>([]);
-  const [formasPagamento, setFormasPagamento] = useState<FormaPagamentoOption[]>([]);
   const [formData, setFormData] = useState<FornecedorFormData>(INITIAL_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -75,51 +41,40 @@ export default function FornecedoresPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const isEditing = useMemo(() => editingId !== null, [editingId]);
-  const planosDaFormaSelecionada = useMemo(
-    () => formasPagamento.find((forma) => forma.forma_olist_id === formData.meu_forma_pagamento_olist_id)?.planos ?? [],
-    [formData.meu_forma_pagamento_olist_id, formasPagamento],
-  );
-
+  const isEditing = editingId !== null;
   const carregarDados = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    const [fornecedoresResult, usuariosResponse, planosResult] = await Promise.all([
-      supabase
-        .from("fornecedores")
-        .select("id, aplicativo_id, aplicativo_pai_id, vendedor_olist_id, meu_cliente_olist_id, meu_forma_pagamento_olist_id, meu_tipo_venda_enum, meu_plano_pagamento_id, nome, endereco, created_at, updated_at")
-        .order("nome", { ascending: true }),
-      fetch("/api/fornecedores/vendedores", {
-        headers: session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {},
-      }),
-      supabase.from("plano_pagamento").select("id, nome").eq("ativo", true).order("nome"),
-    ]);
-
-    const usuariosJson = await usuariosResponse.json() as {
-      aplicativosPai?: AplicativoPaiOption[];
-      usuarios?: UsuarioVendedorOption[];
-      formasPagamento?: FormaPagamentoOption[];
-      error?: string;
-    };
-
-    if (fornecedoresResult.error || !usuariosResponse.ok || planosResult.error) {
-      setErrorMessage(
-        `Erro ao carregar dados: ${fornecedoresResult.error?.message ?? planosResult.error?.message ?? usuariosJson.error ?? "erro desconhecido"}`,
-      );
+    if (!session?.access_token || !usuario?.aplicativo_id) {
       setIsLoading(false);
       return;
     }
-
-    setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
-    setAplicativosPai(usuariosJson.aplicativosPai ?? []);
-    setUsuariosVendedores(usuariosJson.usuarios ?? []);
-    setPlanosPagamento((planosResult.data as PlanoPagamentoOption[]) ?? []);
-    setFormasPagamento(usuariosJson.formasPagamento ?? []);
-    setIsLoading(false);
-  }, [session?.access_token]);
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const [fornecedoresResult, aplicativosResponse] = await Promise.all([
+        supabase
+          .from("fornecedores")
+          .select("id, aplicativo_pai_id, nome, endereco, created_at")
+          .eq("aplicativo_id", usuario.aplicativo_id)
+          .order("nome", { ascending: true }),
+        fetch("/api/fornecedores/aplicativos-pai", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+      ]);
+      const aplicativosJson = await aplicativosResponse.json() as {
+        aplicativosPai?: AplicativoPaiOption[];
+        error?: string;
+      };
+      if (fornecedoresResult.error || !aplicativosResponse.ok) {
+        throw new Error(fornecedoresResult.error?.message ?? aplicativosJson.error ?? "Não foi possível carregar os fornecedores.");
+      }
+      setFornecedores((fornecedoresResult.data as Fornecedor[]) ?? []);
+      setAplicativosPai(aplicativosJson.aplicativosPai ?? []);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Não foi possível carregar os fornecedores.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session?.access_token, usuario?.aplicativo_id]);
 
   useEffect(() => {
     carregarDados();
@@ -136,11 +91,6 @@ export default function FornecedoresPage() {
     setFormOpen(true);
     setFormData({
       aplicativo_pai_id: fornecedor.aplicativo_pai_id,
-      vendedor_olist_id: fornecedor.vendedor_olist_id ?? "",
-      meu_cliente_olist_id: fornecedor.meu_cliente_olist_id?.toString() ?? "",
-      meu_forma_pagamento_olist_id: fornecedor.meu_forma_pagamento_olist_id?.toString() ?? "",
-      meu_tipo_venda_enum: fornecedor.meu_tipo_venda_enum ?? "",
-      meu_plano_pagamento_id: fornecedor.meu_plano_pagamento_id ?? "",
       nome: fornecedor.nome,
       endereco: fornecedor.endereco ?? "",
     });
@@ -157,15 +107,6 @@ export default function FornecedoresPage() {
 
     const payload = {
       aplicativo_pai_id: formData.aplicativo_pai_id,
-      vendedor_olist_id: formData.vendedor_olist_id || null,
-      meu_cliente_olist_id: formData.meu_cliente_olist_id.trim()
-        ? Number(formData.meu_cliente_olist_id)
-        : null,
-      meu_forma_pagamento_olist_id: formData.meu_forma_pagamento_olist_id.trim()
-        ? Number(formData.meu_forma_pagamento_olist_id)
-        : null,
-      meu_tipo_venda_enum: formData.meu_tipo_venda_enum || null,
-      meu_plano_pagamento_id: formData.meu_plano_pagamento_id || null,
       nome: formData.nome.trim(),
       endereco: formData.endereco.trim() || null,
     };
@@ -178,20 +119,6 @@ export default function FornecedoresPage() {
 
     if (!payload.nome) {
       setErrorMessage("Nome do fornecedor é obrigatório.");
-      setIsSaving(false);
-      return;
-    }
-
-    if (payload.meu_cliente_olist_id !== null &&
-        (!Number.isInteger(payload.meu_cliente_olist_id) || payload.meu_cliente_olist_id <= 0)) {
-      setErrorMessage("Informe um ID de cliente válido.");
-      setIsSaving(false);
-      return;
-    }
-
-    if (payload.meu_forma_pagamento_olist_id !== null &&
-        (!Number.isInteger(payload.meu_forma_pagamento_olist_id) || payload.meu_forma_pagamento_olist_id <= 0)) {
-      setErrorMessage("Informe um ID de forma de pagamento válido.");
       setIsSaving(false);
       return;
     }
@@ -232,7 +159,8 @@ export default function FornecedoresPage() {
     const { error } = await supabase
       .from("fornecedores")
       .delete()
-      .eq("id", fornecedor.id);
+      .eq("id", fornecedor.id)
+      .eq("aplicativo_id", usuario?.aplicativo_id ?? "");
 
     if (error) {
       setErrorMessage(`Erro ao excluir fornecedor: ${error.message}`);
@@ -258,7 +186,7 @@ export default function FornecedoresPage() {
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <h3 className="text-lg font-semibold text-slate-900">
             {isEditing ? "Editar fornecedor" : "Cadastrar fornecedor"}
           </h3>
@@ -272,7 +200,7 @@ export default function FornecedoresPage() {
 
               setFormOpen(true);
             }}
-            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm min-h-11 font-medium text-slate-700 hover:bg-slate-50"
             aria-expanded={formOpen}
           >
             {formOpen ? "Fechar" : "Abrir"}
@@ -289,7 +217,7 @@ export default function FornecedoresPage() {
               onChange={(event) =>
                 setFormData((prev) => ({ ...prev, nome: event.target.value }))
               }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className="input mt-1 min-h-11 w-full"
               placeholder="Nome do fornecedor"
             />
           </label>
@@ -311,89 +239,6 @@ export default function FornecedoresPage() {
             <span className="mt-1 block text-xs text-slate-500">Aplicativo que receberá os novos pedidos na fila para direcionamento às filiais.</span>
           </label>
 
-          <label className="text-sm text-slate-700">
-            Usuário vendedor
-            <select
-              value={formData.vendedor_olist_id}
-              onChange={(event) =>
-                setFormData((prev) => ({ ...prev, vendedor_olist_id: event.target.value }))
-              }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            >
-              <option value="">Nenhum vendedor</option>
-              {usuariosVendedores.map((usuario) => (
-                <option key={usuario.id} value={usuario.id}>
-                  {usuario.nome} — {usuario.email}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block text-xs text-slate-500">
-              Usuários de todos os aplicativos são exibidos.
-            </span>
-          </label>
-
-          <label className="text-sm text-slate-700">
-            Meu ID de cliente
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={formData.meu_cliente_olist_id}
-              onChange={(event) =>
-                setFormData((prev) => ({ ...prev, meu_cliente_olist_id: event.target.value }))
-              }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              placeholder="ID do contato na Olist do fornecedor"
-            />
-          </label>
-
-          <label className="text-sm text-slate-700">
-            Meu ID de forma de pagamento Olist
-            <select
-              value={formData.meu_forma_pagamento_olist_id}
-              onChange={(event) => setFormData((prev) => ({
-                ...prev,
-                meu_forma_pagamento_olist_id: event.target.value,
-                meu_plano_pagamento_id: "",
-              }))}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-            >
-              <option value="">Nenhuma</option>
-              {formasPagamento.map((forma) => (
-                <option key={forma.forma_olist_id} value={forma.forma_olist_id}>
-                  {forma.forma_olist_id}{forma.forma_olist_nome ? ` — ${forma.forma_olist_nome}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm text-slate-700">
-            Meu tipo de venda
-            <select
-              value={formData.meu_tipo_venda_enum}
-              onChange={(event) => setFormData((prev) => ({ ...prev, meu_tipo_venda_enum: event.target.value }))}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-            >
-              <option value="">Nenhum</option>
-              <option value="venda">Venda</option>
-              <option value="venda g">Venda G</option>
-              <option value="venda pc">Venda PC</option>
-            </select>
-          </label>
-
-          <label className="text-sm text-slate-700">
-            Meu plano de pagamento
-            <select
-              value={formData.meu_plano_pagamento_id}
-              onChange={(event) => setFormData((prev) => ({ ...prev, meu_plano_pagamento_id: event.target.value }))}
-              disabled={!formData.meu_forma_pagamento_olist_id}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
-            >
-              <option value="">Nenhum</option>
-              {planosDaFormaSelecionada.map((plano) => <option key={plano.id} value={plano.id}>{plano.nome}</option>)}
-            </select>
-          </label>
-
           <label className="text-sm text-slate-700 md:col-span-2">
             Endereco
             <textarea
@@ -413,7 +258,7 @@ export default function FornecedoresPage() {
             <button
               type="submit"
               disabled={isSaving}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {isSaving
                 ? "Salvando..."
@@ -425,7 +270,7 @@ export default function FornecedoresPage() {
               <button
                 type="button"
                 onClick={resetForm}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Cancelar edicao
               </button>
@@ -435,10 +280,10 @@ export default function FornecedoresPage() {
         )}
 
         {errorMessage && (
-          <p className="mt-4 text-sm text-red-600">{errorMessage}</p>
+          <p role="alert" className="mt-4 text-sm text-red-600">{errorMessage}</p>
         )}
         {successMessage && (
-          <p className="mt-4 text-sm text-emerald-700">{successMessage}</p>
+          <p role="status" className="mt-4 text-sm text-emerald-700">{successMessage}</p>
         )}
       </section>
 
@@ -460,11 +305,6 @@ export default function FornecedoresPage() {
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="p-3">Nome</th>
                   <th className="p-3">Aplicativo pai</th>
-                  <th className="p-3">Usuário vendedor</th>
-                  <th className="p-3">Meu ID de cliente</th>
-                  <th className="p-3">Minha forma de pagamento Olist</th>
-                  <th className="p-3">Meu tipo de venda</th>
-                  <th className="p-3">Meu plano de pagamento</th>
                   <th className="p-3">Endereco</th>
                   <th className="p-3">Cadastro</th>
                   <th className="p-3 text-right">Acoes</th>
@@ -473,22 +313,13 @@ export default function FornecedoresPage() {
               <tbody>
                 {fornecedores.map((fornecedor) => (
                   <tr key={fornecedor.id} className="border-b border-slate-100">
-                    <td className="p-3 font-medium text-slate-700">
+                    <td className="max-w-sm break-words p-3 font-medium text-slate-700">
                       {fornecedor.nome}
                     </td>
                     <td className="p-3 text-slate-700">
                       {aplicativosPai.find((aplicativo) => aplicativo.id === fornecedor.aplicativo_pai_id)?.nome ?? fornecedor.aplicativo_pai_id}
                     </td>
-                    <td className="p-3 text-slate-700">
-                      {usuariosVendedores.find((usuario) => usuario.id === fornecedor.vendedor_olist_id)?.nome
-                        ?? fornecedor.vendedor_olist_id
-                        ?? "-"}
-                    </td>
-                    <td className="p-3 text-slate-700">{fornecedor.meu_cliente_olist_id ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{fornecedor.meu_forma_pagamento_olist_id ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{fornecedor.meu_tipo_venda_enum ?? "-"}</td>
-                    <td className="p-3 text-slate-700">{planosPagamento.find((plano) => plano.id === fornecedor.meu_plano_pagamento_id)?.nome ?? "-"}</td>
-                    <td className="max-w-md p-3 text-slate-700">
+                    <td className="max-w-md break-words p-3 text-slate-700">
                       {fornecedor.endereco || "-"}
                     </td>
                     <td className="p-3 text-slate-700">
@@ -499,7 +330,7 @@ export default function FornecedoresPage() {
                         <button
                           type="button"
                           onClick={() => handleEdit(fornecedor)}
-                          className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                          className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
                         >
                           Editar
                         </button>
@@ -507,7 +338,7 @@ export default function FornecedoresPage() {
                           type="button"
                           onClick={() => handleDelete(fornecedor)}
                           disabled={deletingId === fornecedor.id}
-                          className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          className="min-h-11 rounded-md border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
                           {deletingId === fornecedor.id ? "Excluindo..." : "Excluir"}
                         </button>

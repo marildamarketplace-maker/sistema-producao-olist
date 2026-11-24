@@ -8,14 +8,7 @@ const entrada = z.object({
   aplicativo_pai_id: z.guid(),
   nome: z.string().trim().min(1).max(200),
   endereco: z.string().trim().max(2000).nullable(),
-  vendedor_olist_id: z.guid().nullable(),
-  meu_cliente_olist_id: z.number().int().positive().max(2147483647).nullable(),
-  meu_forma_pagamento_olist_id: z.number().int().positive().max(2147483647).nullable(),
-  meu_plano_pagamento_id: z.guid().nullable(),
-  meu_tipo_venda_enum: z.enum(["venda", "venda g", "venda pc"]).nullable(),
 }).strict();
-
-const tiposVenda = { venda: "VENDA", "venda g": "VENDA_G", "venda pc": "VENDA_PC" } as const;
 
 export async function POST(request: Request) {
   try {
@@ -30,9 +23,7 @@ export async function POST(request: Request) {
     if (!pai) return NextResponse.json({ error: "Selecione um aplicativo pai, não uma filial." }, { status: 400 });
     const data = {
       aplicativoPaiId: body.aplicativo_pai_id, nome: body.nome, endereco: body.endereco,
-      vendedorOlistId: body.vendedor_olist_id, meuClienteOlistId: body.meu_cliente_olist_id,
-      meuFormaPagamentoOlistId: body.meu_forma_pagamento_olist_id, meuPlanoPagamentoId: body.meu_plano_pagamento_id,
-      meuTipoVenda: body.meu_tipo_venda_enum ? tiposVenda[body.meu_tipo_venda_enum] : null, updatedAt: new Date(),
+      updatedAt: new Date(),
     };
     if (body.id) {
       const resultado = await prisma.fornecedor.updateMany({ where: { id: body.id, aplicativoId: usuario.aplicativoId }, data });

@@ -26,6 +26,7 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
   let consultas = 0;
   let gravacoes = 0;
   let filialBanco: string | null = null;
+  let semFilhos = false;
   const filtros: unknown[] = [];
   const tx = {
     envioFornecedor: { findUnique: async () => null },
@@ -65,15 +66,16 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
       },
     },
     aplicativo: { findMany: async ({ where, select }: { where: unknown; select: unknown }) => {
-      assert.deepEqual(where, { aplicativoPaiId: matriz });
+      assert.deepEqual(where, { OR: [{ id: matriz }, { aplicativoPaiId: matriz }] });
       assert.deepEqual(select, { id: true, nome: true });
-      return [{ id: filialA, nome: "Filial A" }, { id: filialB, nome: "Filial B" }];
+      return [{ id: matriz, nome: "Conta própria" }, ...(semFilhos ? [] : [{ id: filialA, nome: "Filial A" }, { id: filialB, nome: "Filial B" }])];
     } },
-    $queryRaw: async (sql: TemplateStringsArray, filial: string, app: string) => {
+    $queryRaw: async (sql: TemplateStringsArray, filial: string, ...apps: string[]) => {
       if (sql.join("?").includes("FOR UPDATE")) return [{ id: solicitacaoId }];
       assert.match(sql.join("?"), /FOR SHARE/);
-      assert.equal(app, matriz);
-      return [filialA, filialB].includes(filial) ? [{ id: filial }] : [];
+      assert.deepEqual(apps, [matriz, matriz]);
+      assert.match(sql.join("?"), /\bid\s*=[\s\S]*OR\s+aplicativo_pai_id/);
+      return [matriz, filialA, filialB].includes(filial) ? [{ id: filial }] : [];
     },
   };
   Object.assign(globalThis, { prisma: {
@@ -112,7 +114,8 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     ]);
     assert.equal(json.pedidos[0].origem, "Meury Shop");
     assert.deepEqual(json.pedidos[0].dadosPedido, dadosPedido);
-    assert.equal(json.filiais.length, 2);
+    assert.equal(json.filiais.length, 3);
+    assert.equal(json.filiais[0].id, matriz);
     assert.equal(json.pedidos[0].aplicativoSolicitante, undefined);
   });
   await t.test("filtra direcionados e todos sem aceitar aplicativo de outro tenant", async () => {
@@ -140,11 +143,24 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     }
     assert.equal(consultas, antes);
   });
-  await t.test("não direciona pedido de outra matriz ou para filial de outro grupo, nem à própria matriz", async () => {
+  await t.test("não direciona pedido de outra matriz, para outro grupo ou neto", async () => {
     existente = false; assert.equal((await patch()).status, 404); existente = true;
     assert.equal((await patch({ pedidoId, filialId: externa, versao: 0 })).status, 400);
-    assert.equal((await patch({ pedidoId, filialId: matriz, versao: 0 })).status, 400);
+    assert.equal((await patch({ pedidoId, filialId: "00000000-0000-0000-0000-000000000098", versao: 0 })).status, 400);
     assert.equal(gravacoes, 0);
+  });
+  await t.test("fornecedor sem filhos lista e direciona à própria conta sem enviar à Olist", async () => {
+    semFilhos = true;
+    const json = await (await get()).json();
+    assert.deepEqual(json.filiais, [{ id: matriz, nome: "Conta própria" }]);
+    const original = JSON.stringify(dadosPedido);
+    const response = await patch({ pedidoId, filialId: matriz, versao: versaoBanco });
+    assert.equal(response.status, 200);
+    assert.equal(filialBanco, matriz);
+    assert.equal(statusBanco, "PENDENTE");
+    assert.equal(JSON.stringify(dadosPedido), original);
+    assert.equal((await response.json()).filialId, matriz);
+    semFilhos = false; filialBanco = null; versaoBanco = 0; gravacoes = 0;
   });
   await t.test("direciona à filial A e permite trocar para B preservando o snapshot", async () => {
     const original = JSON.stringify(dadosPedido);

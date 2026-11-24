@@ -21,6 +21,10 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
   const erroRef = useRef<HTMLParagraphElement>(null);
   const sucessoRef = useRef<HTMLParagraphElement>(null);
   const enviandoRef = useRef(false);
+  const vendedorPadrao = useRef<number | null>(null);
+  const tokenAtual = useRef(token);
+  useEffect(() => { tokenAtual.current = token; }, [token]);
+  const [padraoCarregando, setPadraoCarregando] = useState(false);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [fornecedorId, setFornecedorId] = useState("");
   const [filialId, setFilialId] = useState("");
@@ -69,6 +73,30 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
     return () => controller.abort();
   }, [token]);
 
+  // Uma troca de conta invalida todas as seleções comerciais; alterações do rascunho
+  // não são dependências deste efeito e nunca reaplicam o vendedor padrão.
+  useEffect(() => {
+    vendedorPadrao.current = null;
+    setComerciais((atual) => criarRascunhoFilaOlist(atual.tecidos.map((item) => item.tecidoId)));
+    if (!fornecedorId || !filialSelecionadaId) { setPadraoCarregando(false); return; }
+    const controller = new AbortController();
+    setPadraoCarregando(true);
+    const params = new URLSearchParams({ fornecedorId, filialId: filialSelecionadaId, solicitacaoId, recurso: "inicial" });
+    fetch(`/api/fornecedores/fila/olist?${params}`, {
+      headers: { Authorization: `Bearer ${tokenAtual.current}` }, signal: controller.signal, cache: "no-store",
+    }).then(async (response) => {
+      const dados = await response.json() as { vendedorOlistPadraoId?: number | null; error?: string };
+      if (!response.ok) throw new Error(dados.error || "Não foi possível consultar o vendedor padrão.");
+      if (!controller.signal.aborted) {
+        vendedorPadrao.current = dados.vendedorOlistPadraoId ?? null;
+        setComerciais((atual) => ({ ...atual, vendedorId: vendedorPadrao.current ?? 0 }));
+      }
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setErro(error instanceof Error ? error.message : "Falha ao consultar o vendedor padrão. Selecione-o manualmente.");
+    }).finally(() => { if (!controller.signal.aborted) setPadraoCarregando(false); });
+    return () => controller.abort();
+  }, [fornecedorId, filialSelecionadaId, solicitacaoId]);
+
   async function carregarRevisao() {
     if (!fornecedorId || enviandoRef.current) return;
     enviandoRef.current = true;
@@ -81,7 +109,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
       });
       const json = await response.json() as { dadosPedido: DadosPedidoFila; tecidos: TecidoFilaOpcao[]; revisao: string; error?: string };
       if (!response.ok) throw new Error(json.error || "Erro ao preparar revisão.");
-      setComerciais(criarRascunhoFilaOlist(json.dadosPedido.itens.map((i) => i.tecido.id)));
+      setComerciais(criarRascunhoFilaOlist(json.dadosPedido.itens.map((i) => i.tecido.id), undefined, vendedorPadrao.current));
       setDadosOriginais(json.dadosPedido);
       setEdicao(montarEdicaoPedidoFila(json.dadosPedido));
       setTecidos(json.tecidos);
@@ -93,7 +121,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
 
   async function enviar(event: React.FormEvent) {
     event.preventDefault();
-    if (!fornecedorId || enviandoRef.current || sucesso) return;
+    if (!fornecedorId || enviandoRef.current || sucesso || padraoCarregando) return;
     if (etapa === 1) {
       if (edicao) { setErro(""); setEtapa(2); }
       else await carregarRevisao();
@@ -142,6 +170,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
           {!sucesso && <p className="mt-1 text-sm text-slate-600">Etapa {etapa} de 2 · {etapa === 1 ? "Selecionar fornecedor" : "Revisar e editar pedido"}</p>}
         </header>
         <div className="min-h-0 space-y-4 overflow-y-auto p-5 sm:p-6">
+          {padraoCarregando && <p role="status" className="text-sm text-slate-600">Consultando vendedor padrão da conta selecionada...</p>}
           {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="break-words text-sm text-red-700">{erro}</p>}
           {sucesso ? <p ref={sucessoRef} tabIndex={-1} role="status" className="text-sm text-emerald-700">Solicitação registrada na fila do fornecedor com status PENDENTE.</p> : etapa === 1 ? (
             <>
@@ -150,9 +179,9 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                 <option value="">{carregando ? "Carregando..." : "Selecione"}</option>
                 {fornecedores.map((fornecedor) => <option key={fornecedor.id} value={fornecedor.id}>{fornecedor.nome}</option>)}
               </select>
-              {fornecedorSelecionado && !podeSelecionarFilial && <p className="text-sm text-slate-600">Você não tem permissão para selecionar uma filial. O pedido será enviado como PENDENTE.</p>}
+              {fornecedorSelecionado && !podeSelecionarFilial && <p className="text-sm text-slate-600">Você não tem permissão para selecionar o aplicativo destinatário. O pedido será enviado como PENDENTE.</p>}
               {fornecedorSelecionado && <fieldset disabled={enviando || !podeSelecionarFilial} aria-labelledby="fila-fornecedor-filiais" className="min-w-0 space-y-3 rounded-lg border border-slate-200 p-4">
-                <legend id="fila-fornecedor-filiais" className="px-1 text-sm font-semibold">Filial de {fornecedorSelecionado.nome}</legend>
+                <legend id="fila-fornecedor-filiais" className="px-1 text-sm font-semibold">Aplicativo destinatário de {fornecedorSelecionado.nome}</legend>
                 <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 p-3 text-sm">
                   <input type="radio" name="fila-filial" value="" checked={!filialSelecionadaId} onChange={() => { setFilialId(""); setComerciais(criarRascunhoFilaOlist(edicao?.itens.map((i) => i.tecidoId) ?? [])); }} className="h-5 w-5 shrink-0" />
                   Não selecionar — manter PENDENTE
@@ -165,8 +194,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                         <span className="mt-1 block whitespace-pre-wrap break-words text-sm text-slate-600">{filial.descricao || "Sem descrição cadastrada."}</span></span>
                     </label>
                   </li>)}
-                </ul> : <p role="status" className="text-sm text-slate-600">Este fornecedor não possui filiais vinculadas.</p>}
-                <p className="text-sm text-slate-600">{filialSelecionadaId ? "A filial será salva; o pedido continuará PENDENTE até a confirmação de criação na Olist." : "Sem filial selecionada, o pedido permanecerá PENDENTE."}</p>
+                </ul> : <p role="status" className="text-sm text-slate-600">Nenhum aplicativo destinatário disponível para este fornecedor.</p>}
+                <p className="text-sm text-slate-600">{filialSelecionadaId ? "O aplicativo destinatário será salvo; o pedido continuará PENDENTE até a confirmação de criação na Olist." : "Sem aplicativo destinatário selecionado, o pedido permanecerá PENDENTE."}</p>
               </fieldset>}
               {!carregando && !fornecedores.length && <p role="status" className="text-sm text-slate-600">Nenhum fornecedor com aplicativo pai vinculado disponível.</p>}
             </>
@@ -174,7 +203,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
             <>
               <h3 ref={tituloEtapa} tabIndex={-1} className="break-words font-semibold">Revisar pedido para {fornecedores.find((fornecedor) => fornecedor.id === fornecedorId)?.nome}</h3>
               <p className="text-sm text-slate-600">Confira os dados que serão enviados. As alterações valem apenas para este pedido da fila; a solicitação original será preservada. Quantidade de peças e consumo em metros podem ser ajustados separadamente.</p>
-              <p className="break-words rounded-md border border-slate-200 p-3 text-sm">Filial: <strong>{fornecedorSelecionado?.filiais.find((filial) => filial.id === filialSelecionadaId)?.nome ?? "Não selecionar"}</strong> · Status ao enviar: <strong>PENDENTE</strong></p>
+              <p className="break-words rounded-md border border-slate-200 p-3 text-sm">Aplicativo destinatário: <strong>{fornecedorSelecionado?.filiais.find((filial) => filial.id === filialSelecionadaId)?.nome ?? "Não selecionar"}</strong> · Status ao enviar: <strong>PENDENTE</strong></p>
               {edicao.itens.map((item, index) => (
                 <fieldset key={`${item.produtoId}-${index}`} disabled={enviando} className="min-w-0 space-y-3 rounded-lg border border-slate-200 p-4">
                   <legend className="px-1 text-sm font-semibold">Item {index + 1}</legend>
@@ -210,7 +239,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                   api={`/api/fornecedores/fila/olist?${new URLSearchParams({ fornecedorId, filialId: filialSelecionadaId, solicitacaoId })}`}
                   itens={edicao.itens.map((item) => ({ tecidoId: item.tecidoId, nome: item.tecidoNome || tecidos.find((t) => t.id === item.tecidoId)?.nome || "Tecido", corteLaser: item.corteLaser }))}
                   selecoes={comerciais} aoAlterar={setComerciais}
-                /> : <p className="text-sm text-slate-600">Selecione uma filial na etapa anterior para consultar os cadastros da conta Olist correspondente. Você pode enviar sem preencher esses dados.</p>}
+                /> : <p className="text-sm text-slate-600">Selecione o aplicativo destinatário na etapa anterior para consultar os cadastros da conta Olist correspondente. Você pode enviar sem preencher esses dados.</p>}
               </section>
               <button type="button" disabled={enviando} onClick={() => void carregarRevisao()} className={botao}>Descartar edições e recarregar dados</button>
             </>
@@ -219,7 +248,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
         <footer className="flex shrink-0 flex-wrap justify-end gap-3 border-t border-slate-200 p-4">
           <button type="button" onClick={onClose} disabled={enviando} className={botao}>{sucesso ? "Fechar" : "Cancelar"}</button>
           {!sucesso && etapa === 2 && <button type="button" onClick={() => { setEtapa(1); setErro(""); }} disabled={enviando} className={botao}>Voltar</button>}
-          {!sucesso && <button type="submit" disabled={!fornecedorId || carregando || enviando || (etapa === 2 && !edicao)} className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 disabled:opacity-50">{enviando ? etapa === 1 ? "Preparando..." : "Enviando..." : etapa === 1 ? "Revisar pedido" : "Confirmar e enviar para fila"}</button>}
+          {!sucesso && <button type="submit" disabled={!fornecedorId || carregando || enviando || padraoCarregando || (etapa === 2 && !edicao)} className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 disabled:opacity-50">{enviando ? etapa === 1 ? "Preparando..." : "Enviando..." : etapa === 1 ? "Revisar pedido" : "Confirmar e enviar para fila"}</button>}
         </footer>
       </form>
     </dialog>

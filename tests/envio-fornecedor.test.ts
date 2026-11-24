@@ -10,7 +10,12 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   let resposta: unknown = { id: 123 };
   let http = 200, timeout = false;
   const tx: any = {
-    $queryRaw: async (sql: TemplateStringsArray) => sql.join("").includes("FROM aplicativo") ? filialValida ? [{ id: "filial" }] : [] : [{ id: "solicitacao" }],
+    $queryRaw: async (sql: TemplateStringsArray, ...valores: string[]) => {
+      if (!sql.join("").includes("FROM aplicativo")) return [{ id: "solicitacao" }];
+      assert.deepEqual(valores.slice(1), ["matriz", "matriz"]);
+      assert.match(sql.join("?"), /\bid\s*=[\s\S]*OR\s+aplicativo_pai_id/);
+      return filialValida && ["matriz", "filial"].includes(valores[0]) ? [{ id: valores[0] }] : [];
+    },
     pedidoFornecedorSolicitacao: {
       findFirst: async () => registros[0] ?? null,
       create: async ({ data }: any) => { if (persistenciaFalha) throw new Error("banco indisponível segredo"); const r = { ...data, id: "registro" }; registros.push(r); return r; },
@@ -32,7 +37,7 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   };
   let fila = Promise.resolve();
   const banco = { ...tx,
-    aplicativo: { findUnique: async () => ({ id: "filial", nome: "Filial", olistClientId: "fake", olistClientSecret: "fake" }) },
+    aplicativo: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, nome: "Conta destinatária", olistClientId: "fake", olistClientSecret: "fake" }) },
     integracaoOlistToken: { findUnique: async () => ({ accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }) },
     $transaction: async (fn: (tx: any) => unknown) => {
       const anterior = fila; let liberar!: () => void; fila = new Promise((r) => { liberar = r; }); await anterior;
@@ -53,6 +58,21 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     assert.equal(registros[0].aplicativoDestinatarioId, "filial"); assert.equal(registros[0].pedidoOlistId, "123");
     assert.match(String(estado?.payload.observacoesInternas), /Solicitacao fornecedor: solicitacao/);
     await assert.rejects(enviar()); assert.equal(posts, 1);
+  });
+  await t.test("fila envia à conta própria e protege repetição e destinos fora do grupo", async () => {
+    reset();
+    const proprio = () => enviarFornecedor({ ...base, aplicativoId: "matriz", fila: { id: "fila", versao, matrizId: "matriz" } });
+    const resultados = await Promise.allSettled([proprio(), proprio()]);
+    assert.equal(resultados.filter((resultado) => resultado.status === "fulfilled").length, 1);
+    assert.equal(posts, 1); assert.equal(estado?.aplicativoId, "matriz");
+    assert.equal(registros[0].aplicativoDestinatarioId, "matriz");
+    assert.equal(status, "CONCLUIDO");
+    await assert.rejects(proprio()); assert.equal(posts, 1);
+    for (const destino of ["externa", "neto"]) {
+      reset();
+      await assert.rejects(enviarFornecedor({ ...base, aplicativoId: destino, fila: { id: "fila", versao, matrizId: "matriz" } }));
+      assert.equal(posts, 0); assert.equal(estado, null); assert.equal(registros.length, 0);
+    }
   });
   await t.test("filial inválida e versão concorrente não fazem chamada externa", async () => {
     reset(); filialValida = false; await assert.rejects(enviar()); assert.equal(posts, 0); assert.equal(estado, null);

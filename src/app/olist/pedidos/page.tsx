@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
+import { FormEvent, Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { PageHeader } from "@/components/page-header";
+import { OlistPageHeader as PageHeader, OlistEmpresa, useEmpresaOlist } from "@/components/olist-empresa";
 import { AccessGuard } from "@/components/access-guard";
 
 type Pedido = Record<string, unknown>;
@@ -105,6 +105,7 @@ function PedidoMobileCard({ pedido, selecionado, aberto, carregando, detalhe, ex
 }
 
 function PedidosOlistPage() {
+  const aplicativoId = useEmpresaOlist();
   const { session } = useAuth();
   const iniciais = { numero: "", nomeCliente: "", cpfCnpj: "", numeroPedidoEcommerce: "", dataInicial: "", dataFinal: "", dataAtualizacao: "", situacao: "", origemPedido: "", orderBy: "desc" };
   const [filtros, setFiltros] = useState(iniciais);
@@ -115,6 +116,8 @@ function PedidosOlistPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [selecionados, setSelecionados] = useState<Record<string, Pedido>>({});
+  const exportacaoController = useRef<AbortController | null>(null);
+  useEffect(() => () => { exportacaoController.current?.abort(); }, []);
   const [exportando, setExportando] = useState(false);
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const [detalhesAbertos, setDetalhesAbertos] = useState<Record<string, boolean>>({});
@@ -124,7 +127,7 @@ function PedidosOlistPage() {
   const carregar = useCallback(async () => {
     if (!session?.access_token) return;
     setCarregando(true); setErro(null);
-    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset) });
+    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset), aplicativoId });
     Object.entries(consulta).forEach(([chave, valor]) => { if (valor) params.set(chave, valor); });
     try {
       const response = await fetch(`/api/olist/pedidos?${params}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
@@ -134,7 +137,7 @@ function PedidosOlistPage() {
     } catch (error) {
       setItens([]); setTotal(0); setErro(error instanceof Error ? error.message : "Erro inesperado.");
     } finally { setCarregando(false); }
-  }, [consulta, offset, session?.access_token]);
+  }, [consulta, offset, session?.access_token, aplicativoId]);
 
   useEffect(() => { void carregar(); }, [carregar]);
   function pesquisar(event: FormEvent) { event.preventDefault(); setOffset(0); setConsulta({ ...filtros }); }
@@ -168,7 +171,7 @@ function PedidosOlistPage() {
     if (!abrir || detalhesPedidos[id] || !session?.access_token) return;
     setDetalhesCarregando((atuais) => ({ ...atuais, [id]: true }));
     try {
-      const response = await fetch(`/api/olist/pedidos/${encodeURIComponent(id)}`, {
+      const response = await fetch(`/api/olist/pedidos/${encodeURIComponent(id)}?aplicativoId=${encodeURIComponent(aplicativoId)}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const pedido = await response.json() as Pedido & { error?: string };
@@ -184,13 +187,18 @@ function PedidosOlistPage() {
   async function exportarSelecionados(tipo: "pedidos" | "estampas") {
     const pedidosLista = Object.values(selecionados);
     if (pedidosLista.length === 0 || !session?.access_token) return;
+    if (exportacaoController.current) return;
+    const controller = new AbortController();
+    exportacaoController.current = controller;
     setExportando(true); setErro(null);
     try {
       const detalhes: Pedido[] = [];
       for (const pedidoLista of pedidosLista) {
+        controller.signal.throwIfAborted();
         const id = texto(pedidoLista, "id");
-        const response = await fetch(`/api/olist/pedidos/${encodeURIComponent(id)}`, {
+        const response = await fetch(`/api/olist/pedidos/${encodeURIComponent(id)}?aplicativoId=${encodeURIComponent(aplicativoId)}`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
+          signal: controller.signal,
         });
         const pedido = await response.json() as Pedido & { error?: string };
         if (!response.ok) throw new Error(pedido.error ?? `Não foi possível obter os itens do pedido ${id}.`);
@@ -229,14 +237,19 @@ function PedidosOlistPage() {
           return estampas.map((estampa) => [...dadosProduto, estampa.codigo, estampa.variante, estampa.quantidade]);
         });
       }
+      controller.signal.throwIfAborted();
       const csv = `\uFEFF${[cabecalho, ...registros].map((linha) => linha.map(campoCsv).join(";")).join("\r\n")}`;
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url; link.download = `${tipo}-selecionados-${new Date().toISOString().slice(0, 10)}.csv`; link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setErro(error instanceof Error ? error.message : "Erro inesperado ao exportar o pedido.");
-    } finally { setExportando(false); }
+    } finally {
+      if (exportacaoController.current === controller) exportacaoController.current = null;
+      if (!controller.signal.aborted) setExportando(false);
+    }
   }
   const pagina = Math.floor(offset / LIMITE) + 1;
   const paginas = Math.max(1, Math.ceil(total / LIMITE));
@@ -266,5 +279,5 @@ function PedidosOlistPage() {
 }
 
 export default function PedidosOlistAccessPage() {
-  return <AccessGuard permissions={["podeVisualizarOlistPedidos"]}><PedidosOlistPage /></AccessGuard>;
+  return <AccessGuard permissions={["podeVisualizarOlistPedidos"]}><OlistEmpresa><PedidosOlistPage /></OlistEmpresa></AccessGuard>;
 }

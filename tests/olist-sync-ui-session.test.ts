@@ -13,6 +13,7 @@ let configuracaoExiste = true;
 let usuarioAtivo = true;
 let chamadasGrupo = 0;
 Object.assign(globalThis, { prisma: {
+  usuarioVendedorOlist: { findFirst: async () => null },
   usuario: {
     findFirst: async ({ where }: { where: { id?: string } }) => usuarioAtivo && where.id === "usuario" ? { id: "usuario", aplicativoId } : null,
     findMany: async () => [],

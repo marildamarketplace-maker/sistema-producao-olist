@@ -1,3 +1,5 @@
+import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
+import { resolverEmpresaOlist } from "@/lib/olist-empresa";
 import { NextResponse } from "next/server";
 import { listarFormasRecebimentoOlistApi } from "@/lib/olist";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -15,10 +17,11 @@ export async function GET(request: Request) {
 
   try {
     const usuario = await getUsuarioAutenticado(request);
+    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
     if (!usuario.podeVisualizarOlistFormasRecebimento) {
       return NextResponse.json({ error: "Sem permissão para visualizar formas de recebimento." }, { status: 403 });
     }
-    const resultado = await listarFormasRecebimentoOlistApi(usuario.aplicativoId, {
+    const resultado = await listarFormasRecebimentoOlistApi(aplicativoId, {
       nome: params.get("nome")?.trim() || undefined,
       situacao,
       limit,
@@ -26,6 +29,7 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(resultado);
   } catch (error) {
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Erro ao listar formas de recebimento Olist:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro inesperado ao consultar a Olist." },

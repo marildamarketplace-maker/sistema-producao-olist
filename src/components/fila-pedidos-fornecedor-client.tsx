@@ -144,7 +144,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCance
         </div>
         <span className="rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">{rotulosStatusFila[pedido.status]}</span>
       </div>
-      {pedido.filial && <p className="break-words text-sm text-slate-600">Filial atual: <strong>{pedido.filial.nome}</strong>{pedido.direcionadoEm ? ` · ${dataHora(pedido.direcionadoEm)}` : ""}</p>}
+      {pedido.filial && <p className="break-words text-sm text-slate-600">Aplicativo destinatário atual: <strong>{pedido.filial.nome}</strong>{pedido.direcionadoEm ? ` · ${dataHora(pedido.direcionadoEm)}` : ""}</p>}
       {pedido.dadosPedido ? (
         <details className="rounded-md border border-slate-200">
           <summary className="min-h-11 cursor-pointer rounded-md px-3 py-3 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2">Consultar itens ({pedido.dadosPedido.itens.length})</summary>
@@ -168,16 +168,16 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCance
         </details>
       ) : <p role="alert" className="text-sm text-red-700">Os dados deste pedido estão em um formato não reconhecido.</p>}
       <form onSubmit={direcionar} className="space-y-3" aria-busy={salvando}>
-        <label htmlFor={`filial-${pedido.id}`} className="block text-sm font-medium text-slate-700">{pedido.filial ? "Trocar filial" : "Direcionar para filial"}</label>
+        <label htmlFor={`filial-${pedido.id}`} className="block text-sm font-medium text-slate-700">{pedido.filial ? "Trocar aplicativo destinatário" : "Direcionar para aplicativo"}</label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <select id={`filial-${pedido.id}`} required className="input min-h-11 min-w-0 flex-1 sm:w-auto" value={filialId} disabled={salvando || conflito || !podeAlterar || filiais.length === 0} onChange={(event) => setFilialId(event.target.value)}>
-            <option value="">Selecione a filial</option>
+            <option value="">Selecione o aplicativo destinatário</option>
             {!filialAtualDisponivel && pedido.filial && <option value={pedido.filial.id} disabled>{pedido.filial.nome} (sem vínculo atual)</option>}
             {filiais.map((filial) => <option key={filial.id} value={filial.id}>{filial.nome}</option>)}
           </select>
           <div className="flex flex-wrap items-start gap-2">
             <button type="submit" className={primario} disabled={salvando || conflito || !podeAlterar || !filialId || !filiais.some((filial) => filial.id === filialId)}>
-              {salvando ? "Salvando..." : "Salvar filial"}
+              {salvando ? "Salvando..." : "Salvar aplicativo"}
             </button>
             <MaisOpcoesFila
               consulta={pedido.status === "PROCESSAR" || pedido.status === "CONCLUIDO"}
@@ -191,7 +191,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCance
         {erro && !confirmando && <p role="alert" className="break-words text-sm text-red-700">{erro}</p>}
         {conflito && <button type="button" onClick={aoAtualizar} className={secundario}>Atualizar fila</button>}
       </form>
-      {filialId && filialId !== pedido.filial?.id && <p className="text-sm text-slate-600">Salve a filial antes de configurar o envio para a Olist.</p>}
+      {filialId && filialId !== pedido.filial?.id && <p className="text-sm text-slate-600">Salve o aplicativo destinatário antes de configurar o envio para a Olist.</p>}
       {pedido.status === "PROCESSAR" && <p className="text-sm text-slate-600">Envio reservado. Consulte o resultado em Mais opções antes de tentar novamente.</p>}
       {cancelando && <CancelarPedidoFila pedido={pedido} token={token} fechar={() => setCancelando(false)} concluir={() => { setCancelando(false); aoCancelar(); }} />}
       {confirmando && <EnviarPedidoFilaOlist pedido={pedido} token={token} aoFechar={() => setConfirmando(false)} aoConcluir={aoAtualizar} />}
@@ -255,7 +255,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
       {erro && <div role="alert" className="rounded-lg border border-red-200 bg-white p-5"><p className="mb-3 text-sm text-red-700">{erro}</p><button type="button" onClick={atualizar} className={secundario}>Tentar novamente</button></div>}
       {carregando ? <p role="status" className="text-sm text-slate-600">Carregando fila de pedidos...</p> : !erro && dados ? (
         <>
-          {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Seu aplicativo não possui filiais vinculadas. Vincule uma filial para direcionar os pedidos.</p>}
+          {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum aplicativo destinatário disponível. Atualize a fila para consultar as opções.</p>}
           <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) com o filtro selecionado.</p>
           {dados.pedidos.length === 0 ? <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum pedido encontrado nesta página.</p> : dados.pedidos.map((pedido) => (
             <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} aoCancelar={() => { focarAtualizacao.current = true; setMensagem("Pedido cancelado na fila. O envio está bloqueado."); atualizar(); }} />

@@ -93,7 +93,7 @@ export const permissionLabels: Record<PermissionKey, string> = {
   podeVisualizarConfiguracao: "Visualizar configurações",
   podeEditarConfiguracao: "Editar configurações",
   podeGerenciarFilaPedidos: "Gerenciar fila de pedidos",
-  podeSelecionarFilialFornecedor: "Selecionar filial ao enviar para fila",
+  podeSelecionarFilialFornecedor: "Selecionar aplicativo destinatário ao enviar para fila",
 };
 
 export function hasAnyPermission(

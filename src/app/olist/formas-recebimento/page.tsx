@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AccessGuard } from "@/components/access-guard";
-import { PageHeader } from "@/components/page-header";
+import { OlistPageHeader as PageHeader, OlistEmpresa, useEmpresaOlist } from "@/components/olist-empresa";
 import { useAuth } from "@/components/auth-provider";
 import { ModalAssociarPlanosPagamento } from "@/components/modal-associar-planos-pagamento";
 
@@ -15,6 +15,7 @@ type Resposta = {
 const LIMITE = 50;
 
 function FormasRecebimentoOlistPage() {
+  const aplicativoId = useEmpresaOlist();
   const { session } = useAuth();
   const [itens, setItens] = useState<FormaRecebimento[]>([]);
   const [total, setTotal] = useState(0);
@@ -29,7 +30,7 @@ function FormasRecebimentoOlistPage() {
     if (!session?.access_token) return;
     setCarregando(true);
     setErro(null);
-    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset) });
+    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset), aplicativoId });
     if (consulta.nome.trim()) params.set("nome", consulta.nome.trim());
     if (consulta.situacao) params.set("situacao", consulta.situacao);
     try {
@@ -47,7 +48,7 @@ function FormasRecebimentoOlistPage() {
     } finally {
       setCarregando(false);
     }
-  }, [consulta, offset, session?.access_token]);
+  }, [consulta, offset, session?.access_token, aplicativoId]);
 
   useEffect(() => { void carregar(); }, [carregar]);
   function pesquisar(event: FormEvent) {
@@ -72,11 +73,11 @@ function FormasRecebimentoOlistPage() {
         {carregando ? <p className="p-6 text-sm text-slate-600">Consultando a Olist...</p> : itens.length === 0 ? <p className="p-6 text-sm text-slate-600">Nenhuma forma de recebimento encontrada.</p> : <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">ID</th><th className="px-4 py-3">Nome</th><th className="px-4 py-3 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">{itens.map((item, indice) => <tr key={`${item.id ?? "forma"}-${indice}`}><td className="px-4 py-3 font-medium text-slate-700">{item.id ?? "—"}</td><td className="px-4 py-3 text-slate-900">{item.nome || "—"}</td><td className="px-4 py-3 text-right"><button type="button" disabled={item.id == null} onClick={() => setFormaSelecionada({ id: String(item.id), nome: item.nome || "Forma de recebimento" })} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Associar planos</button></td></tr>)}</tbody></table></div>}
         <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><span className="text-sm text-slate-500">Página {pagina} de {totalPaginas}</span><div className="flex gap-2"><button type="button" disabled={carregando || offset === 0} onClick={() => setOffset((valor) => Math.max(0, valor - LIMITE))} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Anterior</button><button type="button" disabled={carregando || offset + LIMITE >= total} onClick={() => setOffset((valor) => valor + LIMITE)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50">Próxima</button></div></div>
       </section>
-      {formaSelecionada && session?.access_token && <ModalAssociarPlanosPagamento accessToken={session.access_token} tipo="recebimento" forma={formaSelecionada} onClose={() => setFormaSelecionada(null)} />}
+      {formaSelecionada && session?.access_token && <ModalAssociarPlanosPagamento aplicativoId={aplicativoId} accessToken={session.access_token} tipo="recebimento" forma={formaSelecionada} onClose={() => setFormaSelecionada(null)} />}
     </div>
   );
 }
 
 export default function FormasRecebimentoOlistAccessPage() {
-  return <AccessGuard permissions={["podeVisualizarOlistFormasRecebimento"]}><FormasRecebimentoOlistPage /></AccessGuard>;
+  return <AccessGuard permissions={["podeVisualizarOlistFormasRecebimento"]}><OlistEmpresa><FormasRecebimentoOlistPage /></OlistEmpresa></AccessGuard>;
 }

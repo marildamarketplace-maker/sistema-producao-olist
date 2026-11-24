@@ -1,12 +1,15 @@
+import { resolverVendedorConsultaOlist } from "@/lib/olist-escopo-vendedor";
+import { resolverEmpresaOlist } from "@/lib/olist-empresa";
 import { NextResponse } from "next/server";
 import { listarContatosOlistApi } from "@/lib/olist";
-import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 
 const SITUACOES = new Set(["B", "A", "I", "E"]);
 
 function inteiroNaoNegativo(valor: string | null, padrao: number) {
+  if (valor === null || valor.trim() === "") return padrao;
   const numero = Number(valor);
-  return Number.isInteger(numero) && numero >= 0 ? numero : padrao;
+  return Number.isSafeInteger(numero) && numero >= 0 ? numero : padrao;
 }
 
 export async function GET(request: Request) {
@@ -17,23 +20,25 @@ export async function GET(request: Request) {
   const orderBy = params.get("orderBy") === "asc" ? "asc" : "desc";
 
   try {
-    const usuario = await getUsuarioAutenticado(request);
-    const resultado = await listarContatosOlistApi(usuario.aplicativoId, {
+    const usuario = await autorizarOlist(request, "podeVisualizarOlistContatos");
+    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
+    const vendedorId = await resolverVendedorConsultaOlist(usuario, aplicativoId);
+    const resultado = await listarContatosOlistApi(aplicativoId, {
       nome: params.get("nome")?.trim() || undefined,
       codigo: params.get("codigo")?.trim() || undefined,
       situacao: SITUACOES.has(situacaoParam) ? situacaoParam as "B" | "A" | "I" | "E" : undefined,
-      idVendedor: params.get("idVendedor")?.trim() || undefined,
+      idVendedor: vendedorId !== null ? String(vendedorId) : params.get("idVendedor")?.trim() || undefined,
       cpfCnpj: params.get("cpfCnpj")?.trim() || undefined,
       celular: params.get("celular")?.trim() || undefined,
       orderBy,
       limit,
       offset,
     });
-    return NextResponse.json(resultado);
+    return NextResponse.json(resultado, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    console.error("Erro ao listar contatos Olist:", error);
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro inesperado ao consultar a Olist." },
+      { error: "Não foi possível consultar os contatos na Olist." },
       { status: 500 },
     );
   }

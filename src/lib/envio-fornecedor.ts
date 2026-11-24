@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { criarPedidoOlistSeguro, ErroCriacaoOlist } from "@/lib/olist";
+import { bloquearDestinoFornecedor } from "@/lib/fila-fornecedor-destino";
 
 export class ErroEnvioFornecedor extends Error {}
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -23,8 +24,9 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
     const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: contexto.solicitacaoId } });
     if (existente || (envio && envioBloqueado(envio.estado))) throw new ErroEnvioFornecedor("Solicitação já enviada, em envio ou com resultado incerto. Confira o resultado antes de tentar novamente.");
     if (contexto.fila) {
-      const filiais = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM aplicativo WHERE id = ${contexto.aplicativoId}::uuid AND aplicativo_pai_id = ${contexto.fila.matrizId}::uuid FOR SHARE`;
-      if (!filiais.length) throw new ErroEnvioFornecedor("A filial não pertence mais à matriz.");
+      if (!await bloquearDestinoFornecedor(tx, contexto.fila.matrizId, contexto.aplicativoId)) {
+        throw new ErroEnvioFornecedor("O aplicativo destinatário não pertence mais ao fornecedor.");
+      }
       const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: contexto.fila.id,
         aplicativoFornecedorId: contexto.fila.matrizId, versao: contexto.fila.versao, aplicativoFilialId: contexto.aplicativoId,
         status: { in: ["PENDENTE", "FALHADO"] } }, data: { status: "PROCESSAR", versao: { increment: 1 } } });

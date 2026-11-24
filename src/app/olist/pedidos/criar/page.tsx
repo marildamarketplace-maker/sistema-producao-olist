@@ -39,7 +39,7 @@ type ItemPedido = {
   laser: boolean;
   divisoes: Divisao[];
 };
-type Dados = { vendedores: Vendedor[]; clientes: Cliente[]; produtos: Produto[]; estampas: Estampa[]; variantes: Variante[]; tiposProduto: TipoProdutoOpcao[]; tamanhos: TamanhoOpcao[]; vendedorOlistId?: number | null; error?: string };
+type Dados = { vendedores: Vendedor[]; clientes: Cliente[]; produtos: Produto[]; estampas: Estampa[]; variantes: Variante[]; tiposProduto: TipoProdutoOpcao[]; tamanhos: TamanhoOpcao[]; vendedorOlistId?: number | null; vendedoresPaginacao?: { total: number; limit: number; offset: number }; error?: string };
 type DivisaoPreview = { estampa: string; variante: string; quantidade: string; unidade: string; tamanho: string; tipo: string; laser: string };
 type PedidoPreview = {
   idContato: number;
@@ -129,6 +129,11 @@ function CriarPedidoOlistPage() {
   const [etapa, setEtapa] = useState(1);
   const [dados, setDados] = useState<Dados>({ vendedores: [], clientes: [], produtos: [], estampas: [], variantes: [], tiposProduto: [], tamanhos: [] });
   const [vendedorId, setVendedorId] = useState("");
+  const [vendedoresConsulta, setVendedoresConsulta] = useState("");
+  const [vendedoresBuscando, setVendedoresBuscando] = useState(false);
+  const vendedoresController = useRef<AbortController | null>(null);
+  const vendedorInicializado = useRef(false);
+  useEffect(() => () => vendedoresController.current?.abort(), []);
   const [clienteId, setClienteId] = useState("");
   const [formasPagamento, setFormasPagamento] = useState<FormaPagamento[]>([]);
   const [formaPagamentoId, setFormaPagamentoId] = useState("");
@@ -169,14 +174,41 @@ function CriarPedidoOlistPage() {
       if (!response.ok) throw new Error(json.error ?? "Não foi possível carregar os dados.");
       setDados((atuais) => ({ ...atuais, ...json }));
       const vendedorPadraoId = json.vendedorOlistId;
-      if (vendedorPadraoId) {
+      if (vendedorPadraoId && !vendedorInicializado.current) {
         setVendedorId(String(vendedorPadraoId));
         setEtapa(2);
       }
+      vendedorInicializado.current = true;
     } catch (error) { setErro(error instanceof Error ? error.message : "Erro inesperado."); }
     finally { setCarregando(false); }
   }, [session?.access_token]);
   useEffect(() => { void carregar(); }, [carregar]);
+
+  async function pesquisarVendedores(consulta: string, offset = 0) {
+    if (!session?.access_token) return;
+    vendedoresController.current?.abort();
+    const controller = new AbortController();
+    vendedoresController.current = controller;
+    setVendedoresBuscando(true); setErro(null);
+    const params = new URLSearchParams({ recurso: "vendedores", offset: String(offset) });
+    const digitos = consulta.replace(/\D/g, "");
+    if (consulta.trim()) {
+      if (digitos.length === 11 || digitos.length === 14) params.set("cpfCnpj", digitos);
+      else if (/^\d+$/.test(consulta.trim())) params.set("codigo", consulta.trim());
+      else params.set("nome", consulta.trim());
+    }
+    try {
+      const response = await fetch(`/api/olist/pedidos/criar?${params}`, { headers: { Authorization: `Bearer ${session.access_token}` }, signal: controller.signal });
+      const json = await response.json() as { itens?: Vendedor[]; paginacao?: Dados["vendedoresPaginacao"]; error?: string };
+      if (!response.ok) throw new Error(json.error ?? "Não foi possível pesquisar os vendedores.");
+      if (!controller.signal.aborted) {
+        setDados((atuais) => ({ ...atuais, vendedores: json.itens ?? [], vendedoresPaginacao: json.paginacao }));
+        setVendedoresConsulta(consulta);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setErro(error instanceof Error ? error.message : "Erro ao pesquisar vendedores.");
+    } finally { if (!controller.signal.aborted) setVendedoresBuscando(false); }
+  }
 
   useEffect(() => {
     if (etapa !== 2 || !vendedorId || !session?.access_token || clientesCarregados.current === vendedorId) return;
@@ -422,11 +454,7 @@ function CriarPedidoOlistPage() {
   const itensValidos = itens.length > 0 && validarItens() === null;
   const totalPedido = itens.reduce((total, item) => total + (numero(item.quantidade) || 0) * (numero(item.valorUnitario) || 0), 0);
   const totalPedidoFormatado = totalPedido.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const termoVendedor = buscas.vendedor.trim().toLocaleLowerCase("pt-BR");
-  const vendedoresFiltrados = termoVendedor ? dados.vendedores.filter((vendedor) =>
-    [vendedor.contato?.nome, vendedor.contato?.codigo, vendedor.contato?.cpfCnpj, vendedor.id]
-      .some((valor) => String(valor ?? "").toLocaleLowerCase("pt-BR").includes(termoVendedor))
-  ) : dados.vendedores;
+  const vendedoresFiltrados = dados.vendedores;
   const termoCliente = buscas.cliente.trim().toLocaleLowerCase("pt-BR");
   const clientesFiltrados = termoCliente ? dados.clientes.filter((cliente) =>
     [cliente.nome, cliente.fantasia, cliente.codigo, cliente.cpfCnpj]
@@ -457,7 +485,7 @@ function CriarPedidoOlistPage() {
     {erro && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{erro}</div>}
     {sucesso && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5 text-emerald-800"><p className="font-semibold">Pedido criado com sucesso.</p><p className="mt-1 text-sm">Pedido {sucesso.numeroPedido ?? sucesso.id ?? "criado"}.</p><Link href="/olist/pedidos" className="mt-3 inline-block text-sm font-medium underline">Voltar para pedidos</Link></div>}
 
-    {!sucesso && etapa === 1 && <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Selecione o vendedor</h3><input placeholder="Filtrar por nome, código, CPF/CNPJ ou ID" value={buscas.vendedor} onChange={(e) => setBuscas({ ...buscas, vendedor: e.target.value })} className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2" /><p className="mt-2 text-xs text-slate-500">{vendedoresFiltrados.length} de {dados.vendedores.length} vendedores ativos</p><div className="mt-4 overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="w-12 px-4 py-3">Sel.</th><th className="px-4 py-3">Vendedor</th><th className="px-4 py-3">Código</th><th className="px-4 py-3">ID</th></tr></thead><tbody className="divide-y divide-slate-100">{vendedorId && !dados.vendedores.some((vendedor) => String(vendedor.id) === vendedorId) && <tr className="bg-emerald-50"><td className="px-4 py-3"><input type="radio" checked readOnly /></td><td className="px-4 py-3 font-medium">Vendedor padrão</td><td className="px-4 py-3 text-slate-500">—</td><td className="px-4 py-3">{vendedorId}</td></tr>}{vendedoresFiltrados.map((vendedor) => { const id = String(vendedor.id ?? ""); const selecionado = vendedorId === id; return <tr key={id} onClick={() => setVendedorId(id)} className={`cursor-pointer ${selecionado ? "bg-emerald-50" : "hover:bg-slate-50"}`}><td className="px-4 py-3"><input type="radio" name="vendedor" checked={selecionado} onChange={() => setVendedorId(id)} /></td><td className="px-4 py-3 font-medium text-slate-900">{vendedor.contato?.nome ?? `Vendedor ${vendedor.id}`}</td><td className="px-4 py-3 text-slate-600">{vendedor.contato?.codigo ?? "—"}</td><td className="px-4 py-3 text-slate-600">{vendedor.id ?? "—"}</td></tr>; })}{vendedoresFiltrados.length === 0 && !vendedorId && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-500">Nenhum vendedor encontrado.</td></tr>}</tbody></table></div><div className="mt-6 flex justify-stretch sm:justify-end"><button disabled={!vendedorId} onClick={() => setEtapa(2)} className="w-full rounded-md bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">Continuar</button></div></section>}
+    {!sucesso && etapa === 1 && <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Selecione o vendedor</h3><div className="mt-4 flex flex-wrap gap-2"><input aria-label="Pesquisar vendedor" placeholder="Nome, código ou CPF/CNPJ" value={buscas.vendedor} onChange={(e) => setBuscas({ ...buscas, vendedor: e.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void pesquisarVendedores(buscas.vendedor); } }} className="input min-h-11 min-w-0 flex-1" /><button type="button" disabled={vendedoresBuscando} onClick={() => void pesquisarVendedores(buscas.vendedor)} className="min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">Buscar</button></div><p role="status" className="mt-2 text-xs text-slate-500">{vendedoresBuscando ? "Consultando vendedores..." : `${vendedoresFiltrados.length} vendedores ativos nesta página`}</p><div className="mt-4 overflow-x-auto rounded-md border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="w-12 px-4 py-3">Sel.</th><th className="px-4 py-3">Vendedor</th><th className="px-4 py-3">Código</th><th className="px-4 py-3">ID</th></tr></thead><tbody className="divide-y divide-slate-100">{vendedorId && !dados.vendedores.some((vendedor) => String(vendedor.id) === vendedorId) && <tr className="bg-emerald-50"><td className="px-4 py-3"><input type="radio" checked readOnly /></td><td className="px-4 py-3 font-medium">Vendedor selecionado</td><td className="px-4 py-3 text-slate-500">—</td><td className="px-4 py-3">{vendedorId}</td></tr>}{vendedoresFiltrados.map((vendedor) => { const id = String(vendedor.id ?? ""); const selecionado = vendedorId === id; return <tr key={id} onClick={() => setVendedorId(id)} className={`cursor-pointer ${selecionado ? "bg-emerald-50" : "hover:bg-slate-50"}`}><td className="px-4 py-3"><input type="radio" name="vendedor" checked={selecionado} onChange={() => setVendedorId(id)} /></td><td className="px-4 py-3 font-medium text-slate-900">{vendedor.contato?.nome ?? `Vendedor ${vendedor.id}`}</td><td className="px-4 py-3 text-slate-600">{vendedor.contato?.codigo ?? "—"}</td><td className="px-4 py-3 text-slate-600">{vendedor.id ?? "—"}</td></tr>; })}{vendedoresFiltrados.length === 0 && !vendedorId && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-500">Nenhum vendedor encontrado.</td></tr>}</tbody></table></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={vendedoresBuscando || !(dados.vendedoresPaginacao?.offset)} onClick={() => void pesquisarVendedores(vendedoresConsulta, Math.max(0, (dados.vendedoresPaginacao?.offset ?? 0) - 100))} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Anterior</button><button type="button" disabled={vendedoresBuscando || !dados.vendedoresPaginacao || dados.vendedoresPaginacao.offset + dados.vendedoresPaginacao.limit >= dados.vendedoresPaginacao.total} onClick={() => void pesquisarVendedores(vendedoresConsulta, (dados.vendedoresPaginacao?.offset ?? 0) + 100)} className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Próxima</button></div><div className="mt-6 flex justify-stretch sm:justify-end"><button disabled={!vendedorId} onClick={() => setEtapa(2)} className="w-full rounded-md bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">Continuar</button></div></section>}
 
     {!sucesso && etapa === 2 && <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h3 className="font-semibold text-slate-900">Selecione o cliente</h3><input placeholder="Filtrar por nome, código ou CPF/CNPJ" value={buscas.cliente} onChange={(e) => setBuscas({ ...buscas, cliente: e.target.value })} className="mt-4 w-full rounded-md border border-slate-300 px-3 py-2" /><p className="mt-2 text-xs text-slate-500">{buscando ? "Carregando todos os clientes do vendedor..." : `${clientesFiltrados.length} de ${dados.clientes.length} clientes`}</p><ListaClientes clientes={clientesFiltrados} clienteId={clienteId} carregando={buscando} onSelect={setClienteId} /><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"><button onClick={() => setEtapa(1)} className="w-full rounded-md border border-slate-300 px-5 py-2 text-sm sm:w-auto">Voltar</button><button disabled={!clienteId} onClick={() => setEtapa(3)} className="w-full rounded-md bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">Continuar</button></div></section>}
 

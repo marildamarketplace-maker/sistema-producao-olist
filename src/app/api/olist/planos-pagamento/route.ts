@@ -1,3 +1,5 @@
+import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
+import { resolverEmpresaOlist } from "@/lib/olist-empresa";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -20,6 +22,7 @@ function possuiPermissao(
 export async function GET(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
+    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
     const params = new URL(request.url).searchParams;
     const tipo = params.get("tipo");
     const formaOlistId = params.get("formaOlistId")?.trim();
@@ -39,11 +42,11 @@ export async function GET(request: Request) {
       }),
       tipo === "pagamento"
         ? prisma.formaPagamentoOlistPlano.findMany({
-            where: { aplicativoId: usuario.aplicativoId, formaOlistId },
+            where: { aplicativoId, formaOlistId },
             select: { planoPagamentoId: true },
           })
         : prisma.formaRecebimentoOlistPlano.findMany({
-            where: { aplicativoId: usuario.aplicativoId, formaOlistId },
+            where: { aplicativoId, formaOlistId },
             select: { planoPagamentoId: true },
           }),
     ]);
@@ -53,6 +56,7 @@ export async function GET(request: Request) {
       planoIdsAssociados: associacoes.map((item) => item.planoPagamentoId),
     });
   } catch (error) {
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Erro ao consultar planos de pagamento:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao consultar planos." },
@@ -64,6 +68,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
+    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
     const body = await request.json() as {
       tipo?: unknown;
       formaOlistId?: unknown;
@@ -95,12 +100,12 @@ export async function PUT(request: Request) {
     await prisma.$transaction(async (tx) => {
       if (tipo === "pagamento") {
         await tx.formaPagamentoOlistPlano.deleteMany({
-          where: { aplicativoId: usuario.aplicativoId, formaOlistId },
+          where: { aplicativoId, formaOlistId },
         });
         if (planoIds.length) {
           await tx.formaPagamentoOlistPlano.createMany({
             data: planoIds.map((planoPagamentoId) => ({
-              aplicativoId: usuario.aplicativoId,
+              aplicativoId,
               formaOlistId,
               formaOlistNome,
               planoPagamentoId,
@@ -109,12 +114,12 @@ export async function PUT(request: Request) {
         }
       } else {
         await tx.formaRecebimentoOlistPlano.deleteMany({
-          where: { aplicativoId: usuario.aplicativoId, formaOlistId },
+          where: { aplicativoId, formaOlistId },
         });
         if (planoIds.length) {
           await tx.formaRecebimentoOlistPlano.createMany({
             data: planoIds.map((planoPagamentoId) => ({
-              aplicativoId: usuario.aplicativoId,
+              aplicativoId,
               formaOlistId,
               formaOlistNome,
               planoPagamentoId,
@@ -126,6 +131,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ success: true, quantidade: planoIds.length });
   } catch (error) {
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Erro ao associar planos de pagamento:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao salvar associações." },

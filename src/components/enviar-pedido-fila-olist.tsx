@@ -22,6 +22,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const tituloId = useId();
   const ocupado = useRef(false);
   const alterado = useRef(false);
+  const contaInicializada = useRef("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -47,10 +48,21 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
     const controller = new AbortController();
     fetch(api, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
-      .then((d) => { setEnvio(d.envio); if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true; setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map((i) => i.tecido.id) ?? [], d.selecoes ?? undefined)); })
+      .then((d) => {
+        if (controller.signal.aborted) return;
+        setEnvio(d.envio);
+        if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
+        const conta = `${api}:${d.filial.id}`;
+        if (contaInicializada.current !== conta) {
+          setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map((i) => i.tecido.id) ?? [], d.selecoes ?? undefined, d.vendedorOlistPadraoId));
+          contaInicializada.current = conta;
+          setVersao(pedido.versao);
+          setPrevia(null);
+        }
+      })
       .catch((e) => { if (!controller.signal.aborted) setErro(e.message); }).finally(() => { if (!controller.signal.aborted) setCarregando(false); });
     return () => controller.abort();
-  }, [api, token, pedido.status, pedido.dadosPedido]);
+  }, [api, token, pedido.status, pedido.dadosPedido, pedido.filial?.id, pedido.versao]);
   useEffect(() => { if (erro || mensagem || previa) alerta.current?.focus(); }, [erro, mensagem, previa]);
   async function operar(body: unknown, acao: "preview" | "confirmar" | "conciliar") {
     if (ocupado.current) return; ocupado.current = true; setSalvando(true); setErro("");

@@ -1,6 +1,7 @@
+import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
+import { resolverEmpresaOlist } from "@/lib/olist-empresa";
 import { NextResponse } from "next/server";
 import { listarProdutosOlistApi } from "@/lib/olist";
-import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
 const SITUACOES = new Set(["A", "I", "E"]);
 
@@ -19,8 +20,9 @@ export async function GET(request: Request) {
     : undefined;
 
   try {
-    const usuario = await getUsuarioAutenticado(request);
-    const resultado = await listarProdutosOlistApi(usuario.aplicativoId, {
+    const usuario = await autorizarOlist(request, "podeVisualizarOlistProdutos");
+    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
+    const resultado = await listarProdutosOlistApi(aplicativoId, {
       nome: params.get("nome")?.trim() || undefined,
       codigo: params.get("codigo")?.trim() || undefined,
       gtin: params.get("gtin")?.trim() || undefined,
@@ -30,6 +32,7 @@ export async function GET(request: Request) {
     });
     return NextResponse.json(resultado);
   } catch (error) {
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Erro ao listar produtos Olist:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro inesperado ao consultar a Olist." },

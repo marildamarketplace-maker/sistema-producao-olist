@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { dadosPedidoFilaSchema, filtrosStatusFila, type ListaFilaAdministracao } from "@/lib/fila-fornecedor-contrato";
+import { bloquearDestinoFornecedor } from "@/lib/fila-fornecedor-destino";
 
 const consultaSchema = z.object({
   situacao: z.enum(["pendente", "processar", "concluido", "falhado", "cancelado", "direcionado", "todos", "processando", "enviado", "com_falha"]).default("pendente")
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
         },
       }),
       prisma.pedidoFornecedorQueue.count({ where }),
-      prisma.aplicativo.findMany({ where: { aplicativoPaiId: aplicativoId }, select: { id: true, nome: true }, orderBy: { nome: "asc" } }),
+      prisma.aplicativo.findMany({ where: { OR: [{ id: aplicativoId }, { aplicativoPaiId: aplicativoId }] }, select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }] }),
     ]);
     const resultado: ListaFilaAdministracao = {
       pedidos: pedidos.map((pedido) => {
@@ -87,7 +88,7 @@ export async function PATCH(request: Request) {
   try {
     const { usuarioId, aplicativoId } = await autorizar(request);
     const parsed = direcionamentoSchema.safeParse(await request.json().catch(() => null));
-    if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido, filial e versão válidos.", 400);
+    if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido, aplicativo destinatário e versão válidos.", 400);
     const { pedidoId, filialId, versao, enviarOlist } = parsed.data;
     if (enviarOlist) throw new ErroAdministracaoFila("Use a revisão e confirmação de Enviar para a Olist.", 400);
     const resultado = await prisma.$transaction(async (tx) => {
@@ -100,14 +101,10 @@ export async function PATCH(request: Request) {
       }
       await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${pedido.solicitacaoProducaoId}::uuid FOR UPDATE`;
       const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: pedido.solicitacaoProducaoId } });
-      if (envio && !["REJEITADO", "LIBERADO"].includes(envio.estado)) throw new ErroAdministracaoFila("Envio concluído, em andamento ou incerto. Confira o resultado antes de trocar a filial.", 409);
-      // Impede a troca do aplicativo pai da filial durante a atribuição.
-      const filiais = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM aplicativo
-        WHERE id = ${filialId}::uuid AND aplicativo_pai_id = ${aplicativoId}::uuid
-        FOR SHARE
-      `;
-      if (!filiais.length) throw new ErroAdministracaoFila("Selecione uma filial vinculada ao seu aplicativo.", 400);
+      if (envio && !["REJEITADO", "LIBERADO"].includes(envio.estado)) throw new ErroAdministracaoFila("Envio concluído, em andamento ou incerto. Confira o resultado antes de trocar o aplicativo destinatário.", 409);
+      if (!await bloquearDestinoFornecedor(tx, aplicativoId, filialId)) {
+        throw new ErroAdministracaoFila("Selecione o aplicativo próprio do fornecedor ou um filho direto.", 400);
+      }
       const direcionadoEm = new Date();
       const atualizacao = await tx.pedidoFornecedorQueue.updateMany({
         where: { id: pedidoId, aplicativoFornecedorId: aplicativoId, versao, status: { in: ["PENDENTE", "FALHADO"] } },

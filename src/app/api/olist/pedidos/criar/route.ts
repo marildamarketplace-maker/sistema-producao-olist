@@ -8,7 +8,8 @@ import {
   listarVendedoresOlistApi,
 } from "@/lib/olist";
 import { prisma } from "@/lib/prisma";
-import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
+import { obterVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
+import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import {
   criarInfoAdicionalOlist,
   criarObservacoesPedidoOlist,
@@ -20,12 +21,24 @@ import {
 type DivisaoInput = { quantidade?: unknown; estampa?: unknown; variante?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown };
 type ItemInput = { produtoId?: unknown; produtoCodigo?: unknown; produtoDescricao?: unknown; produtoUnidade?: unknown; quantidade?: unknown; valorUnitario?: unknown; tipo?: unknown; tamanho?: unknown; laser?: unknown; divisoes?: unknown };
 
+class ErroEntradaPedidoOlist extends Error {}
+
+function lerIdOlist(valor: unknown, nome: string) {
+  if ((typeof valor !== "number" && typeof valor !== "string") ||
+      (typeof valor === "string" && !/^[1-9]\d*$/.test(valor))) {
+    throw new ErroEntradaPedidoOlist(`Selecione um ${nome} válido.`);
+  }
+  const id = Number(valor);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new ErroEntradaPedidoOlist(`Selecione um ${nome} válido.`);
+  return id;
+}
+
 function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
   const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
     ? [0]
     : nomePlano.split("/").map(Number);
   if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
-    throw new Error("O plano de pagamento possui parcelas inválidas.");
+    throw new ErroEntradaPedidoOlist("O plano de pagamento possui parcelas inválidas.");
   }
 
   const totalCentavos = Math.round(valorTotal * 100);
@@ -66,7 +79,7 @@ const listarProdutosCriacaoComCache = unstable_cache(
 
 export async function GET(request: Request) {
   try {
-    const usuario = await getUsuarioAutenticado(request);
+    const usuario = await autorizarOlist(request, "podeCriarOlistPedido");
     const params = new URL(request.url).searchParams;
     const recurso = params.get("recurso") ?? "catalogo";
     const nome = params.get("nome")?.trim() || undefined;
@@ -76,6 +89,10 @@ export async function GET(request: Request) {
     const idVendedor = idVendedorParam && /^\d+$/.test(idVendedorParam) ? idVendedorParam : undefined;
 
     if (recurso === "vendedores") {
+      const offset = Number(params.get("offset") ?? "0");
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) {
+        return NextResponse.json({ error: "Página de vendedores inválida." }, { status: 400 });
+      }
       if (cpfCnpj) {
         const contatos = await listarContatosOlistApi(usuario.aplicativoId, { cpfCnpj, limit: 10, offset: 0 });
         const codigos = contatos.itens
@@ -87,10 +104,10 @@ export async function GET(request: Request) {
           const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { codigo: codigoContato, limit: 10, offset: 0 });
           resultados.push(...resposta.itens.filter((item) => item.situacao === "B" || item.situacao === "A"));
         }
-        return NextResponse.json({ itens: resultados });
+        return NextResponse.json({ itens: resultados, paginacao: { total: resultados.length, limit: 100, offset: 0 } });
       }
-      const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { nome, codigo, limit: 50, offset: 0 });
-      return NextResponse.json({ itens: resposta.itens.filter((item) => item.situacao === "B" || item.situacao === "A") });
+      const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { nome, codigo, limit: 100, offset });
+      return NextResponse.json({ itens: resposta.itens.filter((item) => item.situacao === "B" || item.situacao === "A"), paginacao: resposta.paginacao });
     }
     if (recurso === "clientes") {
       const itens = [];
@@ -160,40 +177,31 @@ export async function GET(request: Request) {
       prisma.tipoProduto.findMany({ orderBy: { titulo: "asc" }, select: { id: true, sku: true, titulo: true } }),
       prisma.tamanho.findMany({ orderBy: { titulo: "asc" }, select: { id: true, sku: true, titulo: true } }),
     ]);
-    let vendedores: Record<string, unknown>[] = [];
-    try {
-      let offset = 0;
-      let total = 0;
-      do {
-        const resposta = await listarVendedoresOlistApi(usuario.aplicativoId, { limit: 100, offset });
-        vendedores.push(...resposta.itens);
-        total = resposta.paginacao.total;
-        offset += 100;
-      } while (offset < total && (!usuario.vendedorOlistId || !vendedores.some((vendedor) => Number(vendedor.id) === usuario.vendedorOlistId)));
-      vendedores = vendedores.filter((vendedor) =>
-        (vendedor.situacao === "B" || vendedor.situacao === "A") &&
-        (!usuario.vendedorOlistId || Number(vendedor.id) === usuario.vendedorOlistId)
-      );
-    } catch (error) {
-      console.warn("Não foi possível carregar os vendedores:", error);
-    }
+    const vendedorOlistId = await obterVendedorDoUsuario(usuario.id, usuario.aplicativoId);
+    // A lista inicial é limitada. A etapa de seleção pesquisa/pagina sob demanda.
+    const respostaVendedores = await listarVendedoresOlistApi(usuario.aplicativoId, { limit: 100, offset: 0 });
+    const vendedores = respostaVendedores.itens.filter((vendedor) => vendedor.situacao === "B" || vendedor.situacao === "A");
     return NextResponse.json({
       estampas,
       variantes,
       tiposProduto: tiposProduto.map((tipo) => ({ id: tipo.id, codigo: tipo.sku, nome: tipo.titulo })),
       tamanhos: tamanhos.map((tamanho) => ({ id: tamanho.id, codigo: tamanho.sku, descricao: tamanho.titulo })),
       vendedores,
-      vendedorOlistId: usuario.vendedorOlistId,
+      vendedoresPaginacao: respostaVendedores.paginacao,
+      vendedorOlistId,
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao carregar dados." }, { status: 500 });
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: "Não foi possível carregar os dados da conta Olist." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const usuario = await getUsuarioAutenticado(request);
-    const body = await request.json() as {
+    const usuario = await autorizarOlist(request, "podeCriarOlistPedido");
+    const bodyJson: unknown = await request.json().catch(() => { throw new ErroEntradaPedidoOlist("Informe um pedido válido."); });
+    if (!bodyJson || typeof bodyJson !== "object" || Array.isArray(bodyJson)) throw new ErroEntradaPedidoOlist("Informe um pedido válido.");
+    const body = bodyJson as {
       vendedorId?: unknown;
       clienteId?: unknown;
       formaPagamentoId?: unknown;
@@ -204,19 +212,17 @@ export async function POST(request: Request) {
       itens?: unknown;
       acao?: unknown;
     };
-    const vendedorId = Number(body.vendedorId);
-    const clienteId = Number(body.clienteId);
-    if (!Number.isInteger(vendedorId) || vendedorId <= 0) throw new Error("Selecione um vendedor válido.");
-    if (!Number.isInteger(clienteId) || clienteId <= 0) throw new Error("Selecione um cliente válido.");
+    const vendedorId = lerIdOlist(body.vendedorId, "vendedor");
+    const clienteId = lerIdOlist(body.clienteId, "cliente");
     const formaPagamentoId = String(body.formaPagamentoId ?? "").trim();
     const planoPagamentoId = String(body.planoPagamentoId ?? "").trim();
     const tipoVenda = String(body.tipoVenda ?? "").trim().toLowerCase();
     const observacaoPedido = String(body.observacaoPedido ?? "").trim();
     const observacaoEntrega = String(body.observacaoEntrega ?? "").trim();
-    if (!/^\d+$/.test(formaPagamentoId)) throw new Error("Selecione uma forma de pagamento válida.");
-    if (!planoPagamentoId) throw new Error("Selecione um plano de pagamento.");
-    if (!["venda", "venda g", "venda pc"].includes(tipoVenda)) throw new Error("Selecione um tipo de venda válido.");
-    if (!Array.isArray(body.itens) || body.itens.length === 0) throw new Error("Adicione ao menos um produto.");
+    if (!/^\d+$/.test(formaPagamentoId)) throw new ErroEntradaPedidoOlist("Selecione uma forma de pagamento válida.");
+    if (!planoPagamentoId) throw new ErroEntradaPedidoOlist("Selecione um plano de pagamento.");
+    if (!["venda", "venda g", "venda pc"].includes(tipoVenda)) throw new ErroEntradaPedidoOlist("Selecione um tipo de venda válido.");
+    if (!Array.isArray(body.itens) || body.itens.length === 0) throw new ErroEntradaPedidoOlist("Adicione ao menos um produto.");
 
     const associacaoPlano = await prisma.formaPagamentoOlistPlano.findUnique({
       where: {
@@ -229,7 +235,7 @@ export async function POST(request: Request) {
       select: { planoPagamento: { select: { nome: true, ativo: true } } },
     });
     if (!associacaoPlano?.planoPagamento.ativo) {
-      throw new Error("O plano selecionado não está associado à forma de pagamento.");
+      throw new ErroEntradaPedidoOlist("O plano selecionado não está associado à forma de pagamento.");
     }
 
     const observacoesLinhas: LinhaObservacaoPedidoOlist[] = [];
@@ -245,15 +251,15 @@ export async function POST(request: Request) {
       const quantidade = Number(item.quantidade);
       const valorUnitario = item.valorUnitario === null || item.valorUnitario === undefined ? undefined : Number(item.valorUnitario);
       const divisoes = Array.isArray(item.divisoes) ? item.divisoes as DivisaoInput[] : [];
-      if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error(`Produto ${indice + 1} inválido.`);
-      if (produtosAdicionados.has(produtoId)) throw new Error(`O produto ${produtoCodigo} foi adicionado mais de uma vez.`);
+      if (!Number.isInteger(produtoId) || produtoId <= 0) throw new ErroEntradaPedidoOlist(`Produto ${indice + 1} inválido.`);
+      if (produtosAdicionados.has(produtoId)) throw new ErroEntradaPedidoOlist(`O produto ${produtoCodigo} foi adicionado mais de uma vez.`);
       produtosAdicionados.add(produtoId);
-      if (!Number.isFinite(quantidade) || quantidade < 1) throw new Error(`A quantidade mínima do produto ${indice + 1} é 1.`);
-      if (valorUnitario !== undefined && (!Number.isFinite(valorUnitario) || valorUnitario < 0)) throw new Error(`Valor do produto ${indice + 1} inválido.`);
+      if (!Number.isFinite(quantidade) || quantidade < 1) throw new ErroEntradaPedidoOlist(`A quantidade mínima do produto ${indice + 1} é 1.`);
+      if (valorUnitario !== undefined && (!Number.isFinite(valorUnitario) || valorUnitario < 0)) throw new ErroEntradaPedidoOlist(`Valor do produto ${indice + 1} inválido.`);
       if (divisoes.length === 0) divisoes.push({ quantidade });
       const soma = divisoes.reduce((total, divisao) => total + Number(divisao.quantidade), 0);
-      if (divisoes.some((divisao) => !Number.isFinite(Number(divisao.quantidade)) || Number(divisao.quantidade) <= 0)) throw new Error(`Divisão do produto ${indice + 1} inválida.`);
-      if (Math.abs(soma - quantidade) > 0.0001) throw new Error(`As divisões do produto ${indice + 1} somam ${soma}, mas a quantidade é ${quantidade}.`);
+      if (divisoes.some((divisao) => !Number.isFinite(Number(divisao.quantidade)) || Number(divisao.quantidade) <= 0)) throw new ErroEntradaPedidoOlist(`Divisão do produto ${indice + 1} inválida.`);
+      if (Math.abs(soma - quantidade) > 0.0001) throw new ErroEntradaPedidoOlist(`As divisões do produto ${indice + 1} somam ${soma}, mas a quantidade é ${quantidade}.`);
       for (const divisao of divisoes) {
         const estampa = String(divisao.estampa ?? "").trim();
         const variante = String(divisao.variante ?? "").trim();
@@ -325,6 +331,8 @@ export async function POST(request: Request) {
     const resultado = await criarPedidoOlistApi(usuario.aplicativoId, pedido);
     return NextResponse.json(resultado);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao criar pedido." }, { status: 400 });
+    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof ErroEntradaPedidoOlist) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: "Não foi possível criar o pedido. Confira os dados e a integração Olist." }, { status: 502 });
   }
 }

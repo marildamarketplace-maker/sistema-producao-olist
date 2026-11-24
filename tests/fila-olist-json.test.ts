@@ -30,3 +30,14 @@ test("contrato da fila preserva bloco Olist opcional e continua aceitando snapsh
   const olist = { filialId: filial, selecoes: { clienteId: 123 } };
   assert.deepEqual(dadosPedidoFilaSchema.parse({ ...dados, olist }).olist, olist);
 });
+
+test("vendedor salvo prevalece sobre sugestão e ausência permite seleção manual", () => {
+  assert.equal(criarRascunhoFilaOlist([tecido], undefined, 200).vendedorId, 200);
+  assert.equal(criarRascunhoFilaOlist([tecido], { vendedorId: 300 }, 200).vendedorId, 300);
+  assert.equal(criarRascunhoFilaOlist([tecido], undefined, null).vendedorId, 0);
+  const rascunho = criarRascunhoFilaOlist([tecido], undefined, 200);
+  rascunho.vendedorId = 400;
+  assert.equal(serializarRascunhoFilaOlist(rascunho).vendedorId, 400);
+  rascunho.vendedorId = 0;
+  assert.equal(serializarRascunhoFilaOlist(rascunho).vendedorId, undefined);
+});

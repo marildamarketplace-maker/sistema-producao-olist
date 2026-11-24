@@ -24,16 +24,31 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   let esperadoLaser = true;
   let esperadaObservacao = "Observação";
   let filialValida = true;
+  let semFilhos = false;
   let ultimoRegistro: Record<string, unknown> | null = null;
+  let enviado = false;
+  let envioAnterior: { estado: string; pedidoOlistId: string | null } | null = null;
+  let bloqueada = false;
   const tx = {
     $queryRaw: async (strings: TemplateStringsArray, ...valores: unknown[]) => {
       if (strings.join("").includes("FROM aplicativo")) {
-        assert.deepEqual(valores, [filialId, destino]);
+        assert.ok([filialId, destino].includes(String(valores[0])));
+        assert.deepEqual(valores.slice(1), [destino, destino]);
         assert.match(strings.join(""), /FOR SHARE/);
-        return filialValida ? [{ id: filialId }] : [];
+        return filialValida ? [{ id: valores[0] }] : [];
       }
+      assert.match(strings.join(""), /FOR UPDATE/);
+      bloqueada = true;
       return [];
     },
+    pedidoFornecedorSolicitacao: { findFirst: async ({ where, select }: { where: unknown; select: unknown }) => {
+      assert.equal(bloqueada, true); assert.deepEqual(where, { solicitacaoId }); assert.deepEqual(select, { id: true });
+      return enviado ? { id: "pedido-legado" } : null;
+    } },
+    envioFornecedor: { findUnique: async ({ where, select }: { where: unknown; select: unknown }) => {
+      assert.equal(bloqueada, true); assert.deepEqual(where, { solicitacaoId }); assert.deepEqual(select, { estado: true, pedidoOlistId: true });
+      return envioAnterior;
+    } },
     solicitacaoProducao: { findFirst: async ({ where }: { where: unknown }) => {
       consultas++;
       assert.deepEqual(where, { id: solicitacaoId, aplicativoId: app, status: "em_producao" });
@@ -42,8 +57,8 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     fornecedor: {
       findMany: async ({ where, select }: { where: unknown; select: unknown }) => {
         assert.deepEqual(where, { aplicativoId: app, aplicativoPai: { aplicativoPaiId: null } });
-        assert.deepEqual(select, { id: true, nome: true, aplicativoPai: { select: { filiais: { select: { id: true, nome: true, descricao: true }, orderBy: { nome: "asc" } } } } });
-        return [{ id: fornecedorId, nome: "Fornecedor", aplicativoPai: { filiais: [{ id: destino, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] } }];
+        assert.deepEqual(select, { id: true, nome: true, aplicativoPai: { select: { id: true, nome: true, descricao: true, filiais: { select: { id: true, nome: true, descricao: true }, orderBy: { nome: "asc" } } } } });
+        return [{ id: fornecedorId, nome: "Fornecedor", aplicativoPai: { id: destino, nome: "Matriz fornecedor", descricao: null, filiais: semFilhos ? [] : [{ id: filialId, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] } }];
       },
       findFirst: async ({ where }: { where: unknown }) => {
         assert.deepEqual(where, { id: fornecedorId, aplicativoId: app });
@@ -87,7 +102,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   const request = (body: unknown = { fornecedorId, solicitacaoId, aplicativoFornecedorId: app, dadosPedido: {} }) => new Request("https://example.test", { method: "POST", headers: { Authorization: "Bearer token" }, body: JSON.stringify(body) });
   await t.test("lista apenas fornecedores do aplicativo", async () => {
     const response = await GET(request()); assert.equal(response.status, 200);
-    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: destino, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] }]);
+    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: destino, nome: "Matriz fornecedor", descricao: null }, { id: filialId, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] }]);
   });
   await t.test("ignora dados e aplicativo de destino enviados pelo cliente", async () => {
     assert.equal((await POST(request())).status, 201); assert.equal(gravacoes, 1);
@@ -153,6 +168,17 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: "invalido" }))).status, 400);
     assert.equal(gravacoes, antes);
   });
+  await t.test("fornecedor independente oferece sua conta e registra destino próprio explicitamente", async () => {
+    semFilhos = true;
+    assert.deepEqual((await (await GET(request())).json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: destino, nome: "Matriz fornecedor", descricao: null }] }]);
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: destino }))).status, 201);
+    assert.equal(ultimoRegistro!.aplicativoFilialId, destino);
+    assert.equal(ultimoRegistro!.direcionadoPorId, "usuario");
+    assert.equal(ultimoRegistro!.status, "PENDENTE");
+    podeSelecionarFilial = false;
+    assert.equal((await POST(request({ fornecedorId, solicitacaoId, filialId: destino }))).status, 403);
+    podeSelecionarFilial = true; semFilhos = false;
+  });
   await t.test("selecionar filial exige permissão específica, inclusive na prévia; sem filial mantém PENDENTE", async () => {
     podeSelecionarFilial = false;
     const antes = gravacoes;
@@ -172,5 +198,30 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     erroBanco = "P2002"; assert.equal((await POST(request())).status, 409);
     erroBanco = "P1001"; const response = await POST(request()); assert.equal(response.status, 500);
     assert.doesNotMatch(JSON.stringify(await response.json()), /segredo/);
+    erroBanco = "";
+  });
+  await t.test("envio direto legado bloqueia nova fila e prévia, preservando estado e vínculo", async () => {
+    const antes = gravacoes;
+    for (const estado of ["CONCLUIDO", "RESERVADO", "INCERTO", "DESCONHECIDO"]) {
+      envioAnterior = { estado, pedidoOlistId: null };
+      for (const acao of ["preview", "enviar"]) {
+        bloqueada = false;
+        const response = await POST(request({ fornecedorId, solicitacaoId, acao }));
+        assert.equal(response.status, 409);
+        assert.match((await response.json()).error, /envio concluído, em andamento ou com resultado incerto/);
+        assert.deepEqual(envioAnterior, { estado, pedidoOlistId: null });
+      }
+    }
+    envioAnterior = { estado: "LIBERADO", pedidoOlistId: "123" };
+    assert.equal((await POST(request())).status, 409);
+    envioAnterior = null; enviado = true;
+    assert.equal((await POST(request())).status, 409);
+    enviado = false;
+    assert.equal(gravacoes, antes);
+    for (const estado of ["REJEITADO", "LIBERADO"]) {
+      envioAnterior = { estado, pedidoOlistId: null };
+      assert.equal((await POST(request())).status, 201);
+    }
+    envioAnterior = null;
   });
 });

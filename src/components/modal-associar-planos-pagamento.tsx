@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 type Plano = { id: string; nome: string };
 
 type Props = {
+  aplicativoId?: string;
   accessToken: string;
   tipo: "pagamento" | "recebimento";
   forma: { id: string; nome: string };
@@ -39,7 +40,7 @@ function planosSugeridos(nomeForma: string, planos: Plano[]) {
     .map((plano) => plano.id);
 }
 
-export function ModalAssociarPlanosPagamento({ accessToken, tipo, forma, onClose }: Props) {
+export function ModalAssociarPlanosPagamento({ aplicativoId, accessToken, tipo, forma, onClose }: Props) {
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [busca, setBusca] = useState("");
@@ -54,6 +55,7 @@ export function ModalAssociarPlanosPagamento({ accessToken, tipo, forma, onClose
       setErro(null);
       try {
         const params = new URLSearchParams({ tipo, formaOlistId: forma.id });
+        if (aplicativoId) params.set("aplicativoId", aplicativoId);
         const response = await fetch(`/api/olist/planos-pagamento?${params}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
@@ -79,7 +81,7 @@ export function ModalAssociarPlanosPagamento({ accessToken, tipo, forma, onClose
     }
     void carregar();
     return () => { ativo = false; };
-  }, [accessToken, forma.id, forma.nome, tipo]);
+  }, [accessToken, aplicativoId, forma.id, forma.nome, tipo]);
 
   const planosFiltrados = useMemo(() => {
     const termo = normalizar(busca);
@@ -96,7 +98,7 @@ export function ModalAssociarPlanosPagamento({ accessToken, tipo, forma, onClose
     setSalvando(true);
     setErro(null);
     try {
-      const response = await fetch("/api/olist/planos-pagamento", {
+      const response = await fetch(`/api/olist/planos-pagamento${aplicativoId ? `?aplicativoId=${encodeURIComponent(aplicativoId)}` : ""}`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${accessToken}`,

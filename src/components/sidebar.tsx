@@ -128,7 +128,7 @@ export function Sidebar() {
         >
           <p className="truncate text-sm font-medium text-slate-800">{usuario?.nome ?? user?.email}</p>
           <p className="mt-0.5 truncate text-xs text-slate-500">{user?.email}</p>
-          {usuario?.vendedorOlistId && <p className="mt-1 truncate text-xs text-slate-500">Vendedor Olist: {usuario.vendedorOlistId}</p>}
+          {usuario?.vendedorOlist && <p className="mt-1 truncate text-xs text-slate-500">Vendedor neste aplicativo: {usuario.vendedorOlist.vendedorOlistId}</p>}
         </Link>
         <button
           type="button"

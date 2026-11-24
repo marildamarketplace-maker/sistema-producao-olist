@@ -26,7 +26,7 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
   }
   return <fieldset disabled={disabled} className="min-w-0 space-y-2 rounded-md border border-slate-200 p-3">
     <legend className="max-w-full break-words px-1 text-sm font-medium">{titulo}</legend>
-    <label htmlFor={`${id}-busca`} className="block text-xs text-slate-600">Pesquisar pelo nome na filial</label>
+    <label htmlFor={`${id}-busca`} className="block text-xs text-slate-600">Pesquisar pelo nome na conta destinatária</label>
     <div className="flex flex-wrap gap-2"><input id={`${id}-busca`} className="input min-h-11 min-w-0 flex-1" value={busca} onChange={(e) => setBusca(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void pesquisar(); } }} />
       <button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar()}>Buscar</button></div>
     <label htmlFor={`${id}-resultado`} className="block text-xs text-slate-600">Cadastro selecionado</label>
@@ -71,7 +71,7 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
           {pesquisa("Vendedor", "vendedores", selecoes.vendedorId, (o) => aoAlterar({ ...selecoes, vendedorId: o.id }))}
           {pesquisa("Forma de pagamento", "formas", selecoes.formaId, (o) => aoAlterar({ ...selecoes, formaId: o.id, planoId: "" }))}
           <label className="block text-sm">Plano de pagamento local<select className="input mt-2 min-h-11" value={selecoes.planoId} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, planoId: e.target.value })}><option value="">Selecione um plano associado</option>{planos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
-            {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta filial.</span>}</label>
+            {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta conta.</span>}</label>
           <label className="block text-sm">Tipo de venda<select className="input mt-2 min-h-11" value={selecoes.tipoVenda} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, tipoVenda: e.target.value as RascunhoFilaOlist["tipoVenda"] })}><option value="">Selecione</option><option value="VENDA">Venda</option><option value="VENDA_G">Venda G</option><option value="VENDA_PC">Venda PC</option></select></label>
         </div>
         {selecoes.tecidos.map((tecido, index) => <div key={tecido.tecidoId} className="space-y-2">

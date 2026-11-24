@@ -8,8 +8,8 @@ test("opções de fornecedores incluem somente matrizes e somente ID/nome, com p
   let consultas = 0;
   const matriz = { id: "00000000-0000-0000-0000-000000000002", nome: "MV Tecidos" };
   Object.assign(globalThis, { prisma: {
-    usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: "origem" }), findUnique: async () => ({ podeVisualizarFornecedores: permitido }), findMany: async () => [] },
-    formaPagamentoOlistPlano: { findMany: async () => [] },
+    usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: "origem" }), findUnique: async () => ({ podeVisualizarFornecedores: permitido }), findMany: async () => { assert.fail("Não deve listar usuários de outros aplicativos."); } },
+    formaPagamentoOlistPlano: { findMany: async () => { assert.fail("Não deve listar configurações comerciais legadas."); } },
     aplicativo: { findMany: async ({ where, select }: { where: unknown; select: unknown }) => {
       consultas++;
       assert.deepEqual(where, { aplicativoPaiId: null });
@@ -20,11 +20,15 @@ test("opções de fornecedores incluem somente matrizes e somente ID/nome, com p
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: "usuario", email: "teste@example.test" } }, error: null }));
   const { GET } = await import("../src/app/api/fornecedores/vendedores/route");
+  const { GET: listarAplicativosPai } = await import("../src/app/api/fornecedores/aplicativos-pai/route");
   const request = () => new Request("https://example.test", { headers: { Authorization: "Bearer teste" } });
   const response = await GET(request());
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).aplicativosPai, [matriz]);
+  assert.deepEqual(await response.json(), { aplicativosPai: [matriz] });
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.deepEqual(await (await listarAplicativosPai(request())).json(), { aplicativosPai: [matriz] });
+  assert.equal((await listarAplicativosPai(new Request("https://example.test"))).status, 401);
   permitido = false;
   assert.equal((await GET(request())).status, 403);
-  assert.equal(consultas, 1);
+  assert.equal(consultas, 2);
 });

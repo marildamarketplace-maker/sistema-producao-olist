@@ -34,13 +34,13 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
 }
 async function validarIntegracao(filialId: string) {
   const config = await getAplicativoOlistConfig(filialId);
-  if (!config.clientId || !config.clientSecret) throw new ErroFila("Configure o OAuth da Olist no aplicativo da filial antes de continuar.");
+  if (!config.clientId || !config.clientSecret) throw new ErroFila("Configure o OAuth da Olist no aplicativo destinatário antes de continuar.");
   await getValidOlistAccessToken(filialId).catch((error: unknown) => {
     const detalhe = error instanceof Error ? error as Error & { code?: unknown; httpStatus?: unknown; codigoOAuth?: unknown; requerReconexao?: unknown } : null;
     // Não registrar o erro bruto: Axios inclui credenciais no config e Prisma pode incluir dados da consulta.
     const codigo = typeof detalhe?.code === "string" && /^(P\d{4}|E[A-Z_]{2,40}|ERR_[A-Z_]{2,40})$/.test(detalhe.code) ? detalhe.code : null;
     const codigoOAuth = typeof detalhe?.codigoOAuth === "string" && ["invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "invalid_scope", "unsupported_grant_type", "server_error", "temporarily_unavailable"].includes(detalhe.codigoOAuth) ? detalhe.codigoOAuth : null;
-    console.error("[fila-olist] Falha ao obter ou renovar token da filial.", {
+    console.error("[fila-olist] Falha ao obter ou renovar token da conta destinatária.", {
       filialId,
       codigo,
       httpStatus: typeof detalhe?.httpStatus === "number" ? detalhe.httpStatus : null,
@@ -51,13 +51,13 @@ async function validarIntegracao(filialId: string) {
         : codigo?.startsWith("P") ? "falha_banco"
         : codigo ? "falha_operacional" : "falha_nao_classificada",
     });
-    throw new ErroFila("Conecte novamente a integração Olist da filial antes de continuar.");
+    throw new ErroFila("Conecte novamente a integração Olist da conta destinatária antes de continuar.");
   });
 }
 export async function validarSelecoesParciais(filialId: string, selecoes: SelecoesFilaOlistParciais, precisaLaser = false) {
     if (selecoes.clienteId || selecoes.vendedorId || selecoes.formaId || selecoes.tecidos?.length || selecoes.laser) await validarIntegracao(filialId);
     const plano = selecoes.planoId && selecoes.formaId ? await prisma.formaPagamentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } }) : null;
-    if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de pagamento nesta filial.");
+    if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de pagamento nesta conta destinatária.");
     const cliente = selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null;
     const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-pagamento", selecoes.formaId) : null;
     if ((cliente && !ativo(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de pagamento inativos.");
@@ -68,16 +68,16 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
       vendedor = lista.itens.find((i) => Number(i.id) === selecoes.vendedorId);
       if (vendedor || lista.itens.length < 100) break;
     }
-    if (selecoes.vendedorId && (!vendedor || !ativo(vendedor))) throw new ErroFila("Vendedor indisponível na conta da filial.");
+    if (selecoes.vendedorId && (!vendedor || !ativo(vendedor))) throw new ErroFila("Vendedor indisponível na conta destinatária.");
     const nomes = new Map<string, string>();
     for (const produto of selecoes.tecidos ?? []) {
       const cadastro = await obterCadastroFornecedorOlist(filialId, "produtos", produto.id);
-      if (!ativo(cadastro)) throw new ErroFila("Produto ou serviço inativo na conta da filial.");
+      if (!ativo(cadastro)) throw new ErroFila("Produto ou serviço inativo na conta destinatária.");
       nomes.set(`P:${produto.id}`, nome(cadastro));
     }
     if (selecoes.laser) {
       const servico = await obterCadastroFornecedorOlist(filialId, "servicos", selecoes.laser.id);
-      if (!ativo(servico)) throw new ErroFila("Serviço de laser inativo na filial.");
+      if (!ativo(servico)) throw new ErroFila("Serviço de laser inativo na conta destinatária.");
       nomes.set(`S:${selecoes.laser.id}`, nome(servico));
     }
     if (precisaLaser && !selecoes.laser) throw new ErroFila("Selecione o serviço de corte a laser e seu preço.");

@@ -9,19 +9,33 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   let permitido = true, existe = true, filialValida = true, associado = true, cadastroAtivo = true, retornoMarcador = true;
   let fila: any, selecoesSalvas: unknown = null, previa: any = null, envio: any = null, registro: any = null;
   let posts = 0, consultas: string[] = [];
+  let vendedorPadraoId: number | null = 201;
+  let destinoAtual = filial;
   let alterarDuranteConsulta = false;
   const dadosPedido = { versao: 1, observacao: "JSON revisado", itens: [{ produtoId: id(11), sku: "SKU-EST/6861-A/", tecido: { id: tecidoId, nome: "Tecido revisado", referencia: "ref-origem" }, quantidade: 4, unidade: "UN", quantidadeTecido: 7, unidadeTecido: "MT", estampa: "6861 editada", variante: "B", corteLaser: true, tamanho: "145x180", tipoProduto: "Toalha" }] };
   const selecoes = { clienteId: 100, vendedorId: 200, formaId: 300, planoId, tipoVenda: "VENDA", tecidos: [{ tecidoId, id: 400, preco: 10 }], laser: { id: 500, preco: 2 } };
-  const reset = () => { fila = { id: filaId, fornecedorId, aplicativoFornecedorId: matriz, aplicativoFilialId: filial, solicitacaoProducaoId: solicitacaoId, dadosPedido: structuredClone(dadosPedido), versao: 0, status: "PENDENTE" }; previa = null; envio = null; registro = null; posts = 0; consultas = []; };
+  const reset = (destino = filial) => { destinoAtual = destino; fila = { id: filaId, fornecedorId, aplicativoFornecedorId: matriz, aplicativoFilialId: destinoAtual, solicitacaoProducaoId: solicitacaoId, dadosPedido: structuredClone(dadosPedido), versao: 0, status: "PENDENTE" }; previa = null; envio = null; registro = null; posts = 0; consultas = []; };
   reset();
   const tx: any = {
-    $queryRaw: async () => [{ id: filial }],
+    usuarioVendedorOlist: { findFirst: async ({ where, select }: { where: { usuarioId: string; aplicativoId: string }; select: unknown }) => {
+      assert.equal(where.usuarioId, usuarioId); assert.equal(where.aplicativoId, destinoAtual);
+      assert.deepEqual(select, { vendedorOlistId: true });
+      return vendedorPadraoId === null ? null : { vendedorOlistId: vendedorPadraoId };
+    } },
+    $queryRaw: async (sql: TemplateStringsArray, ...valores: string[]) => {
+      if (sql.join("").includes("FROM aplicativo")) {
+        assert.deepEqual(valores, [destinoAtual, matriz, matriz]);
+        assert.match(sql.join("?"), /FOR SHARE/);
+        return filialValida && [matriz, filial].includes(destinoAtual) ? [{ id: destinoAtual }] : [];
+      }
+      return [{ id: solicitacaoId }];
+    },
     usuario: { findFirst: async () => ({ id: usuarioId, aplicativoId: matriz }), findUnique: async () => ({ aplicativoId: matriz, podeGerenciarFilaPedidos: permitido }) },
     aplicativo: {
-      findFirst: async ({ where }: any) => { assert.equal(where.aplicativoPaiId, matriz); assert.equal(where.id, filial); return filialValida ? { id: filial, nome: "Filial A" } : null; },
-      findUnique: async ({ where }: any) => { assert.equal(where.id, filial); return { id: filial, nome: "Filial A", olistClientId: integrado ? "fake" : "", olistClientSecret: integrado ? "fake" : "" }; },
+      findFirst: async ({ where }: any) => { assert.deepEqual(where, { id: destinoAtual, OR: [{ id: matriz }, { aplicativoPaiId: matriz }] }); return filialValida && [matriz, filial].includes(destinoAtual) ? { id: destinoAtual, nome: destinoAtual === matriz ? "Conta própria" : "Filial A" } : null; },
+      findUnique: async ({ where }: any) => { assert.equal(where.id, destinoAtual); return { id: destinoAtual, nome: "Filial A", olistClientId: integrado ? "fake" : "", olistClientSecret: integrado ? "fake" : "" }; },
     },
-    integracaoOlistToken: { findUnique: async ({ where }: any) => { assert.equal(where.aplicativoId_provider.aplicativoId, filial); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }; } },
+    integracaoOlistToken: { findUnique: async ({ where }: any) => { assert.equal(where.aplicativoId_provider.aplicativoId, destinoAtual); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }; } },
     pedidoFornecedorQueue: {
       findFirst: async ({ where }: any) => { assert.equal(where.aplicativoFornecedorId, matriz); return existe ? structuredClone(fila) : null; },
       updateMany: async ({ where, data }: any) => {
@@ -32,12 +46,12 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
       update: async ({ data }: any) => { fila.status = data.status; fila.versao++; return fila; },
     },
     configFornecedorFilial: {
-      findUnique: async ({ where }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: filial }); return selecoesSalvas ? { selecoes: selecoesSalvas } : null; },
-      upsert: async ({ where, create }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: filial }); selecoesSalvas = create.selecoes; },
+      findUnique: async ({ where }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: destinoAtual }); return selecoesSalvas ? { selecoes: selecoesSalvas } : null; },
+      upsert: async ({ where, create }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: destinoAtual }); selecoesSalvas = create.selecoes; },
     },
     formaPagamentoOlistPlano: {
-      findFirst: async ({ where }: any) => { assert.equal(where.aplicativoId, filial); assert.equal(where.formaOlistId, "300"); return associado ? { planoPagamento: { nome: "30/60" } } : null; },
-      findMany: async ({ where }: any) => { assert.equal(where.aplicativoId, filial); return [{ planoPagamento: { id: planoId, nome: "30/60" } }]; },
+      findFirst: async ({ where }: any) => { assert.equal(where.aplicativoId, destinoAtual); assert.equal(where.formaOlistId, "300"); return associado ? { planoPagamento: { nome: "30/60" } } : null; },
+      findMany: async ({ where }: any) => { assert.equal(where.aplicativoId, destinoAtual); return [{ planoPagamento: { id: planoId, nome: "30/60" } }]; },
     },
     previaFornecedor: {
       create: async ({ data }: any) => { previa = { ...data, id: previaId }; return previa; },
@@ -77,9 +91,45 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     filialValida = false; assert.equal((await GET(req(), ctx)).status, 403); assert.equal((await preview()).status, 403); filialValida = true;
     assert.equal(posts, 0); assert.equal(consultas.length, 0);
   });
+  await t.test("conta própria sem filhos consulta, sugere vendedor, revisa, confirma e concilia", async () => {
+    reset(matriz);
+    vendedorPadraoId = 900;
+    const inicial = await (await GET(req(), ctx)).json();
+    assert.deepEqual(inicial.filial, { id: matriz, nome: "Conta própria" });
+    assert.equal(inicial.vendedorOlistPadraoId, 900);
+    assert.equal(posts, 0);
+    const revisar = await preview();
+    assert.equal(revisar.status, 200);
+    assert.equal((await revisar.json()).filial.id, matriz);
+    assert.equal(fila.dadosPedido.olist.filialId, matriz);
+    assert.equal((await POST(req({ acao: "confirmar", previaId }), ctx)).status, 200);
+    assert.equal(posts, 1); assert.equal(registro.aplicativoDestinatarioId, matriz);
+    assert.equal(envio.aplicativoId, matriz); assert.equal(envio.estado, "CONCLUIDO");
+    assert.equal((await POST(req({ acao: "confirmar", previaId }), ctx)).status, 409);
+    assert.equal(posts, 1);
+    reset(matriz);
+    envio = { solicitacaoId, aplicativoId: matriz, tentativaId: id(20), estado: "INCERTO", iniciadoEm: new Date(0), pedidoOlistId: "123", historico: [] };
+    assert.equal((await POST(req({ acao: "vincular", tentativaId: id(20), justificativa: "Conferência na conta própria", pedidoOlistId: "123" }), ctx)).status, 200);
+    assert.equal(registro.aplicativoDestinatarioId, matriz); assert.equal(envio.estado, "CONCLUIDO"); assert.equal(posts, 0);
+    reset(); vendedorPadraoId = 201;
+  });
+  await t.test("conta externa e neto não consultam nem criam na Olist", async () => {
+    for (const destino of [id(98), id(99)]) {
+      reset(destino);
+      assert.equal((await GET(req(), ctx)).status, 403);
+      assert.equal((await preview()).status, 403);
+      assert.equal(posts, 0); assert.equal(consultas.length, 0);
+    }
+    reset();
+  });
   await t.test("histórico de outros pedidos não preenche a seleção; JSON da filial atual preenche", async () => {
     selecoesSalvas = { selecoes };
-    assert.equal((await (await GET(req(), ctx)).json()).selecoes, null);
+    const inicial = await (await GET(req(), ctx)).json();
+    assert.equal(inicial.selecoes, null);
+    assert.equal(inicial.vendedorOlistPadraoId, 201);
+    vendedorPadraoId = null;
+    assert.equal((await (await GET(req(), ctx)).json()).vendedorOlistPadraoId, null);
+    vendedorPadraoId = 201;
     fila.dadosPedido.olist = { filialId: filial, selecoes: { clienteId: 100 } };
     assert.deepEqual((await (await GET(req(), ctx)).json()).selecoes, { clienteId: 100 });
     fila.dadosPedido.olist.filialId = id(99);

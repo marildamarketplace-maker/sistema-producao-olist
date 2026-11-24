@@ -15,7 +15,6 @@ export async function getUsuarioAutenticado(request: Request) {
       id: true,
       ativo: true,
       aplicativoId: true,
-      vendedorOlistId: true,
       podeEditarConfiguracao: true,
       podeVisualizarOlistFormasPagamento: true,
       podeVisualizarOlistFormasRecebimento: true,

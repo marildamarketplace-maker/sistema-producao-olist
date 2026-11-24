@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { PageHeader } from "@/components/page-header";
+import { OlistPageHeader as PageHeader, OlistEmpresa, useEmpresaOlist } from "@/components/olist-empresa";
 import { useAuth } from "@/components/auth-provider";
 import { AccessGuard } from "@/components/access-guard";
 
@@ -53,6 +53,7 @@ function textoObjeto(valor?: Record<string, unknown> | null, chavesPreferidas: s
 }
 
 function ContatosOlistPage() {
+  const aplicativoId = useEmpresaOlist();
   const { session } = useAuth();
   const filtrosIniciais = { nome: "", codigo: "", cpfCnpj: "", celular: "", situacao: "", orderBy: "desc" };
   const [filtros, setFiltros] = useState(filtrosIniciais);
@@ -66,7 +67,7 @@ function ContatosOlistPage() {
   const carregar = useCallback(async () => {
     setCarregando(true);
     setErro(null);
-    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset) });
+    const params = new URLSearchParams({ limit: String(LIMITE), offset: String(offset), aplicativoId });
     Object.entries(consulta).forEach(([chave, valor]) => { if (valor.trim()) params.set(chave, valor.trim()); });
     try {
       const response = await fetch(`/api/olist/contatos?${params.toString()}`, {
@@ -83,7 +84,7 @@ function ContatosOlistPage() {
     } finally {
       setCarregando(false);
     }
-  }, [consulta, offset, session?.access_token]);
+  }, [consulta, offset, session?.access_token, aplicativoId]);
 
   useEffect(() => { void carregar(); }, [carregar]);
 
@@ -116,5 +117,5 @@ function ContatosOlistPage() {
 }
 
 export default function ContatosOlistAccessPage() {
-  return <AccessGuard permissions={["podeVisualizarOlistContatos"]}><ContatosOlistPage /></AccessGuard>;
+  return <AccessGuard permissions={["podeVisualizarOlistContatos"]}><OlistEmpresa><ContatosOlistPage /></OlistEmpresa></AccessGuard>;
 }

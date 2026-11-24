@@ -11,11 +11,8 @@ import { EnviarFilaFornecedor } from "@/components/enviar-fila-fornecedor";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
-import { CampoTipoProduto, type TipoProdutoOpcao } from "@/components/campo-tipo-produto";
-import { CampoTamanho, type TamanhoOpcao } from "@/components/campo-tamanho";
 import { Switch } from "@/components/switch";
 import { supabase } from "@/lib/supabase";
-import { criarInfoAdicionalOlist, criarLinhaObservacaoPedidoOlist } from "@/lib/olist-pedido";
 import { montarSolicitacaoProducaoWhatsapp } from "@/lib/solicitacao-producao-whatsapp";
 import { FILTROS_SOLICITACOES_INICIAIS, criarFiltrosSolicitacoesIniciais, filtrarSolicitacoes } from "@/lib/solicitacoes-producao-filtros";
 
@@ -32,66 +29,6 @@ type ProdutoFornecidoInfo = {
   referencia?: string | null;
   quantidade_por_produto: number;
 };
-
-type FornecedorEnvio = {
-  id: string;
-  nome: string;
-  vendedor_olist_id: string;
-  aplicativo_id: string;
-};
-
-type ItemConferenciaFornecedor = ItemSolicitacao & {
-  nomeProduto: string;
-  produtoFornecido: ProdutoFornecidoInfo | null;
-};
-
-type PedidoFornecedorItemEdicao = {
-  produto: { id: number; tipo: string };
-  quantidade: number;
-  valorUnitario: number;
-  infoAdicional: string;
-};
-
-type PedidoFornecedorEdicao = {
-  idContato: number;
-  vendedor: { id: number };
-  situacao: number;
-  data: string;
-  observacoes: string;
-  observacoesInternas: string;
-  pagamento: {
-    formaRecebimento: { id: number };
-    parcelas: Array<{ dias: number; valor: number; formaRecebimento: { id: number } }>;
-  };
-  itens: PedidoFornecedorItemEdicao[];
-};
-
-type DivisaoInfoAdicional = {
-  estampa: string;
-  variante: string;
-  quantidade: string;
-  unidade: string;
-  laser: string;
-  tamanho: string;
-  tipo: string;
-};
-
-function extrairDivisoesInfoAdicional(info: string): DivisaoInfoAdicional[] {
-  return Array.from(info.matchAll(/<ESTAMPA>([\s\S]*?)<\/ESTAMPA>/g)).map((match) => {
-    const bloco = match[1];
-    const valor = (tag: string) => bloco.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))?.[1] ?? "";
-    return {
-      estampa: valor("COD"), variante: valor("VAR"), quantidade: valor("QTD"),
-      unidade: valor("UN"), laser: valor("LASER") || "false",
-      tamanho: valor("TAM"),
-      tipo: valor("TIPO"),
-    };
-  });
-}
-
-function montarInfoAdicional(divisoes: DivisaoInfoAdicional[]) {
-  return criarInfoAdicionalOlist(divisoes, "MT", { incluirTagsVazias: true });
-}
 
 type ProdutoOlistProdutoFornecedorRow = {
   produto_fornecedor_id: string;
@@ -377,8 +314,6 @@ export default function SolicitacoesProducaoPage() {
   const { session, usuario } = useAuth();
   const formularioManualRef = useRef<HTMLElement>(null);
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [tiposProduto, setTiposProduto] = useState<TipoProdutoOpcao[]>([]);
-  const [tamanhos, setTamanhos] = useState<TamanhoOpcao[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [filtrosSolicitacoes, setFiltrosSolicitacoes] = useState(criarFiltrosSolicitacoesIniciais);
   const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
@@ -401,18 +336,6 @@ export default function SolicitacoesProducaoPage() {
   const atualizarFila = useCallback((fila: ResumoFilaProducao) => setFilasPorSolicitacao((atuais) => ({ ...atuais, [fila.solicitacaoProducaoId]: fila })), []);
   const [filaDisponivel, setFilaDisponivel] = useState(false);
   const [filaSolicitacaoId, setFilaSolicitacaoId] = useState<string | null>(null);
-  const [envioModalOpen, setEnvioModalOpen] = useState(false);
-  const [envioEtapa, setEnvioEtapa] = useState<1 | 2 | 3>(1);
-  const [envioSolicitacao, setEnvioSolicitacao] = useState<Solicitacao | null>(null);
-  const [fornecedoresEnvio, setFornecedoresEnvio] = useState<FornecedorEnvio[]>([]);
-  const [fornecedorEnvioId, setFornecedorEnvioId] = useState("");
-  const [itensConferencia, setItensConferencia] = useState<ItemConferenciaFornecedor[]>([]);
-  const [envioCarregando, setEnvioCarregando] = useState(false);
-  const [envioEnviando, setEnvioEnviando] = useState(false);
-  const [envioErro, setEnvioErro] = useState<string | null>(null);
-  const [envioSucesso, setEnvioSucesso] = useState<{ id?: number; numeroPedido?: string } | null>(null);
-  const [pedidoFornecedorEdicao, setPedidoFornecedorEdicao] = useState<PedidoFornecedorEdicao | null>(null);
-
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
@@ -476,8 +399,6 @@ export default function SolicitacoesProducaoPage() {
       setItensCarregando({});
       const produtosJson = await produtosResponse.json() as {
         produtos?: Produto[];
-        tiposProduto?: TipoProdutoOpcao[];
-        tamanhos?: TamanhoOpcao[];
         error?: string;
       };
       const pedidosJson = await pedidosResponse.json() as {
@@ -496,8 +417,6 @@ export default function SolicitacoesProducaoPage() {
 
       const produtosCarregados = produtosJson.produtos ?? [];
       setProdutos(produtosCarregados);
-      setTiposProduto(produtosJson.tiposProduto ?? []);
-      setTamanhos(produtosJson.tamanhos ?? []);
       const pedidosAgrupados: Record<string, string[]> = {};
       for (const pedido of pedidosJson.pedidos ?? []) {
         pedidosAgrupados[pedido.solicitacaoId] ??= [];
@@ -619,191 +538,6 @@ export default function SolicitacoesProducaoPage() {
       nome: fornecedor.nome,
       referencia: fornecedor.referencia,
       quantidade_por_produto: quantidadePorProduto,
-    });
-  }
-
-  function fecharEnvioFornecedor() {
-    setEnvioModalOpen(false);
-    setEnvioEtapa(1);
-    setEnvioSolicitacao(null);
-    setFornecedoresEnvio([]);
-    setFornecedorEnvioId("");
-    setItensConferencia([]);
-    setEnvioErro(null);
-    setEnvioSucesso(null);
-    setPedidoFornecedorEdicao(null);
-  }
-
-  async function abrirEnvioFornecedor(solicitacao: Solicitacao) {
-    if (!session) return;
-    setEnvioModalOpen(true);
-    setEnvioEtapa(1);
-    setEnvioSolicitacao(solicitacao);
-    setFornecedorEnvioId("");
-    setItensConferencia([]);
-    setEnvioErro(null);
-    setEnvioSucesso(null);
-    setPedidoFornecedorEdicao(null);
-    setEnvioCarregando(true);
-
-    const { data, error } = await supabase
-      .from("fornecedores")
-      .select("id, nome, vendedor_olist_id, aplicativo_id")
-      .not("vendedor_olist_id", "is", null)
-      .not("aplicativo_id", "is", null)
-      .order("nome");
-
-    if (error) setEnvioErro(`Erro ao carregar fornecedores: ${error.message}`);
-    else setFornecedoresEnvio((data as FornecedorEnvio[]) ?? []);
-    setEnvioCarregando(false);
-  }
-
-  async function revisarProdutosFornecedor() {
-    if (!envioSolicitacao || !fornecedorEnvioId) return;
-    setEnvioCarregando(true);
-    setEnvioErro(null);
-
-    try {
-      const itens = await carregarItensSolicitacao(envioSolicitacao.id);
-      if (!itens?.length) throw new Error("A solicitação não possui produtos para conferência.");
-
-      const detalhes = await Promise.all(itens.map(async (item) => {
-        const [{ data: produtoOlistData }, produtoFornecido] = await Promise.all([
-          supabase
-            .from("produto_olist")
-            .select("titulo_final")
-            .eq("produto_id", item.produto_id)
-            .limit(1)
-            .maybeSingle(),
-          carregarProdutoFornecido(item.produto_id),
-        ]);
-
-        return {
-          ...item,
-          nomeProduto: (produtoOlistData as { titulo_final?: string } | null)?.titulo_final ?? item.sku,
-          produtoFornecido,
-        };
-      }));
-
-      setItensConferencia(detalhes);
-      setEnvioEtapa(2);
-    } catch (error) {
-      setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar conferência dos produtos.");
-    } finally {
-      setEnvioCarregando(false);
-    }
-  }
-
-  async function confirmarEnvioFornecedor() {
-    if (!session?.access_token || !envioSolicitacao || !fornecedorEnvioId) return;
-    setEnvioEnviando(true);
-    setEnvioErro(null);
-    try {
-      if (!pedidoFornecedorEdicao) throw new Error("A prévia do pedido não foi carregada.");
-      const response = await fetch("/api/fornecedores/enviar", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fornecedorId: fornecedorEnvioId,
-          solicitacaoId: envioSolicitacao.id,
-          acao: "enviar",
-          pedidoEditado: pedidoFornecedorEdicao,
-        }),
-      });
-      const json = await response.json() as { id?: number; numeroPedido?: string; error?: string };
-      if (!response.ok) throw new Error(json.error ?? "Não foi possível criar o pedido na Olist.");
-      setEnvioSucesso(json);
-      const pedidoOlistId = String(json.id ?? json.numeroPedido ?? "").trim();
-      setPedidosOlistPorSolicitacao((pedidos) => ({
-        ...pedidos,
-        [envioSolicitacao.id]: pedidoOlistId ? [pedidoOlistId] : ["Enviado"],
-      }));
-    } catch (error) {
-      setEnvioErro(error instanceof Error ? error.message : "Erro ao enviar para o fornecedor.");
-    } finally {
-      setEnvioEnviando(false);
-    }
-  }
-
-  async function prepararPedidoFornecedor() {
-    if (!session?.access_token || !envioSolicitacao || !fornecedorEnvioId) return;
-    setEnvioCarregando(true);
-    setEnvioErro(null);
-    try {
-      const response = await fetch("/api/fornecedores/enviar", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fornecedorId: fornecedorEnvioId,
-          solicitacaoId: envioSolicitacao.id,
-          acao: "preview",
-        }),
-      });
-      const json = await response.json() as { pedido?: PedidoFornecedorEdicao; error?: string };
-      if (!response.ok || !json.pedido) throw new Error(json.error ?? "Não foi possível gerar a prévia do pedido.");
-      setPedidoFornecedorEdicao(json.pedido);
-      setEnvioEtapa(3);
-    } catch (error) {
-      setEnvioErro(error instanceof Error ? error.message : "Erro ao preparar o pedido.");
-    } finally {
-      setEnvioCarregando(false);
-    }
-  }
-
-  function alterarPedidoFornecedor(patch: Partial<PedidoFornecedorEdicao>) {
-    setPedidoFornecedorEdicao((pedido) => pedido ? { ...pedido, ...patch } : pedido);
-  }
-
-  function alterarItemPedidoFornecedor(index: number, patch: Partial<PedidoFornecedorItemEdicao>) {
-    setPedidoFornecedorEdicao((pedido) => pedido ? {
-      ...pedido,
-      itens: pedido.itens.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
-    } : pedido);
-  }
-
-  function alterarDivisaoPedidoFornecedor(
-    itemIndex: number,
-    divisaoIndex: number,
-    campo: keyof DivisaoInfoAdicional,
-    valor: string,
-  ) {
-    setPedidoFornecedorEdicao((pedido) => {
-      if (!pedido?.itens[itemIndex]) return pedido;
-      const divisoes = extrairDivisoesInfoAdicional(pedido.itens[itemIndex].infoAdicional);
-      if (!divisoes[divisaoIndex]) return pedido;
-      divisoes[divisaoIndex] = { ...divisoes[divisaoIndex], [campo]: valor };
-
-      const indiceObservacao = pedido.itens
-        .slice(0, itemIndex)
-        .reduce((total, item) => total + extrairDivisoesInfoAdicional(item.infoAdicional).length, 0) + divisaoIndex;
-      const linhasObservacao = pedido.observacoesInternas.split("\n.\n");
-      const partes = linhasObservacao[indiceObservacao]?.split("     |     ") ?? [];
-      if (partes[0]) {
-        linhasObservacao[indiceObservacao] = criarLinhaObservacaoPedidoOlist({
-          descricao: partes[0],
-          quantidade: divisoes[divisaoIndex].quantidade,
-          unidade: divisoes[divisaoIndex].unidade,
-          estampa: divisoes[divisaoIndex].estampa,
-          variante: divisoes[divisaoIndex].variante,
-          laser: divisoes[divisaoIndex].laser,
-          tamanho: divisoes[divisaoIndex].tamanho,
-          tipo: divisoes[divisaoIndex].tipo,
-        });
-      }
-
-      return {
-        ...pedido,
-        observacoesInternas: linhasObservacao.join("\n.\n"),
-        itens: pedido.itens.map((item, index) => index === itemIndex
-          ? { ...item, infoAdicional: montarInfoAdicional(divisoes) }
-          : item),
-      };
     });
   }
 
@@ -1526,7 +1260,6 @@ export default function SolicitacoesProducaoPage() {
               const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
               const podeEditar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
               const podeCancelar = solicitacao.status !== "cancelada";
-              const jaEnviadaFornecedor = (pedidosOlistPorSolicitacao[solicitacao.id]?.length ?? 0) > 0;
 
               return (
                 <Fragment key={solicitacao.id}>
@@ -1638,20 +1371,6 @@ export default function SolicitacoesProducaoPage() {
                           >
                             <Send className="h-4 w-4" aria-hidden="true" />
                             {filasPorSolicitacao[solicitacao.id]?.status ?? (filaDisponivel ? "Enviar para fila do Fornecedor" : "Status da fila indisponível")}
-                          </button>
-                        )}
-                        {destacarDivisao && (
-                          <button
-                            type="button"
-                            onClick={() => void abrirEnvioFornecedor(solicitacao)}
-                            disabled={!session || carregandoItens || envioCarregando || jaEnviadaFornecedor}
-                            className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                            title={jaEnviadaFornecedor
-                              ? "Esta solicitação já foi enviada para o fornecedor"
-                              : session ? "Enviar para o fornecedor" : "Entre no sistema para enviar"}
-                          >
-                            <Send className="h-4 w-4" aria-hidden="true" />
-                            Enviar para o Fornecedor
                           </button>
                         )}
                         <button
@@ -2156,315 +1875,6 @@ export default function SolicitacoesProducaoPage() {
         />
       )}
       {detalheFilaId && session?.access_token && <DetalhesFilaProducao solicitacaoId={detalheFilaId} token={session.access_token} onClose={() => setDetalheFilaId(null)} onAtualizado={atualizarFila} />}
-      {envioModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Enviar para o Fornecedor</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Etapa {envioEtapa} de 3 — {
-                    envioEtapa === 1 ? "Seleção do fornecedor" :
-                    envioEtapa === 2 ? "Conferência dos produtos" : "Revisão final do pedido"
-                  }
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={fecharEnvioFornecedor}
-                disabled={envioCarregando || envioEnviando}
-                className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50"
-              >
-                Fechar
-              </button>
-            </div>
-
-            <div className="overflow-y-auto p-5">
-              {envioEtapa === 1 ? (
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold text-slate-900">Selecione o fornecedor</h4>
-                    <p className="mt-1 text-sm text-slate-600">
-                      São exibidos apenas fornecedores com ID do vendedor e ID do aplicativo.
-                    </p>
-                  </div>
-
-                  {envioCarregando ? (
-                    <p className="text-sm text-slate-600">Carregando fornecedores...</p>
-                  ) : fornecedoresEnvio.length === 0 ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                      Nenhum fornecedor possui os dados necessários para continuar.
-                    </p>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {fornecedoresEnvio.map((fornecedor) => {
-                        const selecionado = fornecedorEnvioId === fornecedor.id;
-                        return (
-                          <label
-                            key={fornecedor.id}
-                            className={`cursor-pointer rounded-lg border p-4 transition ${
-                              selecionado ? "border-emerald-600 bg-emerald-50" : "border-slate-200 hover:border-slate-400"
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <input
-                                type="radio"
-                                name="fornecedor-envio"
-                                value={fornecedor.id}
-                                checked={selecionado}
-                                onChange={() => setFornecedorEnvioId(fornecedor.id)}
-                                className="mt-1"
-                              />
-                              <div className="min-w-0">
-                                <p className="font-semibold text-slate-900">{fornecedor.nome}</p>
-                                <p className="mt-2 text-sm text-slate-600">ID vendedor: {fornecedor.vendedor_olist_id}</p>
-                                <p className="mt-1 break-all text-sm text-slate-600">ID aplicativo: {fornecedor.aplicativo_id}</p>
-                              </div>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : envioEtapa === 2 ? (
-                <div className="space-y-5">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fornecedor selecionado</p>
-                    <p className="mt-1 font-semibold text-slate-900">
-                      {fornecedoresEnvio.find((fornecedor) => fornecedor.id === fornecedorEnvioId)?.nome}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-semibold text-slate-900">Confira os produtos da solicitação</h4>
-                    <p className="mt-1 text-sm text-slate-600">Revise todas as informações antes de continuar.</p>
-                  </div>
-
-                  <div className="space-y-4">
-                    {itensConferencia.map((item) => {
-                      const quantidadeNecessaria = item.produtoFornecido
-                        ? item.quantidade_solicitada * item.produtoFornecido.quantidade_por_produto
-                        : null;
-                      return (
-                        <article key={item.id} className="rounded-lg border border-slate-200 p-4 sm:p-5">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <p className="font-semibold text-slate-900">
-                                {item.quantidade_solicitada} unidades — {item.sku}
-                              </p>
-                              <p className="mt-1 text-sm text-slate-600">{item.nomeProduto}</p>
-                            </div>
-                            <span className={`self-start rounded-full px-3 py-1 text-xs font-semibold ${
-                              item.tipo_corte === "LASER"
-                                ? "bg-indigo-100 text-indigo-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}>
-                              {item.tipo_corte === "LASER" ? "Corte a laser" : "Sem corte a laser"}
-                            </span>
-                          </div>
-
-                          <div className="mt-4 border-t border-slate-200 pt-4">
-                            <p className="text-sm font-semibold text-slate-800">Produto fornecido</p>
-                            {item.produtoFornecido ? (
-                              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-                                <div><dt className="text-slate-500">Referência</dt><dd className="mt-1 font-medium text-slate-800">{item.produtoFornecido.referencia ?? "-"}</dd></div>
-                                <div><dt className="text-slate-500">Quantidade necessária</dt><dd className="mt-1 font-medium text-slate-800">{formatarDecimal(quantidadeNecessaria ?? 0)} m</dd></div>
-                                <div><dt className="text-slate-500">Nome</dt><dd className="mt-1 font-medium text-slate-800">{item.produtoFornecido.nome}</dd></div>
-                              </dl>
-                            ) : (
-                              <p className="mt-2 text-sm text-slate-500">Nenhum produto fornecido relacionado.</p>
-                            )}
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                  <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-                    Continue para visualizar e editar exatamente o que será enviado à Olist.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  <div>
-                    <h4 className="font-semibold text-slate-900">Revise o pedido que será enviado</h4>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Edite os campos necessários. O JSON será montado somente após a confirmação.
-                    </p>
-                  </div>
-                  {pedidoFornecedorEdicao && (
-                    <div className="space-y-5">
-                      <section className="rounded-lg border border-slate-200 p-4">
-                        <h5 className="font-semibold text-slate-900">Dados do pedido</h5>
-                        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                          <label className="text-sm text-slate-700">ID do cliente
-                            <input disabled type="number" min={1} value={pedidoFornecedorEdicao.idContato} onChange={(event) => alterarPedidoFornecedor({ idContato: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                          <label className="text-sm text-slate-700">ID do vendedor
-                            <input disabled type="number" min={1} value={pedidoFornecedorEdicao.vendedor.id} onChange={(event) => alterarPedidoFornecedor({ vendedor: { id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                          <label className="text-sm text-slate-700">Situação
-                            <input disabled type="number" value={pedidoFornecedorEdicao.situacao} onChange={(event) => alterarPedidoFornecedor({ situacao: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                          <label className="text-sm text-slate-700">Data
-                            <input disabled type="date" value={pedidoFornecedorEdicao.data} onChange={(event) => alterarPedidoFornecedor({ data: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                        </div>
-                        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-sm font-semibold text-slate-800">Forma de pagamento e parcelas enviadas à Olist</p>
-                          <p className="mt-2 text-sm text-slate-700">Forma de recebimento: <strong>ID {pedidoFornecedorEdicao.pagamento.formaRecebimento.id}</strong></p>
-                          <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
-                            <table className="min-w-full text-sm"><thead className="bg-slate-100 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Parcela</th><th className="px-3 py-2">Prazo</th><th className="px-3 py-2">Valor</th><th className="px-3 py-2">Forma</th></tr></thead><tbody className="divide-y divide-slate-100">{pedidoFornecedorEdicao.pagamento.parcelas.map((parcela, index) => <tr key={`${parcela.dias}-${index}`}><td className="px-3 py-2">{index + 1}</td><td className="px-3 py-2">{parcela.dias === 0 ? "À vista" : `${parcela.dias} dias`}</td><td className="px-3 py-2 font-medium">{parcela.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="px-3 py-2">ID {parcela.formaRecebimento.id}</td></tr>)}</tbody></table>
-                          </div>
-                        </div>
-                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                          <label className="block text-sm text-slate-700">Observações enviadas à Olist
-                            <textarea disabled value={pedidoFornecedorEdicao.observacoes || "Nenhuma observação comum."} onChange={(event) => alterarPedidoFornecedor({ observacoes: event.target.value })} className="mt-1 min-h-32 w-full whitespace-pre-wrap rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                          <label className="block text-sm text-slate-700">Observações internas enviadas à Olist
-                            <textarea disabled value={pedidoFornecedorEdicao.observacoesInternas || "Nenhuma observação interna."} onChange={(event) => alterarPedidoFornecedor({ observacoesInternas: event.target.value })} className="mt-1 min-h-32 w-full whitespace-pre-wrap rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                          </label>
-                        </div>
-                      </section>
-
-                      {pedidoFornecedorEdicao.itens.map((item, index) => (
-                        <section key={`${item.produto.id}-${index}`} className="rounded-lg border border-slate-200 p-4">
-                          <h5 className="font-semibold text-slate-900">
-                            {item.produto.tipo === "S" ? "Serviço" : "Produto"} {index + 1}
-                          </h5>
-                          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                            <label className="text-sm text-slate-700">ID do produto
-                              <input disabled type="number" min={1} value={item.produto.id} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, id: Number(event.target.value) } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                            </label>
-                            <label className="text-sm text-slate-700">Tipo
-                              <input disabled value={item.produto.tipo} onChange={(event) => alterarItemPedidoFornecedor(index, { produto: { ...item.produto, tipo: event.target.value } })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                            </label>
-                            <label className="text-sm text-slate-700">Quantidade
-                              <input disabled type="number" min={0.0001} step="0.0001" value={item.quantidade} onChange={(event) => alterarItemPedidoFornecedor(index, { quantidade: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                            </label>
-                            <label className="text-sm text-slate-700">Preço unitário
-                              <input disabled type="number" min={0} step="0.01" value={item.valorUnitario} onChange={(event) => alterarItemPedidoFornecedor(index, { valorUnitario: Number(event.target.value) })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                            </label>
-                          </div>
-                          {extrairDivisoesInfoAdicional(item.infoAdicional).map((divisao, divisaoIndex) => (
-                            <div key={divisaoIndex} className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estampa/variante {divisaoIndex + 1}</p>
-                              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                <label className="text-sm text-slate-700">Estampa
-                                  <input value={divisao.estampa} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "estampa", event.target.value)} placeholder="Código da estampa" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-                                </label>
-                                <label className="text-sm text-slate-700">Variante
-                                  <input value={divisao.variante} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "variante", event.target.value)} placeholder="Variante" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-                                </label>
-                                <label className="text-sm text-slate-700">Quantidade da divisão
-                                  <input disabled inputMode="decimal" value={divisao.quantidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "quantidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                                </label>
-                                <label className="text-sm text-slate-700">Unidade
-                                  <input disabled value={divisao.unidade} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "unidade", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500" />
-                                </label>
-                                <label className="text-sm text-slate-700">Tamanho
-                                  <div className="mt-1">
-                                    <CampoTamanho
-                                      opcoes={tamanhos}
-                                      valor={divisao.tamanho}
-                                      onChange={(tamanho) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tamanho", tamanho)}
-                                    />
-                                  </div>
-                                </label>
-                                <label className="text-sm text-slate-700">Tipo do produto
-                                  <div className="mt-1">
-                                    <CampoTipoProduto
-                                      opcoes={tiposProduto}
-                                      valor={divisao.tipo}
-                                      onChange={(tipo) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "tipo", tipo)}
-                                    />
-                                  </div>
-                                </label>
-                                <label className="text-sm text-slate-700">Corte a laser
-                                  <select disabled value={divisao.laser} onChange={(event) => alterarDivisaoPedidoFornecedor(index, divisaoIndex, "laser", event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500">
-                                    <option value="false">Não</option>
-                                    <option value="true">Sim</option>
-                                  </select>
-                                </label>
-                              </div>
-                            </div>
-                          ))}
-                          {item.produto.tipo !== "S" && (
-                            <label className="mt-4 block text-sm text-slate-700">Informação adicional
-                              <textarea disabled value={item.infoAdicional} onChange={(event) => alterarItemPedidoFornecedor(index, { infoAdicional: event.target.value })} className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs disabled:bg-slate-100 disabled:text-slate-500" />
-                            </label>
-                          )}
-                        </section>
-                      ))}
-                    </div>
-                  )}
-                  {envioSucesso && (
-                    <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
-                      Pedido criado com sucesso{envioSucesso.numeroPedido ? `: ${envioSucesso.numeroPedido}` : envioSucesso.id ? `: ID ${envioSucesso.id}` : "."}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {envioErro && (
-                <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{envioErro}</p>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-200 p-5">
-              {envioEtapa > 1 && !envioSucesso && (
-                <button
-                  type="button"
-                  onClick={() => setEnvioEtapa((etapa) => etapa === 3 ? 2 : 1)}
-                  disabled={envioCarregando || envioEnviando}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Voltar
-                </button>
-              )}
-              {envioEtapa === 1 ? (
-                <button
-                  type="button"
-                  onClick={() => void revisarProdutosFornecedor()}
-                  disabled={!fornecedorEnvioId || envioCarregando}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {envioCarregando ? "Carregando..." : "Revisar produtos"}
-                </button>
-              ) : envioEtapa === 2 ? (
-                <button
-                  type="button"
-                  onClick={() => void prepararPedidoFornecedor()}
-                  disabled={envioCarregando || itensConferencia.length === 0}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {envioCarregando ? "Gerando prévia..." : "Revisar pedido final"}
-                </button>
-              ) : (
-                envioSucesso ? (
-                  <button
-                    type="button"
-                    onClick={fecharEnvioFornecedor}
-                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                  >
-                    Fechar
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void confirmarEnvioFornecedor()}
-                    disabled={envioEnviando || !pedidoFornecedorEdicao}
-                    className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  >
-                    {envioEnviando ? "Criando pedido..." : "Criar pedido na Olist"}
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-      )}
       </div>
     </AccessGuard>
   );

@@ -23,8 +23,8 @@ export type RascunhoFilaOlist = Omit<SelecoesFilaOlist, "tipoVenda" | "tecidos" 
   tecidos: Array<{ tecidoId: string; id: number; preco: number | null }>;
   laser: { id: number; preco: number | null } | null;
 };
-export function criarRascunhoFilaOlist(tecidos: string[], salvas?: SelecoesFilaOlistParciais): RascunhoFilaOlist {
-  return { clienteId: salvas?.clienteId ?? 0, vendedorId: salvas?.vendedorId ?? 0, formaId: salvas?.formaId ?? 0,
+export function criarRascunhoFilaOlist(tecidos: string[], salvas?: SelecoesFilaOlistParciais, vendedorPadraoId?: number | null): RascunhoFilaOlist {
+  return { clienteId: salvas?.clienteId ?? 0, vendedorId: salvas?.vendedorId ?? vendedorPadraoId ?? 0, formaId: salvas?.formaId ?? 0,
     planoId: salvas?.planoId ?? "", tipoVenda: salvas?.tipoVenda ?? "", laser: salvas?.laser ? { id: salvas.laser.id, preco: salvas.laser.preco ?? null } : null,
     tecidos: [...new Set(tecidos)].map((tecidoId) => { const salvo = salvas?.tecidos?.find((s) => s.tecidoId === tecidoId); return { tecidoId, id: salvo?.id ?? 0, preco: salvo?.preco ?? null }; }) };
 }
