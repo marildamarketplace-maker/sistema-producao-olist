@@ -3,7 +3,9 @@ import { prisma } from "@/lib/prisma";
 
 /** Serializa a relação inteira, inclusive cadastros duplicados ou ainda ausentes. */
 export async function bloquearRelacaoFornecedor(tx: Prisma.TransactionClient, clienteId: string, matrizId: string) {
-  await tx.$queryRaw`SELECT public.fornecedor_relacao_bloquear(${clienteId}::uuid,${matrizId}::uuid)`;
+  // PrismaPg não desserializa a coluna PostgreSQL void retornada pela função.
+  // O cast afeta apenas o resultado descartado; o lock permanece na transação.
+  await tx.$queryRaw`SELECT public.fornecedor_relacao_bloquear(${clienteId}::uuid,${matrizId}::uuid)::text`;
 }
 
 export async function bloquearRelacoesFornecedor(tx: Prisma.TransactionClient,

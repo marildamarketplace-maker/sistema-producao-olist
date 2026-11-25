@@ -4,6 +4,7 @@ import {
 } from "./contrato";
 import { normalizarDocumento } from "../documento-fiscal";
 import { serializarCanonico } from "./cripto";
+import { referenciaVendedorContatoSync, nomeVendedorContatoSync, chaveBaseVendedorContato, ehBaseVendedorContato } from "./vendedores-contato";
 import { referenciasTiposContatoSync, tiposSemanticosContatoSync } from "./tipos-contato";
 
 import { nomeProdutoElegivelSync, observarProducaoSync, producaoCanonicaSync } from "./produtos";
@@ -230,6 +231,10 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
     }
     if (objeto(fonte.vendedor) && fonte.vendedor.id) pendencias.push("REFERENCIA_VENDEDOR");
     if (entidade === "CONTATO" && completo) {
+      const vendedor = referenciaVendedorContatoSync(fonte.vendedor);
+      campos.vendedorNome = vendedor?.nome ? nomeVendedorContatoSync(vendedor.nome) : null;
+    }
+    if (entidade === "CONTATO" && completo) {
       tiposContatoRemotos = referenciasTiposContatoSync(fonte.tipos);
       if (tiposContatoRemotos.length) pendencias.push("REFERENCIA_TIPOS_CONTATO");
     }
@@ -245,7 +250,7 @@ export function observarRegistro(entidade: EntidadeSync, payload: unknown, opcoe
   if (!nome.trim()) pendencias.push("NOME_OBRIGATORIO");
   const alterado = payload.dataAlteracao ?? payload.dataAtualizacao;
   const alteradoEm = alterado === null || alterado === undefined ? null : texto(alterado);
-  return { id, chave, nome, situacao, alteradoEm, tipo, paiId, completo, campos, pendencias, ...(tiposContatoRemotos ? { tiposContatoRemotos } : {}) };
+  return { id, chave, nome, situacao, alteradoEm, tipo, paiId, completo, campos, pendencias, ...(tiposContatoRemotos ? { tiposContatoRemotos } : {}), ...(entidade === "CONTATO" && completo ? { vendedorContatoRemoto: referenciaVendedorContatoSync(payload.vendedor) } : {}) };
 }
 
 /** A Olist materializa cobrança ausente como endereço vazio com país Brasil.
@@ -302,6 +307,7 @@ export function avaliarReplicas(entrada: {
   const fontesPorCampo: Record<string, string[]> = {};
   const nomesCampos = new Set([...Object.keys(hashesBase ?? {}), ...presentes.flatMap(item => Object.keys(item.observacao.campos))]);
   for (const campo of nomesCampos) {
+    if (entidade === "CONTATO" && (campo === "vendedorNome" || ehBaseVendedorContato(campo))) continue;
     if (presentes.some(item => !(campo in item.observacao.campos))) {
       motivos.push(`CAMPO_INCOMPLETO:${campo}`);
       continue;
@@ -327,18 +333,37 @@ export function avaliarReplicas(entrada: {
     campos[campo] = candidatos[0].valor;
     fontesPorCampo[campo] = candidatos.map(item => item.aplicativoId).sort();
   }
+  const basesVendedor: Record<string, string> = {};
+  if (entidade === "CONTATO") {
+    const vendedores = presentes.map(item => ({ ...item, nome: item.observacao.campos.vendedorNome }));
+    if (vendedores.some(item => item.nome !== null && typeof item.nome !== "string")) motivos.push("VENDEDOR_CONTATO_INCOMPLETO");
+    const semBase = vendedores.some(item => entrada.hashesBase?.[chaveBaseVendedorContato(item.aplicativoId)] === undefined);
+    const candidatos = semBase ? vendedores : vendedores.filter(item => hash(item.nome ?? null) !== entrada.hashesBase?.[chaveBaseVendedorContato(item.aplicativoId)]);
+    const nomes = new Set(candidatos.map(item => item.nome));
+    if (nomes.size > 1) motivos.push(semBase ? "DIVERGENCIA_INICIAL:vendedorNome" : "CONFLITO:vendedorNome");
+    const nome = candidatos[0]?.nome ?? null;
+    campos.vendedorNome = typeof nome === "string" ? nome : null;
+    fontesPorCampo.vendedorNome = candidatos.map(item => item.aplicativoId).sort();
+    for (const item of vendedores) basesVendedor[chaveBaseVendedorContato(item.aplicativoId)] = hash(campos.vendedorNome ?? item.nome ?? null);
+    // Ausência na origem é uma intenção de preservar cada vínculo local.
+    // A base por réplica evita restaurar esse vínculo na próxima auditoria.
+  }
   if (motivos.length) return bloqueada();
   const aplicativosCriar = replicas.filter(item => !item.observacao).map(item => item.aplicativoId);
   const esperado = serializarCanonico(campos);
-  const aplicativosAtualizar = presentes.filter(item => serializarCanonico(Object.fromEntries(Object.entries(item.observacao.campos).map(([campo, valor]) => [campo, valorComparavel(campo, valor)]))) !== esperado).map(item => item.aplicativoId);
+  const aplicativosAtualizar = presentes.filter(item => {
+    const alvo = entidade === "CONTATO" && campos.vendedorNome === null ? { ...campos, vendedorNome: item.observacao.campos.vendedorNome } : campos;
+    return serializarCanonico(Object.fromEntries(Object.entries(item.observacao.campos).map(([campo, valor]) => [campo, valorComparavel(campo, valor)]))) !== (alvo === campos ? esperado : serializarCanonico(alvo));
+  }).map(item => item.aplicativoId);
   if (aplicativosCriar.length) {
+    if (entidade === "CONTATO" && presentes.some(item => item.observacao.vendedorContatoRemoto)) motivos.push("REFERENCIA_VENDEDOR");
     for (const item of presentes) motivos.push(...item.observacao.pendencias.filter(codigo => codigo.startsWith("REFERENCIA_") || codigo === "IMAGENS_REQUEREM_VALIDACAO"));
   }
   if ((aplicativosCriar.length || aplicativosAtualizar.length) && !CAPACIDADES_SYNC[entidade].criar) motivos.push("ENTIDADE_SOMENTE_LEITURA");
   if (motivos.length) return bloqueada();
   return {
     status: aplicativosCriar.length || aplicativosAtualizar.length ? "PROPAGAR" : "SINCRONIZADO",
-    motivos: [], campos, hashes: gerarHashesCampos(campos, hash), fontesPorCampo, aplicativosCriar, aplicativosAtualizar,
+    motivos: [], campos, hashes: { ...gerarHashesCampos(campos, hash), ...basesVendedor }, fontesPorCampo, aplicativosCriar, aplicativosAtualizar,
   };
 }
 
@@ -379,6 +404,10 @@ export function prepararPayload(entidade: EntidadeSync, campos: CamposSync, opco
     throw new FalhaSync("IDENTIDADE_INCOMPATIVEL", "O tipo de pessoa não corresponde ao contrato de contatos.");
   }
   payload.cpfCnpj = documento;
+  if (campos.vendedorNome !== undefined) {
+    if (campos.vendedorNome !== null && (typeof campos.vendedorNome !== "string" || !nomeVendedorContatoSync(campos.vendedorNome) || campos.vendedorNome.length > 200)) throw new FalhaSync("VENDEDOR_CONTATO_INVALIDO", "O nome do vendedor é inválido.");
+    if (opcoes.operacao === "ATUALIZAR") payload.vendedorNome = campos.vendedorNome;
+  }
   if (campos.tiposContato !== undefined) payload.tiposContato = tiposSemanticosContatoSync(campos.tiposContato);
   for (const campo of ["endereco", "enderecoCobranca"] as const) if (campo in campos) payload[campo] = estruturaTextos(campos[campo], ENDERECO);
   if (opcoes.operacao === "CRIAR") payload.situacao = "B";

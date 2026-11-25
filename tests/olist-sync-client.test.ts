@@ -667,3 +667,25 @@ test("cadência envolve cada HTTP, publica só metadados e precede guard e marca
     {...opcoes,antesDeRequisicao:async m=>{if(m!=="GET")throw new FalhaSync("COTA_OLIST","Aguarde",true);}}),falha("COTA_OLIST",false));
   assert.ok(!eventos.includes("guard")&&!eventos.includes("POST"));
 });
+
+test("PUT contato usa vendedor local explícito e remove campos canônicos nas duas sanitizações", async () => {
+  const m = mock([{ status: 200, dados: { cpfCnpj: "04252011000110", razaoSocial: "Conta" } }, { status: 204, dados: null }]);
+  await m.cliente.atualizar("destino", "CONTATO", "10", { nome: "Contato", cpfCnpj: "52998224725", tipoPessoa: "F", vendedorNome: "ana", vendedor: { id: 123 } }, { validarConta: () => true, vendedorDestinoId: "987" });
+  const put = m.chamadas.find(c => c.metodo === "PUT")!;
+  assert.deepEqual((put.payload as Record<string, unknown>).vendedor, { id: 987 });
+  assert.equal("vendedorNome" in (put.payload as Record<string, unknown>), false);
+  const bloqueada = mock([]);
+  await assert.rejects(bloqueada.cliente.atualizar("destino", "CONTATO", "10", { nome: "Contato", cpfCnpj: "52998224725", tipoPessoa: "F", vendedorNome: "ana" }, { validarConta: () => true }), falha("VENDEDOR_CONTATO_NAO_MAPEADO"));
+  assert.equal(bloqueada.chamadas.length, 0);
+});
+
+test("catálogo de vendedores usa consulta paginada e credencial validada da mesma conta", async () => {
+  const m = mock([{ status: 200, dados: { cpfCnpj: "04252011000110", razaoSocial: "Conta" } }, { status: 200, dados: pagina([{ id: 987, contato: { nome: "Ana" }, situacao: "B" }]) }]);
+  const resultado = await m.cliente.listarVendedoresContato!("destino", { offset: 0, limit: 100 }, { validarConta: () => true });
+  assert.deepEqual(resultado.itens, [{ id: "987", nome: "Ana", situacao: "B" }]);
+  assert.equal(new URL(m.chamadas[1].url).pathname, "/public-api/v3/vendedores");
+  assert.equal(new URL(m.chamadas[1].url).searchParams.get("limit"), "100");
+  const outra = mock([{ status: 200, dados: { cpfCnpj: "04252011000110", razaoSocial: "Conta" } }]);
+  await assert.rejects(outra.cliente.listarVendedoresContato!("destino", { offset: 0, limit: 100 }, { validarConta: () => false }), falha("CONTA_ALTERADA"));
+  assert.equal(outra.chamadas.length, 1);
+});

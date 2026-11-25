@@ -14,7 +14,7 @@ import { gerarHashesCampos, observarRegistro } from "../src/lib/olist-sync/domin
 import type { CamposSync } from "../src/lib/olist-sync/contrato";
 
 const url = process.env.OLIST_SYNC_SERVICE_TEST_DATABASE_URL;
-test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", { skip: !url, timeout: 180_000 }, async t => {
+test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", { skip: !url, timeout: 240_000 }, async t => {
   const endereco = new URL(url!);
   assert.ok(["localhost", "127.0.0.1"].includes(endereco.hostname));
   assert.match(endereco.pathname, /^\/olist_sync_test_service$/);
@@ -36,6 +36,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
   const cripto = criarCriptografiaSync({ OLIST_SYNC_DATA_KEY:Buffer.alloc(32,1).toString("base64"), OLIST_SYNC_HMAC_KEY:Buffer.alloc(32,2).toString("base64") });
   let agora = Date.now();
   const contas = new Map<string, Map<string, CamposSync>>();
+  const vendedores = new Map<string, Array<{id:number;contato:{nome:string};situacao:string}>>();
   const tipos = new Map<string, Array<{id:number;nome:string;perfilContato:number}>>();
   const chamadas:RequisicaoSync[] = [];
   const credenciaisSolicitadas:string[] = [];
@@ -55,6 +56,10 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       if (interceptar) await interceptar(r,app);
       if(responder) {const resposta=await responder(r,app);if(resposta)return resposta;}
       if (caminho.pathname.endsWith("/info")) return { status:200, dados:{cpfCnpj:docs.get(app),razaoSocial:`Conta ${app}`} };
+      if (caminho.pathname.endsWith("/vendedores")) {
+        const itens=vendedores.get(app)??[],offset=Number(caminho.searchParams.get("offset")),limit=Number(caminho.searchParams.get("limit"));
+        return {status:200,dados:{itens:itens.slice(offset,offset+limit),paginacao:{total:itens.length,offset,limit}}};
+      }
       if (caminho.pathname.endsWith("/contatos/tipos")) {
         const itens=tipos.get(app)??[], offset=Number(caminho.searchParams.get("offset")), limit=Number(caminho.searchParams.get("limit"));
         return {status:200,dados:{itens:itens.slice(offset,offset+limit),paginacao:{total:itens.length,offset,limit}}};
@@ -82,7 +87,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
       for(const campo of ["estoque","precos","custos","tributacao","ncm"]) assert.equal(campo in r.payload,false,`Campo protegido enviado: ${campo}`);
       if (app===rejeitarDestino) return {status:422,dados:{}};
       const payloadProduto=r.payload.producao?{...r.payload,producao:expandirProducao(r.payload.producao)}:r.payload;
-      const dadosContato=caminho.pathname.includes("/contatos") && Array.isArray(r.payload.tipos)
+      const dadosContato:CamposSync=caminho.pathname.includes("/contatos") && Array.isArray(r.payload.tipos)
         ? {...r.payload,tipos:r.payload.tipos.map(id=>({id,descricao:tipos.get(app)?.find(tipo=>tipo.id===id)?.nome??null}))}:payloadProduto;
       if(r.metodo==="POST") {
         if(post429) {post429=false;return {status:429,dados:{},retryAfter:"60"};}
@@ -90,11 +95,14 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
         if(postIncerto) {postIncerto=false;throw new Error("Resposta perdida depois do commit remoto");}
         return {status:200,dados:{id:Number(criado)}};
       }
-      conta.set(id,{...conta.get(id),...dadosContato});return {status:204,dados:null};
+      const vendedor=dadosContato.vendedor;
+      const expandido=caminho.pathname.includes("/contatos") && vendedor && typeof vendedor==="object" && !Array.isArray(vendedor)
+        ? {...dadosContato,vendedor:{...vendedor,nome:vendedores.get(app)?.find(v=>v.id===vendedor.id)?.contato.nome??null}}:dadosContato;
+      conta.set(id,{...conta.get(id),...expandido});return {status:204,dados:null};
     },
   };
   const cliente = criarClienteSync(transporte);
-  const servico=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
+  let servico=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
   const produto=(id:number,sku="001-A",descricao="Ref Toalha"):CamposSync=>({id,sku,descricao:descricao.startsWith("Ref ")?descricao:`Ref ${descricao}`,tipo:"S",situacao:"A",estoque:{saldo:10},precos:{preco:50},ncm:"1234"});
   async function reset() {
     await sql.query("TRUNCATE olist_sync_registro,olist_sync_execucao CASCADE");
@@ -103,7 +111,7 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     await db.olistSyncParticipante.updateMany({where:{configuracaoId:config!.id},data:{contaIdentidade:null,proximaChamadaEm:null}});
     await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config!.id,aplicativoId:terceiro}},data:{habilitado:false}});
     await sql.query("UPDATE usuario SET ativo=true,pode_executar_sincronizacao_olist=true WHERE id=$1",[usuario]);
-    tipos.clear();contas.clear(); for(const app of [a,b,terceiro])contas.set(app,new Map()); chamadas.length=0;credenciaisSolicitadas.length=0;postIncerto=false;post429=false;rejeitarDestino=null;interceptar=null;responder=null;agora=Date.now()+1000;proximoId=1000;
+    vendedores.clear();tipos.clear();contas.clear(); for(const app of [a,b,terceiro])contas.set(app,new Map()); chamadas.length=0;credenciaisSolicitadas.length=0;postIncerto=false;post429=false;rejeitarDestino=null;interceptar=null;responder=null;agora=Date.now()+1000;proximoId=1000;
     docs.set(b,"11222333000181");
   }
   async function enfileirar(modo:"AUDITAR"|"AUDITAR_E_APLICAR"|"APLICAR"="AUDITAR_E_APLICAR") {
@@ -901,6 +909,163 @@ test("Olist sync: consumidor completo com PostgreSQL real e provedor simulado", 
     assert.equal((await db.olistSyncExecucao.findUniqueOrThrow({where:{id:e.id}})).status,"CONCLUIDA_COM_PENDENCIAS");assert.equal(escritas().length,0);
   });
   const contato=(id:number, documento="52998224725", tiposContato:CamposSync["tipos"]=[]) => ({id,nome:"Contato",cpfCnpj:documento,tipoPessoa:"F",situacao:"B",tipos:tiposContato});
+  async function prepararVendedores() {
+    await reset();
+    await db.olistSyncConfiguracao.update({where:{id:config!.id},data:{entidades:["CONTATO"]}});
+    vendedores.set(a,[{id:101,contato:{nome:"Ana Silva"},situacao:"B"},{id:102,contato:{nome:"Bia"},situacao:"B"}]);
+    vendedores.set(b,[{id:201,contato:{nome:" ANA   SILVA "},situacao:"B"},{id:202,contato:{nome:"Bia"},situacao:"B"}]);
+    contas.get(a)!.set("10",{...contato(10),vendedor:{id:101,nome:"Ana Silva"}});
+    contas.get(b)!.set("20",{...contato(20),vendedor:{id:201,nome:" ANA   SILVA "}});
+    const base=await enfileirar("AUDITAR");await terminar(base.id);
+    assert.equal(escritas().length,0);
+  }
+  await t.test("vendedor usa ID do destino e só conclui após GET confirmar o vínculo",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,1);
+    assert.equal(escritas()[0].token,b);assert.deepEqual((escritas()[0].payload as CamposSync).vendedor,{id:202});
+    assert.equal((await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id}})).status,"CONFIRMADA");
+    const nova=await enfileirar();await terminar(nova.id);assert.equal(escritas().length,1,"não repete PUT confirmado");
+    const etapas=await db.olistSyncEtapa.findMany({where:{execucaoId:e.id},select:{cursorJson:true}});
+    assert.ok(!JSON.stringify(etapas).includes("Ana Silva"),"nomes ficam cifrados nos checkpoints");
+  });
+  for(const caso of ["ausente","ambiguo","inativo"] as const)await t.test(`vendedor ${caso} no destino deixa contato pendente sem PUT`,async()=>{
+    await prepararVendedores();
+    vendedores.set(b,caso==="ausente"?[vendedores.get(b)![0]]:caso==="ambiguo"?[...vendedores.get(b)!,{id:203,contato:{nome:" BIA "},situacao:"B"}]:vendedores.get(b)!.map(v=>v.id===202?{...v,situacao:"I"}:v));
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{execucaoId:e.id,status:"AGUARDANDO_REVISAO",tipo:{startsWith:"VENDEDOR_CONTATO_"}}}));
+    assert.ok(await db.olistSyncEstado.count({where:{status:"AGUARDANDO_REVISAO"}}));
+  });
+  await t.test("origem sem vendedor atualiza outros campos e preserva vínculo em auditorias seguintes",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:null,email:"novo@example.test"});
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,1);assert.deepEqual((escritas()[0].payload as CamposSync).vendedor,{id:201});
+    assert.equal(contas.get(a)!.get("10")!.vendedor,null);
+    const estados=await db.olistSyncEstado.findMany({where:{entidade:"CONTATO"},select:{status:true}});
+    assert.ok(estados.every(s=>s.status==="SINCRONIZADO"),JSON.stringify(estados));
+    const nova=await enfileirar();await terminar(nova.id);assert.equal(escritas().length,1);
+    assert.equal(await db.olistSyncPendencia.count({where:{execucaoId:nova.id,status:"AGUARDANDO_REVISAO"}}),0);
+  });
+  await t.test("vendedores diferentes na primeira auditoria ficam pendentes",async()=>{
+    await prepararVendedores();
+    await db.olistSyncRegistro.updateMany({data:{hashesBaseJson:{}}});
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{execucaoId:e.id,tipo:"DIVERGENCIA_INICIAL:vendedorNome"}}));
+  });
+  await t.test("PUT de resposta incerta confirma vendedor por GET sem repetir escrita",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    responder=async(r,app)=>{
+      if(r.metodo!=="PUT" || app!==b)return undefined;
+      contas.get(b)!.set("20",{...contas.get(b)!.get("20"),vendedor:{id:202,nome:"Bia"}});
+      throw new Error("Resposta perdida depois do commit remoto");
+    };
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,1);
+    assert.equal((await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id}})).status,"CONFIRMADA");
+  });
+  await t.test("GET posterior com vendedor divergente não confirma PUT",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    responder=async r=>r.metodo==="PUT"?{status:204,dados:null}:undefined;
+    const e=await enfileirar();await terminar(e.id);
+    assert.equal(escritas().length,1);
+    assert.equal((await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id}})).status,"RESULTADO_INCONCLUSIVO");
+  });
+  await t.test("catálogo vendedores paginado retoma checkpoint sem reler página por contato",async()=>{
+    await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
+    vendedores.set(a,Array.from({length:105},(_,i)=>({id:i+1,contato:{nome:`Vendedor ${i}`},situacao:"B"})));
+    for(let i=0;i<4;i++)contas.get(a)!.set(String(10+i),contato(10+i,String(52998224725+i)));
+    const e=await enfileirar("AUDITAR");
+    await avancarAte(async()=>chamadas.some(r=>r.token===a&&new URL(r.url).pathname.endsWith("/vendedores")),"primeira página vendedores");
+    servico=criarServicoOlistSync(db,cliente,{agora:()=>new Date(agora),cripto,aguardar:async ms=>{agora+=ms;}});
+    await terminar(e.id);
+    const paginas=chamadas.filter(r=>r.token===a&&new URL(r.url).pathname.endsWith("/vendedores"));
+    assert.deepEqual(paginas.map(r=>new URL(r.url).searchParams.get("offset")),["0","100"]);
+  });
+  await t.test("catálogo de vendedores alterado após auditoria bloqueia aplicação",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    const audit=await enfileirar("AUDITAR");await terminar(audit.id);
+    vendedores.set(b,[vendedores.get(b)![0]]);
+    const e=await enfileirar("APLICAR");await terminar(e.id);
+    assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{execucaoId:e.id,tipo:"VENDEDOR_CONTATO_NAO_MAPEADO"}}));
+    assert.equal((await db.olistSyncEstado.findFirstOrThrow({where:{aplicativoId:b,entidade:"CONTATO"}})).status,"AGUARDANDO_REVISAO");
+  });
+  await t.test("troca concorrente de ID com mesmo nome no destino bloqueia PUT",async()=>{
+    await prepararVendedores();
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),email:"novo@example.test"});
+    const audit=await enfileirar("AUDITAR");await terminar(audit.id);
+    vendedores.set(b,[{id:299,contato:{nome:"Ana Silva"},situacao:"B"},vendedores.get(b)![1]]);
+    contas.get(b)!.set("20",{...contas.get(b)!.get("20"),vendedor:{id:299,nome:"Ana Silva"}});
+    const e=await enfileirar("APLICAR");await terminar(e.id);
+    assert.equal(escritas().length,0);
+    assert.ok(await db.olistSyncPendencia.count({where:{execucaoId:e.id,tipo:"DESTINO_ALTERADO"}}));
+  });
+  await t.test("revisão manual de vendedor divergente aplica a empresa escolhida",async()=>{
+    await prepararVendedores();
+    await db.olistSyncRegistro.updateMany({data:{hashesBaseJson:{}}});
+    contas.get(b)!.set("20",{...contas.get(b)!.get("20"),vendedor:{id:202,nome:"Bia"}});
+    const audit=await enfileirar("AUDITAR");await terminar(audit.id);
+    const p=await db.olistSyncPendencia.findFirstOrThrow({where:{execucaoId:audit.id,tipo:"DIVERGENCIA_INICIAL:vendedorNome"}});
+    const atualConfig=await repo.obterConfiguracao(pai);assert.ok(atualConfig);
+    const antigas={data:process.env.OLIST_SYNC_DATA_KEY,hmac:process.env.OLIST_SYNC_HMAC_KEY};
+    try {
+      process.env.OLIST_SYNC_DATA_KEY=Buffer.alloc(32,1).toString("base64");process.env.OLIST_SYNC_HMAC_KEY=Buffer.alloc(32,2).toString("base64");
+      await resolverPendenciaSync(db,atualConfig,usuario,p.id,{versao:p.versao,acao:"APROVAR",motivo:"Vendedor conferido; usar a empresa de origem escolhida",aplicativoFonteId:a});
+    } finally {
+      if(antigas.data===undefined)delete process.env.OLIST_SYNC_DATA_KEY;else process.env.OLIST_SYNC_DATA_KEY=antigas.data;
+      if(antigas.hmac===undefined)delete process.env.OLIST_SYNC_HMAC_KEY;else process.env.OLIST_SYNC_HMAC_KEY=antigas.hmac;
+    }
+    const e=await enfileirar("APLICAR");await terminar(e.id);
+    assert.equal(escritas().length,1);assert.deepEqual((escritas()[0].payload as CamposSync).vendedor,{id:201});
+    assert.equal((await db.olistSyncOperacao.findFirstOrThrow({where:{execucaoId:e.id}})).status,"CONFIRMADA");
+    const nova=await enfileirar();await terminar(nova.id);assert.equal(escritas().length,1);
+  });
+  await t.test("vendedor converge em três contas aceitando avanço já confirmado de outro destino",async()=>{
+    await prepararVendedores();
+    await db.olistSyncParticipante.update({where:{configuracaoId_aplicativoId:{configuracaoId:config.id,aplicativoId:terceiro}},data:{habilitado:true}});
+    vendedores.set(terceiro,[{id:301,contato:{nome:"Ana Silva"},situacao:"B"},{id:302,contato:{nome:"Bia"},situacao:"B"}]);
+    contas.get(terceiro)!.set("30",{...contato(30),vendedor:{id:301,nome:"Ana Silva"}});
+    const base=await enfileirar("AUDITAR");await terminar(base.id);
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    const e=await enfileirar();await terminar(e.id,240);
+    assert.equal(escritas().length,2);
+    assert.equal(await db.olistSyncOperacao.count({where:{execucaoId:e.id,status:"CONFIRMADA"}}),2);
+    assert.deepEqual(contas.get(terceiro)!.get("30")!.vendedor,{id:302,nome:"Bia"});
+  });
+  for(const incremental of [false,true])for(const caso of ["ausente","homonimo"] as const)await t.test(`retomada após corrigir dependência no catálogo (${caso}; incremental: ${incremental})`,async()=>{
+    await prepararVendedores();
+    const todos=vendedores.get(b)!;
+    vendedores.set(b,caso==="ausente"?[todos[0]]:[...todos,{id:203,contato:{nome:" BIA "},situacao:"B"}]);
+    contas.get(a)!.set("10",{...contas.get(a)!.get("10"),vendedor:{id:102,nome:"Bia"}});
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,0);
+    vendedores.set(b,todos);
+    if(incremental) {
+      const coberturas=await db.olistSyncCobertura.findMany({where:{configuracaoId:config.id,entidade:"CONTATO"},select:{id:true,contaIdentidade:true}});
+      for(const cobertura of coberturas)await db.olistSyncCobertura.update({where:{id:cobertura.id},data:{incrementalValidado:true,incrementalValidadoEm:new Date(agora),incrementalValidadoPor:usuario,incrementalContaIdentidade:cobertura.contaIdentidade,incrementalVersaoContrato:1,incrementalFuso:"America/Sao_Paulo"}});
+      responder=async r=>r.metodo==="GET"&&new URL(r.url).pathname.endsWith("/contatos")&&new URL(r.url).searchParams.has("dataAtualizacao")
+        ?{status:200,dados:{itens:[],paginacao:{total:0,offset:0,limit:100}}}:undefined;
+    }
+    const segunda=incremental?await repo.enfileirar({configuracaoId:config.id,modo:"AUDITAR_E_APLICAR",idempotencia:randomUUID(),solicitadoPor:usuario,origem:"MANUAL",completa:false}):await enfileirar();
+    await terminar(segunda.id);
+    assert.equal(escritas().length,1);assert.deepEqual((escritas()[0].payload as CamposSync).vendedor,{id:202});
+    if(incremental) {
+      const etapas=await db.olistSyncEtapa.findMany({where:{execucaoId:segunda.id,fase:"DETALHAR"},select:{cursorJson:true}});
+      assert.ok(etapas.every(e=>(e.cursorJson as {plano:{modo:string}}).plano.modo==="INCREMENTAL"));
+    }
+    assert.equal(await db.olistSyncPendencia.count({where:{status:"AGUARDANDO_REVISAO"}}),0);
+    const estados=await db.olistSyncEstado.findMany({where:{entidade:"CONTATO"},select:{status:true}});
+    assert.ok(estados.every(s=>s.status==="SINCRONIZADO"));
+    await terminar((await enfileirar()).id);assert.equal(escritas().length,1);
+  });
   await t.test("tipos equivalentes com IDs distintos criam contato usando o ID do destino e resolvem bloqueio antigo",async()=>{
     await reset();await db.olistSyncConfiguracao.update({where:{id:config.id},data:{entidades:["CONTATO"]}});
     tipos.set(a,[{id:1,nome:"Cliente",perfilContato:0}]);tipos.set(b,[{id:87,nome:" CLIENTE ",perfilContato:0}]);

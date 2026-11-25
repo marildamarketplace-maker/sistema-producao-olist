@@ -1,3 +1,4 @@
+import { chaveBaseVendedorContato } from "@/lib/olist-sync/vendedores-contato";
 import { VERSAO_OBSERVACAO_CONTATO } from "@/lib/olist-sync/tipos-contato";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
@@ -111,7 +112,7 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
       const registro = await tx.olistSyncRegistro.findUniqueOrThrow({ where: { id: p.registroId }, select: { revisao: true } });
       const estados = await tx.olistSyncEstado.findMany({ where: { configuracaoId: config.id, registroId: p.registroId, participante: { habilitado: true } }, select: { aplicativoId: true, remoteId: true, dadosCriptografados: true, hashesJson: true, ultimaExecucaoId: true, fingerprint: true, presente: true, detalhePendente: true, metadadosJson: true }, take: 20 });
       if(p.entidade === "CONTATO" && estados.some(s => objetoJson(s.metadadosJson).versaoObservacaoContato !== VERSAO_OBSERVACAO_CONTATO))
-        throw new ErroRepositorioSync("Reaudite os contatos para validar os tipos de cada conta antes de aprovar.");
+        throw new ErroRepositorioSync("Reaudite os contatos para validar os tipos e vendedores de cada conta antes de aprovar.");
       const fonte = estados.find(s => s.aplicativoId === input.aplicativoFonteId);
       if (!fonte?.dadosCriptografados)
         throw new ErroRepositorioSync("Escolha uma empresa participante com observação completa.");
@@ -162,21 +163,29 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
       const entidade = entidadeSync(p.entidade), revisao = registro.revisao + 1, replicas: CamposSync = {};
       for (const membro of membros) {
         const s = estados.find(v => v.aplicativoId === membro.aplicativoId);
-        replicas[membro.aplicativoId] = s ? { remoteId: s.remoteId, hashes: objetoJson(s.hashesJson) } : null;
+        const observado = s?.dadosCriptografados ? observacaoProtegida(c.decifrar(s.dadosCriptografados, `${config.id}:estado:${s.aplicativoId}:${p.entidade}:${s.remoteId}`)) : null;
+        replicas[membro.aplicativoId] = s ? { remoteId: s.remoteId, hashes: objetoJson(s.hashesJson), ...(p.entidade === "CONTATO" ? { vendedorVinculo: c.hash(observado?.vendedorContatoRemoto?.id ?? null, `${config.id}:vendedor-local`) } : {}) } : null;
       }
       if (await tx.olistSyncOperacao.count({ where: { registroId: p.registroId, status: { in: ["EM_APLICACAO", "VERIFICANDO", "RESULTADO_INCONCLUSIVO"] } } }))
         throw new ErroRepositorioSync("Há uma escrita pendente de reconciliação para este registro.");
       await tx.olistSyncOperacao.updateMany({ where: { registroId: p.registroId, status: { in: ["PROPOSTA", "AUTORIZADA"] } }, data: { status: "OBSOLETA" } });
       for (const membro of membros.filter(p => p.aplicativoId !== fonte.aplicativoId)) {
         const destino = estados.find(s => s.aplicativoId === membro.aplicativoId);
-        const anteriores = destino?.dadosCriptografados ? observacaoProtegida(c.decifrar(destino.dadosCriptografados, `${config.id}:estado:${destino.aplicativoId}:${p.entidade}:${destino.remoteId}`)).campos : undefined;
-        const escrita = entidade === "PRODUTO" ? primeiraEscritaProdutoSync(obs.campos, anteriores) : { campos: obs.campos, somenteProducao: false };
+        const observacaoDestino = destino?.dadosCriptografados ? observacaoProtegida(c.decifrar(destino.dadosCriptografados, `${config.id}:estado:${destino.aplicativoId}:${p.entidade}:${destino.remoteId}`)) : undefined;
+        const anteriores = observacaoDestino?.campos;
+        if (entidade === "CONTATO" && !destino && obs.vendedorContatoRemoto) throw new ErroRepositorioSync("A criação de contato com vendedor exige correção do cadastro e nova auditoria.");
+        const alvoContato = entidade === "CONTATO" && obs.campos.vendedorNome === null ? { ...obs.campos, vendedorNome: anteriores?.vendedorNome ?? null } : obs.campos;
+        const escrita = entidade === "PRODUTO" ? primeiraEscritaProdutoSync(obs.campos, anteriores) : { campos: alvoContato, somenteProducao: false };
         const acao = !destino ? "CRIAR" : "ATUALIZAR";
         prepararPayload(entidade, obs.campos, { operacao: destino ? "ATUALIZAR" : "CRIAR" });
-        if (destino && serializarCanonico(objetoJson(destino.hashesJson)) === serializarCanonico(gerarHashesCampos(obs.campos, v => c.hash(v, `${config.id}:campo`))))
+        if (destino && serializarCanonico(objetoJson(destino.hashesJson)) === serializarCanonico(gerarHashesCampos(escrita.campos, v => c.hash(v, `${config.id}:campo`))))
           continue;
         const operacaoId = randomUUID();
-        await tx.olistSyncOperacao.create({ data: { id: operacaoId, configuracaoId: config.id, registroId: p.registroId, execucaoId: p.execucaoId, sourceAppId: fonte.aplicativoId, destinoAppId: membro.aplicativoId, acao, revisao, status: "AUTORIZADA", precondicoesJson: { replicas, somenteProducao: escrita.somenteProducao, ...(entidade === "PRODUTO" ? { versaoProdutos: VERSAO_PRODUTOS_SYNC } : {}), ...(escrita.producaoPendente ? { producaoPendenteCriptografada: c.cifrar(escrita.producaoPendente, `${config.id}:operacao:${operacaoId}:producao`) } : {}), ...(entidade === "CONTATO" ? { versaoObservacaoContato: VERSAO_OBSERVACAO_CONTATO } : {}), versaoConfiguracao: config.versao, fontesPorCampo: Object.fromEntries(Object.keys(obs.campos).map(k => [k, [fonte.aplicativoId]])) }, payloadCriptografado: c.cifrar(escrita.campos, `${config.id}:operacao:${operacaoId}`) }, select: { id: true } });
+        const basesVendedor = entidade === "CONTATO" ? Object.fromEntries(estados.map(s => {
+          const atual = observacaoProtegida(c.decifrar(s.dadosCriptografados!, `${config.id}:estado:${s.aplicativoId}:${p.entidade}:${s.remoteId}`));
+          return [chaveBaseVendedorContato(s.aplicativoId), c.hash(obs.campos.vendedorNome ?? atual.campos.vendedorNome ?? null, `${config.id}:campo`)];
+        })) : {};
+        await tx.olistSyncOperacao.create({ data: { id: operacaoId, configuracaoId: config.id, registroId: p.registroId, execucaoId: p.execucaoId, sourceAppId: fonte.aplicativoId, destinoAppId: membro.aplicativoId, acao, revisao, status: "AUTORIZADA", precondicoesJson: { replicas, somenteProducao: escrita.somenteProducao, ...(entidade === "PRODUTO" ? { versaoProdutos: VERSAO_PRODUTOS_SYNC } : {}), ...(escrita.producaoPendente ? { producaoPendenteCriptografada: c.cifrar(escrita.producaoPendente, `${config.id}:operacao:${operacaoId}:producao`) } : {}), ...(entidade === "CONTATO" ? { versaoObservacaoContato: VERSAO_OBSERVACAO_CONTATO, hashesBaseContato: basesVendedor, preservarVendedor: obs.campos.vendedorNome === null, vendedorPreservadoCriptografado: c.cifrar(observacaoDestino?.vendedorContatoRemoto?.id ?? null, `${config.id}:operacao:${operacaoId}:vendedor-preservado`) } : {}), versaoConfiguracao: config.versao, fontesPorCampo: Object.fromEntries(Object.keys(obs.campos).map(k => [k, [fonte.aplicativoId]])) }, payloadCriptografado: c.cifrar(escrita.campos, `${config.id}:operacao:${operacaoId}`) }, select: { id: true } });
       }
       await tx.olistSyncRegistro.update({ where: { id: p.registroId }, data: { revisao }, select: { id: true } });
     }

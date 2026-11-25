@@ -3,7 +3,7 @@ import { FalhaSync, type CamposSync, type ObservacaoRemota } from "./contrato";
 
 export const MAXIMO_TIPOS_CONTATO = 1_000;
 export const VALIDADE_CATALOGO_TIPOS_MS = 15 * 60_000;
-export const VERSAO_OBSERVACAO_CONTATO = 2;
+export const VERSAO_OBSERVACAO_CONTATO = 3;
 const identificador = z.string().regex(/^[1-9]\d{0,15}$/).refine(id => Number.isSafeInteger(Number(id)));
 const tipoSchema = z.object({ id: identificador, nome: z.string().trim().min(1).max(200), perfilContato: z.number().int().min(0).max(5) });
 export type TipoContatoSync = z.infer<typeof tipoSchema>;

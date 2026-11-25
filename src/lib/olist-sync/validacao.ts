@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EntidadeSync, JsonValue, CamposSync, ObservacaoRemota } from "./contrato";
 import { FalhaSync, ENTIDADES_SYNC } from "./contrato";
+import { referenciaVendedorContatoSync } from "./vendedores-contato";
 import { referenciasTiposContatoSync } from "./tipos-contato";
 
 export const entidadeSchema = z.enum(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR", "SERVICO"]);
@@ -52,6 +53,7 @@ export function observacaoProtegida(valor: JsonValue): ObservacaoRemota {
   return { id: r.id, nome: r.nome, situacao: r.situacao, completo: r.completo, chave: r.chave,
     alteradoEm: typeof r.alteradoEm === "string" ? r.alteradoEm : null, campos: objetoJson(r.campos), pendencias: r.pendencias as string[],
     ...(typeof r.tipo === "string" ? { tipo: r.tipo } : {}), ...(typeof r.paiId === "string" ? { paiId: r.paiId } : {}),
+    ...(r.vendedorContatoRemoto !== undefined ? { vendedorContatoRemoto: referenciaVendedorContatoSync(r.vendedorContatoRemoto) } : {}),
     ...(r.tiposContatoRemotos !== undefined ? { tiposContatoRemotos: referenciasTiposContatoSync(r.tiposContatoRemotos) } : {}) };
 }
 

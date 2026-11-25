@@ -1,3 +1,4 @@
+import type { VendedorContatoSync, ReferenciaVendedorContatoSync } from "./vendedores-contato";
 import type { CotaLeituraSync } from "./ritmo";
 import type { ReferenciaTipoContatoSync, TipoContatoSync } from "./tipos-contato";
 
@@ -24,6 +25,8 @@ export interface ObservacaoRemota {
   pendencias: string[];
   /** Referências locais transitórias, até serem convertidas em nome/perfil. */
   tiposContatoRemotos?: ReferenciaTipoContatoSync[];
+  /** ID local protegido; nunca usado como identidade entre contas. */
+  vendedorContatoRemoto?: ReferenciaVendedorContatoSync | null;
 }
 
 export interface PaginaSync {
@@ -67,6 +70,7 @@ export interface OpcoesConsultaSync {
 
 export interface OpcoesMutacaoSync extends Omit<OpcoesConsultaSync, "antesDeConsultar" | "reutilizarIdentidade"> {
   catalogoTiposContato?: readonly TipoContatoSync[];
+  vendedorDestinoId?: string | null;
   componentesProduto?: ReadonlyMap<string, string>;
   somenteProducao?: boolean;
   /** Verifica autorização e reserva após a leitura remota, antes de enviar a escrita. */
@@ -74,6 +78,7 @@ export interface OpcoesMutacaoSync extends Omit<OpcoesConsultaSync, "antesDeCons
 }
 
 export interface ClienteSync {
+  listarVendedoresContato?(aplicativoId: string, opcoes: { offset: number; limit: number }, consulta: OpcoesConsultaSync): Promise<{ itens: VendedorContatoSync[]; total: number; cotaLeitura?: CotaLeituraSync }>;
   listarTiposContato?(aplicativoId: string, opcoes: { offset: number; limit: number }, consulta?: OpcoesConsultaSync): Promise<{ itens: TipoContatoSync[]; total: number; cotaLeitura?: CotaLeituraSync }>;
   listar(aplicativoId: string, entidade: EntidadeSync, opcoes: OpcoesListagemSync): Promise<PaginaSync>;
   buscarPorChave(aplicativoId: string, entidade: EntidadeSync, chave: string, opcoes?: OpcoesConsultaSync): Promise<ObservacaoRemota[]>;
