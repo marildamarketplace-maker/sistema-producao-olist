@@ -271,10 +271,15 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
       return { clienteId: ref.cliente.id, vendedorId: ref.vendedor.id, vendedorFixo: fixo !== null,
         cadastros: { cliente: origem.cadastroCliente, vendedor: origem.cadastroVendedor } };
     }
-    const vendedores = await vendedoresPorIdentidade(destinoId, origem.referencia.vendedor, consultar);
+    // O vínculo fornece o ID local do vendedor; código de contato não
+    // comprova o código do vendedor. Confira a identidade após ler esse ID.
+    // Sem documento, mantenha a detecção conservadora de homônimos.
+    const vendedores = fixo !== null && origem.referencia.vendedor.cpfCnpj !== null
+      ? [await vendedorPorId(destinoId, fixo, consultar)]
+      : await vendedoresPorIdentidade(destinoId, origem.referencia.vendedor, consultar);
     if (vendedores.length !== 1) throw new ErroFilaOlist(vendedores.length ? "Há mais de um vendedor correspondente no aplicativo destinatário." : "Vendedor não encontrado no aplicativo destinatário.", 409);
     const vendedor = vendedores[0];
-    if (fixo !== null && fixo !== vendedor.referencia.id) throw new ErroFilaOlist("O vínculo do vendedor no aplicativo destinatário corresponde a outra pessoa.", 403);
+    if (fixo !== null && (fixo !== vendedor.referencia.id || !mesmaPessoa(origem.referencia.vendedor, vendedor.referencia))) throw new ErroFilaOlist("O vínculo do vendedor no aplicativo destinatário corresponde a outra pessoa.", 403);
     const clientes = await contatosPorIdentidade(destinoId, origem.referencia.cliente, consultar);
     if (clientes.length !== 1) throw new ErroFilaOlist(clientes.length ? "Há mais de um cliente correspondente no aplicativo destinatário." : "Cliente não encontrado no aplicativo destinatário.", 409);
     const clienteId = idRemoto(clientes[0].id);

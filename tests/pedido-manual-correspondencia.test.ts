@@ -105,7 +105,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino);
     assert.equal(r.clienteId, 41); assert.equal(r.vendedorId, 31); assert.equal(r.vendedorFixo, true);
     const filtrosDestino = d.consultas.filter(c => c.app === destino && c.caminho === "vendedores");
-    assert.deepEqual(filtrosDestino.map(c => c.parametros.codigo), ["DESTINO-31"]);
+    assert.deepEqual(filtrosDestino.map(c => c.parametros.codigo), [undefined]);
     assert.equal(filtrosDestino.some(c => c.parametros.codigo === "ORIGEM-11"), false);
     assert.equal(r.cadastros.cliente.id, 41); assert.equal(r.cadastros.vendedor.id, 31);
     assert.ok(d.consultas.every(c => c.timeout > 0 && c.timeout <= 5000));
@@ -124,6 +124,17 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
       await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, origem), /vendedor de referência/);
     }
   });
+  await t.test("vendedor vinculado no destino independe do código ou da busca de contatos", async () => {
+    const { d, servico } = criar(); const ref = await referencia(servico);
+    d.contatos.get(destino)!.splice(0, 1);
+    const antes = d.consultas.length;
+    const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino);
+    assert.equal(r.vendedorId, 31);
+    assert.equal(r.vendedorFixo, true);
+    assert.equal(d.consultas.slice(antes).some(c => c.app === destino && c.parametros.cpfCnpj === docVendedor), false);
+    (d.vendedor(destino).contato as Cadastro).cpfCnpj = docCliente;
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /outra pessoa/);
+  });
   await t.test("sem vínculo em nenhuma conta permite seleção livre, preservando permissões", async () => {
     const { d, servico } = criar(); d.vinculos.clear();
     d.cliente().vendedor = { id: 999 }; d.cliente(destino).vendedor = { id: 999 };
@@ -134,6 +145,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
   await t.test("destino sem vínculo, vínculo conflitante ou cliente fora da carteira bloqueiam", async () => {
     const { d, servico } = criar(); const ref = await referencia(servico);
     d.vinculos.delete(destino); await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /sem vínculo/);
+    d.vendedores.get(destino)!.push({ id: 999, contato: { nome: "Outra pessoa", cpfCnpj: docCliente } });
     d.vinculos.set(destino, 999); await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /outra pessoa/);
     d.vinculos.set(destino, 31); d.cliente(destino).vendedor = { id: 999 };
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /vendedor vinculado/);
@@ -237,7 +249,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     await assert.rejects(referencia(servico), /confirmar o documento/);
   });
   await t.test("cliente ou vendedor duplicado no destino não recebe seleção arbitrária", async () => {
-    const { d, servico } = criar(); const ref = await referencia(servico);
+    const { d, servico } = criar(); d.vinculos.clear(); const ref = await referencia(servico);
     d.contatos.get(destino)!.push({ ...d.cliente(destino), id: 42 });
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /mais de um cliente/);
     d.contatos.get(destino)!.pop(); d.vendedores.get(destino)!.push({ ...d.vendedor(destino), id: 32 });
@@ -298,7 +310,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     const antes = d.consultas.length;
     const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino, { validarDadosDirecionamento: true });
     assert.equal(r.clienteId, 41); assert.equal(r.vendedorId, 31);
-    assert.equal(d.consultas.length - antes, 6);
+    assert.equal(d.consultas.length - antes, 5);
   });
   await t.test("fila histórica mantém destino e snapshot após alteração de nome/UF com a mesma identidade", async () => {
     const { d, servico } = criar(); const ref = await referencia(servico); const original = structuredClone(ref);
@@ -315,7 +327,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, falsa, destino), /vendedor de referência/);
   });
   await t.test("orçamento total impede uma expansão de consultas pelos códigos de contato", async () => {
-    const { d, servico } = criar(); const ref = await referencia(servico);
+    const { d, servico } = criar(); d.vinculos.clear(); const ref = await referencia(servico);
     for (let i = 0; i < 20; i++) d.contatos.get(destino)!.push({ id: 500 + i, nome: "Ana", codigo: `EXTRA-${i}`, cpfCnpj: docVendedor, situacao: "A" });
     const antes = d.consultas.length;
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /dentro do limite/);
