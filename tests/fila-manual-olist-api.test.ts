@@ -177,7 +177,9 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     assert.equal(snapshot.direcionamentoManual?.alteracoes[0].usuarioId,adminId);
     assert.equal((await confirmar()).status,409,"a prévia anterior não vale no novo destino");
     const novas=urlsConsultadas.slice(antes).map(url=>new URL(url));
-    assert.ok(novas.filter(u=>u.pathname.endsWith("/vendedores")).every(u=>u.searchParams.has("codigo")),"reaproveitar correspondência filtrada, sem varrer vendedores novamente");
+    const consultasVendedores=novas.filter(u=>u.pathname.endsWith("/vendedores"));
+    assert.equal(consultasVendedores.length,2,"consultar uma vez o vendedor por ID em cada conta");
+    assert.ok(consultasVendedores.every(u=>u.searchParams.get("limit")==="100"&&u.searchParams.get("offset")==="0"),"a busca por ID mantém páginas limitadas");
     const destinoSelecoes={...selecoes,clienteId:130,vendedorId:120};
     assert.equal((await preview(destinoSelecoes)).status,200);
     assert.equal(dadosPedidoFilaSchema.parse(fila.dadosPedido).direcionamentoManual?.alteracoes.length,1,"regravação preserva metadados");

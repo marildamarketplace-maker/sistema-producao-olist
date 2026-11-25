@@ -276,12 +276,72 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     d.contatos.get(destino)!.pop(); d.vendedores.get(destino)!.push({ ...d.vendedor(destino), id: 32 });
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /mais de um vendedor/);
   });
+  await t.test("contato ativo não fica ambíguo por excluído ou inativo no resumo, mesmo com documento inválido", async () => {
+    for (const situacao of ["I", "E"]) {
+      const d = dados(); const consultar = d.deps.consultar;
+      d.deps.consultar = async (app, caminho, parametros, timeout) => {
+        const resposta = await consultar(app, caminho, parametros, timeout);
+        return app === destino && caminho === "contatos"
+          ? { itens: [{ ...d.cliente(destino), id: 42, situacao, cpfCnpj: "---" }, d.cliente(destino)], paginacao: { total: 2 } }
+          : resposta;
+      };
+      const { servico } = criar(d); const ref = await referencia(servico);
+      assert.equal((await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino)).clienteId, 41);
+      assert.equal(d.consultas.some(c => c.app === destino && c.caminho === "contatos/42"), false,
+        "o resumo indisponível não consome uma consulta de detalhe");
+      assert.equal(d.consultas.filter(c => c.app === destino && c.caminho === "contatos/41").length, 1,
+        "o detalhe confirmado é reaproveitado pela resolução");
+    }
+  });
+  await t.test("situação do detalhe prevalece quando a lista ainda apresenta como ativo um contato excluído", async () => {
+    for (const situacao of ["I", "E"]) {
+      const d = dados();
+      d.contatos.get(destino)!.push({ ...d.cliente(destino), id: 42, situacao });
+      const consultar = d.deps.consultar;
+      d.deps.consultar = async (app, caminho, parametros, timeout) => {
+        const resposta = await consultar(app, caminho, parametros, timeout);
+        return app === destino && caminho === "contatos"
+          ? { itens: d.contatos.get(destino)!.filter(c => c.cpfCnpj === docCliente).map(c => ({ ...c, situacao: "A" })), paginacao: { total: 2 } }
+          : resposta;
+      };
+      const { servico } = criar(d); const ref = await referencia(servico);
+      const antes = d.consultas.length;
+      const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino);
+      assert.equal(r.clienteId, 41); assert.equal(r.vendedorFixo, true);
+      assert.equal(d.consultas.slice(antes).filter(c => c.app === destino && c.caminho.startsWith("contatos/")).length, 2);
+      assert.ok(d.consultas.length - antes <= 12);
+      d.cliente(destino).vendedor = { id: 999 };
+      await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /vendedor vinculado/);
+    }
+  });
+  await t.test("nenhum cliente elegível é escolhido quando todas as correspondências estão indisponíveis", async () => {
+    const { d, servico } = criar(); const ref = await referencia(servico);
+    d.cliente(destino).situacao = "I";
+    d.contatos.get(destino)!.push({ ...d.cliente(destino), id: 42, situacao: "E" });
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /Cliente não encontrado/);
+    assert.equal(d.consultas.some(c => c.app === destino && c.caminho.startsWith("contatos/")), false);
+  });
+  await t.test("detalhe ativo com identidade alterada, ID divergente ou falha de API não é descartado como excluído", async () => {
+    for (const caso of ["documento", "id", "api"] as const) {
+      const d = dados(); const consultar = d.deps.consultar;
+      d.deps.consultar = async (app, caminho, parametros, timeout) => {
+        const resposta = await consultar(app, caminho, parametros, timeout);
+        if (app !== destino || caminho !== "contatos/41") return resposta;
+        if (caso === "api") throw new Error("Bearer segredo; documento=" + docCliente);
+        return { ...d.cliente(destino), ...(caso === "id" ? { id: 42 } : { cpfCnpj: docVendedor }) };
+      };
+      const { servico } = criar(d); const ref = await referencia(servico);
+      await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), (error: unknown) =>
+        error instanceof Error && "status" in error && error.status === (caso === "documento" ? 409 : 502) &&
+        !error.message.includes("segredo") && !error.message.includes(docCliente));
+    }
+  });
   await t.test("A e B são ativos; inativos, resposta incompleta e falha de API bloqueiam sem expor PII", async () => {
     const { d, servico } = criar(); const ref = await referencia(servico);
     for (const situacao of ["I", "E"]) { d.vendedor(destino).situacao = situacao;
       await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /Vendedor indisponível/); }
     d.vendedor(destino).situacao = "B"; d.cliente(destino).situacao = "I";
-    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /Cliente indisponível/);
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /Cliente não encontrado/);
     d.cliente(destino).situacao = "A"; d.incompleta = true;
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /correspondência única/);
     d.incompleta = false; d.falha = true;

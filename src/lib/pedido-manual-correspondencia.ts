@@ -50,8 +50,11 @@ function idRemoto(valor: unknown): number {
   if (!Number.isSafeInteger(id) || id <= 0 || id > 2147483647) throw new ErroFilaOlist("Cadastro Olist com identificador inválido.", 502);
   return id;
 }
+function cadastroAtivo(valor: Record<string, unknown>) {
+  return ["A", "B"].includes(String(valor.situacao ?? "A").trim().toUpperCase());
+}
 function pessoaAtiva(valor: Record<string, unknown>, rotulo: string) {
-  if (!["A", "B"].includes(String(valor.situacao ?? "A").trim().toUpperCase())) throw new ErroFilaOlist(`${rotulo} indisponível neste aplicativo.`, 409);
+  if (!cadastroAtivo(valor)) throw new ErroFilaOlist(`${rotulo} indisponível neste aplicativo.`, 409);
 }
 function documento(valor: Record<string, unknown>): string | null {
   // Um resumo sem esse campo não comprova que a pessoa não tem documento.
@@ -151,9 +154,13 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     if (completa && (payload.paginacao.total > itens.length || itens.length >= LIMITE_PAGINA)) throw new ErroFilaOlist("A pesquisa não comprovou uma correspondência única. Revise os cadastros.", 409);
     return { itens, total: payload.paginacao.total };
   }
-  async function detalheCliente(app: string, id: number, consultar: Consultar) {
+  async function lerContato(app: string, id: number, consultar: Consultar) {
     const cadastro = await consultar(app, `contatos/${id}`);
     if (!objeto(cadastro) || idRemoto(cadastro.id) !== id) throw new ErroFilaOlist("Cliente indisponível neste aplicativo.", 502);
+    return cadastro;
+  }
+  async function detalheCliente(app: string, id: number, consultar: Consultar) {
+    const cadastro = await lerContato(app, id, consultar);
     pessoaAtiva(cadastro, "Cliente");
     return cadastro;
   }
@@ -190,10 +197,22 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     }
     const encontrados: Record<string, unknown>[] = [];
     for (const resumo of p.itens) {
-      const cadastro = Object.hasOwn(resumo, "cpfCnpj") ? resumo : await detalheCliente(app, idRemoto(resumo.id), consultar);
+      // Excluídos/inativos podem aparecer na pesquisa e não são candidatos.
+      if (!cadastroAtivo(resumo)) continue;
+      if (Object.hasOwn(resumo, "cpfCnpj")) {
+        const candidato = pessoa(resumo, idRemoto(resumo.id));
+        const homonimoDocumentado = ref.cpfCnpj === null && candidato.cpfCnpj !== null &&
+          chaveContatoPorNome(ref.nome) === chaveContatoPorNome(candidato.nome);
+        if (!mesmaPessoa(ref, candidato) && !homonimoDocumentado) continue;
+      }
+      // A situação do resumo pode estar desatualizada. Confirme no detalhe
+      // antes de contar correspondências, sem ocultar falhas da integração.
+      const cadastro = await lerContato(app, idRemoto(resumo.id), consultar);
+      if (!cadastroAtivo(cadastro)) continue;
       const candidato = pessoa(cadastro, idRemoto(cadastro.id));
       validarHomonimoDocumentado(ref, candidato, "Cliente");
-      if (mesmaPessoa(ref, candidato)) encontrados.push(cadastro);
+      if (!mesmaPessoa(ref, candidato)) throw new ErroFilaOlist("Cliente alterado durante a resolução. Revise o pedido.", 409);
+      encontrados.push(cadastro);
     }
     return encontrados;
   }
@@ -295,8 +314,8 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     const clientes = await contatosPorIdentidade(destinoId, origem.referencia.cliente, consultar);
     if (clientes.length !== 1) throw new ErroFilaOlist(clientes.length ? "Há mais de um cliente correspondente no aplicativo destinatário." : "Cliente não encontrado no aplicativo destinatário.", 409);
     const clienteId = idRemoto(clientes[0].id);
-    const cliente = await detalheCliente(destinoId, clienteId, consultar);
-    if (!mesmaPessoa(origem.referencia.cliente, pessoa(cliente, clienteId))) throw new ErroFilaOlist("Cliente alterado durante a resolução. Revise o pedido.", 409);
+    // A busca já confirmou identidade e situação no detalhe deste ID.
+    const cliente = clientes[0];
     if (fixo !== null) validarVendedorPedidoOlist(cliente, vendedor.referencia.id);
     return { clienteId, vendedorId: vendedor.referencia.id, vendedorFixo: fixo !== null, cadastros: { cliente, vendedor: vendedor.cadastro } };
   }
