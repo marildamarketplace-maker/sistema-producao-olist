@@ -102,6 +102,15 @@ test("administração da fila isola pedidos recebidos e filiais, com autorizaç�
     assert.equal(consultas, antes);
     permitido = true;
   });
+  await t.test("detalhes de pessoas exigem pedido autorizado e destino vinculado",async()=>{
+    assert.equal((await get("acao=pessoas&pedidoId=invalido")).status,400);
+    permitido=false;
+    assert.equal((await get(`acao=pessoas&pedidoId=${pedidoId}`)).status,403);
+    permitido=true;existente=false;
+    assert.equal((await get(`acao=pessoas&pedidoId=${pedidoId}`)).status,404);
+    existente=true;
+    assert.equal((await get(`acao=pessoas&pedidoId=${pedidoId}`)).status,409);
+  });
   await t.test("lista snapshot dos pedidos recebidos, com paginação, sem expor credenciais", async () => {
     filtros.length = 0;
     const response = await get("pagina=2");

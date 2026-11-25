@@ -1,3 +1,5 @@
+import { operarRecuperacaoFila } from "@/lib/fila-recuperacao-operacao";
+import { estadoRecuperacao } from "@/lib/fila-recuperacao-olist";
 import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { consultarFilaManualOlist, operarFilaManualOlist } from "@/lib/fila-manual-olist";
 import { NextResponse } from "next/server";
@@ -59,7 +61,7 @@ export async function GET(request: Request, contexto: Contexto) {
       const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId }, include: { aplicativo: { select: { nome: true } } } });
       const snapshot = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
       const configuracao = snapshot.success && snapshot.data.olist?.filialId === filial.id ? snapshot.data.olist : null;
-      return resposta({ filial, selecoes: configuracao?.selecoes ?? null,
+      return resposta({ filial, versao: fila.versao, selecoes: configuracao?.selecoes ?? null, recuperacao: snapshot.success ? estadoRecuperacao(snapshot.data, filial.id) : null,
         vendedorOrigem: snapshot.success ? snapshot.data.vendedorOrigem ?? null : null,
         vendedorFixo: snapshot.success && snapshot.data.vendedorOrigem?.tipo === "VINCULO",
         vendedorOlistPadraoId: snapshot.success && snapshot.data.vendedorOrigem?.aplicativoId === filial.id ? snapshot.data.vendedorOrigem.vendedorOlistId : await obterVendedorDoUsuario(usuarioId, filial.id), envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
@@ -78,6 +80,7 @@ export async function POST(request: Request, contexto: Contexto) {
   try {
     const { fila, matrizId, usuarioId } = await autorizar(request, contexto);
     const entrada: unknown = await request.json().catch(() => null);
+    if (entrada && typeof entrada === "object" && "acao" in entrada && entrada.acao === "recuperar") return resposta(await operarRecuperacaoFila(fila, matrizId, usuarioId, entrada));
     if (fila.tipoOrigem === "MANUAL") return resposta(await operarFilaManualOlist({ fila, matrizId, usuarioId }, entrada));
     const solicitacaoId = fila.solicitacaoProducaoId, fornecedorId = fila.fornecedorId;
     if (!solicitacaoId || !fornecedorId) throw new ErroFila("Origem da fila inválida.", 409);
@@ -161,7 +164,7 @@ export async function POST(request: Request, contexto: Contexto) {
       if (envioAtual && envioBloqueado(envioAtual.estado)) throw new ErroFila("Existe uma tentativa em andamento ou sem conferência. Atualize a fila.", 409);
       const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId,
         aplicativoFilialId: filial.id, versao: fila.versao, status: { in: ["PENDENTE", "FALHADO"] } },
-        data: { dadosPedido: json({ ...(fila.dadosPedido as Prisma.JsonObject), olist: { filialId: filial.id, selecoes }, vendedorOrigem: origemVendedor }), versao: { increment: 1 } } });
+        data: { dadosPedido: json({ ...(fila.dadosPedido as Prisma.JsonObject), olistAnterior: undefined, recuperacaoOlist: undefined, olist: { filialId: filial.id, selecoes }, vendedorOrigem: origemVendedor }), versao: { increment: 1 } } });
       if (atualizado.count !== 1) throw new ErroFila("Pedido alterado durante a revisão. Atualize a fila.", 409);
       return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao,
         payload: json(payload), selecoes: json({ ...selecoes, vendedorOrigem: origemVendedor }), expiraEm: new Date(Date.now() + 15 * 60_000) } });

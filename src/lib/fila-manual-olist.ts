@@ -1,3 +1,4 @@
+import { estadoRecuperacao } from "./fila-recuperacao-olist";
 import type { PedidoFornecedorQueue } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -47,7 +48,7 @@ async function validarSelecoes(fila: PedidoFornecedorQueue, contaId: string, sel
     ? await capturarFornecedorPedidoManual(autor, snapshot.origemManual.aplicativoId, contaId) : undefined;
   if (fornecedorManual && fornecedorManual.matrizId !== fila.aplicativoFornecedorId) throw new ErroFilaOlist("Fornecedor não corresponde à fila.", 403);
   const referencia = snapshot.origemManual && autor
-    ? await validarReferenciaPersistidaPedidoManual(autor, snapshot.origemManual, contaId, selecoes) : null;
+    ? await validarReferenciaPersistidaPedidoManual(autor, snapshot.origemManual, contaId, selecoes, true) : null;
   const cadastros = await validarCadastros(contaId, selecoes, snapshot.itens.some(i => i.corteLaser), referencia?.cadastros);
   if (fixo !== null) validarVendedorPedidoOlist(cadastros.cliente, fixo);
   return { ...cadastros, guardaReferencia: autor && snapshot.origemManual ? guardaReferenciaFilaManual(autor, snapshot.origemManual, fornecedorManual) : undefined };
@@ -67,7 +68,7 @@ export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, par
   // Mudança do vínculo do autor exige nova escolha de cliente, sem usar o vínculo do administrador.
   const selecoes = !snapshot.origemManual && salvas && padrao !== null && salvas.vendedorId !== padrao
     ? { ...salvas, vendedorId: padrao, clienteId: undefined } : salvas;
-  return { filial, selecoes, vendedorOlistPadraoId: padrao, vendedorFixo: fila.vendedorFixo, envio };
+  return { filial, versao: fila.versao, selecoes, recuperacao: estadoRecuperacao(snapshot, filial.id), vendedorOlistPadraoId: padrao, vendedorFixo: fila.vendedorFixo, envio };
 }
 export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Contexto, entrada: unknown) {
   const body = schema.parse(entrada);
@@ -131,7 +132,7 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
     const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId, aplicativoFilialId: filial.id,
       versao: body.versao, status: { in: ["PENDENTE", "FALHADO"] } }, data: {
         dadosPedido: jsonManual({ ...dados, ...(guardaReferencia?.fornecedorManual ? { fornecedorManual: guardaReferencia.fornecedorManual } : {}),
-          olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 },
+          olistAnterior: undefined, recuperacaoOlist: undefined, olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 },
       } });
     if (atualizado.count !== 1) throw new ErroFilaOlist("Pedido alterado durante a revisão.", 409);
     return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao,

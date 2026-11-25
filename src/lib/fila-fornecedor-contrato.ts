@@ -38,6 +38,10 @@ const itemSchema = z.object({
 export const dadosPedidoFilaSchema = z.object({
   versao: z.literal(1),
   olist: dadosOlistFilaSchema.optional(),
+  olistAnterior: dadosOlistFilaSchema.optional(),
+  recuperacaoOlist: z.object({ filialId: z.guid(), campos: z.array(z.object({
+    chave: z.string().max(80), estado: z.enum(["RECUPERADO", "PENDENTE"]), mensagem: z.string().max(250),
+  }).strict()).max(1005) }).strict().optional(),
   vendedorOrigem: vendedorOrigemFilaSchema.optional(),
   itens: z.array(itemSchema).min(1),
   observacao: z.string().nullable().optional(),

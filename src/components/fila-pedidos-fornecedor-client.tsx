@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { PessoasDestinoFila } from "@/components/pessoas-destino-fila";
 import { MoreHorizontal, Send, XCircle } from "lucide-react";
 import { EnviarPedidoFilaOlist } from "@/components/enviar-pedido-fila-olist";
 import { createPortal } from "react-dom";
@@ -147,6 +148,7 @@ function PedidoFilaCard({ pedido, filiais, aplicativoId, token, aoSalvar, aoAtua
         <span className="rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">{rotulosStatusFila[pedido.status]}</span>
       </div>
       {pedido.filial && <p className="break-words text-sm text-slate-600">Aplicativo destinatário atual: <strong>{pedido.filial.nome}</strong>{pedido.direcionadoEm ? ` · ${dataHora(pedido.direcionadoEm)}` : ""}</p>}
+      <PessoasDestinoFila key={`${pedido.id}:${pedido.versao}:${pedido.filial?.id}:${token}`} pedidoId={pedido.id} token={token} />
       {pedido.dadosPedido ? (
         <details className="rounded-md border border-slate-200">
           <summary className="min-h-11 cursor-pointer rounded-md px-3 py-3 text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2">Consultar itens ({pedido.dadosPedido.itens.length})</summary>

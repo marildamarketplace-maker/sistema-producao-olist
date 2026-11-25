@@ -5,7 +5,7 @@ import { envioBloqueado } from "@/lib/envio-fornecedor";
 import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import { dadosPedidoFilaSchema } from "@/lib/fila-fornecedor-contrato";
 import { prisma } from "@/lib/prisma";
-import { resolverCorrespondenciaPedidoManual } from "@/lib/pedido-manual-correspondencia";
+import { obterVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
 import { guardaReferenciaFilaManual, obterAutorReferenciaFilaManual, validarAtoresFilaManual, type GuardaReferenciaFilaManual } from "@/lib/fila-manual-referencia";
 import { capturarFornecedorPedidoManual } from "@/lib/pedido-manual-fornecedor";
 
@@ -13,7 +13,7 @@ type EntradaAlteracaoFilaManual = {
   pedidoId: string; aplicativoId: string; usuarioId: string; versao: number; filialId?: string;
 };
 export type ReferenciaRedirecionamentoManual = {
-  filialId: string; versao: number; clienteId: number; vendedorId: number; guarda: GuardaReferenciaFilaManual;
+  filialId: string; versao: number; vendedorId?: number; guarda: GuardaReferenciaFilaManual;
 };
 
 /** As consultas Olist terminam antes da transação que bloqueia a fila. */
@@ -33,10 +33,10 @@ export async function prepararRedirecionamentoFilaManual(entrada: EntradaAlterac
   if (envio && (envio.pedidoOlistId || envioBloqueado(envio.estado))) throw new ErroFilaOlist("Envio concluído, em andamento ou incerto. Confira a tentativa antes de alterar.", 409);
   const autor = await obterAutorReferenciaFilaManual(pedido.autorId, pedido.aplicativoSolicitanteId);
   const fornecedorManual = snapshot.fornecedorManual ? await capturarFornecedorPedidoManual(autor, snapshot.origemManual.aplicativoId, entrada.filialId) : undefined;
-  const correspondencia = await resolverCorrespondenciaPedidoManual(autor, snapshot.origemManual, entrada.filialId);
-  if (pedido.vendedorFixo && !correspondencia.vendedorFixo) throw new ErroFilaOlist("O autor vendedor não possui mais vínculo nesta conta. Corrija o cadastro antes de revisar.", 409);
-  return { filialId: entrada.filialId, versao: pedido.versao, clienteId: correspondencia.clienteId,
-    vendedorId: correspondencia.vendedorId, guarda: guardaReferenciaFilaManual(autor, snapshot.origemManual, fornecedorManual) };
+  const vendedorId = pedido.vendedorFixo ? await obterVendedorDoUsuario(autor.id, entrada.filialId) : null;
+  if (pedido.vendedorFixo && !vendedorId) throw new ErroFilaOlist("O autor vendedor não possui mais vínculo nesta conta. Corrija o cadastro antes de revisar.", 409);
+  return { filialId: entrada.filialId, versao: pedido.versao,
+    ...(vendedorId ? { vendedorId } : {}), guarda: guardaReferenciaFilaManual(autor, snapshot.origemManual, fornecedorManual) };
 }
 
 export async function alterarFilaManual(tx: Prisma.TransactionClient, entrada: EntradaAlteracaoFilaManual,
@@ -67,7 +67,11 @@ export async function alterarFilaManual(tx: Prisma.TransactionClient, entrada: E
   }
   const dadosPedido = mudouConta ? { ...snapshot,
     ...(referencia?.guarda.fornecedorManual ? { fornecedorManual: referencia.guarda.fornecedorManual } : {}),
-    olist: referencia && snapshot.origemManual ? { filialId: entrada.filialId!, selecoes: { clienteId: referencia.clienteId, vendedorId: referencia.vendedorId } } : undefined,
+    olistAnterior: snapshot.olistAnterior ?? snapshot.olist,
+    recuperacaoOlist: undefined,
+    olist: referencia && snapshot.origemManual ? { filialId: entrada.filialId!, selecoes: {
+      ...(referencia.vendedorId ? { vendedorId: referencia.vendedorId } : {}), tipoVenda: snapshot.olist?.selecoes.tipoVenda,
+    } } : undefined,
     ...(snapshot.direcionamentoManual && pedido.aplicativoFilialId ? { direcionamentoManual: {
       ...snapshot.direcionamentoManual, alteracoes: [...snapshot.direcionamentoManual.alteracoes,
         { usuarioId: entrada.usuarioId, em: direcionadoEm.toISOString(), anteriorId: pedido.aplicativoFilialId, aplicativoId: entrada.filialId! }],

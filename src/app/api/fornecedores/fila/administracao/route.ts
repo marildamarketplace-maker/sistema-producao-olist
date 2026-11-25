@@ -1,3 +1,4 @@
+import { consultarPessoasDestinoFila } from "@/lib/fila-pessoas-destino";
 import { alterarFilaManual, prepararRedirecionamentoFilaManual } from "@/lib/fila-manual-administracao";
 import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
@@ -49,6 +50,18 @@ export async function GET(request: Request) {
   try {
     const { aplicativoId } = await autorizar(request);
     const params = new URL(request.url).searchParams;
+    if (params.get("acao") === "pessoas") {
+      const id=z.guid().safeParse(params.get("pedidoId"));
+      if(!id.success) throw new ErroAdministracaoFila("Pedido inválido.",400);
+      const pedido=await prisma.pedidoFornecedorQueue.findFirst({where:{id:id.data,aplicativoFornecedorId:aplicativoId},select:{aplicativoFilialId:true,dadosPedido:true}});
+      if(!pedido) throw new ErroAdministracaoFila("Pedido não encontrado.",404);
+      const destino=pedido.aplicativoFilialId?await prisma.aplicativo.findFirst({where:{id:pedido.aplicativoFilialId,OR:[{id:aplicativoId},{aplicativoPaiId:aplicativoId}]},select:{id:true,nome:true}}):null;
+      const dados=dadosPedidoFilaSchema.safeParse(pedido.dadosPedido);
+      const olist=dados.success?dados.data.olist:undefined;
+      if(!destino||olist?.filialId!==destino.id||!olist.selecoes.clienteId||!olist.selecoes.vendedorId) throw new ErroAdministracaoFila("Cliente e vendedor ainda não foram vinculados ao aplicativo destinatário atual.",409);
+      const pessoas=await consultarPessoasDestinoFila(destino.id,olist.selecoes.clienteId,olist.selecoes.vendedorId);
+      return NextResponse.json({aplicativo:destino,...pessoas},{headers:{"Cache-Control":"private, no-store"}});
+    }
     const parsed = consultaSchema.safeParse({ situacao: params.get("situacao") ?? undefined, pagina: params.get("pagina") ?? undefined });
     if (!parsed.success) throw new ErroAdministracaoFila("Filtro ou página inválidos.", 400);
     const { situacao, pagina } = parsed.data;

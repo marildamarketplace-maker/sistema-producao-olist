@@ -83,6 +83,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
       if(p.endsWith("/vendedores"))data={itens:[vendedor],paginacao:{total:1}};
       else if(p.endsWith("/contatos"))data={itens:[parsed.searchParams.get("cpfCnpj")==="98765432100"?{...vendedor.contato,situacao:"A"}:cliente],paginacao:{total:1}};
       else if(/\/contatos\/(30|130)$/.test(p))data=cliente;
+      else if(p.endsWith("/contatos/999"))data={...cliente,id:999,nome:"Outra pessoa",cpfCnpj:"11111111111"};
       else data={id:Number(p.split("/").at(-1)),nome:"Cadastro",situacao:"A",vendedor:{id:vendedorId}};
       return {status:200,data,headers:{"content-type":"application/json"}};
     }
@@ -162,7 +163,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     reset();assert.equal((await cancelar()).status,200);assert.equal(fila.status,"CANCELADO");assert.equal((await preview()).status,409);
     reset();permitido=false;assert.equal((await rota.GET(req(),ctx)).status,403);assert.equal((await cancelar()).status,403);permitido=true;
   });
-  await t.test("novo pedido remapeia antes do redirecionamento, preserva origem e histórico e envia ao destino manual",async()=>{
+  await t.test("troca preserva referência comercial e histórico para recuperação por campo no novo destino",async()=>{
     reset();adicionarReferencia();
     assert.equal((await preview()).status,200);
     const antes=urlsConsultadas.length;
@@ -170,7 +171,8 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     const {dadosPedidoFilaSchema}=await import("../src/lib/fila-fornecedor-contrato");
     const snapshot=dadosPedidoFilaSchema.parse(fila.dadosPedido);
     assert.equal(fila.aplicativoFilialId,filial);
-    assert.deepEqual(snapshot.olist,{filialId:filial,selecoes:{clienteId:130,vendedorId:120}});
+    assert.deepEqual(snapshot.olist,{filialId:filial,selecoes:{vendedorId:120,tipoVenda:"VENDA"}});
+    assert.deepEqual(snapshot.olistAnterior,{filialId:matriz,selecoes});
     assert.equal(snapshot.origemManual?.cliente.uf,"MG");
     assert.equal(snapshot.direcionamentoManual?.inicial.aplicativoId,matriz);
     assert.equal(snapshot.direcionamentoManual?.alteracoes.length,1);
@@ -178,7 +180,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     assert.equal((await confirmar()).status,409,"a prévia anterior não vale no novo destino");
     const novas=urlsConsultadas.slice(antes).map(url=>new URL(url));
     const consultasVendedores=novas.filter(u=>u.pathname.endsWith("/vendedores"));
-    assert.equal(consultasVendedores.length,2,"consultar uma vez o vendedor por ID em cada conta");
+    assert.equal(consultasVendedores.length,0,"trocar o destino preserva referência sem bloquear na resolução remota");
     assert.ok(consultasVendedores.every(u=>u.searchParams.get("limit")==="100"&&u.searchParams.get("offset")==="0"),"a busca por ID mantém páginas limitadas");
     const destinoSelecoes={...selecoes,clienteId:130,vendedorId:120};
     assert.equal((await preview(destinoSelecoes)).status,200);
@@ -189,7 +191,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   await t.test("falha de vínculo ou mudança concorrente não altera o destino novo nem seus IDs",async()=>{
     reset();adicionarReferencia();semVinculoDestino=true;
     const versao=fila.versao;
-    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao,filialId:filial},"PATCH"))).status,403);
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao,filialId:filial},"PATCH"))).status,409);
     assert.equal(fila.aplicativoFilialId,matriz);assert.equal(fila.versao,versao);
     semVinculoDestino=false;mudarAutorNaTransacao=true;
     assert.equal((await admin.PATCH(req({pedidoId:filaId,versao,filialId:filial},"PATCH"))).status,409);

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { PessoasDestinoFila } from "@/components/pessoas-destino-fila";
 import { DadosComerciaisFilaOlist } from "@/components/dados-comerciais-fila-olist";
 import { criarRascunhoFilaOlist } from "@/lib/fila-olist-contrato";
 import { conterFocoNoDialogo } from "@/lib/dialogo-foco";
@@ -13,8 +14,13 @@ const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curr
 type PedidoPrevia = { idContato: number; vendedor: { id: number }; observacoes: string; observacoesInternas: string;
   itens: { produto: { id: number; tipo: string }; quantidade: number; valorUnitario: number; infoAdicional: string }[];
   pagamento: { parcelas: { dias: number; valor: number }[] } };
+type Recuperacao = { campos: Array<{ chave: string; estado: "RECUPERADO" | "PENDENTE"; mensagem: string }>; restantes: string[] };
 type Previa = { previaId: string; payload: PedidoPrevia; produtos: Record<string, string>; cliente: string; vendedor: string; forma: string; plano: string };
 
+function rotuloCampo(chave: string, pedido: PedidoFilaAdministracao) {
+  const nomes: Record<string, string> = { clienteId: "Cliente", vendedorId: "Vendedor", formaId: "Forma de pagamento", planoId: "Plano de pagamento", laser: "Corte a laser" };
+  return nomes[chave] ?? `Produto ${pedido.dadosPedido?.itens.find(i => i.tecido.id === chave.slice(7))?.tecido.nome ?? "do pedido"}`;
+}
 export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: { pedido: PedidoFilaAdministracao; token: string; aoFechar: () => void; aoConcluir: () => void }) {
   const api = `/api/fornecedores/fila/${pedido.id}/olist`;
   const dialog = useRef<HTMLDialogElement>(null);
@@ -24,6 +30,13 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const alterado = useRef(false);
   const contaInicializada = useRef("");
   const vendedorVinculadoId = useRef<number | null>(null);
+  const [recuperacao, setRecuperacao] = useState<Recuperacao | null>(null);
+  const [recuperando, setRecuperando] = useState(false);
+  const [tentativaRecuperacao, setTentativaRecuperacao] = useState(0);
+  const [edicaoManual, setEdicaoManual] = useState(false);
+  const [temEdicoes, setTemEdicoes] = useState(false);
+  const edicaoManualRef = useRef(false); edicaoManualRef.current = edicaoManual || temEdicoes;
+  const [editarDados, setEditarDados] = useState(true);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -53,26 +66,53 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
     const controller = new AbortController();
     fetch(api, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
-      .then((d) => {
+      .then(async (d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
-        const conta = `${api}:${d.filial.id}`;
+        const conta = `${api}:${d.filial.id}:${pedido.versao}`;
+        const inicializar = contaInicializada.current !== conta;
+        const recuperar = inicializar || tentativaRecuperacao > 0;
         if (contaInicializada.current !== conta) {
-          setVendedorFixo(Boolean(d.vendedorFixo));
+          setEditarDados(!(d.selecoes && pedido.dadosPedido?.olist?.filialId === d.filial.id));
+          setVendedorFixo(Boolean(d.vendedorFixo) && (pedido.tipoOrigem === "MANUAL" || d.vendedorOrigem?.aplicativoId === d.filial.id));
           vendedorVinculadoId.current = d.vendedorOrigem?.tipo === "VINCULO" ? d.vendedorOrigem.vendedorOlistId : null;
-          setOrigemVinculada(d.vendedorOrigem?.tipo === "VINCULO");
-          setVendedorFonte(d.vendedorOrigem?.tipo === "VINCULO" ? "VINCULO" : "MANUAL");
+          setOrigemVinculada(d.vendedorOrigem?.tipo === "VINCULO" && d.vendedorOrigem?.aplicativoId === d.filial.id);
+          setVendedorFonte(d.vendedorOrigem?.tipo === "VINCULO" && d.vendedorOrigem?.aplicativoId === d.filial.id ? "VINCULO" : "MANUAL");
           setEscolhaManualConfirmada(Boolean(d.vendedorOrigem));
-          setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map((i) => i.tecido.id) ?? [], d.selecoes ?? undefined, d.vendedorOlistPadraoId));
+          setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map((i) => i.tecido.id) ?? [], d.selecoes ?? undefined, d.recuperacao ? null : d.vendedorOlistPadraoId));
           contaInicializada.current = conta;
-          setVersao(pedido.versao);
+          setVersao(d.versao ?? pedido.versao);
           setPrevia(null);
+          setRecuperacao(d.recuperacao ?? null);
+          if (d.recuperacao) setEditarDados(true);
+        }
+        if (!recuperar || edicaoManualRef.current || !d.recuperacao || d.envio && !["LIBERADO", "REJEITADO"].includes(d.envio.estado)) return;
+        const chaves: string[] = tentativaRecuperacao > 0
+          ? [...d.recuperacao.restantes, ...d.recuperacao.campos.filter((c: Recuperacao["campos"][number]) => c.estado === "PENDENTE").map((c: Recuperacao["campos"][number]) => c.chave)]
+          : [...d.recuperacao.restantes];
+        chaves.sort((a, b) => (a === "planoId" ? 1 : 0) - (b === "planoId" ? 1 : 0));
+        if (!chaves.length) { setEditarDados(true); return; }
+        setCarregando(false);
+        setRecuperando(true); setEditarDados(true);
+        let versaoAtual = d.versao ?? pedido.versao;
+        for (const chave of chaves) {
+          if (controller.signal.aborted) return;
+          alterado.current = true;
+          const r = await fetch(api, { method: "POST", signal: controller.signal, cache: "no-store", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ acao: "recuperar", versao: versaoAtual, filialId: d.filial.id, chave }) });
+          const resultado = await r.json();
+          if (!r.ok) throw new Error(resultado.error || "A recuperação foi interrompida. Os cadastros já recuperados foram preservados.");
+          if (controller.signal.aborted) return;
+          versaoAtual = resultado.versao;
+          setVersao(versaoAtual); setRecuperacao(resultado.recuperacao);
+          setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map(i => i.tecido.id) ?? [], resultado.selecoes));
+          alterado.current = true;
         }
       })
-      .catch((e) => { if (!controller.signal.aborted) setErro(e.message); }).finally(() => { if (!controller.signal.aborted) setCarregando(false); });
+      .catch((e) => { if (!controller.signal.aborted) setErro(e.message); }).finally(() => { if (!controller.signal.aborted) { setCarregando(false); setRecuperando(false); } });
     return () => controller.abort();
-  }, [api, token, pedido.status, pedido.dadosPedido, pedido.filial?.id, pedido.versao]);
+  }, [api, token, pedido.status, pedido.dadosPedido, pedido.filial?.id, pedido.versao, pedido.tipoOrigem, tentativaRecuperacao]);
   useEffect(() => { if (erro || mensagem || previa) alerta.current?.focus(); }, [erro, mensagem, previa]);
   async function operar(body: unknown, acao: "preview" | "confirmar" | "conciliar") {
     if (ocupado.current) return; ocupado.current = true; setSalvando(true); setErro("");
@@ -87,6 +127,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
     } finally { ocupado.current = false; setSalvando(false); }
   }
   function alterarEscolhaManual(escolhaManual: boolean) {
+    setEditarDados(true);
     setEscolhaManualConfirmada(escolhaManual);
     setVendedorFonte(escolhaManual ? "MANUAL" : origemVinculada ? "VINCULO" : "MANUAL");
     setVendedorFixo(origemVinculada && !escolhaManual);
@@ -120,8 +161,26 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           <input type="checkbox" className="mt-1" checked={vendedorFonte === "MANUAL" && escolhaManualConfirmada} onChange={(event) => alterarEscolhaManual(event.target.checked)} />
           {origemVinculada ? "Usar uma escolha manual de vendedor para este pedido, após revisar os dados comerciais." : "Revisei e confirmo a escolha manual do vendedor deste pedido, que não possui vínculo de origem registrado."}
         </label>}
-        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={setSelecoes} disabled={salvando} vendedorFixo={vendedorFixo} />
-        <button type="button" className={primario} disabled={salvando || (pedido.tipoOrigem !== "MANUAL" && vendedorFonte === "MANUAL" && !escolhaManualConfirmada)} onClick={() => void operar({ acao: "preview", versao, selecoes, ...(pedido.tipoOrigem !== "MANUAL" ? { vendedorFonte } : {}) }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
+        {recuperacao && <div className="space-y-2 rounded-md border border-slate-200 p-3 text-sm">
+          <p role="status">{recuperando ? `Recuperando cadastros no novo aplicativo · ${recuperacao.campos.length} campos consultados` : "Cadastros do aplicativo destinatário"}</p>
+          <p>Preços atualizados pela nova conta. O total será apresentado na revisão.</p>
+          {recuperacao.campos.some(c => c.estado === "RECUPERADO") && <p className="break-words">Recuperados: {recuperacao.campos.filter(c => c.estado === "RECUPERADO").map(c => rotuloCampo(c.chave, pedido)).join(", ")}</p>}
+          {!recuperando && recuperacao.campos.filter(c => c.estado === "PENDENTE").map(c => <p key={c.chave} className="text-amber-700">{rotuloCampo(c.chave, pedido)}: {c.mensagem}</p>)}
+          {!recuperando && !edicaoManual && !temEdicoes && (recuperacao.restantes.length > 0 || recuperacao.campos.some(c => c.estado === "PENDENTE")) && <button type="button" className={botao} onClick={() => { setErro(""); setTentativaRecuperacao(v => v + 1); }}>Tentar recuperar pendências</button>}
+          {!recuperando && !edicaoManual && <button type="button" className={botao} onClick={() => setEdicaoManual(true)}>Revisar todos os campos</button>}
+        </div>}
+        {!editarDados ? <div className="space-y-3 rounded-md border border-slate-200 p-3 text-sm">
+          <p className="font-medium">Dados selecionados na criação do pedido</p>
+          <dl className="grid gap-3 sm:grid-cols-2">{[["Cliente Olist",selecoes.clienteId||"Pendente"],["Vendedor Olist",selecoes.vendedorId||"Pendente"],["Forma de pagamento",selecoes.formaId||"Pendente"],["Plano",selecoes.planoId||"Pendente"],["Tipo de venda",selecoes.tipoVenda||"Pendente"]].map(([label,valor])=><div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="break-words">{valor}</dd></div>)}</dl>
+          <PessoasDestinoFila pedidoId={pedido.id} token={token}/>
+          <ul className="divide-y divide-slate-200">{selecoes.tecidos.map(t=><li key={t.tecidoId} className="space-y-1 py-2"><p className="break-words font-medium">{pedido.dadosPedido?.itens.find(i=>i.tecido.id===t.tecidoId)?.tecido.nome||"Produto"}</p><p>Produto Olist: {t.id||"Pendente"} · Preço/m: {t.preco==null?"Pendente":moeda(t.preco)}</p></li>)}</ul>
+          {selecoes.laser && <p>Corte a laser: ID {selecoes.laser.id} · Preço/m: {selecoes.laser.preco==null?"Pendente":moeda(selecoes.laser.preco)}</p>}
+          <button type="button" className={botao} disabled={salvando} onClick={()=>setEditarDados(true)}>Editar dados comerciais</button>
+        </div> : <>
+        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={valor => { setTemEdicoes(true); setSelecoes(valor); }} disabled={salvando || recuperando} somentePendentes={!!recuperacao && !edicaoManual} vendedorFixo={vendedorFixo} />
+        </>}
+
+        <button type="button" className={primario} disabled={salvando || recuperando || (pedido.tipoOrigem !== "MANUAL" && vendedorFonte === "MANUAL" && !escolhaManualConfirmada)} onClick={() => void operar({ acao: "preview", versao, selecoes, ...(pedido.tipoOrigem !== "MANUAL" ? { vendedorFonte } : {}) }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
       </div> : previa ? <div className="space-y-4">
         <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt>Cliente</dt><dd className="break-words font-medium">{previa.cliente}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{previa.vendedor}</dd></div><div><dt>Forma / plano</dt><dd>{previa.forma} · {previa.plano}</dd></div></dl>
         {previa.payload.itens.map((item, i) => <div key={i} className="space-y-2 rounded-md border border-slate-200 p-3 text-sm"><p className="break-words font-medium">{previa.produtos[`${item.produto.tipo}:${item.produto.id}`] ?? previa.produtos[item.produto.id]} · ID {item.produto.id}</p><p>{item.quantidade} m × {moeda(item.valorUnitario)} = {moeda(item.quantidade * item.valorUnitario)}</p><p className="whitespace-pre-wrap break-words">{item.infoAdicional}</p></div>)}

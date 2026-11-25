@@ -9,6 +9,7 @@ import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { chaveContatoPorNome, normalizarDocumentoContato } from "@/lib/olist-sync/dominio";
 import { normalizarNomeDirecionamento, UFS_DIRECIONAMENTO } from "@/lib/direcionamento-pedidos-contrato";
 import { referenciaPedidoManualSchema, type ReferenciaPedidoManual } from "./pedido-manual-referencia";
+import { nomeServicoSync } from "./olist-sync/servicos";
 
 export type UsuarioCorrespondenciaPedidoManual = {
   id: string; aplicativoId: string;
@@ -19,7 +20,8 @@ export type CorrespondenciaPedidoManual = {
   cadastros: { cliente: Record<string, unknown>; vendedor: Record<string, unknown> };
 };
 export type OpcoesCorrespondenciaPedidoManual = { validarDadosDirecionamento?: boolean };
-type CaminhoConsulta = "contatos" | "vendedores" | `contatos/${number}`;
+export type CaminhoConsulta = "contatos" | "vendedores" | "produtos" | "servicos" | "formas-pagamento" |
+  `contatos/${number}` | `produtos/${number}` | `servicos/${number}` | `formas-pagamento/${number}`;
 type PessoaReferencia = ReferenciaPedidoManual["vendedor"];
 type EntradaReferencia = { aplicativoOrigemId?: string; vendedorOrigemId: number; clienteOrigemId: number };
 export interface DependenciasCorrespondenciaPedidoManual {
@@ -112,6 +114,9 @@ const dependenciasPadrao: DependenciasCorrespondenciaPedidoManual = {
     throw new ErroFilaOlist("Reconecte a integração Olist deste aplicativo.", 502);
   },
 };
+
+/** Leitura com URL permitida, timeout, limite de resposta e renovação OAuth limitada. */
+export const consultarCorrespondenciaOlist = dependenciasPadrao.consultar;
 
 /** Serviço limitado a leituras; cada operação tem orçamento próprio e não repete mutações. */
 export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorrespondenciaPedidoManual = dependenciasPadrao) {
@@ -322,7 +327,24 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     return { clienteId, vendedorId: vendedor.referencia.id, vendedorFixo: fixo !== null, cadastros: { cliente, vendedor: vendedor.cadastro } };
   }
   async function validarReferenciaPersistidaPedidoManual(usuario: UsuarioCorrespondenciaPedidoManual, ref: ReferenciaPedidoManual, destinoId: string,
-    selecoes: { clienteId?: number; vendedorId?: number }) {
+    selecoes: { clienteId?: number; vendedorId?: number }, escolhaExplicita = false) {
+    if (escolhaExplicita) {
+      if (!selecoes.clienteId || !selecoes.vendedorId) throw new ErroFilaOlist("Selecione cliente e vendedor no destino.");
+      const consultar = contexto();
+      const origem = await lerOrigem(usuario, { aplicativoOrigemId: ref.aplicativoId, clienteOrigemId: ref.cliente.id, vendedorOrigemId: ref.vendedor.id }, consultar, ref);
+      const { vendedorId: fixo } = await autorizar(usuario, destinoId);
+      if (fixo !== null && fixo !== selecoes.vendedorId) throw new ErroFilaOlist("Preserve o vínculo do vendedor nesta conta.", 403);
+      const cliente = await detalheCliente(destinoId, selecoes.clienteId, consultar);
+      const vendedor = await vendedorPorId(destinoId, selecoes.vendedorId, consultar);
+      const compativel = (a: PessoaReferencia, b: PessoaReferencia) => a.cpfCnpj && b.cpfCnpj
+        ? a.cpfCnpj === b.cpfCnpj : nomeServicoSync(a.nome) === nomeServicoSync(b.nome);
+      if (!compativel(origem.referencia.cliente, pessoa(cliente, selecoes.clienteId)) || !compativel(origem.referencia.vendedor, vendedor.referencia)) {
+        throw new ErroFilaOlist("Cliente ou vendedor selecionado não corresponde à identidade de origem.", 409);
+      }
+      if (fixo !== null) validarVendedorPedidoOlist(cliente, fixo);
+      return { clienteId: selecoes.clienteId, vendedorId: selecoes.vendedorId, vendedorFixo: fixo !== null,
+        cadastros: { cliente, vendedor: vendedor.cadastro } };
+    }
     const correspondencia = await resolverCorrespondenciaPedidoManual(usuario, ref, destinoId);
     if (selecoes.clienteId !== correspondencia.clienteId || selecoes.vendedorId !== correspondencia.vendedorId) throw new ErroFilaOlist("Cliente ou vendedor do pedido não correspondem à referência de origem. Revise o pedido.", 409);
     return correspondencia;

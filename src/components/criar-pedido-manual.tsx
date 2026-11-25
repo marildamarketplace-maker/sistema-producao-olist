@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { consultarDirecionamentoCliente } from "@/lib/consultar-direcionamento-cliente";
-import { agruparProdutosRevisao } from "@/lib/revisao-pedido";
+import { RevisaoProdutosPedido } from "@/components/revisao-produtos-pedido";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BloqueioExplicado } from "@/components/bloqueio-explicado";
@@ -411,23 +411,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
         {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
         {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
-          {agruparProdutosRevisao(itens, selecoes.tecidos).map(card => <div key={card.chave} className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-            <p className="break-words font-semibold">{card.nome}</p>
-            <p className="font-medium">{card.pecas ? `${card.pecas.toLocaleString("pt-BR")} peças · ` : ""}{card.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m no total</p>
-            <p>Produto Olist: {card.produtoId || "Pendente"}</p>
-            {card.tipos.map(grupo => {
-              const base = grupo.itens[0];
-              const tipo = base.modalidade === "TECIDO_LISO" ? "Tecido sem estampa" : base.modalidade === "TECIDO_SUBLIMADO" ? "Tecido sublimado" : base.tipoProduto || "Produto sublimado";
-              return <section key={grupo.chave} aria-label={tipo} className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
-                <p className="break-words font-semibold">{tipo}</p>
-                <p>{grupo.pecas ? `${grupo.pecas.toLocaleString("pt-BR")} peças · ` : ""}{grupo.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Preço/m: {grupo.preco == null ? "Pendente" : `R$ ${grupo.preco.toFixed(2)}`}</p>
-                <ul className="divide-y divide-slate-200">{grupo.itens.map(i => <li key={i.id} className="space-y-1 py-2">
-                  {i.modalidade !== "TECIDO_LISO" && <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"}{i.tamanho ? ` · Tamanho: ${i.tamanho}` : ""}</p>}
-                  <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : ""}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? ` · Laser: ${i.corteLaser ? "Sim" : "Não"}` : ""}</p>
-                </li>)}</ul>
-              </section>;
-            })}
-          </div>)}
+          <RevisaoProdutosPedido itens={itens} produtos={selecoes.tecidos} />
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
           <button type="button" className={botao} disabled={etapa === 0 || enviando} onClick={() => { setErro(""); setEtapa(e => e - 1); }}>Voltar</button>

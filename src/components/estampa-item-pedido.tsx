@@ -8,16 +8,20 @@ export function EstampaItemPedido({ valor, api, token, disabled, aoAlterar, codi
  const titulo = variante ? "Variante" : "Estampa";
  const id=useId(); const seta=useRef<HTMLButtonElement>(null);
  const [aberto,setAberto]=useState(false),[pagina,setPagina]=useState(1),[erro,setErro]=useState(false),[carregando,setCarregando]=useState(false);
+ const cache = useRef(new Map<string, { ate: number; dados: z.infer<typeof resposta> }>());
  const [dados,setDados]=useState<z.infer<typeof resposta>>({itens:[],mais:false});
  useEffect(()=>{
   if(!aberto||!api||!token||disabled)return;
   if(variante && !codigoEstampa?.trim()){setDados({itens:[],mais:false});setCarregando(false);return;}
+  const chave=JSON.stringify([api,token,codigoEstampa,valor.trim().toLocaleLowerCase("pt-BR"),pagina]);
+  const anterior=cache.current.get(chave);
+  if(anterior && anterior.ate>Date.now()){setDados(anterior.dados);setCarregando(false);setErro(false);return;}
   const controller=new AbortController();setCarregando(true);setErro(false);
   const timer=setTimeout(()=>{
    const url=new URL(api,location.href);url.searchParams.set("acao","estampas");url.searchParams.set("busca",valor);url.searchParams.set("pagina",String(pagina));
    if(variante){url.searchParams.set("campo","variante");url.searchParams.set("codigo",codigoEstampa ?? "");}
-   void fetch(url,{headers:{Authorization:`Bearer ${token}`},signal:controller.signal,cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error();return resposta.parse(await r.json());}).then(d=>{if(!controller.signal.aborted)setDados(d);}).catch(()=>{if(!controller.signal.aborted)setErro(true);}).finally(()=>{if(!controller.signal.aborted)setCarregando(false);});
-  },250);
+   void fetch(url,{headers:{Authorization:`Bearer ${token}`},signal:controller.signal,cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error();return resposta.parse(await r.json());}).then(d=>{if(!controller.signal.aborted){if(cache.current.size>=30)cache.current.clear();cache.current.set(chave,{ate:Date.now()+60000,dados:d});setDados(d);}}).catch(()=>{if(!controller.signal.aborted)setErro(true);}).finally(()=>{if(!controller.signal.aborted)setCarregando(false);});
+  },150);
   return ()=>{clearTimeout(timer);controller.abort();};
  },[aberto,api,token,valor,pagina,disabled,codigoEstampa,variante]);
  return <div className="relative min-w-0 self-start space-y-2" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setAberto(false);}} onKeyDown={e=>{if(e.key==="Escape"){setAberto(false);seta.current?.focus();}}}>
