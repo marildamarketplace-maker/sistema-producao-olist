@@ -1,3 +1,5 @@
+import { alterarFilaManual } from "@/lib/fila-manual-administracao";
+import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -27,16 +29,16 @@ async function autorizar(request: Request) {
   });
   const usuario = await prisma.usuario.findUnique({
     where: { id: autenticado.id },
-    select: { aplicativoId: true, podeGerenciarFilaPedidos: true },
+    select: { aplicativoId: true, podeGerenciarFilaPedidos: true, ativo: true },
   });
-  if (!usuario?.podeGerenciarFilaPedidos || !usuario.aplicativoId) {
+  if (!usuario?.podeGerenciarFilaPedidos || usuario.ativo === false || !usuario.aplicativoId) {
     throw new ErroAdministracaoFila("Sem permissão para administrar a fila de pedidos.", 403);
   }
   return { usuarioId: autenticado.id, aplicativoId: usuario.aplicativoId };
 }
 
 function falha(error: unknown) {
-  if (error instanceof ErroAdministracaoFila) {
+  if (error instanceof ErroAdministracaoFila || error instanceof ErroFilaOlist) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
   return NextResponse.json({ error: "Não foi possível acessar a fila de pedidos. Tente novamente." }, { status: 500 });
@@ -59,7 +61,7 @@ export async function GET(request: Request) {
         where, skip: (pagina - 1) * porPagina, take: porPagina,
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
-          id: true, solicitacaoProducaoId: true, createdAt: true, direcionadoEm: true,
+          id: true, solicitacaoProducaoId: true, tipoOrigem: true, autor: { select: { nome: true } }, createdAt: true, direcionadoEm: true,
           versao: true, dadosPedido: true, status: true,
           aplicativoSolicitante: { select: { nome: true } },
           aplicativoFilial: { select: { id: true, nome: true } },
@@ -73,6 +75,7 @@ export async function GET(request: Request) {
         const dados = dadosPedidoFilaSchema.safeParse(pedido.dadosPedido);
         return {
           id: pedido.id, status: pedido.status, solicitacaoProducaoId: pedido.solicitacaoProducaoId,
+          tipoOrigem: pedido.tipoOrigem === "MANUAL" ? "MANUAL" : "PRODUCAO", autorNome: pedido.autor?.nome ?? null,
           createdAt: pedido.createdAt.toISOString(), origem: pedido.aplicativoSolicitante.nome,
           filial: pedido.aplicativoFilial, direcionadoEm: pedido.direcionadoEm?.toISOString() ?? null,
           versao: pedido.versao, dadosPedido: dados.success ? dados.data : null,
@@ -93,9 +96,11 @@ export async function PATCH(request: Request) {
     if (enviarOlist) throw new ErroAdministracaoFila("Use a revisão e confirmação de Enviar para a Olist.", 400);
     const resultado = await prisma.$transaction(async (tx) => {
       const pedido = await tx.pedidoFornecedorQueue.findFirst({
-        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true, solicitacaoProducaoId: true },
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true, solicitacaoProducaoId: true, tipoOrigem: true },
       });
       if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
+      if (pedido.tipoOrigem === "MANUAL") return alterarFilaManual(tx, { pedidoId, aplicativoId, usuarioId, versao, filialId });
+      if (!pedido.solicitacaoProducaoId) throw new ErroAdministracaoFila("Origem da fila inválida.", 409);
       if (pedido.status !== "PENDENTE" && pedido.status !== "FALHADO") {
         throw new ErroAdministracaoFila("Este pedido está em PROCESSAR, CONCLUIDO ou CANCELADO e não pode ser alterado.", 409);
       }
@@ -131,14 +136,16 @@ export async function POST(request: Request) {
     if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido e versão válidos para cancelar.", 400);
     const { pedidoId, versao } = parsed.data;
     await prisma.$transaction(async (tx) => {
+      const pedido = await tx.pedidoFornecedorQueue.findFirst({
+        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId },
+        select: { solicitacaoProducaoId: true, tipoOrigem: true },
+      });
+      if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
+      if (pedido.tipoOrigem === "MANUAL") return alterarFilaManual(tx, { pedidoId, aplicativoId, usuarioId, versao });
+      if (!pedido.solicitacaoProducaoId) throw new ErroAdministracaoFila("Origem da fila inválida.", 409);
       const pais = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM aplicativo WHERE id=${aplicativoId}::uuid AND aplicativo_pai_id IS NULL FOR SHARE`;
       if (!pais.length) throw new ErroAdministracaoFila("Somente o aplicativo pai pode cancelar pedidos desta fila.", 403);
-      const pedido = await tx.pedidoFornecedorQueue.findFirst({
-        where: { id: pedidoId, aplicativoFornecedorId: aplicativoId },
-        select: { solicitacaoProducaoId: true },
-      });
-      if (!pedido) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
       // Mesmo lock usado na reserva de envio: cancelar e enviar são excludentes.
       await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id=${pedido.solicitacaoProducaoId}::uuid FOR UPDATE`;
       const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: pedido.solicitacaoProducaoId }, select: { estado: true, pedidoOlistId: true } });

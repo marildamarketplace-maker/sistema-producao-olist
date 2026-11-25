@@ -5,9 +5,20 @@ import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistAp
 import type { SelecoesFilaOlist, SelecoesFilaOlistParciais } from "@/lib/fila-olist-contrato";
 export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 const ErroFila = ErroFilaOlist;
-export function nome(item: Record<string, unknown>) { return String(item.nome ?? item.descricao ?? item.id); }
+function contatoDoCadastro(item: Record<string, unknown>): Record<string, unknown> | null {
+  return item.contato && typeof item.contato === "object" && !Array.isArray(item.contato)
+    ? item.contato as Record<string, unknown> : null;
+}
+export function nome(item: Record<string, unknown>) {
+  return String(item.nome ?? contatoDoCadastro(item)?.nome ?? item.descricao ?? item.id);
+}
 function ativo(item: Record<string, unknown>) { return !["I", "E", "INATIVO", "2", "B"].includes(String(item.situacao ?? "A").toUpperCase()); }
-export async function consultarCadastrosFilaOlist(filialId: string, params: URLSearchParams) {
+// Contatos e vendedores usam B=Ativo e A=Ativo com acesso. Os demais
+// recursos mantêm seu contrato próprio (incluindo B bloqueado quando aplicável).
+function pessoaAtiva(item: Record<string, unknown>) {
+  return ["A", "B"].includes(String(item.situacao ?? "A").trim().toUpperCase());
+}
+export async function consultarCadastrosFilaOlist(filialId: string, params: URLSearchParams, escopo?: { vendedorId: number | null }) {
     const recurso = params.get("recurso");
     await validarIntegracao(filialId);
     const filtros = z.object({ busca: z.string().max(120), pagina: z.coerce.number().int().min(1).max(1000) }).safeParse({ busca: params.get("busca") ?? "", pagina: params.get("pagina") ?? 1 });
@@ -21,15 +32,15 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
       return ({ itens: planos.map((p) => p.planoPagamento) });
     }
     let resultado;
-    if (recurso === "clientes") resultado = await listarContatosOlistApi(filialId, { nome: busca || undefined, situacao: "A", limit, offset });
+    if (recurso === "clientes") resultado = await listarContatosOlistApi(filialId, { nome: busca || undefined, idVendedor: escopo?.vendedorId ? String(escopo.vendedorId) : undefined, limit, offset });
     else if (recurso === "vendedores") resultado = await listarVendedoresOlistApi(filialId, { nome: busca || undefined, limit, offset });
     else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca || undefined, situacao: "A", limit, offset });
     else if (recurso === "servicos") resultado = await listarServicosOlistApi(filialId, { nome: busca || undefined, limit, offset });
     else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
     else throw new ErroFila("Consulta inválida.");
-    return ({ itens: resultado.itens.filter((i) => ativo(i as Record<string, unknown>)).map((i) => {
+    return ({ itens: resultado.itens.filter((i) => (recurso === "clientes" || recurso === "vendedores" ? pessoaAtiva(i as Record<string, unknown>) : ativo(i as Record<string, unknown>)) && (recurso !== "vendedores" || !escopo?.vendedorId || Number(i.id) === escopo.vendedorId)).map((i) => {
       const item = i as Record<string, unknown>, precos = item.precos as Record<string, unknown> | undefined;
-      return { id: Number(item.id), nome: nome(item), referencia: String(item.codigo ?? item.sku ?? ""), preco: Number(precos?.preco ?? item.preco ?? 0) };
+      return { id: Number(item.id), nome: nome(item), referencia: String((recurso === "vendedores" ? contatoDoCadastro(item)?.codigo : undefined) ?? item.codigo ?? item.sku ?? ""), preco: Number(precos?.preco ?? item.preco ?? 0) };
     }), pagina, mais: resultado.itens.length === limit });
 }
 async function validarIntegracao(filialId: string) {
@@ -60,7 +71,7 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
     if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de pagamento nesta conta destinatária.");
     const cliente = selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null;
     const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-pagamento", selecoes.formaId) : null;
-    if ((cliente && !ativo(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de pagamento inativos.");
+    if ((cliente && !pessoaAtiva(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de pagamento inativos.");
     // Vendedores não possuem endpoint de detalhe. Valida por paginação na mesma conta.
     let vendedor: Record<string, unknown> | undefined;
     for (let pagina = 0; selecoes.vendedorId && pagina < 100; pagina++) {
@@ -68,9 +79,9 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
       vendedor = lista.itens.find((i) => Number(i.id) === selecoes.vendedorId);
       if (vendedor || lista.itens.length < 100) break;
     }
-    if (selecoes.vendedorId && (!vendedor || !ativo(vendedor))) throw new ErroFila("Vendedor indisponível na conta destinatária.");
+    if (selecoes.vendedorId && (!vendedor || !pessoaAtiva(vendedor))) throw new ErroFila("Vendedor indisponível na conta destinatária.");
     const nomes = new Map<string, string>();
-    for (const produto of selecoes.tecidos ?? []) {
+    for (const produto of new Map((selecoes.tecidos ?? []).map(p => [p.id, p])).values()) {
       const cadastro = await obterCadastroFornecedorOlist(filialId, "produtos", produto.id);
       if (!ativo(cadastro)) throw new ErroFila("Produto ou serviço inativo na conta destinatária.");
       nomes.set(`P:${produto.id}`, nome(cadastro));

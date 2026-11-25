@@ -5,7 +5,7 @@ import {
 } from "@/lib/olist-pedido";
 
 export class ErroMontagemFornecedor extends Error {}
-export type LinhaFornecedor = { referencia: string; nome: string; preco: number; quantidade: number; quantidadeSolicitada: number; sku: string; estampa: string; variante: string; laser: boolean; tamanho: string; tipo: string };
+export type LinhaFornecedor = { referencia: string; nome: string; preco: number; quantidade: number; quantidadeSolicitada: number; unidadeSolicitada?: "UN" | "MT"; sku: string; estampa: string; variante: string; laser: boolean; tamanho: string; tipo: string };
 export type ConfigPedidoFornecedor = { clienteId: number; vendedorId: number; formaId: number; plano: string; tipoVenda?: string | null; observacao?: string | null };
 function formatarQuantidadeDivisao(quantidade: number) {
   return quantidade.toFixed(2).replace(".", ",");
@@ -42,7 +42,7 @@ export function montarPedidoFornecedor(linhas: LinhaFornecedor[], config: Config
       preco: number;
       quantidade: number;
       divisoes: Map<string, {
-        estampa: string; variante: string; quantidade: number; laser: boolean; tamanho: string; tipo: string;
+        estampa: string; variante: string; quantidade: number; unidade: "UN" | "MT"; laser: boolean; tamanho: string; tipo: string;
       }>;
     }>();
 
@@ -61,8 +61,9 @@ export function montarPedidoFornecedor(linhas: LinhaFornecedor[], config: Config
       };
       if (grupo.preco !== preco) throw new ErroMontagemFornecedor("O mesmo produto Olist foi associado com preços diferentes. Revise os tecidos.");
       grupo.quantidade += quantidade;
-      const chave = `${sku}\u0000${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
-      const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, laser, tamanho, tipo };
+      const unidade = item.unidadeSolicitada ?? (laser ? "UN" : "MT");
+      const chave = `${unidade}\u0000${sku}\u0000${estampa}\u0000${variante}\u0000${laser}\u0000${tamanho}\u0000${tipo}`;
+      const divisao = grupo.divisoes.get(chave) ?? { estampa, variante, quantidade: 0, unidade, laser, tamanho, tipo };
       divisao.quantidade += quantidadeSolicitada;
       grupo.divisoes.set(chave, divisao);
       grupos.set(chaveGrupo, grupo);
@@ -78,7 +79,7 @@ export function montarPedidoFornecedor(linhas: LinhaFornecedor[], config: Config
         divisoes.map((divisao) => ({
           ...divisao,
           quantidade: formatarQuantidadeDivisao(divisao.quantidade),
-          unidade: divisao.laser ? "UN" : "MT",
+          unidade: divisao.unidade,
         })),
         "MT",
         { incluirTagsVazias: true },
@@ -87,7 +88,7 @@ export function montarPedidoFornecedor(linhas: LinhaFornecedor[], config: Config
         observacoes.push({
           descricao: grupo.nome,
           quantidade: formatarQuantidadeDivisao(divisao.quantidade),
-          unidade: divisao.laser ? "UN" : "MT",
+          unidade: divisao.unidade,
           estampa: divisao.estampa,
           variante: divisao.variante,
           laser: divisao.laser,

@@ -27,6 +27,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
+  const [vendedorFixo, setVendedorFixo] = useState(false);
   const [envio, setEnvio] = useState<EstadoEnvioFila | null>(null);
   const [versao, setVersao] = useState(pedido.versao);
   const [previa, setPrevia] = useState<Previa | null>(null);
@@ -51,6 +52,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .then((d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
+        setVendedorFixo(Boolean(d.vendedorFixo));
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
         const conta = `${api}:${d.filial.id}`;
         if (contaInicializada.current !== conta) {
@@ -90,7 +92,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
         {envio.pedidoOlistId && <p className="break-all">ID Olist: {envio.pedidoOlistId}</p>}
         <p className="text-sm">{envio.diagnostico || "A reserva impede criar outro pedido para esta solicitação."}</p>
         {!concluido && <>
-          <p className="text-sm">Confira a conta destinatária da tentativa. Uma tentativa interrompida só pode ser conciliada após 10 minutos. O vínculo exige o identificador da solicitação nas observações internas do pedido Olist.</p>
+          <p className="text-sm">Confira a conta destinatária da tentativa. Uma tentativa interrompida só pode ser conciliada após 10 minutos. O vínculo exige o identificador da fila ou solicitação nas observações internas do pedido Olist.</p>
           <label className="block text-sm">ID do pedido existente<input className="input mt-1 min-h-11" inputMode="numeric" value={idExistente} onChange={(e) => setIdExistente(e.target.value)} /></label>
           <label className="block text-sm">Justificativa da conferência (mínimo 10 caracteres)<textarea className="input mt-1" value={justificativa} maxLength={1000} onChange={(e) => setJustificativa(e.target.value)} /></label>
           <button type="button" className={botao} disabled={salvando || !idExistente || justificativa.trim().length < 10} onClick={() => void operar({ acao: "vincular", pedidoOlistId: idExistente, tentativaId: envio.tentativaId, justificativa }, "conciliar")}>Verificar na Olist e vincular pedido</button>
@@ -98,7 +100,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           <button type="button" className={botao} disabled={salvando || !ausencia || justificativa.trim().length < 10 || !!envio.pedidoOlistId} onClick={() => void operar({ acao: "confirmar-ausencia", ausenciaConfirmada: true, tentativaId: envio.tentativaId, justificativa }, "conciliar")}>Registrar ausência e liberar nova tentativa</button>
         </>}
       </div> : !mensagem && !previa ? <div className="space-y-4">
-        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={setSelecoes} disabled={salvando} />
+        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={setSelecoes} disabled={salvando} vendedorFixo={vendedorFixo} />
         <button type="button" className={primario} disabled={salvando} onClick={() => void operar({ acao: "preview", versao, selecoes }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
       </div> : previa ? <div className="space-y-4">
         <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt>Cliente</dt><dd className="break-words font-medium">{previa.cliente}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{previa.vendedor}</dd></div><div><dt>Forma / plano</dt><dd>{previa.forma} · {previa.plano}</dd></div></dl>

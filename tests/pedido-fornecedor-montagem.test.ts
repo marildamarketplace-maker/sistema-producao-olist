@@ -31,3 +31,10 @@ test("bloqueia quantidade/preço inválidos, conflitos de preço, laser incomple
 test("seleções comerciais bloqueiam payload arbitrário, preços negativos e IDs inválidos", () => {
   assert.equal(selecoesFilaOlistSchema.safeParse({ payload: {} }).success, false);
 });
+
+test("pedido manual mantém peças UN nas divisões e consumo MT na cobrança, mesmo sem laser", () => {
+  const pedido = montarPedidoFornecedor([{ ...linha, quantidade: 2.5, quantidadeSolicitada: 10, unidadeSolicitada: "UN" }], config);
+  assert.equal(pedido.itens[0].quantidade, 2.5);
+  assert.match(pedido.itens[0].infoAdicional, /<QTD>10,00<\/QTD><UN>UN<\/UN>/);
+  assert.match(pedido.observacoesInternas, /10,00 UN/);
+});

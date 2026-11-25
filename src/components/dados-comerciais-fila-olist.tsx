@@ -13,7 +13,7 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
   const controller = useRef<AbortController | null>(null);
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => { setOpcoes([]); setPagina(1); setMais(false); setErro(""); setCarregando(false); return () => controller.current?.abort(); }, [api, token]);
   async function pesquisar(proxima = 1) {
     controller.current?.abort(); const atual = new AbortController(); controller.current = atual;
     setCarregando(true); setErro("");
@@ -43,9 +43,9 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
 }
 
 
-export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled }: {
+export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, vendedorFixo = false }: {
   api: string; token: string; itens: Array<{ tecidoId: string; nome: string; corteLaser: boolean }>;
-  selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean;
+  selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean; ocultarClienteVendedor?: boolean; vendedorFixo?: boolean;
 }) {
   const [planos, setPlanos] = useState<{ id: string; nome: string }[]>([]);
   const [erro, setErro] = useState("");
@@ -67,8 +67,8 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
     {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     {carregando && <p role="status" className="text-sm text-slate-600">Carregando planos associados...</p>}
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-          {pesquisa("Cliente", "clientes", selecoes.clienteId, (o) => aoAlterar({ ...selecoes, clienteId: o.id }))}
-          {pesquisa("Vendedor", "vendedores", selecoes.vendedorId, (o) => aoAlterar({ ...selecoes, vendedorId: o.id }))}
+          {!ocultarClienteVendedor && pesquisa("Cliente", "clientes", selecoes.clienteId, (o) => aoAlterar({ ...selecoes, clienteId: o.id }))}
+          {!ocultarClienteVendedor && (vendedorFixo ? <p className="text-sm">Vendedor do autor (fixo): <strong>{selecoes.vendedorId || "Vínculo pendente nesta conta"}</strong></p> : pesquisa("Vendedor", "vendedores", selecoes.vendedorId, (o) => aoAlterar({ ...selecoes, vendedorId: o.id, clienteId: 0 })))}
           {pesquisa("Forma de pagamento", "formas", selecoes.formaId, (o) => aoAlterar({ ...selecoes, formaId: o.id, planoId: "" }))}
           <label className="block text-sm">Plano de pagamento local<select className="input mt-2 min-h-11" value={selecoes.planoId} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, planoId: e.target.value })}><option value="">Selecione um plano associado</option>{planos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
             {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta conta.</span>}</label>

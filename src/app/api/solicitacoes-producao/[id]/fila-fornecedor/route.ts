@@ -14,7 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         fornecedor: { select: { nome: true } }, aplicativoFilial: { select: { id: true, nome: true } },
       },
     });
-    if (!pedido) return NextResponse.json({ error: "Envio à fila não encontrado." }, { status: 404 });
+    if (!pedido || !pedido.solicitacaoProducaoId || !pedido.fornecedor) return NextResponse.json({ error: "Envio à fila não encontrado." }, { status: 404 });
     const dados = dadosPedidoFilaSchema.safeParse(pedido.dadosPedido);
     const detalhe: DetalheFilaProducao = {
       id: pedido.id, solicitacaoProducaoId: pedido.solicitacaoProducaoId, status: pedido.status,

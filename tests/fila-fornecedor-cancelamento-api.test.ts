@@ -16,7 +16,7 @@ test("pai cancela pedido da própria fila respeitando permissão, reserva e vers
   const tx = {
     pedidoFornecedorQueue: { findFirst: async ({ where, select }: { where: unknown; select: unknown }) => {
       assert.deepEqual(where, { id: pedidoId, aplicativoFornecedorId: pai });
-      assert.deepEqual(select, { solicitacaoProducaoId: true }); consultas++; ordem.push("pedido");
+      assert.deepEqual(select, { solicitacaoProducaoId: true, tipoOrigem: true }); consultas++; ordem.push("pedido");
       return existe ? { solicitacaoProducaoId: solicitacaoId } : null;
     } },
     envioFornecedor: { findUnique: async ({ select }: { select: unknown }) => {
@@ -70,7 +70,7 @@ test("pai cancela pedido da própria fila respeitando permissão, reserva e vers
   for (const inicial of ["PENDENTE", "FALHADO"]) await t.test(`cancela ${inicial} sem filial e registra autoria com lock antes de alterar`, async () => {
     reset(); status = inicial; const response = await post(); assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { id: pedidoId, status: "CANCELADO", versao: 1 });
-    assert.deepEqual(ordem, ["pai", "pedido", "lock", "envio", "cancelar"]); assert.equal(gravacoes, 1);
+    assert.deepEqual(ordem, ["pedido", "pai", "lock", "envio", "cancelar"]); assert.equal(gravacoes, 1);
   });
   for (const estado of ["RESERVADO", "INCERTO", "CONCLUIDO", "DESCONHECIDO"]) await t.test(`bloqueia envio ${estado}`, async () => {
     reset(); envio = { estado, pedidoOlistId: null }; assert.equal((await post()).status, 409); assert.equal(gravacoes, 0);

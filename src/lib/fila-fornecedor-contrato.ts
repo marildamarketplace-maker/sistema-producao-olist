@@ -36,7 +36,9 @@ export const filtrosStatusFila = {
 export type PedidoFilaAdministracao = {
   status: StatusFila;
   id: string;
-  solicitacaoProducaoId: string;
+  solicitacaoProducaoId: string | null;
+  tipoOrigem?: "PRODUCAO" | "MANUAL";
+  autorNome?: string | null;
   createdAt: string;
   origem: string;
   filial: FilialFila | null;

@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Aplicativo {
+  enviosPedidosManuais       EnvioPedidoManual[]
   id                        String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
   olistClientId             String?                       @map("olist_client_id")
@@ -156,6 +157,7 @@ model Midia {
 }
 
 model Usuario {
+  enviosPedidosManuais                  EnvioPedidoManual[]
   id                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoId                         String                  @map("aplicativo_id") @db.Uuid
   nome                                 String
@@ -185,6 +187,7 @@ model Usuario {
   podeVisualizarOlistVendedores        Boolean                 @default(false) @map("pode_visualizar_olist_vendedores")
   vinculosOlistVersao                  Int                     @default(0) @map("vinculos_olist_versao")
   vendedoresOlist                      UsuarioVendedorOlist[]
+  pedidosManuais                       PedidoFornecedorQueue[] @relation("AutorPedidoManual")
   podeEditarEstampas                   Boolean                 @default(false) @map("pode_editar_estampas")
   podeCriarMockups                     Boolean                 @default(false) @map("pode_criar_mockups")
   podeEditarTamanhos                   Boolean                 @default(false) @map("pode_editar_tamanhos")
@@ -1069,9 +1072,16 @@ model AcessoPaginaUsuario {
 model PedidoFornecedorQueue {
   id                      String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoSolicitanteId String                      @map("aplicativo_solicitante_id") @db.Uuid
-  solicitacaoProducaoId   String                      @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
+  solicitacaoProducaoId   String?                     @unique(map: "uq_pedido_fornecedor_queue_solicitacao") @map("solicitacao_producao_id") @db.Uuid
   aplicativoFornecedorId  String                      @map("aplicativo_fornecedor_id") @db.Uuid
-  fornecedorId            String                      @map("fornecedor_id") @db.Uuid
+  fornecedorId            String?                     @map("fornecedor_id") @db.Uuid
+  tipoOrigem              String                      @default("PRODUCAO") @map("tipo_origem")
+  autorId                 String?                     @map("autor_id") @db.Uuid
+  chaveIdempotencia       String?                     @map("chave_idempotencia") @db.Uuid
+  hashEntrada             String?                     @map("hash_entrada")
+  vendedorFixo            Boolean                     @default(false) @map("vendedor_fixo")
+  autor                   Usuario?                    @relation("AutorPedidoManual", fields: [autorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  envioManual             EnvioPedidoManual?
   dadosPedido             Json                        @map("dados_pedido")
   createdAt               DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
   aplicativoFilialId      String?                     @map("aplicativo_filial_id") @db.Uuid
@@ -1084,8 +1094,8 @@ model PedidoFornecedorQueue {
   aplicativoFornecedor    Aplicativo                  @relation("FilaDestino", fields: [aplicativoFornecedorId], references: [id], onUpdate: NoAction)
   aplicativoSolicitante   Aplicativo                  @relation("FilaOrigem", fields: [aplicativoSolicitanteId], references: [id], onUpdate: NoAction)
   direcionadoPor          Usuario?                    @relation(fields: [direcionadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  fornecedor              Fornecedor                  @relation(fields: [fornecedorId], references: [id], onUpdate: NoAction)
-  solicitacaoProducao     SolicitacaoProducao         @relation(fields: [solicitacaoProducaoId], references: [id], onUpdate: NoAction)
+  fornecedor              Fornecedor?                 @relation(fields: [fornecedorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  solicitacaoProducao     SolicitacaoProducao?        @relation(fields: [solicitacaoProducaoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   previasOlist            PreviaFornecedor[]
 
   @@index([aplicativoSolicitanteId], map: "idx_pedido_fornecedor_queue_origem")
@@ -1093,6 +1103,8 @@ model PedidoFornecedorQueue {
   @@index([fornecedorId], map: "idx_pedido_fornecedor_queue_fornecedor")
   @@index([aplicativoFilialId], map: "idx_pedido_fornecedor_queue_filial")
   @@index([direcionadoPorId], map: "idx_pedido_fornecedor_queue_direcionado_por")
+  @@unique([aplicativoSolicitanteId, autorId, chaveIdempotencia], map: "uq_fila_manual_idempotencia")
+  @@index([autorId, createdAt], map: "idx_fila_manual_autor")
   @@map("pedido_fornecedor_queue")
 }
 
@@ -1855,4 +1867,26 @@ model IaRelatorioBusca {
   @@unique([trabalhoId, aplicativoId])
   @@index([aplicativoId, buscaId], map: "ia_relatorio_busca_origem")
   @@map("ia_relatorio_busca")
+}
+
+// Reserva independente de solicitações de produção. A fila é a identidade do envio.
+model EnvioPedidoManual {
+  filaId String @id @map("fila_id") @db.Uuid
+  fila PedidoFornecedorQueue @relation(fields: [filaId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tentativaId String @map("tentativa_id") @db.Uuid
+  aplicativoId String @map("aplicativo_id") @db.Uuid
+  usuarioId String @map("usuario_id") @db.Uuid
+  estado String
+  iniciadoEm DateTime @map("iniciado_em") @db.Timestamptz(6)
+  chamadaEm DateTime? @map("chamada_em") @db.Timestamptz(6)
+  pedidoOlistId String? @map("pedido_olist_id")
+  diagnostico String?
+  payload Json
+  historico Json
+
+  aplicativo Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([aplicativoId, pedidoOlistId], map: "uq_envio_manual_pedido_olist")
+  @@map("envio_pedido_manual")
 }
