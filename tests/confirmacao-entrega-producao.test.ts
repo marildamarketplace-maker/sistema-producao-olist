@@ -3,15 +3,7 @@ import test from "node:test";
 import {
   criarAlertaConfirmacaoEntregaProducao,
   criarAlertaErroConfirmacaoEntregaProducao,
-  obterLimiteConfirmacao,
 } from "../src/lib/confirmacao-entrega-producao";
-
-test("calcula o limite estrito de 24 horas para cobrar confirmação", () => {
-  assert.equal(
-    obterLimiteConfirmacao(new Date("2026-10-03T19:00:00.000Z")).toISOString(),
-    "2026-10-02T19:00:00.000Z",
-  );
-});
 
 test("monta um alerta para uma confirmação atrasada", () => {
   const alerta = criarAlertaConfirmacaoEntregaProducao({

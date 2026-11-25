@@ -3,7 +3,6 @@ import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
 import {
   criarAlertaConfirmacaoEntregaProducao,
   criarAlertaErroConfirmacaoEntregaProducao,
-  obterLimiteConfirmacao,
   type ProducaoPendenteConfirmacao,
 } from "@/lib/confirmacao-entrega-producao";
 import { criarTokenPublicoConfirmacaoProducao } from "@/lib/confirmacao-entrega-producao-publica";
@@ -33,13 +32,11 @@ function obterUrlConfirmacao(aplicativoId: string, solicitacaoId: string, agora:
 
 async function buscarProducoesPendentes(
   aplicativoId: string,
-  limiteCriacao: Date,
 ): Promise<ProducaoPendenteConfirmacao[]> {
   const solicitacoes = await prisma.solicitacaoProducao.findMany({
     where: {
       aplicativoId,
       status: "em_producao",
-      createdAt: { lt: limiteCriacao },
     },
     select: {
       id: true,
@@ -114,7 +111,6 @@ export async function GET(request: NextRequest) {
       try {
         const producoes = await buscarProducoesPendentes(
           aplicativo.id,
-          obterLimiteConfirmacao(agora),
         );
 
         if (producoes.length === 0) {

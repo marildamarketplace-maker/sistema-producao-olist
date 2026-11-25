@@ -1,5 +1,3 @@
-const PRAZO_CONFIRMACAO_MS = 24 * 60 * 60 * 1_000;
-
 export type ProducaoPendenteConfirmacao = {
   id: string;
   createdAt: Date;
@@ -20,11 +18,6 @@ const formatadorDataHora = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
   timeStyle: "short",
 });
-
-export function obterLimiteConfirmacao(atual = new Date()) {
-  if (Number.isNaN(atual.getTime())) throw new Error("Data atual inválida.");
-  return new Date(atual.getTime() - PRAZO_CONFIRMACAO_MS);
-}
 
 export function criarAlertaConfirmacaoEntregaProducao(input: {
   producao: ProducaoPendenteConfirmacao;
