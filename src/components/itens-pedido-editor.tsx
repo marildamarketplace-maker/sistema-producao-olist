@@ -1,7 +1,7 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
-import { useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Copy, Trash2 } from "lucide-react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
 import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "@/components/pesquisa-tecido-olist";
 import { TamanhoItemPedido, type CacheTamanhosPedido } from "@/components/tamanho-item-pedido";
 import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
@@ -26,7 +26,6 @@ const numero = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits:
 export function ItensPedidoEditor(props: Props) {
   const { catalogo, itens, selecoes, disabled, limite, aoAlterarItem, aoRemover, aoAdicionar, aoAlterarSelecoes } = props;
   const cache = useRef<CacheTamanhosPedido>(new Map());
-  const [mudanca, setMudanca] = useState<{ id: string; modalidade: ModalidadePedido } | null>(null);
   const grupos = new Map<string, ItemPedidoManual[]>();
   for (const item of itens) { const chave = item.grupoId ?? item.id; const grupo = grupos.get(chave) ?? []; grupo.push(item); grupos.set(chave, grupo); }
   const indices = new Map(itens.map((item, index) => [item.id, index]));
@@ -38,7 +37,6 @@ export function ItensPedidoEditor(props: Props) {
   }
   function modalidade(grupo: ItemPedidoManual[], valor: ModalidadePedido) {
     for (const item of grupo) aoAlterarItem(item.id, trocarModalidade(item, valor));
-    setMudanca(null);
   }
   return <div className="min-w-0 space-y-4">
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -60,10 +58,9 @@ export function ItensPedidoEditor(props: Props) {
         <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label={`Modalidade do grupo ${indice + 1}`}>
           {(Object.entries(modalidadesPedido) as [ModalidadePedido, string][]).map(([valor, rotulo]) => <button key={valor} type="button" aria-pressed={base.modalidade === valor}
             className={`${botao} text-left ${base.modalidade === valor ? "border-slate-900 bg-slate-900 text-white" : "bg-white text-slate-900 hover:bg-slate-50"}`}
-            onClick={() => { if (base.modalidade === valor) return; if (valor !== "PRODUTO_SUBLIMADO" && grupo.some(i => i.tamanho || i.tipoProduto || i.corteLaser || (valor === "TECIDO_LISO" && (i.estampa || i.variante)))) setMudanca({ id: chave, modalidade: valor }); else modalidade(grupo, valor); }}>{rotulo}</button>)}
+            onClick={() => { if (base.modalidade !== valor) modalidade(grupo, valor); }}>{rotulo}</button>)}
         </div>
         {!base.modalidade && <p role="status" className="text-sm text-amber-700">{temDados ? "Defina a modalidade deste item antes de continuar. Os dados existentes foram preservados." : "Escolha a modalidade para preencher os campos."}</p>}
-        {mudanca?.id === chave && <div role="status" className="space-y-2 rounded-md border border-amber-300 p-3 text-sm"><p>Mudar para {modalidadesPedido[mudanca.modalidade]} remove os campos incompatíveis de {grupo.length > 1 ? "todas as combinações deste grupo" : "este item"}. Revise os dados antes de confirmar.</p><div className="flex flex-wrap gap-2"><button type="button" className={botao} onClick={() => modalidade(grupo, mudanca.modalidade)}>Confirmar mudança</button><button type="button" className={botao} onClick={() => setMudanca(null)}>Cancelar mudança</button></div></div>}
         {!exibirCampos && <button type="button" className={`${botao} inline-flex min-w-11 items-center justify-center`} aria-label={`Remover item ${(indices.get(base.id) ?? 0) + 1}`} title="Remover item" onClick={() => aoRemover(base.id)}><Trash2 className="h-5 w-5" aria-hidden="true" /></button>}
         {exibirCampos && <><div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <PesquisaTecidoOlist nome={base.tecidoNome} catalogo={catalogo} disabled={disabled} produtoId={produto?.id ?? 0} preco={produto?.preco ?? null}
@@ -85,17 +82,17 @@ export function ItensPedidoEditor(props: Props) {
                 aoDigitar={valor => aoAlterarItem(item.id, { tamanho: valor, tamanhoId: null, consumoUnidade: null, modoMetragem: "MANUAL", revisarMetragem: item.quantidadeTecido > 0 })}
                 aoSelecionar={(tamanho, manter) => aoAlterarItem(item.id, selecionarTamanho(item, tamanho, manter))} />
                 <label className="min-w-0 text-sm">Quantidade de peças (UN)<input className="input mt-1 min-h-11 w-full" type="number" min={1} max={2147483647} step={1} value={item.quantidade || ""} onChange={e => aoAlterarItem(item.id, alterarPecas(item, Number(e.target.value)))} /></label></>}
-              <div className="min-w-0 space-y-2"><label className="block text-sm">Quantidade de tecido (MT)<input className="input mt-1 min-h-11 w-full" type="number" min={0.000001} max={1000000000} step="0.000001" readOnly={auto} value={item.quantidadeTecido || ""} onChange={e => aoAlterarItem(item.id, { quantidadeTecido: Number(e.target.value), modoMetragem: "MANUAL", revisarMetragem: false })} /></label>
+              <div className="min-w-0 space-y-2"><label className="block text-sm">Quantidade de tecido (MT)<input className="input mt-1 min-h-11 w-full" type="number" min={0.000001} max={1000000000} step="0.000001" value={item.quantidadeTecido || ""} onChange={e => aoAlterarItem(item.id, { quantidadeTecido: Number(e.target.value), modoMetragem: "MANUAL", revisarMetragem: false })} /></label>
                 {isProduto && <><p className="text-xs text-slate-600">{item.consumoUnidade ? `${numero(item.quantidade)} peças × ${numero(item.consumoUnidade)} m = ${numero(metrosPedido(item.quantidade, item.consumoUnidade))} m` : "Selecione um tamanho com consumo ou informe os metros."}</p>
-                  {auto ? <button type="button" className={botao} onClick={() => aoAlterarItem(item.id, { modoMetragem: "MANUAL" })}>Ajustar metragem</button> : <><p className="text-xs text-amber-700">Metragem ajustada manualmente</p>{item.consumoUnidade && <button type="button" className={botao} onClick={() => aoAlterarItem(item.id, { modoMetragem: "AUTOMATICA", quantidadeTecido: metrosPedido(item.quantidade, item.consumoUnidade!), revisarMetragem: false })}>Restaurar cálculo</button>}</>}
+                  {!auto && <><p className="text-xs text-amber-700">Metragem ajustada manualmente</p>{item.consumoUnidade && <button type="button" className={botao} onClick={() => aoAlterarItem(item.id, { modoMetragem: "AUTOMATICA", quantidadeTecido: metrosPedido(item.quantidade, item.consumoUnidade!), revisarMetragem: false })}>Restaurar cálculo</button>}</>}
                   {item.revisarMetragem && <div role="alert" className="space-y-2 text-xs text-amber-700"><p>Peças ou tamanho mudaram. Confira a metragem manual.</p><button type="button" className={botao} onClick={() => aoAlterarItem(item.id, { revisarMetragem: false })}>Confirmar metragem</button></div>}</>}
               </div>
             </div>
             {isProduto && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5 shrink-0" checked={item.corteLaser} onChange={e => aoAlterarItem(item.id, { corteLaser: e.target.checked })} /><span>Corte a laser<span className="block text-xs text-slate-500 sm:ml-2 sm:inline">Opcional · cobrado por metro</span></span></label>}
-            <div className="flex flex-wrap gap-2"><button type="button" className={botao} disabled={itens.length >= limite} onClick={() => aoAdicionar(item)}>Duplicar item {index + 1}</button><button type="button" className={`${botao} inline-flex min-w-11 items-center justify-center`} aria-label={`Remover item ${index + 1}`} title="Remover item" onClick={() => aoRemover(item.id)}><Trash2 className="h-5 w-5" aria-hidden="true" /></button></div>
+            <div className="flex flex-wrap gap-2"><button type="button" className={`${botao} inline-flex items-center gap-2`} aria-label={`Duplicar item ${index + 1}`} disabled={itens.length >= limite} onClick={() => aoAdicionar(item)}><Copy className="h-5 w-5" aria-hidden="true" />Duplicar</button><button type="button" className={`${botao} inline-flex min-w-11 items-center justify-center`} aria-label={`Remover item ${index + 1}`} title="Remover item" onClick={() => aoRemover(item.id)}><Trash2 className="h-5 w-5" aria-hidden="true" /></button></div>
           </div>;
         })}</div>
-        {isProduto && <button type="button" className={botao} disabled={itens.length >= limite || !base.modalidade} onClick={() => aoAdicionar(base, true)}>Adicionar variante ou tamanho</button>}</>}
+        {temEstampa && <button type="button" className={botao} disabled={itens.length >= limite || !base.modalidade} onClick={() => aoAdicionar(base, true)}>{isProduto ? "Adicionar variante ou tamanho" : "+ Adicionar variante"}</button>}</>}
       </fieldset>;
     })}
     <div className="flex flex-wrap items-center gap-3"><button type="button" className={`${botao} bg-slate-900 text-white`} disabled={disabled || itens.length >= limite} onClick={() => aoAdicionar()}>Adicionar item</button><span role="status" className="text-xs text-slate-600">{itens.length} de {limite} itens{itens.length >= limite ? " · Limite atingido" : ""}</span></div>

@@ -1,4 +1,5 @@
 "use client";
+import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "@/components/pesquisa-tecido-olist";
 import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
@@ -8,6 +9,9 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
   titulo: string; recurso: string; valor: number; api: string; token: string; aoSelecionar: (opcao: OpcaoFilaOlist) => void; disabled: boolean; carregarInicialmente?: boolean;
 }) {
   const id = useId();
+  const [aberto, setAberto] = useState(false);
+  const gatilho = useRef<HTMLButtonElement>(null);
+  const selecionada = useRef<OpcaoFilaOlist | null>(null);
   const [busca, setBusca] = useState("");
   const [opcoes, setOpcoes] = useState<OpcaoFilaOlist[]>([]);
   const [pagina, setPagina] = useState(1);
@@ -35,6 +39,22 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
     if (carregarInicialmente && !disabled) void pesquisar(1, "");
     return () => controller.current?.abort();
   }, [pesquisar, carregarInicialmente, disabled]);
+  const encontrada = opcoes.find(o => o.id === valor);
+  if (encontrada) selecionada.current = encontrada;
+  if (recurso === "formas" || recurso === "servicos") return <div className="relative min-w-0 space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }} onKeyDown={e => { if (e.key === "Escape") { gatilho.current?.focus(); setAberto(false); } }}>
+    <label htmlFor={`${id}-gatilho`} className="block text-sm">{titulo}</label>
+    <button id={`${id}-gatilho`} ref={gatilho} type="button" disabled={disabled} aria-expanded={aberto} aria-controls={`${id}-lista`} className="input flex min-h-11 w-full items-center justify-between gap-2 text-left" onClick={() => setAberto(v => !v)}>
+      <span className="min-w-0 break-words">{valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : `Selecione ${titulo.toLocaleLowerCase("pt-BR")}`}</span><ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0" />
+    </button>
+    {aberto && <div id={`${id}-lista`} className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-3 shadow-lg">
+      <label htmlFor={`${id}-filtro`} className="block text-xs text-slate-600">Pesquisar {titulo.toLocaleLowerCase("pt-BR")}</label>
+      <div className="flex gap-2"><input autoFocus id={`${id}-filtro`} className="input min-h-11 min-w-0 flex-1" value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, busca); } }} /><button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(1,busca)}>Buscar</button></div>
+      {carregando ? <p role="status" className="text-xs">Carregando...</p> : opcoes.map(o => <button key={o.id} type="button" className="min-h-11 w-full rounded-md px-2 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:outline-2" onClick={() => { selecionada.current = o; if(o.id !== valor) aoSelecionar(o); gatilho.current?.focus(); setAberto(false); }}>{o.nome}</button>)}
+      {!carregando && !erro && !opcoes.length && <p role="status" className="text-xs">Nenhum resultado encontrado.</p>}
+      {erro && <p role="alert" className="text-xs text-red-700">{erro}</p>}
+      {(pagina > 1 || mais) && <div className="flex flex-wrap gap-2">{pagina > 1 && <button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(pagina-1,busca)}>Anterior</button>}{mais && <button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(pagina+1,busca)}>Mais resultados</button>}</div>}
+    </div>}
+  </div>;
   return <fieldset disabled={disabled} className="min-w-0 space-y-2 rounded-md border border-slate-200 p-3">
     <legend className="max-w-full break-words px-1 text-sm font-medium">{titulo}</legend>
     <label htmlFor={`${id}-busca`} className="block text-xs text-slate-600">Pesquisar pelo nome na conta destinatária</label>
@@ -71,9 +91,9 @@ function ProdutoCatalogoOlist({ titulo, catalogo, produtoId, preco, aoSelecionar
   </fieldset>;
 }
 
-export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, vendedorFixo = false, catalogoTecidos }: {
+export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, ocultarProdutos = false, vendedorFixo = false, catalogoTecidos }: {
   api: string; token: string; itens: Array<{ tecidoId: string; nome: string; corteLaser: boolean }>;
-  selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean; ocultarClienteVendedor?: boolean; vendedorFixo?: boolean;
+  selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean; ocultarClienteVendedor?: boolean; ocultarProdutos?: boolean; vendedorFixo?: boolean;
   catalogoTecidos?: CatalogoTecidosOlist;
 }) {
   const [planos, setPlanos] = useState<{ id: string; nome: string }[]>([]);
@@ -91,9 +111,9 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
       .finally(() => { if (!controller.signal.aborted) setCarregando(false); });
     return () => controller.abort();
   }, [api, token, selecoes.formaId]);
-  const pesquisa = (titulo: string, recurso: string, valor: number, aoSelecionar: (o: OpcaoFilaOlist) => void) => <PesquisaOlist carregarInicialmente={recurso === "formas"} titulo={titulo} recurso={recurso} valor={valor} api={api} token={token} disabled={disabled} aoSelecionar={aoSelecionar} />;
+  const pesquisa = (titulo: string, recurso: string, valor: number, aoSelecionar: (o: OpcaoFilaOlist) => void) => <PesquisaOlist carregarInicialmente={recurso === "formas" || recurso === "servicos"} titulo={titulo} recurso={recurso} valor={valor} api={api} token={token} disabled={disabled} aoSelecionar={aoSelecionar} />;
   return <div className="space-y-4">
-    {catalogoTecidos && <EstadoCatalogoTecidosOlist ocultarAtualizar catalogo={catalogoTecidos} disabled={disabled} />}
+    {!ocultarProdutos && catalogoTecidos && <EstadoCatalogoTecidosOlist ocultarAtualizar catalogo={catalogoTecidos} disabled={disabled} />}
     {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     {carregando && <p role="status" className="text-sm text-slate-600">Carregando planos associados...</p>}
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -104,7 +124,7 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
             {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta conta.</span>}</label>
           <label className="block text-sm">Tipo de venda<select className="input mt-2 min-h-11" value={selecoes.tipoVenda} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, tipoVenda: e.target.value as RascunhoFilaOlist["tipoVenda"] })}><option value="">Selecione</option><option value="VENDA">Venda</option><option value="VENDA_G">Venda G</option><option value="VENDA_PC">Venda PC</option></select></label>
         </div>
-        {selecoes.tecidos.map((tecido, index) => {
+        {!ocultarProdutos && selecoes.tecidos.map((tecido, index) => {
           const titulo = `Produto para ${itens.find(item => item.tecidoId === tecido.tecidoId)?.nome}`;
           const selecionar = (produto: OpcaoFilaOlist) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((atual, posicao) => posicao === index ? { ...atual, id: produto.id, preco: produto.id ? produto.preco ?? null : null } : atual) });
           const alterarPreco = (preco: number | null) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((atual, posicao) => posicao === index ? { ...atual, preco } : atual) });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { OpcaoFilaOlist } from "@/lib/fila-olist-contrato";
 import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
 
@@ -26,7 +26,7 @@ export function EstadoCatalogoTecidosOlist({ catalogo, disabled, ocultarAtualiza
 }
 
 /** Filtro e paginação locais: escolher um tecido não consulta novamente a Olist. */
-export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produtoId, preco, aoEncontrar, aoAlterarPreco, aoLimparAssociacao, rotuloPreco = "Preço do tecido por metro (R$)" }: {
+export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produtoId, preco, aoEncontrar, aoAlterarPreco, rotuloPreco = "Preço do tecido por metro (R$)" }: {
   nome: string; catalogo: CatalogoTecidosOlist; disabled: boolean; children: ReactNode; produtoId: number; preco: number | null;
   aoEncontrar: (produto: OpcaoFilaOlist) => void; aoAlterarPreco: (preco: number | null) => void; aoLimparAssociacao: () => void; rotuloPreco?: string;
 }) {
@@ -63,23 +63,22 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
     resultadosRef.current?.focus();
   }
 
-  return <div className="min-w-0 space-y-2" onFocusCapture={event => {
+  return <div className="relative min-w-0 space-y-2" onFocusCapture={event => {
     if (!disabled && event.target instanceof HTMLInputElement && event.target.type !== "number") setAberto(true);
   }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setAberto(false); }}
     onKeyDown={event => { if (event.key === "Escape" && aberto) { event.preventDefault(); event.stopPropagation(); fechar(); } }}>
     <div className="flex items-end gap-2" aria-describedby={`${id}-estado`}>
-      <div className={`min-w-0 flex-1 ${selecionado ? "tecido-olist-encontrado" : ""}`}>{children}</div>
+      <div className="min-w-0 flex-1">{children}</div>
       <button ref={botaoRef} type="button" disabled={disabled} onClick={() => setAberto(atual => !atual)}
         aria-label="Selecionar tecido" aria-expanded={aberto} aria-controls={`${id}-resultados`} title="Selecionar entre os produtos carregados"
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 focus-visible:outline focus-visible:outline-2 disabled:opacity-50">
         <ChevronDown aria-hidden="true" size={20} />
       </button>
     </div>
-    <p id={`${id}-estado`} role="status" className={`flex items-start gap-1 text-xs ${selecionado ? "text-emerald-700 dark:text-emerald-300" : "text-slate-600"}`}>
-      {selecionado && <CheckCircle2 aria-hidden="true" size={16} className="shrink-0" />}
+    <p id={`${id}-estado`} role="status" className="text-xs text-slate-600">
       {selecionado ? "Produto selecionado na conta Olist." : "Filtre pelo nome ou referência e selecione um produto da lista."}
     </p>
-    {aberto && <section ref={resultadosRef} id={`${id}-resultados`} tabIndex={-1} aria-label={`Produtos encontrados para ${nome || "seleção"}`} className="min-w-0 space-y-2 rounded-md border border-slate-200 p-3 focus-visible:outline focus-visible:outline-2">
+    {aberto && <section ref={resultadosRef} id={`${id}-resultados`} tabIndex={-1} aria-label={`Produtos encontrados para ${nome || "seleção"}`} className="absolute left-0 right-0 z-50 max-h-96 min-w-0 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-3 shadow-lg focus-visible:outline focus-visible:outline-2">
       <p className="text-xs text-slate-600">{filtrados.length} resultados na lista carregada{!catalogo.completo ? " · Carregamento incompleto" : ""}</p>
       {opcoes.length > 0 ? <ul className="max-h-72 space-y-2 overflow-y-auto">
         {opcoes.map(opcao => <li key={opcao.id}>
@@ -97,8 +96,6 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
       </div>}
       <button type="button" className={botao} onClick={fechar}>Fechar opções</button>
     </section>}
-    {selecionado && <p className="break-words text-sm text-emerald-700 dark:text-emerald-300">Selecionado: <strong>{selecionado.nome}</strong> · ID {selecionado.id}</p>}
-    {produtoId > 0 && <button type="button" className={botao} disabled={disabled} onClick={() => { aoLimparAssociacao(); fechar(); }}>Limpar associação</button>}
     {produtoId > 0 && <label className="block text-sm">{rotuloPreco}
       <input type="number" min="0" max="1000000000" step="0.01" disabled={disabled}
         value={preco ?? ""} onChange={event => aoAlterarPreco(event.target.value === "" ? null : Number(event.target.value))}

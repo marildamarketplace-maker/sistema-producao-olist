@@ -16,7 +16,7 @@ test("pedido misto: modalidades, combinações, cálculo, ajuste e revisão em d
   const escolherModalidade = (g: number, nome: string) => avaliar(`[...document.querySelectorAll("fieldset")][${g}].querySelectorAll("button")[${["Tecido sem estampa", "Tecido sublimado", "Produto sublimado"].indexOf(nome)}].click()`);
   const escolherTamanho = async (g: number, sku: string, linha = 0) => {
     const seletor = `[...document.querySelectorAll("fieldset")][${g}].querySelectorAll('[data-item-id]')[${linha}]`;
-    await avaliar(`[...${seletor}.querySelectorAll("button")].find(b=>b.textContent==="Selecionar tamanho").click()`);
+    await avaliar(`document.getElementById([...${seletor}.querySelectorAll("label")].find(l=>l.textContent==="Tamanho").htmlFor).click()`);
     await ate(() => avaliar<boolean>(`[...${seletor}.querySelectorAll("button")].some(b=>b.textContent.includes(${JSON.stringify(` · ${sku}`)}))`), "Tamanho não carregou");
     await avaliar(`[...${seletor}.querySelectorAll("button")].find(b=>b.textContent.includes(${JSON.stringify(` · ${sku}`)})).click()`);
   };
@@ -44,16 +44,15 @@ test("pedido misto: modalidades, combinações, cálculo, ajuste e revisão em d
     const metros = () => avaliar<number>(`Number([...document.querySelectorAll("fieldset")][2].querySelector('input[step="0.000001"]').value)`);
     assert.equal(await metros(), 15);
     const antes = await avaliar<number>('window.testeManual.consultas.filter(q=>new URLSearchParams(q).get("acao")==="tamanhos").length');
-    await clicar("Ajustar metragem"); await preencher(2, "Quantidade de tecido", "16"); await preencher(2, "Quantidade de peças", "40");
+    await preencher(2, "Quantidade de tecido", "16"); await preencher(2, "Quantidade de peças", "40");
     assert.equal(await metros(), 16); await clicar("Confirmar metragem"); await clicar("Restaurar cálculo"); assert.equal(await metros(), 20);
     assert.equal(await avaliar('window.testeManual.consultas.filter(q=>new URLSearchParams(q).get("acao")==="tamanhos").length'), antes, "Alterar peças não consulta a rede");
-    await clicar("Ajustar metragem"); await preencher(2, "Quantidade de tecido", "16");
-    await escolherTamanho(2, "90"); assert.equal(await metros(), 16);
-    await clicar("Manter ajuste"); assert.equal(await metros(), 16);
-    await clicar("Restaurar cálculo"); assert.equal(await metros(), 32);
+    await preencher(2, "Quantidade de tecido", "16");
+    await escolherTamanho(2, "90"); assert.equal(await metros(), 32);
+    assert.equal(await avaliar('document.body.innerText.includes("Manter ajuste")'), false);
     await escolherTamanho(2, "99"); assert.equal(await metros(), 32);
     assert.equal(await avaliar('document.body.innerText.includes("Confira a metragem manual")'), true);
-    await escolherTamanho(2, "70"); await clicar("Recalcular metros"); assert.equal(await metros(), 20);
+    await escolherTamanho(2, "70"); assert.equal(await metros(), 20);
     await clicar("Adicionar variante ou tamanho");
     assert.equal(await avaliar('document.querySelectorAll("fieldset").length'), 3);
     await preencher(2, "Variante", "Rosa", 1); await preencher(2, "Quantidade de peças", "20", 1); await escolherTamanho(2, "90", 1);
@@ -81,7 +80,7 @@ test("pedido misto: modalidades, combinações, cálculo, ajuste e revisão em d
     await clicar("Enviar para fila");
     await ate(() => avaliar<boolean>('document.querySelector("section h3")?.textContent==="Itens"'), "Conflito de consumo deve retornar aos itens");
     assert.equal(await avaliar(`document.querySelectorAll("fieldset")[2].querySelector('input[type=number][step="0.01"]')?.value`), "19.5", "Preço comercial deve ser preservado");
-    assert.equal(await avaliar('document.querySelectorAll("fieldset")[2].innerText.includes("Selecionado:")'), true);
+    assert.equal(await avaliar('document.querySelectorAll("fieldset")[2].innerText.includes("Produto selecionado na conta Olist.")'), true);
     await avaliar('window.testeManual.consumoAlterado=false');
     await escolherTamanho(2, "70");
     await clicar("Continuar"); await clicar("Continuar"); await clicar("Enviar para fila");

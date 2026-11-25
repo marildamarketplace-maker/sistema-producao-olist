@@ -48,8 +48,9 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await preencher("Quantidade de peças","10"); await preencher("Quantidade de tecido","2.5");
     await preencher("Estampa","6861");
     await clicar("Continuar"); await etapa("Dados comerciais");
+    assert.equal(await avaliar('document.body.innerText.includes("Filtrar produtos carregados")'),false,"Produtos são definidos somente em Itens");
     await ate(()=>avaliar<boolean>('window.testeManual.consultas.some(q=>{const p=new URLSearchParams(q);return p.get("recurso")==="formas"&&p.get("busca")===""&&p.get("pagina")==="1";})'),"Formas de pagamento não carregaram automaticamente");
-    assert.equal(await avaliar('(()=>{const f=[...document.querySelectorAll("fieldset")].find(e=>e.querySelector("legend")?.textContent==="Forma de pagamento");return [...f.querySelectorAll("button")].some(b=>b.textContent==="Anterior"||b.textContent==="Mais resultados");})()'),false,"Página única dispensa paginação");
+    assert.equal(await avaliar('(()=>{const f=[...document.querySelectorAll("label")].find(e=>e.textContent==="Forma de pagamento").parentElement;return [...f.querySelectorAll("button")].some(b=>b.textContent==="Anterior"||b.textContent==="Mais resultados");})()'),false,"Página única dispensa paginação");
     await clicar("Continuar"); await etapa("Revisão");
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),nomeDestinoEsperado,"A revisão conserva o destinatário resolvido fora das referências");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);

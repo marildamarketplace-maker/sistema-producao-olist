@@ -21,7 +21,6 @@ export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSeleci
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
   const [repetir, setRepetir] = useState(0);
-  const [pendente, setPendente] = useState<TamanhoPedido | null>(null);
   useEffect(() => {
     if (!aberto || !api || !token) return;
     let ativo = true;
@@ -47,17 +46,16 @@ export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSeleci
   }, [aberto, api, token, busca, pagina, cache, repetir]);
   function escolher(tamanho: TamanhoPedido) {
     setAberto(false);
-    if (item.modoMetragem === "MANUAL" && item.tamanho && tamanho.id !== item.tamanhoId && tamanho.consumo && tamanho.consumo > 0) setPendente(tamanho);
-    else aoSelecionar(tamanho, false);
+    aoSelecionar(tamanho, false);
   }
-  return <div className="min-w-0 space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }}>
+  return <div className="relative min-w-0 space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }}>
     <label className="block text-sm" htmlFor={id}>Tamanho</label>
-    <input id={id} className="input min-h-11" maxLength={100} value={item.tamanho}
+    <input id={id} className="input min-h-11" aria-controls={aberto && api ? `${id}-opcoes` : undefined} maxLength={100} value={item.tamanho}
+      onClick={() => setAberto(true)}
       onFocus={() => { setBusca(""); setPagina(1); setAberto(true); }}
       onKeyDown={e => { if (e.key === "Escape") setAberto(false); if (e.key === "ArrowDown") { e.preventDefault(); document.getElementById(`${id}-opcoes`)?.querySelector<HTMLButtonElement>("button")?.focus(); } }}
-      onChange={e => { aoDigitar(e.target.value); setPendente(null); setBusca(e.target.value); setPagina(1); setAberto(true); }} />
-    {api && <button type="button" className={botao} aria-expanded={aberto} aria-controls={`${id}-opcoes`} onClick={() => { setBusca(""); setPagina(1); setAberto(v => !v); }}>Selecionar tamanho</button>}
-    {aberto && api && <div id={`${id}-opcoes`} className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2" onKeyDown={e => { if (e.key === "Escape") { setAberto(false); document.getElementById(id)?.focus(); } }}>
+      onChange={e => { aoDigitar(e.target.value); setBusca(e.target.value); setPagina(1); setAberto(true); }} />
+    {aberto && api && <div id={`${id}-opcoes`} className="absolute left-0 top-full z-50 mt-2 max-h-64 w-full space-y-1 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-2 shadow-lg" onKeyDown={e => { if (e.key === "Escape") { document.getElementById(id)?.focus(); setAberto(false); } }}>
       {carregando ? <p role="status" className="p-2 text-xs">Consultando tamanhos…</p> : erro ? <><p role="alert" className="text-xs text-red-700">{erro}</p><button type="button" className={botao} onClick={() => setRepetir(r => r + 1)}>Tentar novamente</button></> : <>
         {resultado.itens.map(t => <button key={t.id} type="button" className="min-h-11 w-full rounded-md px-2 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:outline-2" onClick={() => escolher(t)}>
           <span className="block break-words font-medium">{t.titulo} · {t.sku}</span><span className="text-xs text-slate-500">{t.consumo && t.consumo > 0 ? `${t.consumo.toLocaleString("pt-BR")} m por unidade` : "Sem consumo cadastrado"}</span>
@@ -66,10 +64,5 @@ export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSeleci
         <div className="flex flex-wrap gap-2">{pagina > 1 && <button className={botao} type="button" onClick={() => setPagina(p => p - 1)}>Anteriores</button>}{resultado.mais && <button className={botao} type="button" onClick={() => setPagina(p => p + 1)}>Próximos tamanhos</button>}</div>
       </>}
     </div>}
-    {pendente && <div role="status" className="space-y-2 rounded-md border border-amber-300 p-2 text-xs"><p>O item possui metragem manual. Como aplicar {pendente.titulo}?</p><div className="flex flex-wrap gap-2">
-      <button className={botao} type="button" onClick={() => { aoSelecionar(pendente, false); setPendente(null); }}>Recalcular metros</button>
-      <button className={botao} type="button" onClick={() => { aoSelecionar(pendente, true); setPendente(null); }}>Manter ajuste</button>
-      <button className={botao} type="button" onClick={() => setPendente(null)}>Cancelar</button>
-    </div></div>}
   </div>;
 }

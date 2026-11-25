@@ -66,7 +66,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     await ate(() => avaliar<boolean>('document.querySelectorAll("section ul button").length===2'), "Opções FOURWAY não apareceram");
     await avaliar(`[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")===${JSON.stringify(`Selecionar ${nome}`)}).click()`);
     await ate(() => avaliar<boolean>(`${campo("Tecido")}.value===${JSON.stringify(nome)}`), "Escolha não conservou o nome completo");
-    assert.equal(await avaliar('document.querySelector(".tecido-olist-encontrado")!==null'), true);
+    assert.equal(await avaliar('document.body.innerText.includes("Produto selecionado na conta Olist.")'), true);
     assert.equal(await avaliar(`${campo("Preço do tecido por metro")}.value`), "18.99");
     await adicionarProduto(); await clicar("Remover item 3");
     assert.equal(await consultasProdutos(), 2, "Adicionar/remover uma linha não repete a carga");
@@ -118,7 +118,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     assert.equal(await avaliar('window.testeManual.envios[0].revisaoProducao'), "a".repeat(64));
     assert.deepEqual(await avaliar('window.testeManual.envios[0].selecoes.tecidos'), [{ tecidoId: "00000000-0000-0000-0000-000000000040", id: 5168, preco: 18.99 }]);
   });
-  await t.test("limpar a associação nas duas etapas preserva item e permite reescolher sem consultar", async () => {
+  await t.test("seleção permanece nas duas etapas sem botão de limpar nem novas consultas", async () => {
     const nome = "FOURWAY SUBLIME 3 95%POLI5%ELASTRef. 5168 1J3B4C6D2B";
     await abrir("&catalogoPaginado=1"); await produtos();
     await ate(async () => await consultasProdutos() === 2, "Catálogo inicial não concluiu");
@@ -127,16 +127,16 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     await ate(() => avaliar<boolean>(`Boolean([...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")===${JSON.stringify(`Selecionar ${nome}`)}))`), "FOURWAY não apareceu");
     await avaliar(`[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")===${JSON.stringify(`Selecionar ${nome}`)}).click()`);
     await preencher("Quantidade de peças", "11"); await preencher("Quantidade de tecido", "4.25");
-    await clicar("Limpar associação");
-    await ate(() => avaliar<boolean>(`${campo("Preço do tecido por metro")}===undefined`), "Preço não foi removido em Itens");
+    assert.equal(await avaliar(`${botao("Limpar associação")} === undefined`), true);
+    await ate(() => avaliar<boolean>(`${campo("Preço do tecido por metro")}?.value==="18.99"`), "Preço não foi removido em Itens");
     assert.equal(await avaliar(`${campo("Tecido")}.value`), nome);
     assert.equal(await avaliar(`${campo("Quantidade de peças")}.value`), "11");
     assert.equal(await avaliar(`${campo("Quantidade de tecido")}.value`), "4.25");
     await avaliar('document.querySelector(\'button[aria-label="Selecionar tecido"]\').click()');
     await ate(() => avaliar<boolean>(`${campo("Preço do tecido por metro")}?.value==="18.99"`), "Resultado único não foi associado automaticamente ao reabrir a busca");
     await clicar("Continuar"); await etapa("Dados comerciais");
-    await clicar("Limpar associação");
-    await ate(() => avaliar<boolean>(`${campo("Preço por metro")}===undefined`), "Preço não foi removido em Dados comerciais");
+    assert.equal(await avaliar(`${botao("Limpar associação")} === undefined`), true);
+    await ate(() => avaliar<boolean>(`${campo("Preço por metro")}?.value==="18.99"`), "Preço não foi removido em Dados comerciais");
     assert.equal(await avaliar('document.body.innerText.includes("Selecionado:")'), false);
     assert.equal(await consultasProdutos(), 2, "Limpar e reescolher não chama carregarMais nem atualizar");
     await clicar("Voltar"); await etapa("Itens");
@@ -147,7 +147,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     await clicar("Continuar"); await clicar("Continuar"); await etapa("Revisão");
     await clicar("Enviar para fila");
     await ate(() => avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'), "Aceite ausente");
-    assert.deepEqual(await avaliar('window.testeManual.envios[0].selecoes.tecidos'), [], "Envio mantém a associação pendente depois de limpar");
+    assert.equal(await avaliar('window.testeManual.envios[0].selecoes.tecidos[0].id'), 5168, "Envio preserva o produto selecionado");
     assert.equal(await avaliar('window.testeManual.envios[0].itens[0].tecidoNome'), nome);
     assert.equal(await avaliar('window.testeManual.envios[0].itens[0].quantidade'), 11);
     assert.equal(await avaliar('window.testeManual.envios[0].itens[0].quantidadeTecido'), 4.25);

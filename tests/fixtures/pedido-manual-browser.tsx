@@ -30,7 +30,7 @@ window.fetch = async (input,init) => {
     { id: id(99), titulo: "Sem consumo", sku: "99", consumo: null },
   ], mais: false });
   if (query.has("solicitacaoId") && query.get("acao") === "origem") return Response.json({
-    itens: [40,41].map((n,index) => ({ id:id(n), tecidoNome:`Oxford da produção ${index+1}`, modalidade:"PRODUTO_SUBLIMADO", quantidade:3, quantidadeTecido:1.5, estampa:"6861",variante:"A",tamanho:"50x50",tipoProduto:"Lenço",corteLaser:false })), observacao:"Observação original da produção",revisao:"a".repeat(64),revisaoFonte:window.testeManual.fonteAtual,
+    itens: [...[40,41].map((n,index) => ({ id:id(n), tecidoNome:`Oxford da produção ${index+1}`, modalidade:"PRODUTO_SUBLIMADO", quantidade:3, quantidadeTecido:1.5, estampa:"6861",variante:"A",tamanho:"50x50",tipoProduto:"Lenço",corteLaser:false })), {id:id(42), tecidoNome:"", quantidade:1, quantidadeTecido:0, estampa:"", variante:null, tamanho:"", tipoProduto:"", corteLaser:false}], observacao:"Observação original da produção",revisao:"a".repeat(64),revisaoFonte:window.testeManual.fonteAtual,
   });
   if(query.get("acao")==="resolver") {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});

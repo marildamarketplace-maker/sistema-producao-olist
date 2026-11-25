@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { agruparRevisaoPedido } from "@/lib/revisao-pedido";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BloqueioExplicado } from "@/components/bloqueio-explicado";
@@ -183,8 +184,9 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
       }
       fonteProducao.current = origem.revisaoFonte;
       if (!origemCarregada.current || substituirOrigem.current) {
-        setItens(origem.itens); setObservacao(origem.observacao ?? "");
-        setSelecoes(atual => ({ ...criarRascunhoFilaOlist(origem.itens.map(item => item.id)), vendedorId: atual.vendedorId, clienteId: atual.clienteId }));
+        const itensAproveitaveis = origem.itens.filter(item => item.modalidade && item.tecidoNome.trim() && item.quantidadeTecido > 0);
+        setItens(itensAproveitaveis); setObservacao(origem.observacao ?? "");
+        setSelecoes(atual => ({ ...criarRascunhoFilaOlist(itensAproveitaveis.map(item => item.id)), vendedorId: atual.vendedorId, clienteId: atual.clienteId }));
         origemCarregada.current = true; substituirOrigem.current = false;
       }
       origemConsulta.current = consulta;
@@ -389,18 +391,20 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}
-        {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor catalogoTecidos={catalogoTecidos} />
+        {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
         {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
-          {itens.map((i, index) => {
-            const produto = selecoes.tecidos.find(t => t.tecidoId === i.id);
-            const cadastro = catalogoTecidos.itens.find(item => item.id === produto?.id);
-            return <div key={i.id} className="space-y-1 rounded-md border border-slate-200 p-3 text-sm">
-              <p className="break-words font-semibold">Item {index + 1}: {i.tecidoNome}</p>
-              <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : "Tecido corrido · "}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
-              {i.modoMetragem === "MANUAL" && i.modalidade === "PRODUTO_SUBLIMADO" && <p className="text-amber-700">Metragem ajustada manualmente</p>}
-              <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"} · Tipo: {i.tipoProduto || "—"}</p>
-              <p className="break-words">Produto Olist: {produto?.id ? `${cadastro ? `${cadastro.nome} · ` : ""}ID ${produto.id}` : "Pendente"} · Preço/m: {produto?.preco == null ? "Pendente" : `R$ ${produto.preco.toFixed(2)}`}</p>
+          {agruparRevisaoPedido(itens, selecoes.tecidos).map(grupo => {
+            const base = grupo.itens[0];
+            return <div key={grupo.chave} className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+              <p className="break-words font-semibold">{base.tecidoNome}{base.tipoProduto ? ` · ${base.tipoProduto}` : ""}</p>
+              <p className="font-medium">{grupo.pecas ? `${grupo.pecas.toLocaleString("pt-BR")} peças · ` : "Tecido corrido · "}{grupo.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m</p>
+              <p>Produto Olist: {grupo.produtoId || "Pendente"} · Preço/m: {grupo.preco == null ? "Pendente" : `R$ ${grupo.preco.toFixed(2)}`}</p>
+              <ul className="divide-y divide-slate-200">{grupo.itens.map(i => <li key={i.id} className="space-y-1 py-2">
+                <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"}</p>
+                <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : ""}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
+                {i.modoMetragem === "MANUAL" && i.modalidade === "PRODUTO_SUBLIMADO" && <p className="text-amber-700">Metragem ajustada manualmente</p>}
+              </li>)}</ul>
             </div>;
           })}
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
