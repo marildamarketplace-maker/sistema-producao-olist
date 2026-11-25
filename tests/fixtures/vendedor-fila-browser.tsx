@@ -17,6 +17,7 @@ const pedido: PedidoFilaAdministracao = {
 };
 const selecoesCriacao = {clienteId:100,vendedorId:200,formaId:400,planoId:id(30),tipoVenda:"VENDA" as const,tecidos:[{tecidoId:id(13),id:5168,preco:18.99}],laser:null};
 if(new URLSearchParams(location.search).has("dadosCriacao") && pedido.dadosPedido) pedido.dadosPedido.olist={filialId:new URLSearchParams(location.search).has("destinoAlterado")?id(4):id(3),selecoes:selecoesCriacao};
+if (new URLSearchParams(location.search).has("semPlano")) selecoesCriacao.planoId = "";
 window.testeVendedorFila = { trocarToken: () => undefined, leituras: 0, fechado: false, previas: [] };
 window.fetch = async (input, init) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.origin);
@@ -24,6 +25,8 @@ window.fetch = async (input, init) => {
     window.testeVendedorFila.previas.push(JSON.parse(String(init.body)) as unknown);
     return Response.json({ error: "Prévia interceptada para conferir as seleções enviadas." }, { status: 400 });
   }
+  if (url.searchParams.get("recurso") === "planos") return Response.json({ itens: [{ id: id(30), nome: "30/60" }] });
+  if (url.searchParams.get("recurso") === "formas") return Response.json({ itens: [{ id: 400, nome: "Dinheiro" }], pagina: 1, mais: false });
   if (url.searchParams.get("recurso") === "vendedores") {
     return Response.json({ itens: [{ id: 200, nome: "Vendedor padrão" }, { id: 300, nome: "Outro vendedor" }], pagina: 1, mais: false });
   }

@@ -112,6 +112,17 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
       inicial:{tipo:"PADRAO",regraId:null,regraNome:null,versao:3,aplicativoId:matriz,motivo:"Aplicativo padrão"},alteracoes:[],
     }} as Prisma.JsonObject;
   };
+  await t.test("prévia informa os campos inválidos sem consultar nem criar na Olist", async () => {
+    reset();
+    const response = await preview({ ...selecoes, planoId: "", tecidos: selecoes.tecidos.map(t => ({ ...t, preco: -1 })) });
+    assert.equal(response.status, 400);
+    const resultado = await response.json();
+    assert.match(resultado.campos.planoId, /Selecione um plano de pagamento/);
+    assert.match(resultado.campos["tecidos.0.preco"], /Produto 1.*preço/);
+    assert.ok(!resultado.error.includes("gere outra prévia"));
+    assert.equal(consultas, 0);
+    assert.equal(posts, 0);
+  });
   await t.test("vendedor salvo não é substituído pelo administrador; carteira é verificada na prévia",async()=>{
     const inicial=await (await rota.GET(req(),ctx)).json();assert.equal(inicial.vendedorFixo,true);assert.equal(inicial.selecoes.vendedorId,20);
     const antes=consultas;assert.equal((await preview({...selecoes,vendedorId:99})).status,403);assert.equal(consultas,antes);

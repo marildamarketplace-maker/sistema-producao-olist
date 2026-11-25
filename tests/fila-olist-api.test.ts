@@ -85,6 +85,17 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   const ctx = { params: Promise.resolve({ id: filaId }) };
   const req = (body?: unknown, query = "") => new Request(`https://example.test/api?${query}`, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer fake" }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const preview = (s: unknown = selecoes) => POST(req({ acao: "preview", versao: fila.versao, selecoes: s, vendedorFonte: "MANUAL" }), ctx);
+  await t.test("prévia informa os campos inválidos sem consultar nem criar na Olist", async () => {
+    reset();
+    const response = await preview({ ...selecoes, planoId: "", tecidos: selecoes.tecidos.map(t => ({ ...t, preco: -1 })) });
+    assert.equal(response.status, 400);
+    const resultado = await response.json();
+    assert.match(resultado.campos.planoId, /Selecione um plano de pagamento/);
+    assert.match(resultado.campos["tecidos.0.preco"], /Produto 1.*preço/);
+    assert.ok(!resultado.error.includes("gere outra prévia"));
+    assert.equal(consultas.length, 0);
+    assert.equal(posts, 0);
+  });
   await t.test("nega sem sessão/permissão, outra matriz e filial inválida em leitura e escrita", async () => {
     assert.equal((await GET(new Request("https://example.test"), ctx)).status, 401);
     permitido = false; assert.equal((await GET(req(), ctx)).status, 403); assert.equal((await preview()).status, 403); permitido = true;

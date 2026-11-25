@@ -1,3 +1,4 @@
+import { detalharErrosFilaOlist } from "@/lib/fila-olist-validacao";
 import { operarRecuperacaoFila } from "@/lib/fila-recuperacao-operacao";
 import { estadoRecuperacao } from "@/lib/fila-recuperacao-olist";
 import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
@@ -41,7 +42,7 @@ async function filialValida(matrizId: string, filialId: string | null) {
 }
 function falha(error: unknown) {
   if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
-  if (error instanceof z.ZodError) return NextResponse.json({ error: "Dados comerciais inválidos; gere outra prévia." }, { status: 400 });
+  if (error instanceof z.ZodError) return NextResponse.json(detalharErrosFilaOlist(error), { status: 400 });
   if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message }, { status: error instanceof ErroFila ? error.status : 409 });
   return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da conta destinatária e tente atualizar a fila." }, { status: 502 });
 }
@@ -85,7 +86,7 @@ export async function POST(request: Request, contexto: Contexto) {
     const solicitacaoId = fila.solicitacaoProducaoId, fornecedorId = fila.fornecedorId;
     if (!solicitacaoId || !fornecedorId) throw new ErroFila("Origem da fila inválida.", 409);
     const parsed = bodySchema.safeParse(entrada);
-    if (!parsed.success) throw new ErroFila("Revise os campos obrigatórios, IDs e valores informados.");
+    if (!parsed.success) throw parsed.error;
     const body = parsed.data;
     const filial = await filialValida(matrizId, fila.aplicativoFilialId);
     if (fila.status === "CANCELADO" || fila.status === "CONCLUIDO") throw new ErroFila("Pedido bloqueado para envio.", 409);

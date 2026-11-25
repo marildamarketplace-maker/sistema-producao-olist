@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { detalharErrosFilaOlist, type ErrosComerciaisFila } from "@/lib/fila-olist-validacao";
 import { PessoasDestinoFila } from "@/components/pessoas-destino-fila";
 import { DadosComerciaisFilaOlist } from "@/components/dados-comerciais-fila-olist";
 import { criarRascunhoFilaOlist, mesclarSelecoesRecuperadas, serializarRascunhoFilaOlist, selecoesFilaOlistSchema } from "@/lib/fila-olist-contrato";
@@ -40,6 +41,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
+  const [errosCampos, setErrosCampos] = useState<ErrosComerciaisFila>({});
   const [mensagem, setMensagem] = useState("");
   const [vendedorFixo, setVendedorFixo] = useState(false);
   const [origemVinculada, setOrigemVinculada] = useState(false);
@@ -61,7 +63,13 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   }, []);
   async function requisitar(body?: unknown) {
     const response = await fetch(api, { method: body ? "POST" : "GET", cache: "no-store", headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    const dados = await response.json(); if (!response.ok) throw new Error(dados.error || "Falha na operação."); return dados;
+    const dados = await response.json(); if (!response.ok) {
+      if (dados.campos && typeof dados.campos === "object" && !Array.isArray(dados.campos)) {
+        const campos = Object.fromEntries(Object.entries(dados.campos).filter(([k,v]) => /^(clienteId|vendedorId|formaId|planoId|tipoVenda|laser(\.(id|preco))?|tecidos(\.\d+(\.(id|preco|tecidoId))?)?)$/.test(k) && typeof v === "string"));
+        setErrosCampos(campos as ErrosComerciaisFila); if (Object.keys(campos).length) { setEditarDados(true); setEdicaoManual(true); }
+      }
+      throw new Error(dados.error || "Falha na operação.");
+    } return dados;
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -116,8 +124,25 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
     return () => controller.abort();
   }, [api, token, pedido.status, pedido.dadosPedido, pedido.filial?.id, pedido.versao, pedido.tipoOrigem, tentativaRecuperacao]);
   useEffect(() => { if (erro || mensagem || previa) alerta.current?.focus(); }, [erro, mensagem, previa]);
+  useEffect(() => {
+    const chave = Object.keys(errosCampos)[0];
+    if (!chave) return;
+    const alvo = [...(dialog.current?.querySelectorAll<HTMLElement>("[data-campo-comercial]") ?? [])].find(el => el.dataset.campoComercial === chave);
+    const campo = alvo?.querySelector<HTMLElement>("select, [aria-expanded], input, button");
+    campo?.focus(); campo?.scrollIntoView({ block: "nearest" });
+  }, [errosCampos]);
   async function operar(body: unknown, acao: "preview" | "confirmar" | "conciliar") {
-    if (ocupado.current) return; ocupado.current = true; setSalvando(true); setErro("");
+    if (ocupado.current) return;
+    if (acao === "preview") {
+      const validacao = selecoesFilaOlistSchema.safeParse(selecoes);
+      const campos = validacao.success ? {} : detalharErrosFilaOlist(validacao.error).campos;
+      if (pedido.dadosPedido?.itens.some(i => i.corteLaser) && !selecoes.laser) campos.laser = "Selecione o serviço de corte a laser e informe o preço por metro.";
+      if (Object.keys(campos).length) {
+        setErrosCampos(campos); setErro(Object.values(campos).join(" ")); setEditarDados(true); setEdicaoManual(true); return;
+      }
+    }
+    setErrosCampos({});
+    ocupado.current = true; setSalvando(true); setErro("");
     if (acao !== "preview") alterado.current = true;
     try {
       const dados = await requisitar(body);
@@ -179,7 +204,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           {selecoes.laser && <p>Corte a laser: ID {selecoes.laser.id} · Preço/m: {selecoes.laser.preco==null?"Pendente":moeda(selecoes.laser.preco)}</p>}
           <button type="button" className={botao} disabled={salvando} onClick={()=>setEditarDados(true)}>Editar dados comerciais</button>
         </div> : <>
-        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={valor => { setTemEdicoes(true); setSelecoes(valor); }} disabled={salvando || recuperando} somentePendentes={!!recuperacao && !edicaoManual} vendedorFixo={vendedorFixo} />
+        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} errosCampos={errosCampos} aoAlterar={valor => { setTemEdicoes(true); setSelecoes(valor); setErrosCampos({}); setErro(""); }} disabled={salvando || recuperando} somentePendentes={!!recuperacao && !edicaoManual} vendedorFixo={vendedorFixo} />
         </>}
 
         {!recuperando && temPendencias && <p className="text-sm text-slate-600">Preencha os campos pendentes para revisar o pedido.</p>}
