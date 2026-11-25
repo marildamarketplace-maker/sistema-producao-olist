@@ -1,3 +1,4 @@
+import { consultarEstampasPedido } from "@/lib/estampas-pedido";
 import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -109,6 +110,7 @@ export async function GET(request: Request) {
       return resposta(comprovante(pedido));
     }
     exigirEmProducao(solicitacao.status);
+    if (params.get("acao") === "estampas") return resposta(await consultarEstampasPedido(params));
     if (params.get("acao") === "tamanhos") return resposta(await consultarTamanhosPedido(params));
     if (params.get("acao") === "resolver") {
       const ids = idsResolucao(params);

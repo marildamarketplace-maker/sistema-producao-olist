@@ -51,3 +51,12 @@ test("snapshot misto e montagem Olist cobram metros e descrevem produtos em peç
   assert.equal(payload.itens[0].quantidade, 21.5);
   assert.match(payload.observacoesInternas, /30/);
 });
+
+test("produto sublimado inicia com laser e preserva desmarcação explícita", () => {
+  const original = produto();
+  const novo = { ...original, modalidade: undefined };
+  assert.equal(trocarModalidade(novo, "PRODUTO_SUBLIMADO").corteLaser, true);
+  assert.equal(trocarModalidade({ ...original, modalidade: "TECIDO_SUBLIMADO" }, "PRODUTO_SUBLIMADO").corteLaser, true);
+  assert.equal(trocarModalidade(original, "PRODUTO_SUBLIMADO").corteLaser, false);
+  assert.equal(trocarModalidade({ ...original, corteLaser: true }, "TECIDO_SUBLIMADO").corteLaser, false);
+});

@@ -13,6 +13,7 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
   const gatilho = useRef<HTMLButtonElement>(null);
   const selecionada = useRef<OpcaoFilaOlist | null>(null);
   const [busca, setBusca] = useState("");
+  const [filtroForma, setFiltroForma] = useState<string | null>(null);
   const [opcoes, setOpcoes] = useState<OpcaoFilaOlist[]>([]);
   const [pagina, setPagina] = useState(1);
   const [mais, setMais] = useState(false);
@@ -34,22 +35,37 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
     finally { if (!atual.signal.aborted) setCarregando(false); }
   }, [api, token, recurso]);
   useEffect(() => {
+    if (recurso !== "formas" || filtroForma === null || disabled) return;
+    const timer = setTimeout(() => void pesquisar(1, filtroForma), 300);
+    return () => clearTimeout(timer);
+  }, [recurso, filtroForma, disabled, pesquisar]);
+  useEffect(() => {
     controller.current?.abort();
     setOpcoes([]); setPagina(1); setMais(false); setErro(""); setCarregando(false);
     if (carregarInicialmente && !disabled) void pesquisar(1, "");
     return () => controller.current?.abort();
   }, [pesquisar, carregarInicialmente, disabled]);
+  useEffect(() => {
+    if (recurso !== "formas" || filtroForma === null || disabled) return;
+    const timer = setTimeout(() => void pesquisar(1, filtroForma), 300);
+    return () => clearTimeout(timer);
+  }, [recurso, filtroForma, disabled, pesquisar]);
   const encontrada = opcoes.find(o => o.id === valor);
   if (encontrada) selecionada.current = encontrada;
-  if (recurso === "formas" || recurso === "servicos") return <div className="relative min-w-0 space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }} onKeyDown={e => { if (e.key === "Escape") { gatilho.current?.focus(); setAberto(false); } }}>
+  if (recurso === "formas" || recurso === "servicos" || recurso === "clientes") return <div className="relative min-w-0 self-start space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }} onKeyDown={e => { if (e.key === "Escape") { gatilho.current?.focus(); setAberto(false); } }}>
     <label htmlFor={`${id}-gatilho`} className="block text-sm">{titulo}</label>
+    {recurso === "formas" ? <div className="flex items-center gap-2">
+      <input id={`${id}-gatilho`} className="input min-h-11 min-w-0 flex-1" disabled={disabled} value={filtroForma ?? (valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : "")} placeholder="Selecione uma forma de pagamento" onFocus={() => setAberto(true)} onClick={() => setAberto(true)} onChange={e => { setBusca(e.target.value); setFiltroForma(e.target.value); setAberto(true); }} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, filtroForma ?? ""); } }}/>
+      <button ref={gatilho} type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 focus-visible:outline focus-visible:outline-2" disabled={disabled} aria-label="Selecionar forma de pagamento" aria-expanded={aberto} aria-controls={`${id}-lista`} onClick={() => setAberto(v=>!v)}><ChevronDown aria-hidden="true" className="h-5 w-5"/></button>
+    </div> : <>
     <button id={`${id}-gatilho`} ref={gatilho} type="button" disabled={disabled} aria-expanded={aberto} aria-controls={`${id}-lista`} className="input flex min-h-11 w-full items-center justify-between gap-2 text-left" onClick={() => setAberto(v => !v)}>
       <span className="min-w-0 break-words">{valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : `Selecione ${titulo.toLocaleLowerCase("pt-BR")}`}</span><ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0" />
     </button>
+    </>}
     {aberto && <div id={`${id}-lista`} className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-3 shadow-lg">
-      <label htmlFor={`${id}-filtro`} className="block text-xs text-slate-600">Pesquisar {titulo.toLocaleLowerCase("pt-BR")}</label>
-      <div className="flex gap-2"><input autoFocus id={`${id}-filtro`} className="input min-h-11 min-w-0 flex-1" value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, busca); } }} /><button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(1,busca)}>Buscar</button></div>
-      {carregando ? <p role="status" className="text-xs">Carregando...</p> : opcoes.map(o => <button key={o.id} type="button" className="min-h-11 w-full rounded-md px-2 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:outline-2" onClick={() => { selecionada.current = o; if(o.id !== valor) aoSelecionar(o); gatilho.current?.focus(); setAberto(false); }}>{o.nome}</button>)}
+      {recurso !== "formas" && <><label htmlFor={`${id}-filtro`} className="block text-xs text-slate-600">Pesquisar {titulo.toLocaleLowerCase("pt-BR")}</label>
+      <div className="flex gap-2"><input autoFocus id={`${id}-filtro`} className="input min-h-11 min-w-0 flex-1" value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, busca); } }} /><button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(1,busca)}>Buscar</button></div></>}
+      {carregando ? <p role="status" className="text-xs">Carregando...</p> : opcoes.map(o => <button key={o.id} type="button" className="min-h-11 w-full rounded-md px-2 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:outline-2" onClick={() => { selecionada.current = o; setFiltroForma(null); if(o.id !== valor) aoSelecionar(o); gatilho.current?.focus(); setAberto(false); }}>{o.nome}</button>)}
       {!carregando && !erro && !opcoes.length && <p role="status" className="text-xs">Nenhum resultado encontrado.</p>}
       {erro && <p role="alert" className="text-xs text-red-700">{erro}</p>}
       {(pagina > 1 || mais) && <div className="flex flex-wrap gap-2">{pagina > 1 && <button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(pagina-1,busca)}>Anterior</button>}{mais && <button type="button" className={botao} disabled={carregando} onClick={() => void pesquisar(pagina+1,busca)}>Mais resultados</button>}</div>}

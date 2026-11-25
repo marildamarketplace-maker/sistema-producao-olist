@@ -9,8 +9,8 @@ const respostaSchema = z.object({ itens: z.array(z.object({ id: z.guid(), titulo
 export type CacheTamanhosPedido = Map<string, Promise<z.infer<typeof respostaSchema>>>;
 const botao = "min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500";
 
-export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSelecionar }: {
-  item: ItemPedidoManual; api?: string; token?: string; cache: CacheTamanhosPedido;
+export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSelecionar, erro: erroCampo }: {
+  erro?: string; item: ItemPedidoManual; api?: string; token?: string; cache: CacheTamanhosPedido;
   aoDigitar: (valor: string) => void; aoSelecionar: (tamanho: TamanhoPedido, manter: boolean) => void;
 }) {
   const id = useId();
@@ -48,13 +48,14 @@ export function TamanhoItemPedido({ item, api, token, cache, aoDigitar, aoSeleci
     setAberto(false);
     aoSelecionar(tamanho, false);
   }
-  return <div className="relative min-w-0 space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }}>
+  return <div className="relative min-w-0 self-start space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }}>
     <label className="block text-sm" htmlFor={id}>Tamanho</label>
-    <input id={id} className="input min-h-11" aria-controls={aberto && api ? `${id}-opcoes` : undefined} maxLength={100} value={item.tamanho}
+    <input aria-invalid={Boolean(erroCampo)} aria-describedby={erroCampo ? `${id}-erro` : undefined} id={id} className="input aria-[invalid=true]:border-red-500 aria-[invalid=true]:ring-red-200 min-h-11" aria-controls={aberto && api ? `${id}-opcoes` : undefined} maxLength={100} value={item.tamanho}
       onClick={() => setAberto(true)}
       onFocus={() => { setBusca(""); setPagina(1); setAberto(true); }}
       onKeyDown={e => { if (e.key === "Escape") setAberto(false); if (e.key === "ArrowDown") { e.preventDefault(); document.getElementById(`${id}-opcoes`)?.querySelector<HTMLButtonElement>("button")?.focus(); } }}
       onChange={e => { aoDigitar(e.target.value); setBusca(e.target.value); setPagina(1); setAberto(true); }} />
+    {erroCampo && <p id={`${id}-erro`} role="alert" className="text-xs text-red-700">{erroCampo}</p>}
     {aberto && api && <div id={`${id}-opcoes`} className="absolute left-0 top-full z-50 mt-2 max-h-64 w-full space-y-1 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-2 shadow-lg" onKeyDown={e => { if (e.key === "Escape") { document.getElementById(id)?.focus(); setAberto(false); } }}>
       {carregando ? <p role="status" className="p-2 text-xs">Consultando tamanhos…</p> : erro ? <><p role="alert" className="text-xs text-red-700">{erro}</p><button type="button" className={botao} onClick={() => setRepetir(r => r + 1)}>Tentar novamente</button></> : <>
         {resultado.itens.map(t => <button key={t.id} type="button" className="min-h-11 w-full rounded-md px-2 py-2 text-left text-sm hover:bg-slate-100 focus-visible:outline focus-visible:outline-2" onClick={() => escolher(t)}>

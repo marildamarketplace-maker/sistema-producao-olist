@@ -11,7 +11,7 @@ export const metrosPedido = (pecas: number, consumo: number) => Number((pecas * 
 export function trocarModalidade(item: ItemPedidoManual, modalidade: ModalidadePedido): Partial<ItemPedidoManual> {
   const produto = modalidade === "PRODUTO_SUBLIMADO";
   return { modalidade, quantidade: produto ? item.quantidade || 1 : 0,
-    ...(produto ? {} : { tamanho: "", tamanhoId: null, tipoProduto: "", corteLaser: false, modoMetragem: "MANUAL" as const, consumoUnidade: null, revisarMetragem: false }),
+    ...(produto ? { corteLaser: item.modalidade === "PRODUTO_SUBLIMADO" ? item.corteLaser : true } : { tamanho: "", tamanhoId: null, tipoProduto: "", corteLaser: false, modoMetragem: "MANUAL" as const, consumoUnidade: null, revisarMetragem: false }),
     ...(modalidade === "TECIDO_LISO" ? { estampa: "", variante: null } : {}) };
 }
 export function alterarPecas(item: ItemPedidoManual, quantidade: number): Partial<ItemPedidoManual> {

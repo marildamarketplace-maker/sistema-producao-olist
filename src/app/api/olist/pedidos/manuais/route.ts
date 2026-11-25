@@ -1,3 +1,4 @@
+import { consultarEstampasPedido } from "@/lib/estampas-pedido";
 import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
   try {
     const usuario = await autorizarPedidoManual(request);
     const params = new URL(request.url).searchParams;
+    if (params.get("acao") === "estampas") return resposta(await consultarEstampasPedido(params));
     if (params.get("acao") === "tamanhos") return resposta(await consultarTamanhosPedido(params));
     const pedidoId = params.get("pedidoId");
     if (pedidoId) {

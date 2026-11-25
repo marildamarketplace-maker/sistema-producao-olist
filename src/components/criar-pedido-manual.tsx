@@ -11,7 +11,7 @@ import { pedidoProducaoSchema, origemPedidoProducaoSchema, type EntradaPedidoPro
 import { PageHeader } from "@/components/page-header";
 import { PesquisaOlist, DadosComerciaisFilaOlist } from "@/components/dados-comerciais-fila-olist";
 import { criarRascunhoFilaOlist, serializarRascunhoFilaOlist, type OpcaoFilaOlist } from "@/lib/fila-olist-contrato";
-import { pedidoManualSchema, pedidoManualLegadoSchema, resolucaoPedidoManualSchema, comprovantePedidoManualSchema, chavePedidoManualSchema, type ItemPedidoManual, type EntradaPedidoManual, type EntradaPedidoManualLegada, type ResolucaoPedidoManual, type ComprovantePedidoManual } from "@/lib/pedido-manual-contrato";
+import { itemPedidoManualSchema, pedidoManualSchema, pedidoManualLegadoSchema, resolucaoPedidoManualSchema, comprovantePedidoManualSchema, chavePedidoManualSchema, type ItemPedidoManual, type EntradaPedidoManual, type EntradaPedidoManualLegada, type ResolucaoPedidoManual, type ComprovantePedidoManual } from "@/lib/pedido-manual-contrato";
 
 const API = "/api/olist/pedidos/manuais";
 const resolucaoConsultaSchema = resolucaoPedidoManualSchema.safeExtend({ contextoConsulta: z.string().min(1).max(4096).optional() });
@@ -55,6 +55,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   const [observacao, setObservacao] = useState("");
   const [selecoes, setSelecoes] = useState(() => criarRascunhoFilaOlist([]));
   const [erro, setErro] = useState("");
+  const [validacaoItens, setValidacaoItens] = useState(0);
   const [enviando, setEnviando] = useState(false);
   const [comprovante, setComprovante] = useState<ComprovantePedidoManual | null>(null);
   const [tentativa, setTentativa] = useState<EntradaPedido | null>(null);
@@ -237,7 +238,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     if (itens.length >= limite) return;
     const grupoId = combinar && modelo ? modelo.grupoId ?? modelo.id : undefined;
     const item = modelo ? { ...modelo, id: crypto.randomUUID(), grupoId,
-      ...(combinar ? { variante: null, tamanho: "", tamanhoId: null, consumoUnidade: null, modoMetragem: undefined, quantidade: 1, quantidadeTecido: 0, revisarMetragem: false, corteLaser: false } : {}) } : novoItem();
+      ...(combinar ? { variante: null, tamanho: "", tamanhoId: null, consumoUnidade: null, modoMetragem: undefined, quantidade: modelo.modalidade === "TECIDO_LISO" || modelo.modalidade === "TECIDO_SUBLIMADO" ? 0 : 1, quantidadeTecido: 0, revisarMetragem: false, corteLaser: modelo.modalidade === "PRODUTO_SUBLIMADO" } : {}) } : novoItem();
     setItens(atual => [...atual.map(i => combinar && i.id === modelo?.id ? { ...i, grupoId } : i), item]);
     const associacao = modelo ? selecoes.tecidos.find(t => t.tecidoId === modelo.id) : undefined;
     setSelecoes(atual => ({ ...atual, tecidos: [...atual.tecidos, { tecidoId: item.id, id: associacao?.id ?? 0, preco: associacao?.preco ?? null }] }));
@@ -247,12 +248,27 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
       campo?.focus(); campo?.scrollIntoView({ block: "nearest" });
     });
   }
+  function duplicarGrupo(grupo: ItemPedidoManual[]) {
+    if (itens.length + grupo.length > limite) return;
+    const grupoId = crypto.randomUUID();
+    const copias = grupo.map(item => ({ ...item, id: crypto.randomUUID(), grupoId }));
+    const associacoes = new Map(selecoes.tecidos.map(t => [t.tecidoId, t]));
+    setItens(atuais => [...atuais, ...copias]);
+    setSelecoes(atual => ({ ...atual, tecidos: [...atual.tecidos, ...copias.map((item, index) => ({ tecidoId: item.id, id: associacoes.get(grupo[index].id)?.id ?? 0, preco: associacoes.get(grupo[index].id)?.preco ?? null }))] }));
+  }
+  function validarCamposItens() {
+    if (itens.some(i => !i.modalidade || !itemPedidoManualSchema.safeParse(i).success)) {
+      setErro(""); setEtapa(3); setValidacaoItens(v => v + 1); return false;
+    }
+    return true;
+  }
   function avancar() {
     setErro("");
     if (etapa === 0 && !vendedor?.id) { setErro("Selecione o vendedor."); return; }
     if (etapa === 1 && !cliente?.id) { setErro("Selecione o cliente."); return; }
     if (etapa === 2 && !resolucao) { setErro("Aguarde ou atualize a resolução do aplicativo."); return; }
     if (etapa >= 3) {
+      if (!validarCamposItens()) return;
       try { montarEntrada(); } catch (e) { setErro(e instanceof Error ? e.message : "Revise os itens."); return; }
     }
     setEtapa(atual => atual + 1);
@@ -387,8 +403,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             {carregandoOrigem && <p role="status">Carregando dados da produção...</p>}
             <button type="button" className={botao} disabled={enviando || carregandoOrigem} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>
           </div>}
-          <ItensPedidoEditor atualizarNoCabecalho aoAlterarGrupo={alterarItens} apiTamanhos={apiBase} token={token} catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
-            aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoAlterarSelecoes={setSelecoes}
+          <ItensPedidoEditor validacao={validacaoItens} atualizarNoCabecalho aoAlterarGrupo={alterarItens} apiTamanhos={apiBase} token={token} catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
+            aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoDuplicarGrupo={duplicarGrupo} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}
         {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
@@ -403,14 +419,13 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
               <ul className="divide-y divide-slate-200">{grupo.itens.map(i => <li key={i.id} className="space-y-1 py-2">
                 <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"}</p>
                 <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : ""}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
-                {i.modoMetragem === "MANUAL" && i.modalidade === "PRODUTO_SUBLIMADO" && <p className="text-amber-700">Metragem ajustada manualmente</p>}
               </li>)}</ul>
             </div>;
           })}
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
           <button type="button" className={botao} disabled={etapa === 0 || enviando} onClick={() => { setErro(""); setEtapa(e => e - 1); }}>Voltar</button>
-          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
+          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta && validarCamposItens()) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
         </div>
       </section>
     </>}

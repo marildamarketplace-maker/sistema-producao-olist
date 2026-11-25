@@ -26,8 +26,14 @@ export const itemPedidoManualSchema = z.object({
     if (item.corteLaser || item.tamanho || item.tipoProduto || item.tamanhoId || item.modoMetragem === "AUTOMATICA") erro("modalidade", "Tecido corrido não possui tamanho, tipo de produto ou laser.");
     if (item.modalidade === "TECIDO_LISO" && (item.estampa || item.variante)) erro("estampa", "Tecido sem estampa não possui variante.");
   }
-  if (item.modalidade && item.modalidade !== "TECIDO_LISO" && (!item.estampa || !item.variante)) erro("estampa", "Informe estampa e variante.");
-  if (item.modalidade === "PRODUTO_SUBLIMADO" && (!item.tamanho || !item.tipoProduto)) erro("tamanho", "Informe tamanho e tipo de produto.");
+  if (item.modalidade && item.modalidade !== "TECIDO_LISO") {
+    if (!item.estampa) erro("estampa", "Informe a estampa.");
+    if (!item.variante) erro("variante", "Informe a variante.");
+  }
+  if (item.modalidade === "PRODUTO_SUBLIMADO") {
+    if (!item.tamanho) erro("tamanho", "Informe o tamanho.");
+    if (!item.tipoProduto) erro("tipoProduto", "Informe o tipo de produto.");
+  }
   if (item.modoMetragem === "AUTOMATICA" && (!item.tamanhoId || !item.consumoUnidade)) erro("tamanhoId", "Selecione um tamanho com consumo válido.");
   if (item.revisarMetragem) erro("quantidadeTecido", "Revise a metragem ajustada após alterar as peças.");
 });
