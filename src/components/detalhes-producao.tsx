@@ -17,6 +17,7 @@ type Props = {
   erroFoto: string | null;
   onCarregarFoto: () => void;
   onEditar?: () => void;
+  editorDados?: ReactNode;
   editorItens?: ReactNode;
   editorObservacao?: ReactNode;
 };
@@ -29,7 +30,7 @@ function dataHora(valor: string) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(valor));
 }
 
-export function DetalhesProducao({ producao, imagemToken, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens, editorObservacao }: Props) {
+export function DetalhesProducao({ producao, imagemToken, fotoUrl, carregandoFoto, erroFoto, onCarregarFoto, onEditar, editorItens, editorObservacao, editorDados }: Props) {
   const entrega = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${producao.dataEntrega}T00:00:00Z`));
   const solicitada = producao.itens.reduce((total, item) => total + item.quantidadeSolicitada, 0);
   const produzida = producao.itens.reduce((total, item) => total + item.quantidadeProduzida, 0);
@@ -55,6 +56,7 @@ export function DetalhesProducao({ producao, imagemToken, fotoUrl, carregandoFot
             <span className={`rounded-md px-3 py-1 text-sm font-medium ${producao.status === "concluida" ? "bg-emerald-50 text-emerald-700 dark:text-emerald-300" : "bg-slate-100 text-slate-700"}`}>{statusRotulos[producao.status] ?? producao.status.replaceAll("_", " ")}</span>
           </div>
         </div>
+        {editorDados && <div className="mb-5">{editorDados}</div>}
         <dl className="grid min-w-0 gap-5 text-sm sm:grid-cols-2">
           <div><dt className="text-slate-500">Data de entrega</dt><dd className="mt-1 font-medium text-slate-900">{entrega}</dd></div>
           <div><dt className="text-slate-500">Data de criação · horário de Brasília</dt><dd className="mt-1 text-slate-900">{dataHora(producao.createdAt)}</dd></div>

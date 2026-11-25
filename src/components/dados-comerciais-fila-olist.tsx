@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "@/components/pesquisa-tecido-olist";
+import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
 import type { OpcaoFilaOlist, RascunhoFilaOlist } from "@/lib/fila-olist-contrato";
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-50";
 export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar, disabled }: {
@@ -43,9 +45,25 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
 }
 
 
-export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, vendedorFixo = false }: {
+function ProdutoCatalogoOlist({ titulo, catalogo, produtoId, preco, aoSelecionar, aoAlterarPreco, disabled }: {
+  titulo: string; catalogo: CatalogoTecidosOlist; produtoId: number; preco: number | null; disabled: boolean;
+  aoSelecionar: (produto: OpcaoFilaOlist) => void; aoAlterarPreco: (preco: number | null) => void;
+}) {
+  const [busca, setBusca] = useState("");
+  return <fieldset disabled={disabled} className="min-w-0 space-y-2 rounded-md border border-slate-200 p-3">
+    <legend className="max-w-full break-words px-1 text-sm font-medium">{titulo}</legend>
+    <PesquisaTecidoOlist nome={busca} catalogo={catalogo} produtoId={produtoId} preco={preco} disabled={disabled}
+      aoEncontrar={produto => { setBusca(produto.nome); aoSelecionar(produto); }} aoAlterarPreco={aoAlterarPreco}
+      aoLimparAssociacao={() => aoSelecionar({ id: 0, nome: "" })} rotuloPreco="Preço por metro (R$)">
+      <label className="block min-w-0 text-sm">Filtrar produtos carregados<input className="input mt-1 min-h-11 w-full" value={busca} maxLength={500} onChange={event => setBusca(event.target.value)} /></label>
+    </PesquisaTecidoOlist>
+  </fieldset>;
+}
+
+export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, vendedorFixo = false, catalogoTecidos }: {
   api: string; token: string; itens: Array<{ tecidoId: string; nome: string; corteLaser: boolean }>;
   selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean; ocultarClienteVendedor?: boolean; vendedorFixo?: boolean;
+  catalogoTecidos?: CatalogoTecidosOlist;
 }) {
   const [planos, setPlanos] = useState<{ id: string; nome: string }[]>([]);
   const [erro, setErro] = useState("");
@@ -64,6 +82,7 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
   }, [api, token, selecoes.formaId]);
   const pesquisa = (titulo: string, recurso: string, valor: number, aoSelecionar: (o: OpcaoFilaOlist) => void) => <PesquisaOlist titulo={titulo} recurso={recurso} valor={valor} api={api} token={token} disabled={disabled} aoSelecionar={aoSelecionar} />;
   return <div className="space-y-4">
+    {catalogoTecidos && <EstadoCatalogoTecidosOlist catalogo={catalogoTecidos} disabled={disabled} />}
     {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     {carregando && <p role="status" className="text-sm text-slate-600">Carregando planos associados...</p>}
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -74,10 +93,17 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
             {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta conta.</span>}</label>
           <label className="block text-sm">Tipo de venda<select className="input mt-2 min-h-11" value={selecoes.tipoVenda} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, tipoVenda: e.target.value as RascunhoFilaOlist["tipoVenda"] })}><option value="">Selecione</option><option value="VENDA">Venda</option><option value="VENDA_G">Venda G</option><option value="VENDA_PC">Venda PC</option></select></label>
         </div>
-        {selecoes.tecidos.map((tecido, index) => <div key={tecido.tecidoId} className="space-y-2">
-          {pesquisa(`Produto para ${itens.find((i) => i.tecidoId === tecido.tecidoId)?.nome}`, "produtos", tecido.id, (o) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((t, i) => i === index ? { ...t, id: o.id, preco: o.id ? o.preco ?? null : null } : t) }))}
-          <label className="block text-sm">Preço por metro (R$)<input className="input mt-1 min-h-11" type="number" min="0" max="1000000000" step="0.01" value={tecido.preco ?? ""} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((t, i) => i === index ? { ...t, preco: e.target.value === "" ? null : Number(e.target.value) } : t) })} /></label>
-        </div>)}
+        {selecoes.tecidos.map((tecido, index) => {
+          const titulo = `Produto para ${itens.find(item => item.tecidoId === tecido.tecidoId)?.nome}`;
+          const selecionar = (produto: OpcaoFilaOlist) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((atual, posicao) => posicao === index ? { ...atual, id: produto.id, preco: produto.id ? produto.preco ?? null : null } : atual) });
+          const alterarPreco = (preco: number | null) => aoAlterar({ ...selecoes, tecidos: selecoes.tecidos.map((atual, posicao) => posicao === index ? { ...atual, preco } : atual) });
+          return <div key={tecido.tecidoId} className="min-w-0 space-y-2">
+            {catalogoTecidos ? <ProdutoCatalogoOlist titulo={titulo} catalogo={catalogoTecidos} produtoId={tecido.id} preco={tecido.preco} disabled={disabled} aoSelecionar={selecionar} aoAlterarPreco={alterarPreco} /> : <>
+              {pesquisa(titulo, "produtos", tecido.id, selecionar)}
+              <label className="block text-sm">Preço por metro (R$)<input className="input mt-1 min-h-11" type="number" min="0" max="1000000000" step="0.01" value={tecido.preco ?? ""} disabled={disabled} onChange={event => alterarPreco(event.target.value === "" ? null : Number(event.target.value))} /></label>
+            </>}
+          </div>;
+        })}
         {laser && <div className="space-y-2">
           {pesquisa("Serviço de corte a laser", "servicos", selecoes.laser?.id ?? 0, (o) => aoAlterar({ ...selecoes, laser: { id: o.id, preco: o.id ? o.preco ?? null : null } }))}
           <label className="block text-sm">Preço do serviço por metro (R$)<input className="input mt-1 min-h-11" type="number" min="0" step="0.01" value={selecoes.laser?.preco ?? ""} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, laser: { id: selecoes.laser?.id ?? 0, preco: e.target.value === "" ? null : Number(e.target.value) } })} /></label>

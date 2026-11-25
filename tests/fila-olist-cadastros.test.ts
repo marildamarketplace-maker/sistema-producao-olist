@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import axios from "axios";
+import axios, { type AxiosRequestConfig } from "axios";
 
 test("cadastros da fila respeitam estados por recurso e identificam vendedores pelo contato", async t => {
   let clienteEstado = "B", vendedorEstado = "B", produtoEstado = "A", servicoEstado = "A", formaEstado: string | number = 1;
   const consultas: URL[] = [];
+  const configuracoes: Array<AxiosRequestConfig | undefined> = [];
   let paginaProdutos: Array<Record<string, unknown>> | null = null;
   Object.assign(globalThis, { prisma: {
     aplicativo: { findUnique: async () => ({ olistClientId: "fake", olistClientSecret: "fake" }) },
     integracaoOlistToken: { findUnique: async () => ({ accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }) },
   } });
-  t.mock.method(axios, "get", async (url: string) => {
+  t.mock.method(axios, "get", async (url: string, config?: AxiosRequestConfig) => {
+    configuracoes.push(config);
     const u = new URL(url); consultas.push(u);
     const p = u.pathname;
     let data: unknown;
@@ -75,7 +77,7 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     servicoEstado = "A"; formaEstado = "B";
     await assert.rejects(validarSelecoesParciais("conta", { formaId: 60 }), /inativos/);
   });
-  await t.test("produtos exigem a palavra ref no nome, preservando termo, preço e uma única página remota", async () => {
+  await t.test("produtos com Ref preservam termo, preço e uma única página remota", async () => {
     paginaProdutos = [
       { id: 40, situacao: "A", descricao: "Oxford REF", precos: { preco: 10 } },
       { id: 41, situacao: "A", nome: "ref - Oxford Premium", precos: { preco: 12 } },
@@ -96,6 +98,28 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     const servicos = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "servicos" }));
     assert.equal(consultas.at(-1)!.searchParams.has("nome"), false);
     assert.deepEqual(servicos.itens.map(i => i.id), [40]);
+  });
+  await t.test("busca FOURWAY mantém as duas referências elegíveis e exclui o tecido sem Ref", async () => {
+    paginaProdutos = [
+      { id: 6887, situacao: "A", descricao: "BASEITWILL FOURWAY 92%POLIESTER8% Ref. 6887", precos: { preco: 15.99 } },
+      { id: 5168, situacao: "A", descricao: "FOURWAY SUBLIME 3 95%POLI5%ELASTRef. 5168 1J3B4C6D2B", precos: { preco: 18.99 } },
+      { id: 1000, situacao: "A", descricao: "Tecido Fourway Begonia Spandex Sedinha Elastano Poliéster", precos: { preco: 10.99 } },
+    ];
+    const antes = consultas.length;
+    const resultado = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "FOURWAY" }));
+    assert.deepEqual(resultado.itens.map(i => i.id), [6887, 5168]);
+    assert.equal(consultas.at(-1)!.searchParams.get("nome"), "FOURWAY");
+    assert.equal(consultas.length - antes, 1);
+  });
+  await t.test("produtos propagam cancelamento e prazo ao provedor sem alterar o contrato da listagem", async () => {
+    const controller = new AbortController();
+    await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "ref" }), undefined, controller.signal);
+    assert.equal(configuracoes.at(-1)?.timeout, 20_000);
+    assert.equal(configuracoes.at(-1)?.signal, controller.signal);
+    const chamadas = consultas.length;
+    controller.abort();
+    await assert.rejects(consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos" }), undefined, controller.signal), { name: "AbortError" });
+    assert.equal(consultas.length, chamadas, "Consulta cancelada não chega à Olist");
   });
   await t.test("página sem produtos elegíveis conserva próxima página conforme os resultados brutos", async () => {
     paginaProdutos = Array.from({ length: 50 }, (_, i) => ({ id: i + 1, situacao: "A", descricao: `Oxford ${i}` }));

@@ -1,13 +1,13 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { PesquisaTecidoOlist } from "@/components/pesquisa-tecido-olist";
+import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "@/components/pesquisa-tecido-olist";
+import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
 import type { RascunhoFilaOlist } from "@/lib/fila-olist-contrato";
 import type { ItemPedidoManual } from "@/lib/pedido-manual-contrato";
 
 type Props = {
-  token: string;
-  api: string;
+  catalogo: CatalogoTecidosOlist;
   itens: ItemPedidoManual[];
   selecoes: RascunhoFilaOlist;
   disabled: boolean;
@@ -21,24 +21,29 @@ type Props = {
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:opacity-50";
 
 /** Cada linha conserva sua identidade, inclusive quando muda de posição ou tecido. */
-export function ItensPedidoEditor({ token, api, itens, selecoes, disabled, limite, aoAlterarItem, aoRemover, aoAdicionar, aoAlterarSelecoes }: Props) {
+export function ItensPedidoEditor({ catalogo, itens, selecoes, disabled, limite, aoAlterarItem, aoRemover, aoAdicionar, aoAlterarSelecoes }: Props) {
   function alterarProduto(id: string, patch: { id?: number; preco?: number | null }) {
-    // A pesquisa pode terminar depois de outra linha ter sido alterada.
     aoAlterarSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.map(tecido => tecido.tecidoId === id ? { ...tecido, ...patch } : tecido) }));
   }
 
   return <div className="min-w-0 space-y-4">
-    <p className="text-sm text-slate-600">Informe as peças e o consumo em metros separadamente. A pesquisa de tecido consulta a conta Olist selecionada.</p>
+    <p className="text-sm text-slate-600">Informe as peças e o consumo em metros separadamente. Selecione o tecido pelo nome ou referência.</p>
+    <EstadoCatalogoTecidosOlist catalogo={catalogo} disabled={disabled} />
     {!itens.length && <p role="status" className="text-sm text-slate-600">Nenhum item. Adicione um produto para continuar.</p>}
     {itens.map((item, index) => {
       const produto = selecoes.tecidos.find(tecido => tecido.tecidoId === item.id);
       return <fieldset key={item.id} disabled={disabled} className="min-w-0 space-y-3 rounded-lg border border-slate-200 p-4">
         <legend className="px-1 text-sm font-semibold">Item {index + 1}</legend>
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-          <PesquisaTecidoOlist key={`${item.id}:${api}`} nome={item.tecidoNome} api={api} token={token} disabled={disabled}
+          <PesquisaTecidoOlist nome={item.tecidoNome} catalogo={catalogo} disabled={disabled}
             produtoId={produto?.id ?? 0} preco={produto?.preco ?? null}
-            aoEncontrar={encontrado => alterarProduto(item.id, { id: encontrado.id, preco: encontrado.preco ?? null })}
-            aoAlterarPreco={preco => alterarProduto(item.id, { preco })}>
+            aoEncontrar={encontrado => {
+              // O nome completo acompanha o pedido e a revisão, sem alterar a produção.
+              aoAlterarItem(item.id, { tecidoNome: encontrado.nome });
+              alterarProduto(item.id, { id: encontrado.id, preco: encontrado.preco ?? null });
+            }}
+            aoAlterarPreco={preco => alterarProduto(item.id, { preco })}
+            aoLimparAssociacao={() => alterarProduto(item.id, { id: 0, preco: null })}>
             <label className="block min-w-0 text-sm">Tecido<input className="input mt-1 min-h-11 w-full" maxLength={500} value={item.tecidoNome}
               onChange={event => aoAlterarItem(item.id, { tecidoNome: event.target.value })} /></label>
           </PesquisaTecidoOlist>

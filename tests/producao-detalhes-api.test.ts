@@ -21,15 +21,25 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
   let consultas = 0;
   let observacaoAtual: string | null = "Pedido especial";
   let escritas = 0;
+  let entregaAtual = "2026-10-16";
+  let prioridadeAtual = true;
+  let statusAtual = "em_producao";
   let downloads = 0;
   let tipoImagem = "image/jpeg";
   Object.assign(globalThis, { prisma: {
     usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: app }), findUnique: async () => ({ podeSolicitarProducao: permitido, podeVisualizarProducao: somenteLeitura }) },
-    solicitacaoProducao: { updateMany: async ({ where, data }: { where: { id: string; aplicativoId: string; observacaoGeral: string | null }; data: { observacaoGeral: string | null } }) => {
+    solicitacaoProducao: { updateMany: async ({ where, data }: { where: { id: string; aplicativoId: string; observacaoGeral?: string | null; dataEntrega?: Date; prioridadeProducao?: boolean; status?: { in: string[] } }; data: { observacaoGeral?: string | null; dataEntrega?: Date; prioridadeProducao?: boolean } }) => {
       assert.equal(where.id, id); assert.equal(where.aplicativoId, app);
-      assert.deepEqual(Object.keys(data), ["observacaoGeral"]);
-      if (!existe || where.observacaoGeral !== observacaoAtual) return { count: 0 };
-      observacaoAtual = data.observacaoGeral; escritas++; return { count: 1 };
+      if (data.dataEntrega) {
+        assert.deepEqual(where.status, { in: ["pendente", "em_producao"] });
+        if (!existe || !where.status!.in.includes(statusAtual) || where.dataEntrega?.toISOString().slice(0, 10) !== entregaAtual || where.prioridadeProducao !== prioridadeAtual) return { count: 0 };
+        entregaAtual = data.dataEntrega.toISOString().slice(0, 10); prioridadeAtual = data.prioridadeProducao!;
+      } else {
+        assert.deepEqual(Object.keys(data), ["observacaoGeral"]);
+        if (!existe || where.observacaoGeral !== observacaoAtual) return { count: 0 };
+        observacaoAtual = data.observacaoGeral!;
+      }
+      escritas++; return { count: 1 };
     }, findFirst: async ({ where }: { where: { id: string; aplicativoId: string } }) => {
       consultas++;
       assert.deepEqual(where, { id, aplicativoId: app });
@@ -37,7 +47,7 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
       if (!existe) return null;
       return {
         id, dataEntrega: new Date("2026-10-16T00:00:00Z"), createdAt: new Date("2026-10-15T23:00:00Z"),
-        status: "concluida", observacaoGeral: "Pedido especial", prioridadeProducao: true,
+        status: statusAtual, observacaoGeral: "Pedido especial", prioridadeProducao: true,
         periodoInicio: null, periodoFim: null,
         evidenciaBucket: temEvidencia ? bucketEvidencia : null, evidenciaStoragePath: temEvidencia ? caminho : null,
         pedidosFornecedor: [{ pedidoOlistId: "12345", fornecedor: { nome: "Fornecedor de teste" } }],
@@ -115,6 +125,23 @@ test("detalhes e foto da produção validam permissão, aplicativo e não expõe
     assert.equal((await editar({ observacaoGeral: "x", observacaoAnterior: null })).status, 404);
     existe = true;
     assert.equal(escritas, antes);
+  });
+  await t.test("edita data e prioridade com validação e controle de concorrência e status", async () => {
+    const editar = (body: unknown) => PATCH(new Request("https://example.test", { method: "PATCH", headers: { Authorization: "Bearer token-ficticio", "Content-Type": "application/json" }, body: JSON.stringify(body) }), contexto());
+    const dados = { dataEntrega: "2026-11-30", prioridadeProducao: false, anterior: { dataEntrega: entregaAtual, prioridadeProducao: prioridadeAtual } };
+    assert.equal((await editar(dados)).status, 200);
+    assert.equal(entregaAtual, dados.dataEntrega); assert.equal(prioridadeAtual, false);
+    assert.equal((await editar(dados)).status, 409);
+    dados.anterior = { dataEntrega: entregaAtual, prioridadeProducao: prioridadeAtual };
+    for (const dataEntrega of ["2026-02-30", "2026-13-01", "30/11/2026", ""]) assert.equal((await editar({ ...dados, dataEntrega })).status, 400);
+    assert.equal((await editar({ ...dados, prioridadeProducao: "true" })).status, 400);
+    assert.equal((await editar({ ...dados, aplicativoId: "outro" })).status, 400);
+    for (const status of ["concluida", "cancelada"]) { statusAtual = status; assert.equal((await editar(dados)).status, 409); }
+    statusAtual = "pendente"; assert.equal((await editar(dados)).status, 200); statusAtual = "em_producao";
+    permitido = false; somenteLeitura = true;
+    assert.equal((await editar(dados)).status, 403);
+    permitido = true; somenteLeitura = false; existe = false;
+    assert.equal((await editar(dados)).status, 404); existe = true;
   });
   await t.test("pedido de outro aplicativo ou inexistente retorna 404", async () => {
     existe = false;

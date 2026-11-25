@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { AccessGuard } from "./access-guard";
 import { useAuth } from "./auth-provider";
 import { DetalhesProducao } from "./detalhes-producao";
+import { EditarDadosProducao } from "./editar-dados-producao";
 import { EditarObservacaoProducao } from "./editar-observacao-producao";
 import { EditarItensProducao } from "./editar-itens-producao";
 import type { DetalheProducao } from "@/lib/producao-detalhes-contrato";
@@ -83,6 +84,7 @@ function ConteudoDetalhe({ id }: { id: string }) {
   return <>
     {sucesso && <p role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:text-emerald-300">{sucesso}</p>}
     <DetalhesProducao imagemToken={token} producao={producao} fotoUrl={fotoUrl} carregandoFoto={carregandoFoto} erroFoto={erroFoto} onCarregarFoto={() => { void carregarFoto(); }}
+      editorDados={token && usuario?.podeSolicitarProducao && ["pendente", "em_producao"].includes(producao.status) ? <EditarDadosProducao key={id} id={id} token={token} dados={{ dataEntrega: producao.dataEntrega, prioridadeProducao: producao.prioridadeProducao }} onSalvo={(dados) => setProducao((atual) => atual ? { ...atual, ...dados } : atual)} /> : undefined}
       editorObservacao={token && usuario?.podeSolicitarProducao ? <EditarObservacaoProducao key={id} id={id} token={token} observacao={producao.observacaoGeral} onSalvo={(observacaoGeral) => { setProducao((atual) => atual ? { ...atual, observacaoGeral } : atual); }} /> : undefined}
       onEditar={usuario?.podeSolicitarProducao && !editando ? () => { setSucesso(null); setEditando(true); } : undefined}
       editorItens={editando && token && usuario?.podeSolicitarProducao ? <EditarItensProducao key={`${id}:${producao.revisao}`} producao={producao} token={token} onCancelar={() => setEditando(false)} onRecarregar={recarregar} onSalvo={() => { setSucesso("Itens atualizados com sucesso."); recarregar(); }} /> : undefined}

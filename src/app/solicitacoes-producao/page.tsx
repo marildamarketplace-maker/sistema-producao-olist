@@ -1,10 +1,10 @@
-﻿"use client";
+"use client";
 
 import { expandirKitProducaoManual, type OpcaoProdutoKitManual } from "@/lib/producao-manual-kits";
-import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
-import { ChevronDown, Download, ExternalLink, Eye, Pencil, Plus, Printer, Trash2, XCircle } from "lucide-react";
+import { ChevronDown, ExternalLink, Eye, Plus, Trash2, XCircle } from "lucide-react";
 import { AcaoFilaProducao, type DisponibilidadeEnvioFornecedor } from "@/components/acao-fila-producao";
 import { DetalhesFilaProducao } from "@/components/detalhes-fila-producao";
 import type { ResumoFilaProducao } from "@/lib/fila-fornecedor-contrato";
@@ -63,7 +63,6 @@ type ItemSolicitacao = {
 };
 
 type ItemForm = {
-  id?: string;
   produto_id: string;
   produto_busca: string;
   produto_fornecido?: ProdutoFornecidoInfo | null;
@@ -170,23 +169,6 @@ function formatarDataLocal(date: Date) {
   const valores = Object.fromEntries(partes.map((parte) => [parte.type, parte.value]));
 
   return `${valores.year}-${valores.month}-${valores.day}`;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function formatarStatus(status: string) {
-  return status === "em_producao" ? "EM_PRODUCAO" : status.toUpperCase();
-}
-
-function formatarDataEntrega(dataEntrega: string) {
-  return new Date(`${dataEntrega}T00:00:00`).toLocaleDateString("pt-BR");
 }
 
 function normalizarQuantidadeInteira(valor: string) {
@@ -316,7 +298,6 @@ export default function SolicitacoesProducaoPage() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [filtrosSolicitacoes, setFiltrosSolicitacoes] = useState(criarFiltrosSolicitacoesIniciais);
-  const [itensPorSolicitacao, setItensPorSolicitacao] = useState<Record<string, ItemSolicitacao[]>>({});
   const [itensCarregando, setItensCarregando] = useState<Record<string, boolean>>({});
   const [pedidosOlistPorSolicitacao, setPedidosOlistPorSolicitacao] = useState<Record<string, string[]>>({});
   const [dataEntrega, setDataEntrega] = useState("");
@@ -329,8 +310,6 @@ export default function SolicitacoesProducaoPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [solicitacoesAbertas, setSolicitacoesAbertas] = useState<Record<string, boolean>>({});
-  const [solicitacaoEditandoId, setSolicitacaoEditandoId] = useState<string | null>(null);
   const [filasPorSolicitacao, setFilasPorSolicitacao] = useState<Record<string, ResumoFilaProducao>>({});
   const [detalheFilaId, setDetalheFilaId] = useState<string | null>(null);
   const atualizarFila = useCallback((fila: ResumoFilaProducao) => setFilasPorSolicitacao((atuais) => ({ ...atuais, [fila.solicitacaoProducaoId]: fila })), []);
@@ -396,7 +375,6 @@ export default function SolicitacoesProducaoPage() {
       ];
 
       setSolicitacoes(solicitacoesCarregadas.sort(ordenarSolicitacoes));
-      setItensPorSolicitacao({});
       setItensCarregando({});
       const produtosJson = await produtosResponse.json() as {
         produtos?: Produto[];
@@ -440,7 +418,7 @@ export default function SolicitacoesProducaoPage() {
   async function compartilharSolicitacaoWhatsapp(solicitacaoId: string) {
     setSolicitacaoCopiada(null);
     try {
-      const texto = carregarItensSolicitacao(solicitacaoId, true).then((itens) => {
+      const texto = carregarItensSolicitacao(solicitacaoId).then((itens) => {
         if (!itens) throw new Error("Não foi possível carregar os itens para copiar.");
         return montarSolicitacaoProducaoWhatsapp(itens);
       });
@@ -458,11 +436,7 @@ export default function SolicitacoesProducaoPage() {
     }
   }
 
-  async function carregarItensSolicitacao(solicitacaoId: string, force = false) {
-    if (!force && itensPorSolicitacao[solicitacaoId]) {
-      return itensPorSolicitacao[solicitacaoId];
-    }
-
+  async function carregarItensSolicitacao(solicitacaoId: string) {
     setItensCarregando((anterior) => ({ ...anterior, [solicitacaoId]: true }));
     setErrorMessage(null);
 
@@ -480,7 +454,6 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const itensCarregados = (data as ItemSolicitacao[]) ?? [];
-    setItensPorSolicitacao((anterior) => ({ ...anterior, [solicitacaoId]: itensCarregados }));
 
     return itensCarregados;
   }
@@ -699,19 +672,6 @@ export default function SolicitacoesProducaoPage() {
     setItensForm((anterior) => (anterior.length > 1 ? anterior.filter((_, i) => i !== index) : anterior));
   }
 
-  async function alternarDetalhesSolicitacao(solicitacaoId: string) {
-    const vaiAbrir = !solicitacoesAbertas[solicitacaoId];
-
-    setSolicitacoesAbertas((anterior) => ({
-      ...anterior,
-      [solicitacaoId]: vaiAbrir,
-    }));
-
-    if (vaiAbrir) {
-      await carregarItensSolicitacao(solicitacaoId);
-    }
-  }
-
   function limparFormulario() {
     setAvisoKitManual("");
     selecaoProdutoVersao.current++;
@@ -723,47 +683,12 @@ export default function SolicitacoesProducaoPage() {
     setItensCobertosProducaoExistente([]);
     setItensEstoqueSuficiente([]);
     setPrioridadeProducao(false);
-    setSolicitacaoEditandoId(null);
-  }
-
-  function editarSolicitacao(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
-    if (!podeSolicitarProducao) return;
-
-    if (itensSolicitacao.length === 0) {
-      setErrorMessage("Solicitacao sem itens para editar.");
-      return;
-    }
-
-    setSolicitacaoEditandoId(solicitacao.id);
-    setDataEntrega(solicitacao.data_entrega);
-    setObservacaoGeral(solicitacao.observacao_geral ?? "");
-    setPrioridadeProducao(Boolean(solicitacao.prioridade_producao));
-    setProcessamentoOlistPendente(null);
-    setResumoImportacaoOlist(null);
-    setItensCobertosProducaoExistente([]);
-    setItensEstoqueSuficiente([]);
-    setErrorMessage(null);
-    setItensForm(
-      itensSolicitacao.map((item) => ({
-        id: item.id,
-        produto_id: item.produto_id,
-        produto_busca: item.sku,
-        quantidade_solicitada: normalizarQuantidadeInteira(String(item.quantidade_solicitada)),
-        corte_laser: item.tipo_corte === "LASER",
-        observacao: item.observacao ?? "",
-      })),
-    );
-    rolarParaFormularioManual();
   }
 
   async function cancelarSolicitacao(solicitacao: Solicitacao) {
     if (!podeSolicitarProducao) return;
 
-    const confirmar = window.confirm(
-      solicitacao.status === "concluida"
-        ? "Cancelar esta solicitação concluída? A entrada dos produtos será estornada do estoque."
-        : "Cancelar esta solicitação de produção?",
-    );
+    const confirmar = window.confirm("Cancelar esta solicitação de produção?");
 
     if (!confirmar) return;
 
@@ -788,129 +713,8 @@ export default function SolicitacoesProducaoPage() {
       return;
     }
 
-    if (solicitacaoEditandoId === solicitacao.id) {
-      limparFormulario();
-    }
-
     await carregarDados();
     setSaving(false);
-  }
-
-  function montarHtmlSolicitacao(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
-    const linhas = itensSolicitacao
-      .map(
-        (item) => `
-          <tr>
-            <td class="qtd">${item.quantidade_solicitada}</td>
-            <td>${escapeHtml(item.sku)}</td>
-            <td>${item.tipo_corte === "LASER" ? "Sim" : "Nao"}</td>
-            <td>${escapeHtml(item.observacao || "-")}</td>
-          </tr>
-        `,
-      )
-      .join("");
-
-    return `
-      <!doctype html>
-      <html>
-        <head>
-          <title>Solicitacao de producao</title>
-          <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; margin: 32px; }
-            h1 { font-size: 24px; margin: 0 0 16px; }
-            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; margin-bottom: 20px; font-size: 14px; }
-            .prioridade { display: inline-block; background: #dc2626; color: white; font-weight: 900; letter-spacing: .08em; padding: 6px 12px; border-radius: 6px; margin-bottom: 16px; }
-            table { border-collapse: collapse; width: 100%; font-size: 13px; }
-            th, td { border-bottom: 1px solid #e2e8f0; padding: 8px; text-align: left; vertical-align: top; }
-            th { color: #475569; background: #f8fafc; }
-            .qtd { text-align: right; font-weight: 700; }
-          </style>
-        </head>
-        <body>
-          <h1>Solicitacao de producao</h1>
-          ${solicitacao.prioridade_producao ? '<div class="prioridade">PRIORIDADE</div>' : ""}
-          <div class="meta">
-            <div><strong>Data de entrega:</strong> ${formatarDataEntrega(solicitacao.data_entrega)}</div>
-            <div><strong>Status:</strong> ${formatarStatus(solicitacao.status)}</div>
-            <div><strong>Criada em:</strong> ${new Date(solicitacao.created_at).toLocaleString("pt-BR")}</div>
-            <div><strong>Itens:</strong> ${itensSolicitacao.length}</div>
-            <div style="grid-column: 1 / -1;"><strong>Observacao geral:</strong> ${escapeHtml(solicitacao.observacao_geral || "-")}</div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th class="qtd">Quantidade</th>
-                <th>SKU</th>
-                <th>Corte a laser</th>
-                <th>Observacao</th>
-              </tr>
-            </thead>
-            <tbody>${linhas}</tbody>
-          </table>
-        </body>
-      </html>
-    `;
-  }
-
-  function imprimirSolicitacao(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
-    const janela = window.open("", "_blank", "noopener,noreferrer");
-
-    if (!janela) {
-      setErrorMessage("Nao foi possivel abrir a janela de impressao.");
-      return;
-    }
-
-    janela.document.write(montarHtmlSolicitacao(solicitacao, itensSolicitacao));
-    janela.document.close();
-    janela.focus();
-    janela.print();
-  }
-
-  function baixarImagemSolicitacao(solicitacao: Solicitacao, itensSolicitacao: ItemSolicitacao[]) {
-    const largura = 1200;
-    const altura = 280 + itensSolicitacao.length * 42;
-    const linhas = itensSolicitacao
-      .map((item, index) => {
-        const y = 235 + index * 42;
-
-        return `
-          <text x="80" y="${y}" font-size="18" font-weight="700" text-anchor="end">${item.quantidade_solicitada}</text>
-          <text x="130" y="${y}" font-size="18" font-weight="700">${escapeHtml(item.sku)}</text>
-          <text x="430" y="${y}" font-size="18">${item.tipo_corte === "LASER" ? "Sim" : "Nao"}</text>
-          <text x="600" y="${y}" font-size="18">${escapeHtml(item.observacao || "-").slice(0, 54)}</text>
-          <line x1="40" y1="${y + 14}" x2="1160" y2="${y + 14}" stroke="#e2e8f0" />
-        `;
-      })
-      .join("");
-
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${largura}" height="${altura}" viewBox="0 0 ${largura} ${altura}">
-        <rect width="100%" height="100%" fill="#ffffff"/>
-        <text x="40" y="52" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#0f172a">Solicitacao de producao</text>
-        ${
-          solicitacao.prioridade_producao
-            ? '<rect x="40" y="74" width="170" height="36" rx="6" fill="#dc2626"/><text x="125" y="98" font-family="Arial, sans-serif" font-size="18" font-weight="900" text-anchor="middle" fill="#ffffff">PRIORIDADE</text>'
-            : ""
-        }
-        <text x="40" y="135" font-family="Arial, sans-serif" font-size="18" fill="#334155">Entrega: ${formatarDataEntrega(solicitacao.data_entrega)}</text>
-        <text x="300" y="135" font-family="Arial, sans-serif" font-size="18" fill="#334155">Status: ${formatarStatus(solicitacao.status)}</text>
-        <text x="560" y="135" font-family="Arial, sans-serif" font-size="18" fill="#334155">Criada em: ${new Date(solicitacao.created_at).toLocaleString("pt-BR")}</text>
-        <text x="40" y="168" font-family="Arial, sans-serif" font-size="18" fill="#334155">Observacao geral: ${escapeHtml(solicitacao.observacao_geral || "-").slice(0, 90)}</text>
-        <line x1="40" y1="195" x2="1160" y2="195" stroke="#cbd5e1"/>
-        <text x="80" y="220" font-family="Arial, sans-serif" font-size="16" font-weight="700" text-anchor="end" fill="#475569">Qtd</text>
-        <text x="130" y="220" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#475569">SKU</text>
-        <text x="430" y="220" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#475569">Laser</text>
-        <text x="600" y="220" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#475569">Observacao</text>
-        <g font-family="Arial, sans-serif" fill="#0f172a">${linhas}</g>
-      </svg>
-    `;
-    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = `solicitacao-${solicitacao.id}.svg`;
-    link.click();
-    URL.revokeObjectURL(url);
   }
 
   async function gerarViaOlist() {
@@ -922,7 +726,6 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const dataProcessamento = new Date();
-    const editandoSolicitacao = Boolean(solicitacaoEditandoId);
 
     setIntegrandoOlist(true);
     setErrorMessage(null);
@@ -930,7 +733,7 @@ export default function SolicitacoesProducaoPage() {
     setProcessamentoOlistPendente(null);
     setItensCobertosProducaoExistente([]);
     setItensEstoqueSuficiente([]);
-    if (!editandoSolicitacao) setPrioridadeProducao(false);
+    setPrioridadeProducao(false);
     const resp = await axios.post(
       "/api/olist/gerar-solicitacao",
       {
@@ -983,7 +786,7 @@ export default function SolicitacoesProducaoPage() {
     }
 
     const produtosAtualizados = itensPreparados.length > 0 ? await carregarDados() : produtos;
-    if (!editandoSolicitacao && itensPreparados.length > 0) {
+    if (itensPreparados.length > 0) {
       setDataEntrega(String(json.data_entrega ?? formatarDataLocal(dataProcessamento)));
       setObservacaoGeral("MV:");
       setPrioridadeProducao(Boolean(json.prioridade_producao));
@@ -1015,11 +818,7 @@ export default function SolicitacoesProducaoPage() {
       }),
     );
     if (itensComProdutoFornecido.length > 0) {
-      setItensForm((itensAtuais) =>
-        editandoSolicitacao
-          ? [...itensAtuais, ...itensComProdutoFornecido]
-          : itensComProdutoFornecido,
-      );
+      setItensForm(itensComProdutoFornecido);
       setProcessamentoOlistPendente({
         periodo_inicio: String(json.periodo_inicio ?? dataProcessamento.toISOString()),
         periodo_fim: String(json.periodo_fim ?? dataProcessamento.toISOString()),
@@ -1079,75 +878,6 @@ export default function SolicitacoesProducaoPage() {
 
     const prioridadeSolicitacao =
       prioridadeProducao || itensNormalizados.some((item) => Boolean(item.prioridade_producao));
-
-    if (solicitacaoEditandoId) {
-      const { error: solicitacaoErro } = await supabase
-        .from("solicitacoes_producao")
-        .update({
-          data_entrega: dataEntrega,
-          observacao_geral: observacaoGeral.trim() || null,
-          prioridade_producao: prioridadeSolicitacao,
-        })
-        .eq("id", solicitacaoEditandoId);
-
-      if (solicitacaoErro) {
-        setErrorMessage(`Erro ao atualizar solicitacao: ${solicitacaoErro.message}`);
-        setSaving(false);
-        return;
-      }
-
-      const idsMantidos = itensNormalizados
-        .map((item) => item.id)
-        .filter((id): id is string => Boolean(id));
-
-      const deleteQuery = supabase
-        .from("itens_solicitacao_producao")
-        .delete()
-        .eq("solicitacao_id", solicitacaoEditandoId);
-
-      const { error: deleteErro } =
-        idsMantidos.length > 0
-          ? await deleteQuery.not("id", "in", `(${idsMantidos.join(",")})`)
-          : await deleteQuery;
-
-      if (deleteErro) {
-        setErrorMessage(`Solicitacao atualizada, mas erro ao remover itens excluidos: ${deleteErro.message}`);
-        setSaving(false);
-        return;
-      }
-
-      for (const item of itensNormalizados) {
-        const produto = produtos.find((p) => p.id === item.produto_id);
-        const itemPayload = {
-          produto_id: item.produto_id,
-          sku: produto?.sku ?? "",
-          imagem_url: produto?.imagem_url ?? null,
-          quantidade_solicitada: item.quantidade,
-          tipo_corte: item.corte_laser ? "LASER" : "PADRAO",
-          observacao: ocultarMarcadoresObservacaoProdutoFornecido(item.observacao).trim() || null,
-        };
-
-        const { error: itemErro } = item.id
-          ? await supabase.from("itens_solicitacao_producao").update(itemPayload).eq("id", item.id)
-          : await supabase.from("itens_solicitacao_producao").insert({
-              ...itemPayload,
-              solicitacao_id: solicitacaoEditandoId,
-              quantidade_produzida: 0,
-              status_item: "em_producao",
-            });
-
-        if (itemErro) {
-          setErrorMessage(`Solicitacao atualizada, mas erro ao salvar item ${produto?.sku ?? item.produto_busca}: ${itemErro.message}`);
-          setSaving(false);
-          return;
-        }
-      }
-
-      limparFormulario();
-      await carregarDados();
-      setSaving(false);
-      return;
-    }
 
     const processamentoOlist = processamentoOlistPendente;
     const gruposSolicitacao = [{ prioridade: prioridadeSolicitacao, itens: itensNormalizados }];
@@ -1249,7 +979,6 @@ export default function SolicitacoesProducaoPage() {
               <th className="p-3">Prioridade</th>
               <th className="p-3">Status</th>
               <th className="p-3">Observação geral</th>
-              <th className="p-3">Quantidade de itens</th>
               <th className="p-3">Data de criação</th>
               {exibirPedidoOlist && <th className="p-3">ID pedido Olist</th>}
               <th className="p-3 text-right">Ações</th>
@@ -1257,16 +986,10 @@ export default function SolicitacoesProducaoPage() {
           </thead>
           <tbody>
             {solicitacoesTabela.map((solicitacao) => {
-              const aberta = Boolean(solicitacoesAbertas[solicitacao.id]);
-              const itensSolicitacao = itensPorSolicitacao[solicitacao.id] ?? [];
-              const itensJaCarregados = Boolean(itensPorSolicitacao[solicitacao.id]);
               const carregandoItens = Boolean(itensCarregando[solicitacao.id]);
-              const podeEditar = solicitacao.status !== "concluida" && solicitacao.status !== "cancelada";
-              const podeCancelar = solicitacao.status !== "cancelada";
 
               return (
-                <Fragment key={solicitacao.id}>
-                  <tr className={`border-b ${destacarDivisao && !aberta ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
+                <tr key={solicitacao.id} className={`border-b ${destacarDivisao ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
                     <td className="p-3 text-slate-700">{new Date(`${solicitacao.data_entrega}T00:00:00`).toLocaleDateString("pt-BR")}</td>
                     <td className="p-3">
                       {solicitacao.prioridade_producao ? (
@@ -1279,9 +1002,6 @@ export default function SolicitacoesProducaoPage() {
                     </td>
                     <td className="p-3 font-medium text-slate-700">{solicitacao.status === "em_producao" ? "EM_PRODUCAO" : solicitacao.status.toUpperCase()}</td>
                     <td className="p-3 text-slate-700">{solicitacao.observacao_geral || "-"}</td>
-                    <td className="p-3 text-slate-700">
-                      {itensJaCarregados ? itensSolicitacao.length : "Ao abrir"}
-                    </td>
                     <td className="p-3 text-slate-700">{new Date(solicitacao.created_at).toLocaleString("pt-BR")}</td>
                     {exibirPedidoOlist && (
                       <td className="p-3 text-slate-700">
@@ -1298,7 +1018,7 @@ export default function SolicitacoesProducaoPage() {
                             type="button"
                             onClick={() => void compartilharSolicitacaoWhatsapp(solicitacao.id)}
                             disabled={carregandoItens}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
                             title="Copiar texto do pedido para WhatsApp"
                             aria-label="Copiar texto do pedido para WhatsApp"
                           >
@@ -1310,115 +1030,25 @@ export default function SolicitacoesProducaoPage() {
                         {solicitacaoCopiada === solicitacao.id && (
                           <span role="status" className="self-center text-xs text-emerald-700">Copiado!</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
-                            if (itensCarregados?.length) imprimirSolicitacao(solicitacao, itensCarregados);
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={carregandoItens}
-                          title="Imprimir detalhes"
-                          aria-label="Imprimir detalhes da solicitação"
-                        >
-                          <Printer className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
-                            if (itensCarregados?.length) baixarImagemSolicitacao(solicitacao, itensCarregados);
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={carregandoItens}
-                          title="Salvar imagem"
-                          aria-label="Salvar imagem dos detalhes da solicitação"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-                        {podeSolicitarProducao && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const itensCarregados = await carregarItensSolicitacao(solicitacao.id);
-                                if (itensCarregados?.length) editarSolicitacao(solicitacao, itensCarregados);
-                              }}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={carregandoItens || saving || !podeEditar}
-                              title="Editar solicitação"
-                              aria-label="Editar solicitação"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
+                        {podeSolicitarProducao && solicitacao.status === "em_producao" && (
                             <button
                               type="button"
                               onClick={() => cancelarSolicitacao(solicitacao)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={saving || !podeCancelar}
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={saving}
                               title="Cancelar solicitação"
                               aria-label="Cancelar solicitação"
                             >
-                              <XCircle className="h-4 w-4" />
+                              <XCircle className="h-4 w-4" aria-hidden="true" />
                             </button>
-                          </>
                         )}
                         {destacarDivisao && <AcaoFilaProducao solicitacaoId={solicitacao.id}
                           status={filasPorSolicitacao[solicitacao.id]?.status} aoVerDetalhes={() => setDetalheFilaId(solicitacao.id)}
                           autenticado={Boolean(session)} filaDisponivel={filaDisponivel} podeSolicitar={Boolean(usuario?.podeSolicitarProducao)} disponibilidade={envioFornecedor} />}
-                        <button
-                          type="button"
-                          onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={carregandoItens}
-                          title={aberta ? "Ocultar produtos" : "Ver produtos"}
-                          aria-label={aberta ? "Ocultar produtos da solicitação" : "Ver produtos da solicitação"}
-                          aria-expanded={aberta}
-                        >
-                          <ChevronDown className={`h-4 w-4 transition-transform ${aberta ? "rotate-180" : ""}`} />
-                        </button>
                       </div>
                     </td>
                   </tr>
-                  {aberta && (
-                    <tr className={`border-b bg-slate-50 ${destacarDivisao ? "border-b-2 border-slate-200" : "border-slate-100"}`}>
-                      <td className="p-3" colSpan={exibirPedidoOlist ? 8 : 7}>
-                        {carregandoItens ? (
-                          <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
-                            Carregando itens da solicitacao...
-                          </p>
-                        ) : itensSolicitacao.length === 0 ? (
-                          <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-600">
-                            Solicitacao sem itens cadastrados.
-                          </p>
-                        ) : (
-                        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                          <table className="min-w-full border-collapse text-sm">
-                            <thead>
-                              <tr className="border-b border-slate-200 text-left text-slate-600">
-                                <th className="px-3 py-2">Quantidade</th>
-                                <th className="px-3 py-2">SKU</th>
-                                <th className="px-3 py-2">Corte a laser</th>
-                                <th className="px-3 py-2">Observação</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {itensSolicitacao.map((item) => (
-                                <tr key={item.id} className="border-b border-slate-100 last:border-0">
-                                  <td className="px-3 py-2 font-semibold text-slate-900">{item.quantidade_solicitada}</td>
-                                  <td className="px-3 py-2 font-medium text-slate-700">{item.sku}</td>
-                                  <td className="px-3 py-2 text-slate-700">{item.tipo_corte === "LASER" ? "Sim" : "Não"}</td>
-                                  <td className="px-3 py-2 text-slate-700">{item.observacao || "-"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+
               );
             })}
           </tbody>
@@ -1546,7 +1176,7 @@ export default function SolicitacoesProducaoPage() {
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">
-              {solicitacaoEditandoId ? "Editar solicitação" : "Nova solicitação manual"}
+              Nova solicitação manual
             </h3>
             <p className="mt-1 text-sm text-slate-500">
               Informe a entrega e adicione os produtos que entrarão em produção.
@@ -1747,22 +1377,12 @@ export default function SolicitacoesProducaoPage() {
           </div>
 
           <div className="sticky bottom-0 z-20 -mx-4 flex flex-col gap-2 border-t border-slate-200 bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-8px_20px_-16px_rgba(15,23,42,0.45)] backdrop-blur sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
-            {solicitacaoEditandoId && (
-              <button
-                type="button"
-                onClick={limparFormulario}
-                disabled={saving}
-                className="min-h-11 w-full rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 sm:w-auto"
-              >
-                Cancelar edição
-              </button>
-            )}
             <button
               type="submit"
               disabled={saving}
               className="min-h-11 w-full rounded-md bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
             >
-              {saving ? "Salvando..." : solicitacaoEditandoId ? "Atualizar solicitação" : "Salvar solicitação"}
+              {saving ? "Salvando..." : "Salvar solicitação"}
             </button>
           </div>
           </fieldset>

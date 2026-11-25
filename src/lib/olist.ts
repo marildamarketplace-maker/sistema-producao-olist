@@ -187,6 +187,8 @@ type ProdutoOlistListagem = {
 
 export type FiltrosListagemProdutosOlist = {
   validarContrato?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   nome?: string;
   codigo?: string;
   gtin?: string;
@@ -672,7 +674,8 @@ export async function listarProdutosOlistApi(
     token,
     (accessToken) => axios.get(url.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
-      ...(filtros.validarContrato ? { timeout: 20_000 } : {}),
+      ...(filtros.timeoutMs !== undefined || filtros.validarContrato ? { timeout: filtros.timeoutMs ?? 20_000 } : {}),
+      ...(filtros.signal ? { signal: filtros.signal } : {}),
       validateStatus: () => true,
     }),
   );

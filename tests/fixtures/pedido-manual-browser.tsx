@@ -3,11 +3,11 @@ import { CriarPedidoManual } from "../../src/components/criar-pedido-manual";
 import type { EntradaPedidoProducao } from "../../src/lib/pedido-producao-contrato";
 import type { EntradaPedidoManual } from "../../src/lib/pedido-manual-contrato";
 const id = (n:number) => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`;
-declare global { interface Window { testeManual: { envios:(EntradaPedidoManual | EntradaPedidoProducao)[]; falhar:boolean; fonteAtual:string; falharCarteira:boolean; semVinculoAplicativoId:string|null; conflitoExistente:boolean; clienteSemDocumento:boolean; vendedorAtual:number; consultas:string[]; referenciaAtual:string } } }
+declare global { interface Window { testeManual: { envios:(EntradaPedidoManual | EntradaPedidoProducao)[]; falhar:boolean; fonteAtual:string; falharCarteira:boolean; semVinculoAplicativoId:string|null; conflitoExistente:boolean; clienteSemDocumento:boolean; vendedorAtual:number; consultas:string[]; referenciaAtual:string; contextoAtual:string } } }
 const params = new URLSearchParams(location.search);
 if (!params.has("preservar")) sessionStorage.clear();
 document.documentElement.classList.toggle("dark",params.get("tema")==="dark");
-window.testeManual = {envios:[],falhar:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2)};
+window.testeManual = {envios:[],falhar:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2),contextoAtual:"contexto-validado-local"};
 let falhouInicial=false;
 window.fetch = async (input,init) => {
   const url = new URL(typeof input === "string"?input:input instanceof URL?input.href:input.url,location.href);
@@ -33,7 +33,7 @@ window.fetch = async (input,init) => {
     if(window.testeManual.semVinculoAplicativoId && [referenciaId,destino].includes(window.testeManual.semVinculoAplicativoId)) return Response.json({error:"Aguardando configuração de vendedor pelo fornecedor."},{status:403});
     const vendedorOrigem=window.testeManual.vendedorAtual+(referenciaId===id(7)?100:0);
     const vendedorDestino=referenciaId===destino?vendedorOrigem:window.testeManual.vendedorAtual+100;
-    return Response.json({...(query.has("solicitacaoId")?{contextoConsulta:"contexto-validado-local"}:{}),referencia:{aplicativoId:referenciaId,vendedor:{id:vendedorOrigem,nome:`Vendedor vinculado · ID ${vendedorOrigem}`,cpfCnpj:null},cliente:{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",cpfCnpj:"52998224725",uf:"MG"}},
+    return Response.json({...(query.has("solicitacaoId")?{contextoConsulta:window.testeManual.contextoAtual}:{}),referencia:{aplicativoId:referenciaId,vendedor:{id:vendedorOrigem,nome:`Vendedor vinculado · ID ${vendedorOrigem}`,cpfCnpj:null},cliente:{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",cpfCnpj:"52998224725",uf:"MG"}},
       ...(params.has("semAplicativoDestino")?{}:{aplicativoDestino:{id:destino,nome:externa?(unica?"MV Tecidos fornecedor com nome longo":"Filial B do fornecedor"):unica?"Conta própria":"Filial com nome muito longo para verificar responsividade"}}),
       ...(externa?{fornecedorManual:{fornecedorId:id(6),matrizId:id(4),aplicativoSolicitanteId:id(2),autorId:id(1),referencia:{aplicativoId:referenciaId,vendedorOlistId:vendedorOrigem,revisao:1},destino:{aplicativoId:destino,vendedorOlistId:vendedorDestino,revisao:1}}}:{}),
       decisao:{tipo:unica?"CONTA_UNICA":"PADRAO",regraId:null,regraNome:null,versao:unica?0:1,aplicativoId:destino,motivo:unica?"Única conta disponível.":"Aplicativo padrão configurado pelo pai."},selecoes:{vendedorId:vendedorDestino,clienteId:referenciaId===destino?30:130,vendedorFixo:true}});
@@ -59,6 +59,12 @@ window.fetch = async (input,init) => {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     return Response.json({conta:{id:query.get("aplicativoId"),nome:"Conta"},vendedorId:params.has("livre")?null:[id(2),id(4),id(5)].includes(query.get("aplicativoId")??"")?window.testeManual.vendedorAtual:query.get("aplicativoId")===id(7)?window.testeManual.vendedorAtual+100:21,vendedorFixo:!params.has("livre")});
   }
-  return Response.json({itens:query.get("recurso")==="clientes"?[{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",referencia:"C30"}]:query.get("recurso")==="vendedores"?[{id:20,nome:"Vendedor",referencia:"V20"}]:[],pagina:1,mais:false});
+  const pagina=Number(query.get("pagina")??1);
+  const produtos=[
+    {id:6887,nome:"BASEITWILL FOURWAY 92%POLIESTER8% Ref. 6887",preco:15.99},
+    {id:5168,nome:"FOURWAY SUBLIME 3 95%POLI5%ELASTRef. 5168 1J3B4C6D2B",preco:18.99},
+  ];
+  const paginado=params.has("catalogoPaginado")&&query.get("recurso")==="produtos";
+  return Response.json({itens:query.get("recurso")==="clientes"?[{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",referencia:"C30"}]:query.get("recurso")==="vendedores"?[{id:20,nome:"Vendedor",referencia:"V20"}]:query.get("recurso")==="produtos"?(paginado&&pagina===1?Array.from({length:50},(_,index)=>({id:1000+index,nome:`Oxford Ref. ${1000+index}`,preco:10})):produtos):[],pagina,mais:paginado&&pagina===1});
 };
 createRoot(document.getElementById("root")!).render(<main className="mx-auto max-w-6xl p-4"><CriarPedidoManual token="teste" usuarioId={id(1)} podeGerenciarFila={false} solicitacaoId={params.get("solicitacaoId") ?? undefined} /></main>);

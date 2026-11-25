@@ -1,3 +1,4 @@
+import { edicaoDadosProducaoSchema } from "@/lib/producao-dados-edicao";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { autorizarDetalheProducao, DetalheProducaoError, respostaErroDetalheProducao } from "@/lib/producao-detalhes";
@@ -52,6 +53,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const usuario = await autorizarDetalheProducao(request, id, true);
     let body: unknown;
     try { body = await request.json(); } catch { throw new DetalheProducaoError("Dados da edição inválidos.", 400); }
+    if (body && typeof body === "object" && "dataEntrega" in body) {
+      const parsed = edicaoDadosProducaoSchema.safeParse(body);
+      if (!parsed.success) throw new DetalheProducaoError("Informe data de entrega e prioridade válidas e seus valores anteriores.", 400);
+      const dados = parsed.data;
+      const resultado = await prisma.solicitacaoProducao.updateMany({
+        where: {
+          id, aplicativoId: usuario.aplicativoId, status: { in: ["pendente", "em_producao"] },
+          dataEntrega: new Date(`${dados.anterior.dataEntrega}T00:00:00Z`),
+          prioridadeProducao: dados.anterior.prioridadeProducao,
+        },
+        data: { dataEntrega: new Date(`${dados.dataEntrega}T00:00:00Z`), prioridadeProducao: dados.prioridadeProducao },
+      });
+      if (!resultado.count) {
+        const atual = await prisma.solicitacaoProducao.findFirst({ where: { id, aplicativoId: usuario.aplicativoId }, select: { status: true } });
+        if (!atual) throw new DetalheProducaoError("Produção não encontrada.", 404);
+        throw new DetalheProducaoError("A solicitação foi alterada ou não permite edição. Recarregue os detalhes.", 409);
+      }
+      return NextResponse.json({ success: true, dataEntrega: dados.dataEntrega, prioridadeProducao: dados.prioridadeProducao });
+    }
     if (body && typeof body === "object" && "observacaoGeral" in body) {
       const dados = body as Record<string, unknown>;
       if (Object.keys(dados).some((campo) => !["observacaoGeral", "observacaoAnterior"].includes(campo)) ||

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validarTokenPublicoConfirmacaoProducao } from "@/lib/confirmacao-entrega-producao-publica";
 import { aplicativoTemJob, CHAVES_JOB } from "@/lib/aplicativo-jobs";
-import { carregarImagemItemProducao } from "@/lib/producao-imagem";
+import { carregarImagemItemProducao, lerImagemInvalida } from "@/lib/producao-imagem";
 import { DetalheProducaoError } from "@/lib/producao-detalhes-contrato";
 import { LimiteRequisicoesOlistError } from "@/lib/olist-errors";
 
@@ -24,7 +24,7 @@ export async function POST(request: Request, context: { params: Promise<{ itemId
     if (!aplicativo || !aplicativoTemJob(aplicativo.jobs, CHAVES_JOB.CONFIRMACAO_ENTREGA_PRODUCAO)) return resposta({ error: "Link de confirmação inválido." }, 401);
     const pendente = await prisma.solicitacaoProducao.findFirst({ where: { id: payload.solicitacaoId, aplicativoId: payload.aplicativoId, status: "em_producao" }, select: { id: true } });
     if (!pendente) return resposta({ error: "Solicitação não encontrada ou já confirmada." }, 404);
-    const imagemUrl = await carregarImagemItemProducao(payload.aplicativoId, payload.solicitacaoId, itemId);
+    const imagemUrl = await carregarImagemItemProducao(payload.aplicativoId, payload.solicitacaoId, itemId, await lerImagemInvalida(request));
     return resposta({ imagemUrl });
   } catch (error) {
     if (error instanceof DetalheProducaoError) return resposta({ error: error.message }, error.status);

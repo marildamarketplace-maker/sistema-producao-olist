@@ -141,7 +141,7 @@ export async function GET(request: Request) {
       return resposta({ itens: origem.itens, observacao: origem.observacao, revisao: origem.revisao, revisaoFonte: origem.revisaoFonte });
     }
     if (!params.has("recurso")) return resposta({ conta: contexto.conta, vendedorId: contexto.vendedorId, vendedorFixo: contexto.vendedorId !== null });
-    return resposta(await consultarCadastrosFilaOlist(contexto.conta.id, params, { vendedorId: contexto.vendedorId }));
+    return resposta(await consultarCadastrosFilaOlist(contexto.conta.id, params, { vendedorId: contexto.vendedorId }, request.signal));
   } catch (error) { return falha(error); }
 }
 type Confirmacao = { usuarioId: string; aplicativoId: string; solicitacaoId: string; chave: string; hash: string };

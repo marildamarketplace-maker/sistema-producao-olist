@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BloqueioExplicado } from "@/components/bloqueio-explicado";
+import { useCatalogoTecidosOlist } from "@/hooks/use-catalogo-tecidos-olist";
 import { ItensPedidoEditor } from "@/components/itens-pedido-editor";
 import { pedidoProducaoSchema, origemPedidoProducaoSchema, type EntradaPedidoProducao } from "@/lib/pedido-producao-contrato";
 import { PageHeader } from "@/components/page-header";
@@ -69,6 +70,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   const api = `${apiBase}${separador}${new URLSearchParams({ aplicativoId, ...(solicitacaoId && contextoConsulta ? { contextoConsulta } : {}), ...(solicitacaoId && referenciaId ? { aplicativoOrigemId: referenciaId, vendedorOrigemId: String(vendedor?.id ?? 0), clienteOrigemId: String(cliente?.id ?? 0) } : {}) })}`;
   const apiOrigem = `${apiBase}${separador}${new URLSearchParams({ aplicativoId: referenciaId })}`;
   const nomeAplicativoDestino = resolucao?.aplicativoDestino?.nome ?? aplicativos.find(a => a.id === aplicativoId)?.nome ?? (aplicativoId || "Não selecionado");
+  const catalogoTecidos = useCatalogoTecidosOlist({ api: aplicativoId ? api : null, token, usuarioId,
+    ativo: Boolean(contaPronta && resolucao && aplicativoId && !comprovante && !tentativa) });
 
   useEffect(() => { vendedorAtual.current = vendedor; }, [vendedor]);
   useEffect(() => { titulo.current?.focus(); }, [etapa]);
@@ -202,6 +205,21 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     setItens(atuais => atuais.map(i => i.id === id ? { ...i, ...patch } : i));
     if (patch.tecidoNome !== undefined) setSelecoes(atuais => ({ ...atuais, tecidos: atuais.tecidos.map(t => t.tecidoId === id ? { ...t, id: 0, preco: null } : t) }));
   }
+  function alterarSelecoesComerciais(novas: typeof selecoes) {
+    const anteriores = new Map(selecoes.tecidos.map(tecido => [tecido.tecidoId, tecido.id]));
+    const nomes = new Map<string, string>();
+    for (const tecido of novas.tecidos) {
+      if (!tecido.id || anteriores.get(tecido.tecidoId) === tecido.id) continue;
+      const produto = catalogoTecidos.itens.find(item => item.id === tecido.id);
+      if (produto) nomes.set(tecido.tecidoId, produto.nome);
+    }
+    // A escolha comercial muda apenas os itens deste pedido, preservando a produção.
+    if (nomes.size) setItens(atuais => atuais.map(item => {
+      const nome = nomes.get(item.id);
+      return nome !== undefined ? { ...item, tecidoNome: nome } : item;
+    }));
+    setSelecoes(novas);
+  }
   function adicionar() {
     if (itens.length >= limite) return;
     const item = novoItem(); setItens(atual => [...atual, item]);
@@ -332,14 +350,23 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             {carregandoOrigem && <p role="status">Carregando dados da produção...</p>}
             <button type="button" className={botao} disabled={enviando || carregandoOrigem} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>
           </div>}
-          <ItensPedidoEditor token={token} api={api} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
+          <ItensPedidoEditor catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
             aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}
-        {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={setSelecoes} disabled={enviando} ocultarClienteVendedor />
+        {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor catalogoTecidos={catalogoTecidos} />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
         {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
-          {itens.map((i, index) => { const produto = selecoes.tecidos.find(t => t.tecidoId === i.id); return <div key={i.id} className="space-y-1 rounded-md border border-slate-200 p-3 text-sm"><p className="break-words font-semibold">Item {index + 1}: {i.tecidoNome}</p><p>{i.quantidade.toLocaleString("pt-BR")} peças · {i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p><p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"} · Tipo: {i.tipoProduto || "—"}</p><p>Produto Olist: {produto?.id || "Pendente"} · Preço/m: {produto?.preco == null ? "Pendente" : `R$ ${produto.preco.toFixed(2)}`}</p></div>; })}
+          {itens.map((i, index) => {
+            const produto = selecoes.tecidos.find(t => t.tecidoId === i.id);
+            const cadastro = catalogoTecidos.itens.find(item => item.id === produto?.id);
+            return <div key={i.id} className="space-y-1 rounded-md border border-slate-200 p-3 text-sm">
+              <p className="break-words font-semibold">Item {index + 1}: {i.tecidoNome}</p>
+              <p>{i.quantidade.toLocaleString("pt-BR")} peças · {i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
+              <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"} · Tipo: {i.tipoProduto || "—"}</p>
+              <p className="break-words">Produto Olist: {produto?.id ? `${cadastro ? `${cadastro.nome} · ` : ""}ID ${produto.id}` : "Pendente"} · Preço/m: {produto?.preco == null ? "Pendente" : `R$ ${produto.preco.toFixed(2)}`}</p>
+            </div>;
+          })}
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
           <button type="button" className={botao} disabled={etapa === 0 || enviando} onClick={() => { setErro(""); setEtapa(e => e - 1); }}>Voltar</button>

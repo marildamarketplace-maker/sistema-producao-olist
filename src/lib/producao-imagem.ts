@@ -15,7 +15,7 @@ export function urlImagemProduto(valor: unknown): string | null {
 // Agrupa cliques simultâneos e limita novas consultas por item a cada 30 segundos nesta instância.
 const consultas = new Map<string, { ate: number; promessa: Promise<string | null> }>();
 
-export async function carregarImagemItemProducao(aplicativoId: string, solicitacaoId: string, itemId: string) {
+export async function carregarImagemItemProducao(aplicativoId: string, solicitacaoId: string, itemId: string, imagemInvalida?: string | null) {
   const solicitacao = await prisma.solicitacaoProducao.findFirst({ where: { id: solicitacaoId, aplicativoId }, select: { id: true } });
   if (!solicitacao) throw new DetalheProducaoError("Produção não encontrada.", 404);
   const item = await prisma.itemSolicitacaoProducao.findFirst({
@@ -23,8 +23,8 @@ export async function carregarImagemItemProducao(aplicativoId: string, solicitac
   });
   if (!item) throw new DetalheProducaoError("Item não encontrado nesta produção.", 404);
   const existente = urlImagemProduto(item.imagemUrl);
-  if (existente) return existente;
-  const chave = `${aplicativoId}:${solicitacaoId}:${itemId}`;
+  if (existente && existente !== imagemInvalida) return existente;
+  const chave = `${aplicativoId}:${solicitacaoId}:${itemId}:${existente === imagemInvalida ? existente : ""}`;
   const atual = consultas.get(chave);
   if (atual && atual.ate > Date.now()) return atual.promessa;
   for (const [key, consulta] of consultas) if (consulta.ate <= Date.now()) consultas.delete(key);
@@ -40,7 +40,7 @@ export async function carregarImagemItemProducao(aplicativoId: string, solicitac
       idOlist = String(encontrados[0].id);
     }
     const anexos = await obterAnexosProdutoOlistApi(aplicativoId, idOlist);
-    const imagemUrl = anexos.map((anexo) => urlImagemProduto(anexo?.url)).find(Boolean) ?? null;
+    const imagemUrl = anexos.map((anexo) => urlImagemProduto(anexo?.url)).find((url) => url && url !== imagemInvalida) ?? null;
     if (!imagemUrl) return null;
     await prisma.itemSolicitacaoProducao.updateMany({
       where: { id: itemId, solicitacaoId, aplicativoId, imagemUrl: item.imagemUrl }, data: { imagemUrl },
@@ -49,4 +49,15 @@ export async function carregarImagemItemProducao(aplicativoId: string, solicitac
   })();
   consultas.set(chave, { ate: Date.now() + 30_000, promessa });
   return promessa;
+}
+
+export async function lerImagemInvalida(request: Request): Promise<string | null> {
+  if (!request.body) return null;
+  let body: unknown;
+  try { body = await request.json(); } catch { throw new DetalheProducaoError("Dados de imagem inválidos.", 400); }
+  if (!body || typeof body !== "object" || !("imagemInvalida" in body) || Object.keys(body).some((key) => key !== "imagemInvalida")) throw new DetalheProducaoError("Dados de imagem inválidos.", 400);
+  const valor = body.imagemInvalida;
+  const url = typeof valor === "string" && valor.length <= 4096 ? urlImagemProduto(valor) : null;
+  if (!url) throw new DetalheProducaoError("URL de imagem inválida.", 400);
+  return url;
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { autorizarDetalheProducao, DetalheProducaoError, respostaErroDetalheProducao } from "@/lib/producao-detalhes";
-import { carregarImagemItemProducao } from "@/lib/producao-imagem";
+import { carregarImagemItemProducao, lerImagemInvalida } from "@/lib/producao-imagem";
 import { LimiteRequisicoesOlistError } from "@/lib/olist-errors";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string; itemId: string }> }) {
@@ -8,7 +8,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { id, itemId } = await context.params;
     if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(itemId)) throw new DetalheProducaoError("Item inválido.", 400);
     const usuario = await autorizarDetalheProducao(request, id);
-    const imagemUrl = await carregarImagemItemProducao(usuario.aplicativoId, id, itemId);
+    const imagemUrl = await carregarImagemItemProducao(usuario.aplicativoId, id, itemId, await lerImagemInvalida(request));
     return NextResponse.json({ imagemUrl }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     const falha = error instanceof LimiteRequisicoesOlistError

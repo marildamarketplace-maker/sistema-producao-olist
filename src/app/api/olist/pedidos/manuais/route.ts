@@ -69,7 +69,7 @@ export async function GET(request: Request) {
     }
     const { conta, vendedorId } = await resolverContaPedidoManual(usuario, params.get("aplicativoId")!);
     if (!params.has("recurso")) return resposta({ conta, vendedorId, vendedorFixo: vendedorId !== null });
-    return resposta(await consultarCadastrosFilaOlist(conta.id, params, { vendedorId }));
+    return resposta(await consultarCadastrosFilaOlist(conta.id, params, { vendedorId }, request.signal));
   } catch (error) { return falha(error); }
 }
 export async function POST(request: Request) {

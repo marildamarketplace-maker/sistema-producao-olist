@@ -17,6 +17,7 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
   let imagem: string | null = null;
   let idOlist: string | null = "123";
   let chamadas = 0;
+  let novaImagem = false;
   let escritas = 0;
   Object.assign(globalThis, { prisma: {
     usuario: { findFirst: async () => ({ id: "usuario", aplicativoId: app }), findUnique: async () => ({ podeVisualizarProducao: permitido }) },
@@ -32,7 +33,7 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
         return itemExiste ? { id: itemId, produtoId: "produto", sku: "SKU/TESTE", imagemUrl: imagem } : null;
       },
       updateMany: async ({ where, data }: { where: unknown; data: { imagemUrl: string } }) => {
-        assert.deepEqual(where, { id: itemId, solicitacaoId: sol, aplicativoId: app, imagemUrl: null });
+        assert.deepEqual(where, { id: itemId, solicitacaoId: sol, aplicativoId: app, imagemUrl: novaImagem ? "https://example.test/produto.jpg" : null });
         escritas++; imagem = data.imagemUrl; return { count: 1 };
       },
     },
@@ -45,7 +46,7 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
     chamadas++;
     assert.equal(config.headers.Authorization, "Bearer token-olist-ficticio");
     assert.equal(url, "https://api.tiny.com.br/public-api/v3/produtos/123/anexos");
-    return { status: 200, headers: { "content-type": "application/json" }, data: [{ url: "https://example.test/manual.pdf" }, { url: "https://example.test/produto.jpg" }] };
+    return { status: 200, headers: { "content-type": "application/json" }, data: [{ url: "https://example.test/manual.pdf" }, { url: "https://example.test/produto.jpg" }, ...(novaImagem ? [{ url: "https://example.test/nova.jpg" }] : [])] };
   });
   const { carregarImagemItemProducao, urlImagemProduto } = await import("../src/lib/producao-imagem");
   assert.equal(urlImagemProduto("javascript:alert(1)"), null);
@@ -90,4 +91,9 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.deepEqual(await response.json(), { imagemUrl: "https://example.test/produto.jpg" });
   assert.equal(chamadas, 1);
+  novaImagem = true;
+  assert.equal(await carregarImagemItemProducao(app, sol, itemId, "https://example.test/produto.jpg"), "https://example.test/nova.jpg");
+  assert.equal(chamadas, 2);
+  const invalida = new Request("https://example.test/imagem", { method: "POST", headers: { Authorization: "Bearer sessao", "Content-Type": "application/json" }, body: JSON.stringify({ imagemInvalida: "javascript:alert(1)" }) });
+  assert.equal((await interno.POST(invalida, contexto)).status, 400);
 });

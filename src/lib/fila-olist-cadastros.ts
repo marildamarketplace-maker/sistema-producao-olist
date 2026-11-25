@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasPagamentoOlistApi, obterCadastroFornecedorOlist, getValidOlistAccessToken } from "@/lib/olist";
 import type { SelecoesFilaOlist, SelecoesFilaOlistParciais } from "@/lib/fila-olist-contrato";
-import { nomeProdutoElegivelSync } from "@/lib/olist-sync/produtos";
 export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 const ErroFila = ErroFilaOlist;
 function contatoDoCadastro(item: Record<string, unknown>): Record<string, unknown> | null {
@@ -14,12 +13,18 @@ export function nome(item: Record<string, unknown>) {
   return String(item.nome ?? contatoDoCadastro(item)?.nome ?? item.descricao ?? item.id);
 }
 function ativo(item: Record<string, unknown>) { return !["I", "E", "INATIVO", "2", "B"].includes(String(item.situacao ?? "A").toUpperCase()); }
+// O marcador pode vir colado à composição, como "5%ELASTRef. 5168".
+// Não usar aqui a regra de palavras isoladas da sincronização de catálogos.
+function produtoComReferencia(item: Record<string, unknown>) {
+  return /ref(?=$|[^\p{L}\p{N}_])/iu.test(nome(item).normalize("NFKC"));
+}
 // Contatos e vendedores usam B=Ativo e A=Ativo com acesso. Os demais
 // recursos mantêm seu contrato próprio (incluindo B bloqueado quando aplicável).
 function pessoaAtiva(item: Record<string, unknown>) {
   return ["A", "B"].includes(String(item.situacao ?? "A").trim().toUpperCase());
 }
-export async function consultarCadastrosFilaOlist(filialId: string, params: URLSearchParams, escopo?: { vendedorId: number | null }) {
+export async function consultarCadastrosFilaOlist(filialId: string, params: URLSearchParams, escopo?: { vendedorId: number | null }, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const recurso = params.get("recurso");
     await validarIntegracao(filialId);
     const filtros = z.object({ busca: z.string().max(120), pagina: z.coerce.number().int().min(1).max(1000) }).safeParse({ busca: params.get("busca") ?? "", pagina: params.get("pagina") ?? 1 });
@@ -35,7 +40,7 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
     let resultado;
     if (recurso === "clientes") resultado = await listarContatosOlistApi(filialId, { nome: busca || undefined, idVendedor: escopo?.vendedorId ? String(escopo.vendedorId) : undefined, limit, offset });
     else if (recurso === "vendedores") resultado = await listarVendedoresOlistApi(filialId, { nome: busca || undefined, limit, offset });
-    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca.trim() || "ref", situacao: "A", limit, offset });
+    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca.trim() || "ref", situacao: "A", limit, offset, timeoutMs: 20_000, signal });
     else if (recurso === "servicos") resultado = await listarServicosOlistApi(filialId, { nome: busca || undefined, limit, offset });
     else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
     else throw new ErroFila("Consulta inválida.");
@@ -43,7 +48,7 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
     // também é aplicada aqui, sem depender de uma busca remota com semântica AND.
     // A paginação abaixo usa a página bruta, inclusive quando nenhum item passa.
     return ({ itens: resultado.itens.filter((i) => (recurso === "clientes" || recurso === "vendedores" ? pessoaAtiva(i as Record<string, unknown>) : ativo(i as Record<string, unknown>)) &&
-      (recurso !== "produtos" || nomeProdutoElegivelSync(nome(i as Record<string, unknown>))) &&
+      (recurso !== "produtos" || produtoComReferencia(i as Record<string, unknown>)) &&
       (recurso !== "vendedores" || !escopo?.vendedorId || Number(i.id) === escopo.vendedorId)).map((i) => {
       const item = i as Record<string, unknown>, precos = item.precos as Record<string, unknown> | undefined;
       return { id: Number(item.id), nome: nome(item), referencia: String((recurso === "vendedores" ? contatoDoCadastro(item)?.codigo : undefined) ?? item.codigo ?? item.sku ?? ""), preco: Number(precos?.preco ?? item.preco ?? 0) };

@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { writeFile } from "node:fs/promises";
+import { abrirChromeLocal, ate, chrome } from "./helpers/chrome-local";
+
+test("imagens automáticas, retry manual e edição preservam fluxo desktop/mobile", { skip: chrome ? false : "Chrome indisponível", timeout: 60_000 }, async t => {
+  const { cdp, url } = await abrirChromeLocal(t, "tests/fixtures/producao-imagens-browser.tsx");
+  for (const width of [360, 1440]) for (const tema of ["light", "dark"]) await t.test(`${width}px ${tema}`, async () => {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+    await cdp.pedir("Page.navigate", { url: `${url}?tema=${tema}` });
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[data-testid=auto] img"))'), "Imagem não carregou automaticamente");
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[data-testid=erro] button"))'), "Retry não apareceu");
+    assert.equal(await cdp.avaliar('window.chamadas["/auto"]'), 1);
+    assert.equal(await cdp.avaliar('window.chamadas["/falha"]'), 1);
+    await cdp.avaliar('document.querySelector("[data-testid=erro] button").click()');
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[data-testid=erro] img"))'), "Retry não recuperou imagem");
+    assert.equal(await cdp.avaliar('window.chamadas["/falha"]'), 2);
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[data-testid=quebrada] button")) && !document.querySelector("[data-testid=quebrada] img")'), "URL quebrada não apresentou retry");
+    assert.equal(await cdp.avaliar('window.chamadas["/quebrada"]'), undefined);
+    await cdp.avaliar('document.querySelector("[data-testid=quebrada] button").click()');
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[data-testid=quebrada] img"))'), "URL quebrada não recuperou");
+    assert.equal(await cdp.avaliar('JSON.parse(window.corpos["/quebrada"]).imagemInvalida'), "https://example.test/quebrada.svg");
+    await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Editar data e prioridade").click()');
+    await ate(() => cdp.avaliar<boolean>('document.activeElement?.type==="date"'), "Foco inicial ausente");
+    await cdp.avaliar(`const input=document.querySelector('input[type=date]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'2026-12-01'); input.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('input[type=checkbox]').click();`);
+    await cdp.avaliar('document.querySelector("form").requestSubmit()');
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("[role=alert]"))'), "Erro de edição ausente");
+    assert.equal(await cdp.avaliar('document.querySelector("input[type=date]").value'), "2026-12-01");
+    await cdp.avaliar('document.querySelector("form").requestSubmit()');
+    await ate(() => cdp.avaliar<boolean>('document.querySelector("output").textContent==="2026-12-01 true"'), "Edição não salvou");
+    assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'), true);
+    const captura = await cdp.pedir("Page.captureScreenshot", { format: "png" });
+    await writeFile(`/tmp/producao-componentes-${width}-${tema}.png`, Buffer.from(String(captura.data), "base64"));
+    await cdp.avaliar('document.querySelector("[data-testid=auto] button").click()');
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("dialog[open]"))'), "Ampliação não abriu");
+    await cdp.pedir("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await ate(() => cdp.avaliar<boolean>('!document.querySelector("dialog")'), "Escape não fechou");
+  });
+  assert.deepEqual(cdp.erros, []);
+});
