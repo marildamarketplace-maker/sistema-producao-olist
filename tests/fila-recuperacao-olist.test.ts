@@ -47,7 +47,7 @@ await t.test("ambiguidade, pesquisa incompleta, conflito e falha mantêm os outr
   }
 });
 await t.test("nome exato único aceita caixa/espaços, mas não similaridade ou documentos conflitantes", () => {
-  assert.ok(correspondeCadastro({ nome: "  MARIA   SILVA " }, { nome: "Maria Silva" }, true));
+  assert.ok(correspondeCadastro({ nome: "  MARIA   SILVA ", cpfCnpj: null }, { nome: "Maria Silva", cpfCnpj: null }, true));
   assert.equal(correspondeCadastro({ nome: "Maria Silva" }, { nome: "Maria de Silva" }, true), false);
   assert.equal(correspondeCadastro({ nome: "Maria", cpfCnpj: "12345678909" }, { nome: "Maria", cpfCnpj: "98765432100" }, true), false);
   assert.equal(correspondeCadastro({ nome: "Oxford", codigo: "001" }, { nome: "Oxford", codigo: "1" }), false);

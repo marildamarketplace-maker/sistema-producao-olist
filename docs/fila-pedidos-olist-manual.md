@@ -58,3 +58,17 @@ As consultas de origem exigem podeSolicitarProducao e podeSelecionarFilialFornec
 Seleções parciais são aceitas na entrada da fila e salvas em `dadosPedido.olist = { filialId, selecoes }`. O envio inicial permanece PENDENTE mesmo com filial: PROCESSAR é reservado para a confirmação manual de criação. Trocar filial limpa os selects; trocar tecido descarta os vínculos que deixaram o pedido. Na prévia administrativa, escolhas completas são persistidas no JSON e a prévia é criada na mesma transação, com uma nova versão da fila.
 
 Validação desta extensão: 375 testes aprovados e 3 opcionais de banco ignorados; build, TypeScript e lint do escopo. Navegador com dados fictícios: seleção e limpeza, troca de filial, planos, produto/laser, envio do JSON e PENDENTE em 360px/1440px, temas claro/escuro e ciclo de Tab. Dispositivo físico e integração externa real não foram testados nesta extensão. Nenhuma migration é necessária para o bloco JSON opcional.
+
+## Recuperação após trocar o aplicativo destinatário
+
+Ao abrir o envio em outra conta, a fila conserva as seleções anteriores como referência e tenta recuperar cada cadastro no destino. Os IDs antigos não são usados como IDs da conta nova. Vínculos da sincronização são confirmados por leitura; sem vínculo, a busca usa documento/código exato ou nome exato e único (normalização de caixa e espaços, sem similaridade). Identificadores preenchidos e divergentes impedem a seleção automática.
+
+Produtos e serviços usam os preços do novo aplicativo. O plano exige nome e condições equivalentes, além da associação à forma na conta destinatária. Neste sistema, as condições efetivas são derivadas do nome do plano (`a vista` ou dias separados por `/`); não há condições de parcelas independentes no cadastro local. O total e as parcelas continuam sujeitos à revisão antes da criação na Olist.
+
+A recuperação acontece em etapas limitadas, sem criação de cadastros ou envio automático de pedidos. Cada etapa persiste seleções e estado no JSON existente da fila, com comparação de versão/destino e bloqueio de envio em andamento. Ao fechar, as etapas já salvas permanecem; a próxima abertura retoma os campos não consultados. Ausências, ambiguidades, respostas incompletas ou falhas ficam pendentes e podem ser repetidas ou selecionadas manualmente. Uma edição local não é sobrescrita pela recuperação durante uma renovação de sessão. O preview continua validando os cadastros, vínculo do autor e carteira no servidor.
+
+### Limites e transferência de dados
+
+Cada campo permite até oito consultas lógicas remotas (cada uma com no máximo uma repetição após 401), prazo de 12 segundos e timeout de até cinco segundos por chamada, com resposta limitada a 512 KiB e uma renovação OAuth após 401. Listagens têm até 50 itens e precisam comprovar conclusão da pesquisa; vendedores por ID permitem até quatro páginas. Pesquisas incompletas pedem escolha manual. Tecidos associados ao mesmo produto de origem reaproveitam a recuperação. A resposta de cada etapa contém apenas as seleções alteradas e o estado daquele campo, sem repetir o catálogo ou a lista completa de estados.
+
+As leituras e gravações da fila ainda transportam seu JSON completo entre banco e servidor por etapa; pedidos com muitos tecidos exigem mais tráfego e chamadas. Não há novo polling, cache global ou varredura de catálogo. O processamento depende da tela aberta, mas cada etapa é durável; fechar a tela não deixa trabalho disparado em memória. Os testes usam serviços simulados, sem envio externo real nem estimativa monetária.

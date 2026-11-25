@@ -20,6 +20,13 @@ export const dadosOlistFilaSchema = z.object({ filialId: z.guid(), selecoes: sel
   vendedorFonte: z.enum(["VINCULO", "MANUAL"]).optional(), vendedorRevisao: z.number().int().positive().optional(),
 }).strict();
 export type SelecoesFilaOlistParciais = z.infer<typeof selecoesFilaOlistParciaisSchema>;
+/** Respostas por campo transportam somente seleções alteradas, inclusive tecidos equivalentes. */
+export function mesclarSelecoesRecuperadas(atuais: SelecoesFilaOlistParciais, alteracoes: SelecoesFilaOlistParciais): SelecoesFilaOlistParciais {
+  return { ...atuais, ...alteracoes,
+    ...(alteracoes.formaId !== undefined && alteracoes.formaId !== atuais.formaId ? { planoId: alteracoes.planoId } : {}),
+    tecidos: [...(atuais.tecidos ?? []).filter(t => !alteracoes.tecidos?.some(n => n.tecidoId === t.tecidoId)), ...(alteracoes.tecidos ?? [])],
+  };
+}
 export type RascunhoFilaOlist = Omit<SelecoesFilaOlist, "tipoVenda" | "tecidos" | "laser"> & {
   tipoVenda: SelecoesFilaOlist["tipoVenda"] | "";
   tecidos: Array<{ tecidoId: string; id: number; preco: number | null }>;

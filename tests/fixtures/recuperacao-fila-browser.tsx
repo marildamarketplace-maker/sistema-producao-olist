@@ -31,7 +31,7 @@ window.fetch = async (input, init) => {
     campos.splice(0, campos.length, ...campos.filter(c => c.chave !== body.chave), { chave: body.chave, estado: pendente ? "PENDENTE" : "RECUPERADO", mensagem: pendente ? "Mais de uma correspondência. Selecione o cliente correto." : "Recuperado." });
     selecoes = { ...selecoes, tipoVenda: "VENDA", ...(body.chave === "vendedorId" ? { vendedorId: 120 } : body.chave === "clienteId" && !pendente ? { clienteId: 130 } : body.chave === "formaId" ? { formaId: 140 } : body.chave.startsWith("tecido:") ? { tecidos: [{ tecidoId: id(13), id: 150, preco: 21.99 }] } : body.chave === "planoId" ? { planoId: id(30) } : {}) };
     versao++;
-    return Response.json({ versao, filialId: id(3), selecoes, recuperacao: recuperacao() });
+    return Response.json({ versao, filialId: id(3), alteracoes: selecoes, campo: campos.find(c => c.chave === body.chave) });
   }
   if (url.searchParams.get("recurso") === "clientes") return Response.json({ itens: [{ id: 130, nome: "Cliente escolhido" }, { id: 131, nome: "Outro cliente" }], mais: false, pagina: 1 });
   if (url.searchParams.get("recurso") === "planos") return Response.json({ itens: [{ id: id(30), nome: "30/60" }] });

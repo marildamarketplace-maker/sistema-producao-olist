@@ -70,6 +70,16 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
   const entrada = { vendedorOrigemId: 11, clienteOrigemId: 21 };
   const referencia = async (s: ReturnType<typeof criar>["servico"]) => s.obterReferenciaPedidoManual(usuario, entrada);
 
+  await t.test("escolha explícita resolve homônimo sem dispensar identidade, carteira ou vínculo", async () => {
+    const { d, servico } = criar(); const ref = await referencia(servico);
+    d.contatos.get(destino)!.push({ ...d.cliente(destino), id: 42 });
+    await assert.rejects(servico.validarReferenciaPersistidaPedidoManual(usuario, ref, destino, { clienteId: 41, vendedorId: 31 }), /mais de um cliente/);
+    const resultado = await servico.validarReferenciaPersistidaPedidoManual(usuario, ref, destino, { clienteId: 42, vendedorId: 31 }, true);
+    assert.equal(resultado.clienteId, 42);
+    d.contatos.get(destino)!.find(c => c.id === 42)!.cpfCnpj = "98765432100";
+    await assert.rejects(servico.validarReferenciaPersistidaPedidoManual(usuario, ref, destino, { clienteId: 42, vendedorId: 31 }, true), /identidade/);
+    await assert.rejects(servico.validarReferenciaPersistidaPedidoManual(usuario, ref, destino, { clienteId: 41, vendedorId: 999 }, true), /vínculo/);
+  });
   await t.test("primeiro filho é referência, documentos são canônicos e UF é somente do endereço principal", async () => {
     const { d, servico } = criar(); d.cliente().cpfCnpj = "04.252.011/0001-10";
     d.cliente().enderecoCobranca = { uf: "RJ" };

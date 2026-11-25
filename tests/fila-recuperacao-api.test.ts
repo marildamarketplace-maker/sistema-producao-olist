@@ -56,11 +56,11 @@ test("API recupera e persiste por campo com isolamento, versão e bloqueio de en
     for (const tipo of ["MANUAL", "PRODUCAO"] as const) {
       reset(); fila.tipoOrigem = tipo;
       const response = await req(); assert.equal(response.status, 200); const r = await response.json();
-      assert.equal(r.versao, 1); assert.equal(r.selecoes.tecidos[0].id, 110); assert.equal(r.selecoes.tecidos[0].preco, 21.99);
+      assert.equal(r.versao, 1); assert.equal(r.alteracoes.tecidos[0].id, 110); assert.equal(r.alteracoes.tecidos[0].preco, 21.99);
       const salvo = fila.dadosPedido as Prisma.JsonObject;
       assert.deepEqual(salvo.olistAnterior, snapshot.olist);
-      assert.equal(r.recuperacao.campos[0].estado, "RECUPERADO");
-      assert.ok(!r.recuperacao.restantes.includes(`tecido:${tecido}`));
+      assert.equal(r.campo.estado, "RECUPERADO");
+      assert.equal(r.campo.chave, `tecido:${tecido}`);
     }
   });
   await t.test("destino ou versão obsoletos e alteração durante consulta não sobrescrevem dados", async () => {

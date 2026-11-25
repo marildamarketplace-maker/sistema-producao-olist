@@ -1,13 +1,14 @@
 import type { PedidoFornecedorQueue, Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { dadosPedidoFilaSchema } from "./fila-fornecedor-contrato";
-import { entradaRecuperacaoSchema, referenciaRecuperacao, recuperarCampoOlist, estadoRecuperacao } from "./fila-recuperacao-olist";
+import { entradaRecuperacaoSchema, referenciaRecuperacao, recuperarCampoOlist } from "./fila-recuperacao-olist";
 import { ErroFilaOlist } from "./fila-olist-cadastros";
 import { destinoFornecedorWhere, bloquearDestinoFornecedor } from "./fila-fornecedor-destino";
 import { validarOperadorFornecedor } from "./vendedor-fila-producao";
 import { obterVendedorDoUsuario } from "./usuario-vendedor-olist";
 import { envioBloqueado } from "./envio-fornecedor";
 import { bloquearPedidoManual } from "./envio-pedido-manual";
+import type { SelecoesFilaOlistParciais } from "./fila-olist-contrato";
 
 /** Leitura remota fora da transação; resultados persistidos com comparação de versão. */
 export async function operarRecuperacaoFila(fila: PedidoFornecedorQueue, matrizId: string, usuarioId: string, entrada: unknown) {
@@ -20,6 +21,9 @@ export async function operarRecuperacaoFila(fila: PedidoFornecedorQueue, matrizI
   for (const app of new Set([referencia.filialId, body.filialId])) {
     if (!await prisma.aplicativo.findFirst({ where: destinoFornecedorWhere(matrizId, app), select: { id: true } })) throw new ErroFilaOlist("Conta não autorizada para recuperar os cadastros.", 403);
   }
+  const envioAnterior = fila.tipoOrigem === "MANUAL" ? await prisma.envioPedidoManual.findUnique({ where: { filaId: fila.id }, select: { estado: true } })
+    : fila.solicitacaoProducaoId ? await prisma.envioFornecedor.findUnique({ where: { solicitacaoId: fila.solicitacaoProducaoId }, select: { estado: true } }) : null;
+  if (envioAnterior && envioBloqueado(envioAnterior.estado)) throw new ErroFilaOlist("Envio em andamento ou sem conferência.", 409);
   const fixo = fila.tipoOrigem === "MANUAL" && fila.vendedorFixo && fila.autorId ? await obterVendedorDoUsuario(fila.autorId, body.filialId) : null;
   if (fila.vendedorFixo && fila.tipoOrigem === "MANUAL" && !fixo) throw new ErroFilaOlist("Vínculo do vendedor indisponível nesta conta.", 409);
   const resultado = await recuperarCampoOlist(dados, body.filialId, body.chave, fixo);
@@ -42,5 +46,12 @@ export async function operarRecuperacaoFila(fila: PedidoFornecedorQueue, matrizI
       data: { versao: { increment: 1 }, dadosPedido: JSON.parse(JSON.stringify(atualizado)) as Prisma.InputJsonValue } });
     if (salvo.count !== 1) throw new ErroFilaOlist("Pedido alterado durante a recuperação. Atualize a fila.", 409);
   });
-  return { filialId: body.filialId, versao: body.versao + 1, selecoes: resultado.selecoes, recuperacao: estadoRecuperacao(atualizado, body.filialId) };
+  const anteriores = dados.olist?.filialId === body.filialId ? dados.olist.selecoes : {};
+  const alteracoes: SelecoesFilaOlistParciais = {};
+  for (const campo of ["clienteId", "vendedorId", "formaId", "planoId", "tipoVenda", "laser"] as const) {
+    if (JSON.stringify(resultado.selecoes[campo]) !== JSON.stringify(anteriores[campo])) Object.assign(alteracoes, { [campo]: resultado.selecoes[campo] });
+  }
+  const tecidos = resultado.selecoes.tecidos?.filter(t => !anteriores.tecidos?.some(a => a.tecidoId === t.tecidoId && a.id === t.id && a.preco === t.preco));
+  if (tecidos?.length) alteracoes.tecidos = tecidos;
+  return { filialId: body.filialId, versao: body.versao + 1, alteracoes, campo: resultado.campo };
 }

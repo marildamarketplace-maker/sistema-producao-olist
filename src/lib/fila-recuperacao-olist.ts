@@ -49,6 +49,10 @@ function ativo(c: Cadastro, recurso: Recurso) {
 function doc(c: Cadastro) { return normalizarDocumentoContato(contato(c).cpfCnpj); }
 /** Um nome nunca sobrepõe dois identificadores preenchidos e conflitantes. */
 export function correspondeCadastro(origem: Cadastro, destino: Cadastro, pessoa = false) {
+  if (pessoa && [origem, destino].some(c => {
+    const p = contato(c), bruto = p.cpfCnpj;
+    return !Object.hasOwn(p, "cpfCnpj") || bruto !== null && bruto !== "" && !normalizarDocumentoContato(bruto);
+  })) return false;
   const a = pessoa ? doc(origem) : codigo(origem), b = pessoa ? doc(destino) : codigo(destino);
   if (a && b) return a === b;
   return !!nome(origem) && nome(origem) === nome(destino);
@@ -145,11 +149,17 @@ export async function recuperarCampoOlist(dados: DadosPedidoFila, destinoId: str
       } else {
         const documento = pessoal ? doc(origem) : null, cod = pessoal ? null : codigo(origem);
         // Vendedores são pesquisados pelo nome; seu código pertence ao contato.
-        const filtros: Record<string, string> = documento && recurso === "contatos" ? { cpfCnpj: documento } : cod ? { codigo: cod } : { nome: String(origem.nome ?? contato(origem).nome ?? origem.descricao ?? "") };
+        const filtros: Record<string, string> = documento && recurso === "contatos" ? { cpfCnpj: documento } : cod && recurso !== "servicos" ? { codigo: cod } : { nome: String(origem.nome ?? contato(origem).nome ?? origem.descricao ?? "") };
         if (!Object.values(filtros).some(v => !!v)) return pendente("Nome ou código de origem indisponível.");
         let p = await lista(destinoId, recurso, filtros);
         if (!p.completa) return pendente("Pesquisa incompleta: selecione o cadastro no destino.");
-        if (!p.itens.length && (documento || cod)) p = await lista(destinoId, recurso, { nome: String(origem.nome ?? origem.descricao ?? "") });
+        if (!p.itens.length && documento && recurso === "contatos") {
+          const formatado = documento.length === 11 ? documento.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4")
+            : documento.length === 14 ? documento.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") : documento;
+          if (formatado !== documento) p = await lista(destinoId, recurso, { cpfCnpj: formatado });
+          if (!p.completa) return pendente("Não foi possível comprovar uma correspondência única.");
+        }
+        if (!p.itens.length && (filtros.cpfCnpj || filtros.codigo)) p = await lista(destinoId, recurso, { nome: String(origem.nome ?? origem.descricao ?? "") });
         if (!p.completa) return pendente("Não foi possível comprovar uma correspondência única.");
         const candidatos: Cadastro[] = [];
         for (const c of p.itens) {
