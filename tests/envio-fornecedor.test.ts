@@ -16,6 +16,14 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
       assert.match(sql.join("?"), /\bid\s*=[\s\S]*OR\s+aplicativo_pai_id/);
       return filialValida && ["matriz", "filial"].includes(valores[0]) ? [{ id: valores[0] }] : [];
     },
+    aplicativo: { findUnique: async ({where}: {where:{id:string}}) => ({id:where.id,aplicativoPaiId:where.id === "filial" ? "matriz" : null,nome:"Conta destinatária",olistClientId:"fake",olistClientSecret:"fake"}) },
+    fornecedor: {findFirst: async ({where}: {where:{aplicativoId:string;aplicativoPaiId:string;ativo:boolean}}) => {
+      assert.equal(where.aplicativoId,"cliente"); assert.equal(where.ativo,true);
+      return filialValida && where.aplicativoPaiId === "matriz" ? {id:"fornecedor"} : null;
+    }},
+    usuario: {findFirst: async ({where}: {where:{id:string;aplicativoId:string;podeGerenciarFilaPedidos:boolean}}) => {
+      assert.equal(where.id,"usuario");assert.equal(where.aplicativoId,"matriz");assert.equal(where.podeGerenciarFilaPedidos,true);return {id:"usuario"};
+    }},
     pedidoFornecedorSolicitacao: {
       findFirst: async () => registros[0] ?? null,
       create: async ({ data }: any) => { if (persistenciaFalha) throw new Error("banco indisponível segredo"); const r = { ...data, id: "registro" }; registros.push(r); return r; },
@@ -37,7 +45,7 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   };
   let fila = Promise.resolve();
   const banco = { ...tx,
-    aplicativo: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, nome: "Conta destinatária", olistClientId: "fake", olistClientSecret: "fake" }) },
+    aplicativo: tx.aplicativo,
     integracaoOlistToken: { findUnique: async () => ({ accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }) },
     $transaction: async (fn: (tx: any) => unknown) => {
       const anterior = fila; let liberar!: () => void; fila = new Promise((r) => { liberar = r; }); await anterior;
@@ -49,7 +57,8 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   t.mock.method(axios, "post", async () => { posts++; if (timeout) throw new Error("ETIMEDOUT token-secreto"); return { status: http, data: resposta }; });
   const { enviarFornecedor, envioExpirado } = await import("../src/lib/envio-fornecedor");
   const base = { solicitacaoId: "solicitacao", fornecedorId: "fornecedor", aplicativoId: "filial", usuarioId: "usuario", payload: { observacoesInternas: "Revisado", itens: [] } };
-  const enviar = (direto = false) => enviarFornecedor({ ...base, ...(direto ? {} : { fila: { id: "fila", versao, matrizId: "matriz" } }) });
+  const origemManual = (aplicativoId = "filial") => ({tipo:"MANUAL" as const,usuarioId:"usuario",aplicativoSolicitanteId:"cliente",matrizId:"matriz",aplicativoId,vendedorOlistId:101});
+  const enviar = (direto = false) => direto ? enviarFornecedor(base) : enviarFornecedor({ ...base, origemVendedor:origemManual(), fila: { id: "fila", versao, matrizId: "matriz" } });
   const reset = () => { estado = null; registros = []; status = "PENDENTE"; versao = 0; posts = 0; http = 200; timeout = false; resposta = { id: 123 }; persistenciaFalha = false; filialValida = true; };
   await t.test("duplo clique e corrida entre envio direto e fila fazem apenas um POST", async () => {
     reset(); const resultados = await Promise.allSettled([enviar(), enviar(true), enviar()]);
@@ -61,7 +70,7 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   });
   await t.test("fila envia à conta própria e protege repetição e destinos fora do grupo", async () => {
     reset();
-    const proprio = () => enviarFornecedor({ ...base, aplicativoId: "matriz", fila: { id: "fila", versao, matrizId: "matriz" } });
+    const proprio = () => enviarFornecedor({ ...base, aplicativoId: "matriz", origemVendedor:origemManual("matriz"), fila: { id: "fila", versao, matrizId: "matriz" } });
     const resultados = await Promise.allSettled([proprio(), proprio()]);
     assert.equal(resultados.filter((resultado) => resultado.status === "fulfilled").length, 1);
     assert.equal(posts, 1); assert.equal(estado?.aplicativoId, "matriz");
@@ -70,13 +79,13 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     await assert.rejects(proprio()); assert.equal(posts, 1);
     for (const destino of ["externa", "neto"]) {
       reset();
-      await assert.rejects(enviarFornecedor({ ...base, aplicativoId: destino, fila: { id: "fila", versao, matrizId: "matriz" } }));
+      await assert.rejects(enviarFornecedor({ ...base, aplicativoId: destino, origemVendedor:origemManual(destino), fila: { id: "fila", versao, matrizId: "matriz" } }));
       assert.equal(posts, 0); assert.equal(estado, null); assert.equal(registros.length, 0);
     }
   });
   await t.test("filial inválida e versão concorrente não fazem chamada externa", async () => {
     reset(); filialValida = false; await assert.rejects(enviar()); assert.equal(posts, 0); assert.equal(estado, null);
-    filialValida = true; await assert.rejects(enviarFornecedor({ ...base, fila: { id: "fila", versao: 999, matrizId: "matriz" } })); assert.equal(posts, 0);
+    filialValida = true; await assert.rejects(enviarFornecedor({ ...base, origemVendedor:origemManual(), fila: { id: "fila", versao: 999, matrizId: "matriz" } })); assert.equal(posts, 0);
   });
   await t.test("rejeição conhecida registra FALHADO e permite tentativa manual corrigida", async () => {
     reset(); http = 422; resposta = { error: "dados sensíveis" }; await assert.rejects(enviar(), /HTTP 422/);

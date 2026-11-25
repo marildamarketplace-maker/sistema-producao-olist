@@ -8,12 +8,20 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
   const {cdp,url} = await abrirChromeLocal(t,"tests/fixtures/pedido-manual-browser.tsx", [{name:"link-local",setup(builder) { builder.onResolve({filter:/^next\/link$/},()=>({path:path.resolve("tests/fixtures/olist-empresa-link.tsx")})); }}]);
   const avaliar = <T,>(code:string) => cdp.avaliar<T>(code);
   const botao = (text:string) => `[...document.querySelectorAll("button")].find(b=>b.textContent.trim()===${JSON.stringify(text)})`;
+  const aguardarBotaoHabilitado = (text:string,mensagem:string) => ate(()=>avaliar<boolean>(`(() => { const elemento=${botao(text)}; return Boolean(elemento && !elemento.disabled); })()`),mensagem);
   const clicar = async (text:string) => { await avaliar(`${botao(text)}.click()`); };
   const etapa = async (nome:string) => ate(()=>avaliar<boolean>(`document.querySelector("section h3")?.textContent===${JSON.stringify(nome)}`),`Etapa ${nome} não abriu`);
   const campo = (label:string) => `[...document.querySelectorAll("label")].find(l=>l.textContent.startsWith(${JSON.stringify(label)}))?.querySelector("input,select,textarea")`;
   const preencher = async (label:string,value:string) => avaliar(`{ const e=${campo(label)}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)}); e.dispatchEvent(new Event('input',{bubbles:true})); }`);
-  async function preparar() {
-    await ate(()=>avaliar<boolean>(`Boolean(${botao("Continuar")} && !${botao("Continuar")}.disabled)`),"Conta não carregou").catch(async error=>{ console.error(await avaliar("document.body.innerText"),cdp.erros);throw error; });
+  let navegacao = 0;
+  async function navegar(endereco:string) {
+    const destino = new URL(endereco);
+    destino.searchParams.set("navegacaoTeste",String(++navegacao));
+    await cdp.pedir("Page.navigate",{url:destino.href});
+    await ate(()=>avaliar<boolean>(`location.href===${JSON.stringify(destino.href)} && document.readyState==="complete" && Boolean(document.querySelector("#root > main")) && Boolean(window.testeManual)`),"Novo documento da fixture não ficou pronto");
+  }
+  async function preparar(nomeDestinoEsperado = "Filial com nome muito longo para verificar responsividade") {
+    await aguardarBotaoHabilitado("Continuar","Conta não carregou").catch(async error=>{ console.error(await avaliar("document.body.innerText"),cdp.erros);throw error; });
     await etapa("Vendedor");
     assert.equal(await avaliar('document.body.innerText.includes("Vendedor fixo do usuário")'),true);
     assert.equal(await avaliar('document.querySelectorAll("select").length'),0);
@@ -22,8 +30,9 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Clientes não carregaram");
     await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar"); await etapa("Aplicativo");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Destino não resolvido");
+    await aguardarBotaoHabilitado("Continuar","Destino não resolvido");
     assert.equal(await avaliar('document.querySelectorAll("select").length'),0,"Destino é definido pela regra");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),nomeDestinoEsperado);
     await clicar("Continuar"); await etapa("Itens");
     await clicar("Adicionar item");
     await preencher("Tecido","Oxford com nome longo para testar quebra no resumo comercial");
@@ -31,11 +40,12 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await preencher("Estampa","6861");
     await clicar("Continuar"); await etapa("Dados comerciais");
     await clicar("Continuar"); await etapa("Revisão");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),nomeDestinoEsperado,"A revisão conserva o destinatário resolvido fora das referências");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
   }
   for(const width of [360,390,1440]) for(const theme of ["light","dark"]) await t.test(`${width}px ${theme}`,async () => {
     await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
-    await cdp.pedir("Page.navigate",{url:`${url}?tema=${theme}`});
+    await navegar(`${url}?tema=${theme}`);
     await preparar();
     const rect=await avaliar<{x:number;y:number;width:number;height:number}>(`${botao("Enviar para fila")}.scrollIntoView({block:"center"});JSON.parse(JSON.stringify(${botao("Enviar para fila")}.getBoundingClientRect()))`);
     assert.ok(rect.height>=44&&rect.width>=44);
@@ -60,23 +70,29 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.equal(await avaliar('document.querySelector("a[href*=fila-pedidos]")===null'),true,"Autor sem gestão não recebe acesso administrativo");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
   });
+  for (const [query,nome] of [["semAplicativoDestino=1","00000000-0000-0000-0000-000000000003"],
+    ["contaUnica=1&semAplicativoDestino=1","Conta própria"]]) await t.test(`resposta sem nome de destino preserva a identificação na revisão: ${nome}`,async () => {
+    await navegar(`${url}?${query}`);
+    await preparar(nome);
+    assert.equal(await avaliar(`${botao("Enviar para fila")}.disabled`),false);
+  });
   await t.test("falha de rede preserva confirmação após recarregar e repete a mesma chave",async () => {
-    await cdp.pedir("Page.navigate",{url}); await preparar();
+    await navegar(url); await preparar();
     await avaliar('window.testeManual.falhar=true'); await clicar("Enviar para fila");
     await ate(()=>avaliar<boolean>('Boolean([...document.querySelectorAll("button")].find(b=>b.textContent==="Confirmar resultado"))'),"Recuperação não apareceu");
     const tentativa=await avaliar('window.testeManual.envios[0]');
-    await cdp.pedir("Page.navigate",{url:`${url}?preservar=1`});
-    await ate(()=>avaliar<boolean>(`Boolean(${botao("Confirmar resultado")} && !${botao("Confirmar resultado")}.disabled)`),"Confirmação não persistiu");
+    await navegar(`${url}?preservar=1`);
+    await aguardarBotaoHabilitado("Confirmar resultado","Confirmação não persistiu");
     await clicar("Confirmar resultado");
     await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Recuperação falhou");
     assert.deepEqual(await avaliar('window.testeManual.envios[0]'),tentativa);
-    await cdp.pedir("Page.navigate",{url:`${url}?pedidoId=00000000-0000-0000-0000-000000000010&preservar=1`});
+    await navegar(`${url}?pedidoId=00000000-0000-0000-0000-000000000010&preservar=1`);
     await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Comprovante não persistiu no reload");
     assert.equal(await avaliar('window.testeManual.envios.length'),0);
   });
   await t.test("destino sem vínculo bloqueia avanço e permite repetir a resolução",async () => {
-    await cdp.pedir("Page.navigate",{url});
-    await ate(()=>avaliar<boolean>(`Boolean(${botao("Continuar")} && !${botao("Continuar")}.disabled)`),"Conta inicial não carregou");
+    await navegar(url);
+    await aguardarBotaoHabilitado("Continuar","Conta inicial não carregou");
     await clicar("Continuar");await etapa("Cliente");await clicar("Buscar");
     await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Clientes não carregaram");
     await avaliar('{window.testeManual.falharCarteira=true;const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
@@ -84,12 +100,12 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await ate(()=>avaliar<boolean>('document.body.innerText.includes("sem vínculo")'),"Erro de vínculo não apareceu");
     assert.equal(await avaliar(`${botao("Continuar")}.disabled`),true);
     await avaliar('window.testeManual.falharCarteira=false');await clicar("Atualizar direcionamento");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Troca para conta válida não recuperou fluxo");
+    await aguardarBotaoHabilitado("Continuar","Troca para conta válida não recuperou fluxo");
   });
   for (const width of [360,1440]) await t.test(`cliente sem documento bloqueia avanço e permite corrigir o cadastro em ${width}px`,async () => {
     await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
-    await cdp.pedir("Page.navigate",{url});
-    await ate(()=>avaliar<boolean>(`Boolean(${botao("Continuar")} && !${botao("Continuar")}.disabled)`),"Conta não carregou");
+    await navegar(url);
+    await aguardarBotaoHabilitado("Continuar","Conta não carregou");
     await clicar("Continuar");await etapa("Cliente");
     assert.equal(await avaliar('document.body.innerText.includes("O cliente precisa ter CPF/CNPJ cadastrado")'),true);
     await clicar("Buscar");
@@ -101,22 +117,22 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.equal(await avaliar('window.testeManual.envios.length'),0);
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
     await avaliar('window.testeManual.clienteSemDocumento=false');await clicar("Atualizar direcionamento");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Documento cadastrado não recuperou a resolução");
+    await aguardarBotaoHabilitado("Continuar","Documento cadastrado não recuperou a resolução");
     await clicar("Continuar");await etapa("Itens");
   });
   for (const recuperar of [false,true]) await t.test(`vínculo alterado é atualizado sem perder itens${recuperar ? " após reload" : ""}`,async () => {
     await cdp.pedir("Emulation.setDeviceMetricsOverride",{width:recuperar?1440:360,height:900,deviceScaleFactor:1,mobile:!recuperar});
-    await cdp.pedir("Page.navigate",{url:`${url}?contaUnica=1`}); await preparar();
+    await navegar(`${url}?contaUnica=1`); await preparar("Conta própria");
     if(recuperar) {
       await avaliar('window.testeManual.falhar=true');await clicar("Enviar para fila");
-      await ate(()=>avaliar<boolean>(`Boolean(${botao("Confirmar resultado")} && !${botao("Confirmar resultado")}.disabled)`),"Tentativa não persistiu");
-      await cdp.pedir("Page.navigate",{url:`${url}?preservar=1&contaUnica=1`});
-      await ate(()=>avaliar<boolean>(`Boolean(${botao("Confirmar resultado")} && !${botao("Confirmar resultado")}.disabled)`),"Tentativa não foi recuperada");
+      await aguardarBotaoHabilitado("Confirmar resultado","Tentativa não persistiu");
+      await navegar(`${url}?preservar=1&contaUnica=1`);
+      await aguardarBotaoHabilitado("Confirmar resultado","Tentativa não foi recuperada");
     }
     await avaliar('window.testeManual.vendedorAtual=21');
     await clicar(recuperar?"Confirmar resultado":"Enviar para fila");
     await etapa("Vendedor");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Vínculo não foi reconsultado");
+    await aguardarBotaoHabilitado("Continuar","Vínculo não foi reconsultado");
     const chaveOriginal=await avaliar<string>('window.testeManual.envios[0].chaveIdempotencia');
     assert.equal(await avaliar('sessionStorage.getItem("pedido-manual:00000000-0000-0000-0000-000000000001:chave")'),chaveOriginal,"A rejeição não pode abandonar a chave de uma confirmação concorrente");
     assert.equal(await avaliar('document.querySelectorAll("select").length'),0,"A correção não depende de trocar filial");
@@ -128,7 +144,7 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Carteira atual não carregou");
     await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");await etapa("Aplicativo");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Destino não revalidou");
+    await aguardarBotaoHabilitado("Continuar","Destino não revalidou");
     await clicar("Continuar");await etapa("Itens");
     assert.equal(await avaliar(`${campo("Quantidade de peças")}.value`),"10");
     assert.equal(await avaliar(`${campo("Quantidade de tecido")}.value`),"2.5");
@@ -141,7 +157,7 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
   });
   await t.test("conflito de conteúdo recupera o pedido aceito sem aplicar as novas alterações",async()=>{
-    await cdp.pedir("Page.navigate",{url});await preparar();
+    await navegar(url);await preparar();
     await avaliar('window.testeManual.conflitoExistente=true');await clicar("Enviar para fila");
     await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Não recuperou o comprovante no conflito");
     assert.equal(await avaliar('document.body.innerText.includes("As alterações atuais não foram aplicadas")'),true);
@@ -157,15 +173,15 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.notEqual(await avaliar('window.testeManual.envios.at(-1).chaveIdempotencia'),chaveAnterior,"Somente um novo pedido explícito recebe outra chave");
   });
   await t.test("falha inicial pode ser recuperada sem recarregar a página",async()=>{
-    await cdp.pedir("Page.navigate",{url:`${url}?falhaInicial=1`});
+    await navegar(`${url}?falhaInicial=1`);
     await ate(()=>avaliar<boolean>('document.body.innerText.includes("Falha temporária")'),"Falha inicial não apareceu");
     await clicar("Atualizar conta");
-    await ate(()=>avaliar<boolean>(`Boolean(${botao("Continuar")} && !${botao("Continuar")}.disabled)`),"Atualização inicial não recuperou o fluxo");
+    await aguardarBotaoHabilitado("Continuar","Atualização inicial não recuperou o fluxo");
   });
   await t.test("troca da referência limpa cliente mesmo para vendedor livre",async()=>{
-    await cdp.pedir("Page.navigate",{url:`${url}?livre=1`});
+    await navegar(`${url}?livre=1`);
     await etapa("Vendedor");
-    await ate(()=>avaliar<boolean>(`!${botao("Continuar")}.disabled`),"Referência não carregou");await clicar("Buscar");
+    await aguardarBotaoHabilitado("Continuar","Referência não carregou");await clicar("Buscar");
     await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Vendedores não carregaram");
     await avaliar('{const s=document.querySelector("select");s.value="20";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");await etapa("Cliente");await clicar("Buscar");
@@ -177,6 +193,57 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await clicar("Buscar");await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Vendedores novos não carregaram");
     await avaliar('{const s=document.querySelector("select");s.value="20";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");await etapa("Cliente");assert.equal(await avaliar('document.querySelector("select").value'),"");
+  });
+  await t.test("padrão próprio sem vínculo mantém o seletor e permite escolher o fornecedor", async () => {
+    await navegar(`${url}?fornecedor=1&padraoSemVinculo=1`);
+    await etapa("Vendedor");
+    await ate(()=>avaliar<boolean>('Boolean(document.querySelector("select")) && document.body.innerText.includes("sem vínculo")'),"Seletor não apareceu com a referência própria indisponível");
+    assert.equal(await avaliar(`${botao("Continuar")}.disabled`),true);
+    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await aguardarBotaoHabilitado("Continuar","Fornecedor autorizado não recuperou o fluxo");
+    assert.equal(await avaliar('document.body.innerText.includes("sem vínculo")'),false);
+    assert.equal(await avaliar('document.querySelector("select").value'),"00000000-0000-0000-0000-000000000004");
+  });
+  for (const width of [360,1440]) for (const theme of ["light","dark"]) await t.test(`matriz com duas filiais oferece somente referência própria canônica e fornecedor, preserva itens e cria pedido externo em ${width}px ${theme}`, async () => {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
+    await navegar(`${url}?fornecedor=1&tema=${theme}`);
+    await etapa("Vendedor");
+    await ate(()=>avaliar<boolean>('Boolean(document.querySelector("select"))'),"Referências não carregaram");
+    await aguardarBotaoHabilitado("Continuar","Conta de referência não carregou");
+    assert.deepEqual(await avaliar('[...document.querySelector("select").options].map(o=>o.value)'),[
+      "00000000-0000-0000-0000-000000000002",
+      "00000000-0000-0000-0000-000000000004",
+    ],"A segunda filial própria não é uma referência autorizada pelo servidor");
+    assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
+    await avaliar('{window.testeManual.falharCarteira=true;const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await ate(()=>avaliar<boolean>('document.body.innerText.includes("sem vínculo")'),"Ausência do vínculo não bloqueou a referência");
+    assert.equal(await avaliar(`${botao("Continuar")}.disabled`),true);
+    await avaliar('window.testeManual.falharCarteira=false'); await clicar("Atualizar conta");
+    await aguardarBotaoHabilitado("Continuar","Conta fornecedor não recuperou");
+    assert.equal(await avaliar('document.querySelector("select").value'),"00000000-0000-0000-0000-000000000004");
+    await clicar("Continuar"); await etapa("Cliente"); await clicar("Buscar");
+    await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Carteira não carregou");
+    await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await clicar("Continuar"); await etapa("Aplicativo");
+    await aguardarBotaoHabilitado("Continuar","Destino do fornecedor não resolveu");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial do fornecedor");
+    await clicar("Continuar"); await etapa("Itens"); await clicar("Adicionar item"); await preencher("Tecido","Oxford preservado");
+    await clicar("Voltar");await clicar("Voltar");await clicar("Voltar");await etapa("Vendedor");
+    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000002";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await aguardarBotaoHabilitado("Continuar","Referência própria não voltou");
+    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await aguardarBotaoHabilitado("Continuar","Referência fornecedor não voltou");
+    await clicar("Continuar");await etapa("Cliente");assert.equal(await avaliar('document.querySelector("select").value'),"");
+    await clicar("Buscar");await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Carteira nova não carregou");
+    await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await clicar("Continuar");await etapa("Aplicativo");await aguardarBotaoHabilitado("Continuar","Destino novo não resolveu");
+    await clicar("Continuar");await etapa("Itens");assert.equal(await avaliar(`${campo("Tecido")}.value`),"Oxford preservado");
+    await clicar("Continuar");await clicar("Continuar");await etapa("Revisão");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial do fornecedor","A revisão conserva a filial externa fora das referências");
+    assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
+    await clicar("Enviar para fila");await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Pedido externo não enfileirou");
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.matrizId'),"00000000-0000-0000-0000-000000000004");
+    assert.equal(await avaliar('document.querySelector("a[href*=fila-pedidos]")===null'),true);
   });
   assert.deepEqual(cdp.erros,[]);
 });

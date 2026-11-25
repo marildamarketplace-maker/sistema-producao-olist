@@ -158,6 +158,7 @@ export default function ProdutosFornecedorPage() {
       supabase
         .from("fornecedores")
         .select("id, nome")
+          .eq("ativo", true)
         .order("nome", { ascending: true }),
       supabase
         .from("produtos_fornecedor")

@@ -18,24 +18,28 @@ window.fetch = async (input,init) => {
     if(window.testeManual.conflitoExistente) return Response.json({error:"Esta confirmação já foi usada para outro conteúdo. As alterações atuais não foram aplicadas.",pedidoExistente:{id:id(10),status:"CANCELADO",createdAt:new Date().toISOString(),aplicativo:{id:id(3),nome:"Destino atual do pedido aceito"}}},{status:409});
     const vendedorEsperado=body.aplicativoId===id(2)?window.testeManual.vendedorAtual:window.testeManual.vendedorAtual+100;
     if(body.selecoes.vendedorId!==vendedorEsperado) return Response.json({error:"Use o vendedor vinculado nesta conta."},{status:403});
-    return Response.json({id:id(10),status:"PENDENTE",createdAt:new Date().toISOString(),aplicativo:{id:body.aplicativoId,nome:"Conta própria"}},{status:201});
+    return Response.json({id:id(10),status:"PENDENTE",createdAt:new Date().toISOString(),aplicativo:{id:body.aplicativoId,nome:"Conta própria"},filaExterna:Boolean(body.fornecedorManual)},{status:201});
   }
   window.testeManual.consultas.push(url.search);
   if(query.get("acao")==="resolver") {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     if(window.testeManual.clienteSemDocumento) return Response.json({error:"Cadastre o CPF/CNPJ do cliente no aplicativo de referência antes de criar o pedido."},{status:409});
-    const unica=params.has("contaUnica"), destino=unica?id(2):id(3);
-    return Response.json({referencia:{aplicativoId:id(2),vendedor:{id:window.testeManual.vendedorAtual,nome:`Vendedor vinculado · ID ${window.testeManual.vendedorAtual}`,cpfCnpj:null},cliente:{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",cpfCnpj:"52998224725",uf:"MG"}},
+    const externa=query.get("aplicativoOrigemId")===id(4), unica=params.has("contaUnica"), destino=externa?id(5):unica?id(2):id(3);
+    return Response.json({referencia:{aplicativoId:externa?id(4):id(2),vendedor:{id:window.testeManual.vendedorAtual,nome:`Vendedor vinculado · ID ${window.testeManual.vendedorAtual}`,cpfCnpj:null},cliente:{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",cpfCnpj:"52998224725",uf:"MG"}},
+      ...(params.has("semAplicativoDestino")?{}:{aplicativoDestino:{id:destino,nome:externa?"Filial do fornecedor":unica?"Conta própria":"Filial com nome muito longo para verificar responsividade"}}),
+      ...(externa?{fornecedorManual:{fornecedorId:id(6),matrizId:id(4),aplicativoSolicitanteId:id(2),autorId:id(1),referencia:{aplicativoId:id(4),vendedorOlistId:20,revisao:1},destino:{aplicativoId:id(5),vendedorOlistId:120,revisao:1}}}:{}),
       decisao:{tipo:unica?"CONTA_UNICA":"PADRAO",regraId:null,regraNome:null,versao:unica?0:1,aplicativoId:destino,motivo:unica?"Única conta disponível.":"Aplicativo padrão configurado pelo pai."},selecoes:{vendedorId:unica?window.testeManual.vendedorAtual:window.testeManual.vendedorAtual+100,clienteId:unica?30:130,vendedorFixo:true}});
   }
   if(query.has("pedidoId")) return Response.json({id:id(10),status:"PENDENTE",createdAt:new Date().toISOString(),aplicativo:{id:id(2),nome:"Conta própria"}});
   if(!query.has("aplicativoId")) {
     if(params.has("falhaInicial")&&!falhouInicial){falhouInicial=true;return Response.json({error:"Falha temporária ao carregar contas."},{status:502});}
-    return Response.json({aplicativos:params.has("contaUnica")?[{id:id(2),nome:"Conta própria"}]:[{id:id(2),nome:"Conta própria"},{id:id(3),nome:"Filial com nome muito longo para verificar responsividade"}],aplicativoPadraoId:window.testeManual.referenciaAtual});
+    const aplicativos=params.has("contaUnica")?[{id:id(2),nome:"Conta própria"}]:[{id:id(2),nome:"Conta própria"},{id:id(3),nome:"Filial com nome muito longo para verificar responsividade"}];
+    return Response.json({aplicativos:params.has("fornecedor")?[...aplicativos,{id:id(4),nome:"MV Tecidos fornecedor com nome longo",fornecedorId:id(6)}]:aplicativos,aplicativoPadraoId:window.testeManual.referenciaAtual});
   }
   if(!query.has("recurso")) {
+    if(params.has("padraoSemVinculo")&&query.get("aplicativoId")===id(2)) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
-    return Response.json({conta:{id:query.get("aplicativoId"),nome:"Conta"},vendedorId:params.has("livre")?null:query.get("aplicativoId")===id(2)?window.testeManual.vendedorAtual:21,vendedorFixo:!params.has("livre")});
+    return Response.json({conta:{id:query.get("aplicativoId"),nome:"Conta"},vendedorId:params.has("livre")?null:[id(2),id(4)].includes(query.get("aplicativoId")??"")?window.testeManual.vendedorAtual:21,vendedorFixo:!params.has("livre")});
   }
   return Response.json({itens:query.get("recurso")==="clientes"?[{id:30,nome:"Cliente com nome comercial longo para validar leitura e seleção",referencia:"C30"}]:query.get("recurso")==="vendedores"?[{id:20,nome:"Vendedor",referencia:"V20"}]:[],pagina:1,mais:false});
 };

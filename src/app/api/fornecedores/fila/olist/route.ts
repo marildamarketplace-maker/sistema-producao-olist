@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { obterVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
+import { obterVinculoVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
 import { autorizarOlistOrigem } from "@/lib/fila-fornecedor-origem";
 import { consultarCadastrosFilaOlist, ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 export async function GET(request: Request) {
@@ -10,8 +10,9 @@ export async function GET(request: Request) {
     if (!ids.success) return NextResponse.json({ error: "Selecione fornecedor, aplicativo destinatário e solicitação válidos." }, { status: 400 });
     const { usuarioId, ...filial } = await autorizarOlistOrigem(request, ids.data);
     if (params.get("recurso") === "inicial") {
+      const vinculo = await obterVinculoVendedorDoUsuario(usuarioId, filial.id);
       return NextResponse.json({
-        filial, vendedorOlistPadraoId: await obterVendedorDoUsuario(usuarioId, filial.id),
+        filial, vendedorOlistPadraoId: vinculo?.vendedorOlistId ?? null, vendedorRevisao: vinculo?.revisao ?? null,
       }, { headers: { "Cache-Control": "private, no-store" } });
     }
     const resultado = await consultarCadastrosFilaOlist(filial.id, params);

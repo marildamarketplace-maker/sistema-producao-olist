@@ -53,5 +53,15 @@ test("fornecedores: cadastro sem vendedor/comerciais, escopo de aplicativo e rec
       assert.equal(await avaliar('document.documentElement.scrollWidth <= innerWidth'), true);
     });
   }
+  await t.test("encerrar preserva o cadastro e permite consultar o histórico", async () => {
+    await avaliar("window.confirm=()=>true");
+    await ativar("Encerrar cadastro", false);
+    await ate(() => avaliar<boolean>('document.querySelector("[role=status]")?.textContent.includes("histórico foi preservado")'), "Encerramento não confirmou");
+    assert.equal(await avaliar(`Boolean(${botao("Editar")})`), false);
+    await ativar("Mostrar encerrados", false);
+    await ate(() => avaliar<boolean>('document.body.textContent.includes("Encerrado · histórico preservado")'), "Histórico não apareceu");
+    assert.equal(await avaliar(`Boolean(${botao("Encerrar cadastro")})`), false);
+    assert.equal(await avaliar('document.documentElement.scrollWidth <= innerWidth'), true);
+  });
   assert.deepEqual(cdp.erros, []);
 });

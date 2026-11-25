@@ -6,6 +6,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { UsuariosClientes } from "@/components/usuarios-clientes";
 import { conterFocoNoDialogo } from "@/lib/dialogo-foco";
 import { permissionKeys, permissionLabels, type PermissionKey, type PermissionSet } from "@/lib/permissions";
 import type { EntradaVendedorOlist } from "@/lib/usuario-vendedor-olist";
@@ -314,6 +315,7 @@ function UsuariosPage() {
       })}</div>}
       <nav aria-label="Paginação dos usuários" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-4"><p className="text-sm text-slate-600">Página {paginacao.pagina} de {paginacao.totalPaginas}</p><div className="flex flex-wrap gap-2"><button type="button" className={botao} disabled={carregando || pagina <= 1 || salvando !== null} onClick={() => { setExpandido(null); setEditando(null); setPagina((atual) => atual - 1); }}>Anterior</button><button type="button" className={botao} disabled={carregando || pagina >= paginacao.totalPaginas || salvando !== null} onClick={() => { setExpandido(null); setEditando(null); setPagina((atual) => atual + 1); }}>Próxima</button></div></nav>
     </section>
+    <UsuariosClientes key={escopo} token={token} />
   </div>;
 }
 

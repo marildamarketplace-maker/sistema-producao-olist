@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { bloquearRelacaoFornecedor } from "@/lib/fornecedor-relacao";
 
 const idOlist = z.number().int().positive().max(2147483647);
 export const vendedorOlistEntradaSchema = z.array(z.object({
@@ -14,14 +15,39 @@ export class ErroVinculoVendedorOlist extends Error {
 }
 
 /** O vínculo identifica o vendedor; não concede permissão sobre a conta. */
-export async function obterVendedorDoUsuario(usuarioId: string, aplicativoId: string): Promise<number | null> {
-  const vinculo = await prisma.usuarioVendedorOlist.findFirst({
-    where: { usuarioId, aplicativoId, usuario: { OR: [
-      { aplicativoId }, { aplicativo: { filiais: { some: { id: aplicativoId } } } },
-    ] } },
+export async function obterVendedorDoUsuario(usuarioId: string, aplicativoId: string,
+  db: Prisma.TransactionClient = prisma): Promise<number | null> {
+  const vinculo = await db.usuarioVendedorOlist.findFirst({
+    where: { usuarioId, aplicativoId, ...vinculoVendedorVigenteWhere(aplicativoId) },
     select: { vendedorOlistId: true },
   });
   return vinculo?.vendedorOlistId ?? null;
+}
+
+/** Os triggers preservam origem/grupo dos vínculos ativos; a relação é conferida em toda leitura. */
+export function vinculoVendedorVigenteWhere(aplicativoId: string): Prisma.UsuarioVendedorOlistWhereInput {
+  return { revogadoEm: null, OR: [
+    { origemAplicativoId: null, fornecedorMatrizId: null, usuario: { OR: [
+      { aplicativoId }, { aplicativo: { filiais: { some: { id: aplicativoId } } } },
+    ] } },
+    { origemAplicativoId: { not: null }, fornecedorMatrizId: { not: null }, confirmadoEm: { not: null },
+      usuario: { ativo: true, aplicativo: { fornecedores: { some: { ativo: true,
+        aplicativoPai: { aplicativoPaiId: null, OR: [{ id: aplicativoId }, { filiais: { some: { id: aplicativoId } } }] },
+      } } } } },
+  ] };
+}
+
+export type VinculoVendedorUsuario = {
+  vendedorOlistId: number; revisao: number;
+  origemAplicativoId: string | null; fornecedorMatrizId: string | null;
+};
+
+export async function obterVinculoVendedorDoUsuario(usuarioId: string, aplicativoId: string,
+  db: Prisma.TransactionClient = prisma): Promise<VinculoVendedorUsuario | null> {
+  return db.usuarioVendedorOlist.findFirst({
+    where: { usuarioId, aplicativoId, ...vinculoVendedorVigenteWhere(aplicativoId) },
+    select: { vendedorOlistId: true, revisao: true, origemAplicativoId: true, fornecedorMatrizId: true },
+  });
 }
 
 export async function listarAplicativosElegiveis(aplicativoId: string) {
@@ -69,11 +95,14 @@ async function gravarProprio(tx: Prisma.TransactionClient, usuarioId: string, ap
   if (await compatibilidadeLegada(tx)) {
     await tx.$executeRaw`UPDATE usuario SET vendedor_olist_id=${vendedorOlistId} WHERE id=${usuarioId}::uuid AND aplicativo_id=${aplicativoId}::uuid`;
   } else if (vendedorOlistId === null) {
-    await tx.usuarioVendedorOlist.deleteMany({ where: { usuarioId, aplicativoId } });
+    await tx.usuarioVendedorOlist.deleteMany({ where: { usuarioId, aplicativoId,
+      origemAplicativoId: null, fornecedorMatrizId: null } });
   } else {
     await tx.usuarioVendedorOlist.upsert({
       where: { usuarioId_aplicativoId: { usuarioId, aplicativoId } },
-      create: { usuarioId, aplicativoId, vendedorOlistId }, update: { vendedorOlistId },
+      create: { usuarioId, aplicativoId, vendedorOlistId }, update: { vendedorOlistId,
+        origemAplicativoId: null, fornecedorMatrizId: null, confirmadoEm: null, confirmadoPorId: null,
+        revogadoEm: null, motivoRevogacao: null },
     });
   }
 }
@@ -100,7 +129,9 @@ export async function substituirVendedoresOlist(
   await gravarProprio(tx, usuarioId, aplicativoId, proprio?.vendedorOlistId ?? null);
   const filhos = parsed.data.filter((item) => item.aplicativoId !== aplicativoId);
   await tx.usuarioVendedorOlist.deleteMany({ where: {
-    usuarioId, aplicativoId: { not: aplicativoId, notIn: filhos.map((item) => item.aplicativoId) },
+    usuarioId, origemAplicativoId: null, fornecedorMatrizId: null,
+    aplicativo: { aplicativoPaiId: aplicativoId },
+    aplicativoId: { not: aplicativoId, notIn: filhos.map((item) => item.aplicativoId) },
   } });
   if (filhos.length) {
     // JSON validado é parâmetro SQL. Uma ida ao banco evita até 1.000 upserts pela rede.
@@ -109,15 +140,74 @@ export async function substituirVendedoresOlist(
       SELECT ${usuarioId}::uuid,x."aplicativoId",x."vendedorOlistId"
       FROM jsonb_to_recordset(${dados}::jsonb) AS x("aplicativoId" uuid,"vendedorOlistId" integer)
       ORDER BY x."aplicativoId"
-      ON CONFLICT(usuario_id,aplicativo_id) DO UPDATE SET vendedor_olist_id=EXCLUDED.vendedor_olist_id`;
+      ON CONFLICT(usuario_id,aplicativo_id) DO UPDATE SET vendedor_olist_id=EXCLUDED.vendedor_olist_id,
+        origem_aplicativo_id=NULL,fornecedor_matriz_id=NULL,confirmado_em=NULL,confirmado_por_id=NULL,
+        revogado_em=NULL,motivo_revogacao=NULL`;
   }
   return versaoAtual(tx, usuarioId);
 }
 
-function sqlAplicativosElegiveis(ids: string[], aplicativoId: string) {
+/** A coleção representa somente o grupo do fornecedor; omitidos são revogados, nunca apagados. */
+export async function substituirVendedoresExternosOlist(tx: Prisma.TransactionClient, usuarioId: string,
+  clienteId: string, matrizId: string, vinculos: EntradaVendedorOlist[], versaoEsperada: number,
+  operadorId: string): Promise<number> {
+  const parsed = vendedorOlistEntradaSchema.safeParse(vinculos);
+  if (!parsed.success || !Number.isInteger(versaoEsperada) || versaoEsperada < 0) {
+    throw new ErroVinculoVendedorOlist("Informe vendedores e versão válidos.");
+  }
+  await bloquearRelacaoFornecedor(tx, clienteId, matrizId);
+  const usuario = await bloquearUsuario(tx, usuarioId, clienteId);
+  if (usuario.vinculosOlistVersao !== versaoEsperada) {
+    throw new ErroVinculoVendedorOlist("Os vínculos foram alterados. Recarregue antes de salvar.", 409);
+  }
+  const relacao = await tx.fornecedor.findFirst({ where: { aplicativoId: clienteId, aplicativoPaiId: matrizId,
+    ativo: true, aplicativoPai: { aplicativoPaiId: null } }, select: { id: true } });
+  if (!relacao || clienteId === matrizId) throw new ErroVinculoVendedorOlist("Relação de fornecimento não está ativa.", 403);
+  const ids = parsed.data.map(v => v.aplicativoId).sort();
+  if (ids.length && (await tx.$queryRaw<Array<{ id: string }>>(sqlAplicativosElegiveis(ids, matrizId, { clienteId, usuarioId }))).length !== ids.length) {
+    throw new ErroVinculoVendedorOlist("Selecione somente a matriz fornecedora ou suas filiais diretas, sem sobrepor vínculos internos do cliente.");
+  }
+  await tx.usuarioVendedorOlist.updateMany({ where: {
+    usuarioId, origemAplicativoId: clienteId, fornecedorMatrizId: matrizId, revogadoEm: null,
+    aplicativoId: { notIn: ids },
+  }, data: { revogadoEm: new Date(), motivoRevogacao: "REMOVIDO_PELO_FORNECEDOR" } });
+  if (parsed.data.length) {
+    const dados = JSON.stringify(parsed.data);
+    await tx.$executeRaw`INSERT INTO usuario_vendedor_olist(usuario_id,aplicativo_id,vendedor_olist_id,
+      origem_aplicativo_id,fornecedor_matriz_id,confirmado_em,confirmado_por_id)
+      SELECT ${usuarioId}::uuid,x."aplicativoId",x."vendedorOlistId",${clienteId}::uuid,${matrizId}::uuid,
+        clock_timestamp(),${operadorId}::uuid
+      FROM jsonb_to_recordset(${dados}::jsonb) AS x("aplicativoId" uuid,"vendedorOlistId" integer)
+      ORDER BY x."aplicativoId"
+      ON CONFLICT(usuario_id,aplicativo_id) DO UPDATE SET vendedor_olist_id=EXCLUDED.vendedor_olist_id,
+        origem_aplicativo_id=EXCLUDED.origem_aplicativo_id,fornecedor_matriz_id=EXCLUDED.fornecedor_matriz_id,
+        confirmado_em=EXCLUDED.confirmado_em,confirmado_por_id=EXCLUDED.confirmado_por_id,
+        revogado_em=NULL,motivo_revogacao=NULL
+      WHERE usuario_vendedor_olist.revogado_em IS NOT NULL
+        OR usuario_vendedor_olist.vendedor_olist_id IS DISTINCT FROM EXCLUDED.vendedor_olist_id
+        OR usuario_vendedor_olist.origem_aplicativo_id IS DISTINCT FROM EXCLUDED.origem_aplicativo_id
+        OR usuario_vendedor_olist.fornecedor_matriz_id IS DISTINCT FROM EXCLUDED.fornecedor_matriz_id`;
+  }
+  return versaoAtual(tx, usuarioId);
+}
+
+/** A gestão nativa conserva a conta do cliente e seus filhos, mesmo sem vendedor cadastrado. */
+export function aplicativosExternosElegiveisWhere(matrizId: string, clienteId: string): Prisma.AplicativoWhereInput {
+  return { AND: [
+    { OR: [{ id: matrizId }, { aplicativoPaiId: matrizId }] },
+    { id: { not: clienteId } },
+    { OR: [{ aplicativoPaiId: null }, { aplicativoPaiId: { not: clienteId } }] },
+  ] };
+}
+
+function sqlAplicativosElegiveis(ids: string[], aplicativoId: string,
+  externo?: { clienteId: string; usuarioId: string }) {
   return Prisma.sql`SELECT id FROM aplicativo
     WHERE id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
       AND (id=${aplicativoId}::uuid OR aplicativo_pai_id=${aplicativoId}::uuid)
+      ${externo ? Prisma.sql`AND id<>${externo.clienteId}::uuid AND aplicativo_pai_id IS DISTINCT FROM ${externo.clienteId}::uuid
+        AND NOT EXISTS(SELECT 1 FROM usuario_vendedor_olist v WHERE v.usuario_id=${externo.usuarioId}::uuid
+          AND v.aplicativo_id=aplicativo.id AND v.origem_aplicativo_id IS NULL AND v.fornecedor_matriz_id IS NULL)` : Prisma.empty}
     ORDER BY id FOR SHARE`;
 }
 

@@ -13,6 +13,8 @@ import { envioBloqueado, envioExpirado } from "@/lib/envio-fornecedor";
 import { bloquearPedidoManual, marcarManualInterrompido, marcadorPedidoManual, enviarPedidoManual, jsonManual } from "@/lib/envio-pedido-manual";
 import { validarReferenciaPersistidaPedidoManual } from "@/lib/pedido-manual-correspondencia";
 import { guardaReferenciaFilaManual, obterAutorReferenciaFilaManual, validarAtoresFilaManual } from "@/lib/fila-manual-referencia";
+import { capturarFornecedorPedidoManual, mesmaConfirmacaoFornecedorManual } from "@/lib/pedido-manual-fornecedor";
+import { fornecedorManualSchema } from "@/lib/pedido-manual-referencia";
 
 type Contexto = { fila: PedidoFornecedorQueue; matrizId: string; usuarioId: string };
 const schema = z.discriminatedUnion("acao", [
@@ -21,6 +23,7 @@ const schema = z.discriminatedUnion("acao", [
   z.object({ acao: z.literal("vincular"), tentativaId: z.guid(), pedidoOlistId: z.string().regex(/^[1-9]\d*$/), justificativa: z.string().trim().min(10).max(1000) }).strict(),
   z.object({ acao: z.literal("confirmar-ausencia"), tentativaId: z.guid(), justificativa: z.string().trim().min(10).max(1000), ausenciaConfirmada: z.literal(true) }).strict(),
 ]);
+const selecoesPreviaSchema = selecoesFilaOlistSchema.extend({ fornecedorManual: fornecedorManualSchema.optional() });
 async function contaValida(matrizId: string, filialId: string | null) {
   if (!filialId) throw new ErroFilaOlist("Selecione a conta destinatária.");
   const filial = await prisma.aplicativo.findFirst({ where: destinoFornecedorWhere(matrizId, filialId), select: { id: true, nome: true } });
@@ -39,12 +42,15 @@ async function validarSelecoes(fila: PedidoFornecedorQueue, contaId: string, sel
   if (fixo !== null) {
     if (selecoes.vendedorId !== fixo) throw new ErroFilaOlist("Preserve o vendedor vinculado ao autor deste pedido.", 403);
   }
-  const autor = snapshot.origemManual ? await obterAutorReferenciaFilaManual(fila.autorId, fila.aplicativoFornecedorId) : null;
+  const autor = snapshot.origemManual ? await obterAutorReferenciaFilaManual(fila.autorId, fila.aplicativoSolicitanteId) : null;
+  const fornecedorManual = snapshot.fornecedorManual && autor && snapshot.origemManual
+    ? await capturarFornecedorPedidoManual(autor, snapshot.origemManual.aplicativoId, contaId) : undefined;
+  if (fornecedorManual && fornecedorManual.matrizId !== fila.aplicativoFornecedorId) throw new ErroFilaOlist("Fornecedor não corresponde à fila.", 403);
   const referencia = snapshot.origemManual && autor
     ? await validarReferenciaPersistidaPedidoManual(autor, snapshot.origemManual, contaId, selecoes) : null;
   const cadastros = await validarCadastros(contaId, selecoes, snapshot.itens.some(i => i.corteLaser), referencia?.cadastros);
   if (fixo !== null) validarVendedorPedidoOlist(cadastros.cliente, fixo);
-  return { ...cadastros, guardaReferencia: autor && snapshot.origemManual ? guardaReferenciaFilaManual(autor, snapshot.origemManual) : undefined };
+  return { ...cadastros, guardaReferencia: autor && snapshot.origemManual ? guardaReferenciaFilaManual(autor, snapshot.origemManual, fornecedorManual) : undefined };
 }
 export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, params: URLSearchParams) {
   const filial = await contaValida(matrizId, fila.aplicativoFilialId);
@@ -92,8 +98,11 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
   if (body.acao === "confirmar") {
     const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
     if (!previa) throw new ErroFilaOlist("Prévia expirada ou alterada. Gere outra prévia.", 409);
-    const selecionados = selecoesFilaOlistSchema.parse(previa.selecoes);
+    const { fornecedorManual, ...selecionados } = selecoesPreviaSchema.parse(previa.selecoes);
     const validacao = await validarSelecoes(fila, filial.id, selecionados);
+    if (!mesmaConfirmacaoFornecedorManual(fornecedorManual, validacao.guardaReferencia?.fornecedorManual)) {
+      throw new ErroFilaOlist("Vínculo do fornecedor alterado após a prévia. Revise o pedido novamente.", 409);
+    }
     return enviarPedidoManual({ filaId: fila.id, versao: fila.versao, matrizId, aplicativoId: filial.id, usuarioId,
       ...(fila.vendedorFixo && fila.autorId ? { vendedorFixo: { autorId: fila.autorId, vendedorId: selecionados.vendedorId } } : {}),
       guardaReferencia: validacao.guardaReferencia, payload: previa.payload as Record<string, unknown> });
@@ -121,10 +130,13 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
     if (guardaReferencia && !await bloquearDestinoFornecedor(tx, matrizId, guardaReferencia.origemAplicativoId)) throw new ErroFilaOlist("Aplicativo de referência alterado.", 409);
     const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId, aplicativoFilialId: filial.id,
       versao: body.versao, status: { in: ["PENDENTE", "FALHADO"] } }, data: {
-        dadosPedido: jsonManual({ ...dados, olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 },
+        dadosPedido: jsonManual({ ...dados, ...(guardaReferencia?.fornecedorManual ? { fornecedorManual: guardaReferencia.fornecedorManual } : {}),
+          olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 },
       } });
     if (atualizado.count !== 1) throw new ErroFilaOlist("Pedido alterado durante a revisão.", 409);
-    return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao, selecoes: jsonManual(selecoes), payload: jsonManual(payload), expiraEm: new Date(Date.now() + 15 * 60_000) } });
+    return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao,
+      selecoes: jsonManual({ ...selecoes, ...(guardaReferencia?.fornecedorManual ? { fornecedorManual: guardaReferencia.fornecedorManual } : {}) }),
+      payload: jsonManual(payload), expiraEm: new Date(Date.now() + 15 * 60_000) } });
   });
   return { previaId: previa.id, versao, payload, cliente: nome(cliente), vendedor: nome(vendedor), forma: nome(forma), plano: plano.planoPagamento.nome, produtos: Object.fromEntries(nomes), filial, expiraEm: previa.expiraEm };
 }

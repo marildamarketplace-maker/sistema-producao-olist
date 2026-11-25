@@ -11,6 +11,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-ficticia";
   let permitido = true;
+  let permitidoNaTransacao = true;
   let podeSelecionarFilial = true;
   let existe = true;
   let fornecedorValido = true;
@@ -30,7 +31,10 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   let envioAnterior: { estado: string; pedidoOlistId: string | null } | null = null;
   let bloqueada = false;
   const tx = {
+    usuario: { findUnique: async () => ({ ativo: true, aplicativoId: app, podeSolicitarProducao: permitidoNaTransacao, podeSelecionarFilialFornecedor: podeSelecionarFilial }) },
     $queryRaw: async (strings: TemplateStringsArray, ...valores: unknown[]) => {
+      if (strings.join("").includes("fornecedor_relacao_bloquear")) return [];
+      if (strings.join("").includes("FROM usuario")) return [{ id: "usuario" }];
       if (strings.join("").includes("FROM aplicativo")) {
         assert.ok([filialId, destino].includes(String(valores[0])));
         assert.deepEqual(valores.slice(1), [destino, destino]);
@@ -56,12 +60,12 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
     } },
     fornecedor: {
       findMany: async ({ where, select }: { where: unknown; select: unknown }) => {
-        assert.deepEqual(where, { aplicativoId: app, aplicativoPai: { aplicativoPaiId: null } });
+        assert.deepEqual(where, { aplicativoId: app, ativo: true, aplicativoPai: { aplicativoPaiId: null } });
         assert.deepEqual(select, { id: true, nome: true, aplicativoPai: { select: { id: true, nome: true, descricao: true, filiais: { select: { id: true, nome: true, descricao: true }, orderBy: { nome: "asc" } } } } });
         return [{ id: fornecedorId, nome: "Fornecedor", aplicativoPai: { id: destino, nome: "Matriz fornecedor", descricao: null, filiais: semFilhos ? [] : [{ id: filialId, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] } }];
       },
       findFirst: async ({ where }: { where: unknown }) => {
-        assert.deepEqual(where, { id: fornecedorId, aplicativoId: app });
+        assert.deepEqual(where, { id: fornecedorId, aplicativoId: app, ativo: true });
         return fornecedorValido ? { aplicativoPaiId: destino, aplicativoPai: { aplicativoPaiId: paiDoDestino } } : null;
       },
     },
@@ -107,6 +111,13 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   await t.test("ignora dados e aplicativo de destino enviados pelo cliente", async () => {
     assert.equal((await POST(request())).status, 201); assert.equal(gravacoes, 1);
   });
+  await t.test("revogar permissão entre autenticação e inclusão impede gravar a fila", async () => {
+    const antes = gravacoes;
+    permitidoNaTransacao = false;
+    assert.equal((await POST(request())).status, 403);
+    assert.equal(gravacoes, antes);
+    permitidoNaTransacao = true;
+  });
   await t.test("nega sessão ausente, falta de permissão e IDs inválidos antes de consultar produção", async () => {
     const antes = consultas;
     assert.equal((await POST(new Request("https://example.test", { method: "POST" }))).status, 401);
@@ -116,7 +127,7 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   });
   await t.test("nega outra produção, fornecedor inválido e tecido sem vínculo", async () => {
     existe = false; assert.equal((await POST(request())).status, 404); existe = true;
-    fornecedorValido = false; assert.equal((await POST(request())).status, 400); fornecedorValido = true;
+    fornecedorValido = false; assert.equal((await POST(request())).status, 404); fornecedorValido = true;
     associado = false; assert.equal((await POST(request())).status, 400); associado = true;
     paiDoDestino = app;
     assert.equal((await POST(request())).status, 400);

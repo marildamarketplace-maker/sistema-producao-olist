@@ -36,7 +36,7 @@ test("Olist: permissões no servidor, vendedor por empresa e autorização de co
       findMany: async ({ where, select, take }: { where: { aplicativoId: string; vendedorOlistId: { in: number[] }; usuario: unknown }; select: unknown; take: number }) => {
         pesquisasVinculos++;
         assert.equal(where.aplicativoId, contaEsperada); assert.deepEqual(where.vendedorOlistId.in, [200, 201]);
-        assert.ok(where.usuario); assert.equal(take, 1001);
+        assert.equal((where as unknown as { revogadoEm: unknown }).revogadoEm, null); assert.ok((where as unknown as { OR: unknown }).OR); assert.equal(take, 1001);
         assert.deepEqual(select, { vendedorOlistId: true, usuario: { select: { id: true, nome: true, ativo: true } } });
         return [
           { vendedorOlistId: 200, usuario: { id: "pai-a", nome: "Ana", ativo: true } },

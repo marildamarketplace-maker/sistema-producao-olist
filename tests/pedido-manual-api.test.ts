@@ -24,6 +24,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
   const contas = [id(2),id(3)];
   const chamadas: URL[] = [];
   const tx = {
+    fornecedor: { findMany: async () => [], findFirst: async () => null },
     usuario: { findFirst:async () => usuario, findUnique:async () => ({...usuario}) },
     aplicativo: {
       findFirst:async ({where}:{where:{id:string}}) => contas.includes(where.id)?{id:where.id,nome:"Conta"}:null,
@@ -146,7 +147,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
     const antes=consultas; const repetida=await POST(req("",entrada)); assert.equal(repetida.status,200); assert.equal(consultas,antes);
     assert.equal((await POST(req("",{...entrada,observacao:"mudou"}))).status,409);
     const recibo=await GET(req(`pedidoId=${registros[0].id}`)); assert.equal(recibo.status,200);
-    assert.deepEqual(Object.keys(await recibo.json()).sort(),["aplicativo","createdAt","id","status"]);
+    assert.deepEqual(Object.keys(await recibo.json()).sort(),["aplicativo","createdAt","filaExterna","id","status"]);
     usuario.id=id(90); assert.equal((await GET(req(`pedidoId=${registros[0].id}`))).status,404); usuario.id=id(1);
     usuario.aplicativoId=id(91); assert.equal((await GET(req(`pedidoId=${registros[0].id}`))).status,404); usuario.aplicativoId=id(2);
   });

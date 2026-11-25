@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { dadosOlistFilaSchema } from "./fila-olist-contrato";
-import { referenciaPedidoManualSchema } from "./pedido-manual-referencia";
+import { vendedorOrigemFilaSchema } from "./vendedor-fila-contrato";
+import { referenciaPedidoManualSchema, fornecedorManualSchema } from "./pedido-manual-referencia";
 
 export const direcionamentoPedidoManualSchema = z.object({
   inicial: z.object({
@@ -34,9 +35,11 @@ const itemSchema = z.object({
 export const dadosPedidoFilaSchema = z.object({
   versao: z.literal(1),
   olist: dadosOlistFilaSchema.optional(),
+  vendedorOrigem: vendedorOrigemFilaSchema.optional(),
   itens: z.array(itemSchema).min(1),
   observacao: z.string().nullable().optional(),
   origemManual: referenciaPedidoManualSchema.optional(),
+  fornecedorManual: fornecedorManualSchema.optional(),
   direcionamentoManual: direcionamentoPedidoManualSchema.optional(),
 });
 

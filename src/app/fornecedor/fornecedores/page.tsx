@@ -14,6 +14,7 @@ type Fornecedor = {
   nome: string;
   endereco: string | null;
   created_at: string;
+  ativo: boolean;
 };
 
 type FornecedorFormData = {
@@ -40,6 +41,7 @@ export default function FornecedoresPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [mostrarEncerrados, setMostrarEncerrados] = useState(false);
 
   const isEditing = editingId !== null;
   const carregarDados = useCallback(async () => {
@@ -53,8 +55,9 @@ export default function FornecedoresPage() {
       const [fornecedoresResult, aplicativosResponse] = await Promise.all([
         supabase
           .from("fornecedores")
-          .select("id, aplicativo_pai_id, nome, endereco, created_at")
+          .select("id, aplicativo_pai_id, nome, endereco, created_at, ativo")
           .eq("aplicativo_id", usuario.aplicativo_id)
+          .eq("ativo", !mostrarEncerrados)
           .order("nome", { ascending: true }),
         fetch("/api/fornecedores/aplicativos-pai", {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -74,7 +77,7 @@ export default function FornecedoresPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [session?.access_token, usuario?.aplicativo_id]);
+  }, [session?.access_token, usuario?.aplicativo_id, mostrarEncerrados]);
 
   useEffect(() => {
     carregarDados();
@@ -148,7 +151,7 @@ export default function FornecedoresPage() {
   }
 
   async function handleDelete(fornecedor: Fornecedor) {
-    const confirmar = window.confirm(`Excluir fornecedor ${fornecedor.nome}?`);
+    const confirmar = window.confirm(`Encerrar o cadastro de ${fornecedor.nome}? O histórico será preservado. Ao encerrar a última relação ativa, os vínculos de vendedor serão desativados.`);
 
     if (!confirmar) return;
 
@@ -156,14 +159,16 @@ export default function FornecedoresPage() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const { error } = await supabase
-      .from("fornecedores")
-      .delete()
-      .eq("id", fornecedor.id)
-      .eq("aplicativo_id", usuario?.aplicativo_id ?? "");
-
-    if (error) {
-      setErrorMessage(`Erro ao excluir fornecedor: ${error.message}`);
+    try {
+      const response = await fetch("/api/fornecedores/salvar", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id: fornecedor.id }),
+      });
+      const json = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(json.error || "Não foi possível encerrar o fornecedor.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Não foi possível encerrar o fornecedor.");
       setDeletingId(null);
       return;
     }
@@ -173,7 +178,7 @@ export default function FornecedoresPage() {
     }
 
     await carregarDados();
-    setSuccessMessage("Fornecedor excluido com sucesso.");
+    setSuccessMessage("Cadastro do fornecedor encerrado. O histórico foi preservado.");
     setDeletingId(null);
   }
 
@@ -288,9 +293,10 @@ export default function FornecedoresPage() {
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">
-          Fornecedores cadastrados
-        </h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-slate-900">{mostrarEncerrados ? "Fornecedores encerrados" : "Fornecedores cadastrados"}</h3>
+          <button type="button" className="min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2" aria-pressed={mostrarEncerrados} onClick={() => { resetForm(); setMostrarEncerrados(atual => !atual); }}>{mostrarEncerrados ? "Mostrar ativos" : "Mostrar encerrados"}</button>
+        </div>
 
         {isLoading ? (
           <p className="text-sm text-slate-600">Carregando fornecedores...</p>
@@ -326,7 +332,7 @@ export default function FornecedoresPage() {
                       {new Date(fornecedor.created_at).toLocaleDateString("pt-BR")}
                     </td>
                     <td className="p-3">
-                      <div className="flex justify-end gap-2">
+                      {fornecedor.ativo ? <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => handleEdit(fornecedor)}
@@ -340,9 +346,9 @@ export default function FornecedoresPage() {
                           disabled={deletingId === fornecedor.id}
                           className="min-h-11 rounded-md border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
-                          {deletingId === fornecedor.id ? "Excluindo..." : "Excluir"}
+                          {deletingId === fornecedor.id ? "Encerrando..." : "Encerrar cadastro"}
                         </button>
-                      </div>
+                      </div> : <span className="text-slate-500">Encerrado · histórico preservado</span>}
                     </td>
                   </tr>
                 ))}

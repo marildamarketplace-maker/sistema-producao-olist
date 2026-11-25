@@ -26,9 +26,10 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
   const payload = { ...contexto.payload, observacoesInternas: `${String(contexto.payload.observacoesInternas ?? "")}\n\n${marcadorPedidoManual(filaId)}` };
   await prisma.$transaction(async tx => {
     await validarAtoresFilaManual(tx, usuarioId, contexto.matrizId, contexto.guardaReferencia, contexto.vendedorFixo?.autorId);
-    if (contexto.vendedorFixo) {
+    if (contexto.vendedorFixo && !contexto.guardaReferencia?.fornecedorManual) {
       const vinculo = await tx.usuarioVendedorOlist.findFirst({ where: {
         usuarioId: contexto.vendedorFixo.autorId, aplicativoId,
+        origemAplicativoId: null, fornecedorMatrizId: null, revogadoEm: null,
         usuario: { aplicativoId: contexto.matrizId },
       }, select: { vendedorOlistId: true } });
       if (vinculo?.vendedorOlistId !== contexto.vendedorFixo.vendedorId) throw new ErroEnvioFornecedor("Vínculo do vendedor alterado. Gere outra prévia.");

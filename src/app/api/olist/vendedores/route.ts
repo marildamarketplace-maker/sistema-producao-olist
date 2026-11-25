@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { listarVendedoresOlistApi } from "@/lib/olist";
 import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { prisma } from "@/lib/prisma";
+import { vinculoVendedorVigenteWhere } from "@/lib/usuario-vendedor-olist";
 
 function inteiroNaoNegativo(valor: string | null, padrao: number) {
   if (valor === null || valor.trim() === "") return padrao;
@@ -28,10 +29,7 @@ export async function GET(request: Request) {
       where: {
         aplicativoId: aplicativoId,
         vendedorOlistId: { in: vendedoresIds },
-        usuario: { OR: [
-          { aplicativoId: aplicativoId },
-          { aplicativo: { filiais: { some: { id: aplicativoId } } } },
-        ] },
+        ...vinculoVendedorVigenteWhere(aplicativoId),
       },
       select: { vendedorOlistId: true, usuario: { select: { id: true, nome: true, ativo: true } } },
       orderBy: [{ usuario: { nome: "asc" } }, { usuarioId: "asc" }],

@@ -5,7 +5,7 @@ import FornecedoresPage from "../../src/app/fornecedor/fornecedores/page";
 const aplicativoId = "00000000-0000-0000-0000-000000000001";
 const pai = "00000000-0000-0000-0000-000000000002";
 const fornecedores = [{ id: "00000000-0000-0000-0000-000000000003", aplicativo_pai_id: pai,
-  nome: "Fornecedor com nome longo para verificar leitura e quebra de texto", endereco: "Rua de teste, 123", created_at: "2026-11-24T12:00:00Z" }];
+  nome: "Fornecedor com nome longo para verificar leitura e quebra de texto", endereco: "Rua de teste, 123", ativo: true, created_at: "2026-11-24T12:00:00Z" }];
 const estado = { falharSalvar: true, salvos: [] as Record<string, unknown>[], projecoes: [] as string[], aplicativos: [] as unknown[] };
 Object.assign(window, { fornecedoresTeste: estado });
 document.documentElement.classList.toggle("dark", new URLSearchParams(location.search).get("tema") === "dark");
@@ -22,7 +22,7 @@ export const supabase = {
         return { eq(campo: string, valor: string) {
           if (campo !== "aplicativo_id" || valor !== aplicativoId) throw new Error("Consulta sem escopo de aplicativo.");
           estado.aplicativos.push(valor);
-          return { order: async () => ({ data: fornecedores.map(item => ({ ...item })), error: null }) };
+          return { eq(ativoCampo: string, ativo: boolean) { if (ativoCampo !== "ativo") throw new Error("Filtro ativo ausente"); return { order: async () => ({ data: fornecedores.filter(f => f.ativo === ativo).map(item => ({ ...item })), error: null }) }; } };
         } };
       },
     };
@@ -34,6 +34,7 @@ window.fetch = async (input, init) => {
   }
   if (String(input) !== "/api/fornecedores/salvar") throw new Error(`Endpoint inesperado: ${input}`);
   const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+  if (init?.method === "DELETE") { const alvo=fornecedores.find(f=>f.id===payload.id); if (alvo) alvo.ativo=false; return Response.json({id:payload.id,ativo:false}); }
   estado.salvos.push(payload);
   if (estado.falharSalvar) return Response.json({ error: "Falha recuperável ao salvar." }, { status: 400 });
   fornecedores[0].nome = String(payload.nome);

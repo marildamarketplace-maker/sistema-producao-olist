@@ -14,13 +14,21 @@ test("vendedores por conta: migração, ponte, hierarquia, versão e escrita fin
     await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated;
       CREATE TABLE aplicativo(id uuid PRIMARY KEY, nome text NOT NULL, aplicativo_pai_id uuid REFERENCES aplicativo(id));
       CREATE TABLE usuario(id uuid PRIMARY KEY, aplicativo_id uuid NOT NULL REFERENCES aplicativo(id), vendedor_olist_id integer);
-      CREATE TABLE fornecedores(id uuid PRIMARY KEY, vendedor_olist_id uuid REFERENCES usuario(id), meu_cliente_olist_id integer);
+      CREATE TABLE fornecedores(id uuid PRIMARY KEY, vendedor_olist_id uuid REFERENCES usuario(id), meu_cliente_olist_id integer,
+        aplicativo_id uuid, aplicativo_pai_id uuid);
       CREATE TABLE envio_fornecedor(fila_id uuid,estado text);
+      CREATE TABLE pedido_fornecedor_queue(id uuid PRIMARY KEY, tipo_origem text, fornecedor_id uuid,
+        solicitacao_producao_id uuid, autor_id uuid, chave_idempotencia uuid, hash_entrada text,
+        aplicativo_solicitante_id uuid, aplicativo_fornecedor_id uuid,
+        CONSTRAINT ck_fila_origem CHECK(true));
+      CREATE TABLE pedido_fornecedor_solicitacao(id uuid PRIMARY KEY, fornecedor_id uuid);
+      CREATE TABLE produtos_fornecedor(id uuid PRIMARY KEY, fornecedor_id uuid);
     `);
     await db.query("INSERT INTO aplicativo(id,nome) VALUES ($1,'Matriz'),($2,'Alheio')", [pai, alheio]);
     await db.query("INSERT INTO aplicativo VALUES ($1,'A',$3),($2,'B',$3),($4,'Neto',$1)", [filhoA, filhoB, pai, neto]);
     await db.query("INSERT INTO usuario VALUES ($1,$2,100)", [usuarioId,pai]);
     await db.exec(await readFile(new URL("../prisma/migrations/20261124223231_usuario_vendedor_olist/migration.sql", import.meta.url), "utf8"));
+    await db.exec(await readFile(new URL("../prisma/migrations/20261125183000_vendedores_fornecedores_externos/migration.sql", import.meta.url), "utf8"));
     const linhas = () => db.query<{ aplicativo_id: string; vendedor_olist_id: number }>(
       "SELECT aplicativo_id,vendedor_olist_id FROM usuario_vendedor_olist WHERE usuario_id=$1 ORDER BY aplicativo_id", [usuarioId]);
     assert.deepEqual((await linhas()).rows, [{ aplicativo_id:pai,vendedor_olist_id:100 }]);
@@ -96,7 +104,7 @@ test("vendedores por conta: migração, ponte, hierarquia, versão e escrita fin
     await transaction(()=>substituirVendedoresOlist(client,usuarioId,pai,[],atual));
     assert.deepEqual((await linhas()).rows,[]);
     await db.query("INSERT INTO envio_fornecedor VALUES (null,'INCERTO')");
-    await db.query("INSERT INTO fornecedores VALUES ($1,$2,700)",[id(10),usuarioId]);
+    await db.query("INSERT INTO fornecedores(id,vendedor_olist_id,meu_cliente_olist_id) VALUES ($1,$2,700)",[id(10),usuarioId]);
     const antesContracao = await db.query("SELECT usuario_id,aplicativo_id,vendedor_olist_id FROM usuario_vendedor_olist ORDER BY usuario_id,aplicativo_id");
     const contracao = await readFile(new URL("../prisma/migrations/20261124230059_remove_usuario_vendedor_olist/migration.sql",import.meta.url),"utf8");
     await assert.rejects(db.exec(contracao),/Concilie/); await db.exec("ROLLBACK");

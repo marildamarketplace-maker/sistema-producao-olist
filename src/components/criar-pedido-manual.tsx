@@ -13,9 +13,10 @@ const primario = `${botao} bg-slate-900 text-white`;
 const etapas = ["Vendedor", "Cliente", "Aplicativo", "Itens", "Dados comerciais", "Revisão"];
 const novoItem = (): ItemPedidoManual => ({ id: crypto.randomUUID(), tecidoNome: "", quantidade: 1, quantidadeTecido: 1,
   estampa: "", variante: null, tamanho: "", tipoProduto: "", corteLaser: false });
+type AplicativoReferenciaManual = { id: string; nome: string; fornecedorId?: string };
 
 export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { token: string; usuarioId: string; podeGerenciarFila: boolean }) {
-  const [aplicativos, setAplicativos] = useState<Array<{ id: string; nome: string }>>([]);
+  const [aplicativos, setAplicativos] = useState<AplicativoReferenciaManual[]>([]);
   const [aplicativoId, setAplicativoId] = useState("");
   const [referenciaId, setReferenciaId] = useState("");
   const [resolucao, setResolucao] = useState<ResolucaoPedidoManual | null>(null);
@@ -49,6 +50,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
   const storageChaveKey = `${storageKey}:chave`;
   const api = `${API}?${new URLSearchParams({ aplicativoId })}`;
   const apiOrigem = `${API}?${new URLSearchParams({ aplicativoId: referenciaId })}`;
+  const nomeAplicativoDestino = resolucao?.aplicativoDestino?.nome ?? aplicativos.find(a => a.id === aplicativoId)?.nome ?? (aplicativoId || "Não selecionado");
 
   useEffect(() => { vendedorAtual.current = vendedor; }, [vendedor]);
   useEffect(() => { titulo.current?.focus(); }, [etapa]);
@@ -59,7 +61,14 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
     setCarregando(true);
     fetch(API, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
-      .then(d => { if (!controller.signal.aborted) { setAplicativos(d.aplicativos); setReferenciaId(d.aplicativoPadraoId); setRevisaoConta(r => r + 1); } })
+      .then(d => { if (!controller.signal.aborted) {
+        // As demais contas próprias podem ser destinos, mas só a referência canônica pode iniciar o pedido.
+        const referencias: AplicativoReferenciaManual[] = d.aplicativos.filter((a: AplicativoReferenciaManual) =>
+          a.id === d.aplicativoPadraoId || Boolean(a.fornecedorId));
+        setAplicativos(referencias);
+        setReferenciaId(atual => referencias.some(a => a.id === atual && a.fornecedorId) ? atual : d.aplicativoPadraoId);
+        setRevisaoConta(r => r + 1);
+      } })
       .catch(e => { if (!controller.signal.aborted) setErro(e instanceof Error ? e.message : "Falha ao carregar contas."); })
       .finally(() => { if (!controller.signal.aborted) setCarregando(false); });
     return () => controller.abort();
@@ -128,6 +137,11 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
     setResolucao(null); setAplicativoId(""); setErroResolucao(""); destinoAtual.current = "";
     setSelecoes(criarRascunhoFilaOlist(itens.map(i => i.id)));
   }
+  function selecionarReferencia(id: string) {
+    if (id === referenciaId || ocupado.current) return;
+    setContaPronta(false); setVendedor(null); setCliente(null); setErro(""); setEtapa(0);
+    invalidarDestino(); setReferenciaId(id);
+  }
   function alterarItem(id: string, patch: Partial<ItemPedidoManual>) {
     setItens(atuais => atuais.map(i => i.id === id ? { ...i, ...patch } : i));
     if (patch.tecidoNome !== undefined) setSelecoes(atuais => ({ ...atuais, tecidos: atuais.tecidos.map(t => t.tecidoId === id ? { ...t, id: 0, preco: null } : t) }));
@@ -150,6 +164,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
     if (!resolucao) throw new Error("Revise o direcionamento do pedido.");
     chave.current ??= crypto.randomUUID();
     const parsed = pedidoManualSchema.safeParse({ versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao,
+      ...(resolucao.fornecedorManual ? { fornecedorManual: resolucao.fornecedorManual } : {}),
       chaveIdempotencia: chave.current, aplicativoId, itens, observacao: observacao || null,
       selecoes: { ...serializarRascunhoFilaOlist(selecoes), vendedorId: resolucao.selecoes.vendedorId, clienteId: resolucao.selecoes.clienteId } });
     if (!parsed.success) throw new Error("Revise os itens: informe tecido, peças inteiras e metragem positiva; vendedor e cliente são obrigatórios.");
@@ -212,7 +227,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
       <h3 tabIndex={-1} ref={titulo} className="text-lg font-semibold">Pedido registrado na fila</h3>
       <p role="status">Status: <strong>{comprovante.status}</strong>. O enfileiramento não confirma a criação na Olist.</p>
       <p className="break-all text-sm">Protocolo: {comprovante.id}</p><p className="break-words text-sm">Aplicativo destinatário: {comprovante.aplicativo?.nome ?? "Não selecionado"}</p>
-      <div className="flex flex-wrap gap-3">{podeGerenciarFila && <Link className={primario} href="/fornecedor/fila-pedidos">Abrir fila de pedidos</Link>}<button className={botao} type="button" onClick={novoPedido}>Criar outro pedido</button></div>
+      <div className="flex flex-wrap gap-3">{podeGerenciarFila && !comprovante.filaExterna && <Link className={primario} href="/fornecedor/fila-pedidos">Abrir fila de pedidos</Link>}<button className={botao} type="button" onClick={novoPedido}>Criar outro pedido</button></div>
     </section> : tentativa ? <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5">
       <h3 className="font-semibold">Confirmar resultado do envio para a fila</h3><p className="text-sm">Há uma confirmação pendente nesta sessão. Consulte novamente com os mesmos dados para evitar duplicidade.</p>
       <button type="button" className={primario} disabled={enviando} onClick={() => void enviar(tentativa)}>{enviando ? "Confirmando..." : "Confirmar resultado"}</button>
@@ -220,7 +235,9 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
       <ol aria-label="Etapas da criação" className="flex flex-wrap gap-2 text-xs">{etapas.map((nome, index) => <li key={nome} aria-current={index === etapa ? "step" : undefined} className={`rounded-md border border-slate-200 px-3 py-2 ${index === etapa ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>{index + 1}. {nome}</li>)}</ol>
       <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6" aria-busy={enviando}>
         <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold">{etapas[etapa]}</h3>
-        {etapa === 0 && <><p className="text-sm text-slate-600">Aplicativo de referência: <strong>{aplicativos.find(a => a.id === referenciaId)?.nome ?? "Carregando"}</strong></p>
+        {etapa === 0 && <>{aplicativos.some(a => a.fornecedorId) ? <label className="block text-sm text-slate-700">Aplicativo de referência<select className="input mt-1 min-h-11 w-full" value={referenciaId} disabled={enviando || carregando} onChange={e => selecionarReferencia(e.target.value)}>
+          {aplicativos.map(a => <option key={a.id} value={a.id}>{a.nome}{a.fornecedorId ? " · Fornecedor" : " · Aplicativo próprio"}</option>)}
+        </select><span className="mt-1 block text-xs text-slate-500">Ao escolher um fornecedor, o pedido segue para a fila dele e usa suas regras de direcionamento.</span></label> : <p className="text-sm text-slate-600">Aplicativo de referência: <strong>{aplicativos.find(a => a.id === referenciaId)?.nome ?? "Carregando"}</strong></p>}
           {vendedorFixo ? <p className="text-sm">Vendedor fixo do usuário: <strong>{vendedor?.nome}</strong></p> : <PesquisaOlist key={apiOrigem} titulo="Vendedor" recurso="vendedores" api={apiOrigem} token={token} valor={vendedor?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setVendedor(o); setCliente(null); }} />}
           {!contaPronta && !erro && <p role="status" className="text-sm">Consultando vendedor da conta...</p>}
           <button type="button" className={botao} onClick={() => { setContaPronta(false); setResolucao(null); setRevisaoLista(atual => atual + 1); }}>Atualizar conta</button></>}
@@ -228,7 +245,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
         {etapa === 2 && <div className="space-y-4">
           {resolvendo ? <p role="status">Aplicando regras e localizando os cadastros no destino...</p> : resolucao ? <>
             <dl className="grid gap-4 text-sm sm:grid-cols-2">
-              <div><dt>Aplicativo destinatário</dt><dd className="break-words font-semibold">{aplicativos.find(a => a.id === aplicativoId)?.nome ?? aplicativoId}</dd></div>
+              <div><dt>Aplicativo destinatário</dt><dd className="break-words font-semibold">{nomeAplicativoDestino}</dd></div>
               <div><dt>Direcionamento</dt><dd className="break-words">{resolucao.decisao.motivo}</dd></div>
               <div><dt>Cliente de referência</dt><dd className="break-words">{resolucao.referencia.cliente.nome} · {resolucao.referencia.cliente.cpfCnpj || "Sem documento"}</dd></div>
               <div><dt>UF do endereço principal</dt><dd>{resolucao.referencia.cliente.uf || "Não informada"}</dd></div>
@@ -253,7 +270,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
         </>}
         {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={setSelecoes} disabled={enviando} ocultarClienteVendedor />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
-        {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{aplicativos.find(a => a.id === aplicativoId)?.nome}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
+        {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
           {itens.map((i, index) => { const produto = selecoes.tecidos.find(t => t.tecidoId === i.id); return <div key={i.id} className="space-y-1 rounded-md border border-slate-200 p-3 text-sm"><p className="break-words font-semibold">Item {index + 1}: {i.tecidoNome}</p><p>{i.quantidade.toLocaleString("pt-BR")} peças · {i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p><p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"} · Tipo: {i.tipoProduto || "—"}</p><p>Produto Olist: {produto?.id || "Pendente"} · Preço/m: {produto?.preco == null ? "Pendente" : `R$ ${produto.preco.toFixed(2)}`}</p></div>; })}
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">

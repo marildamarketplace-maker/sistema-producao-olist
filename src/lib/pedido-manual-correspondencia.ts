@@ -1,10 +1,9 @@
 import axios from "axios";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { getValidOlistAccessToken } from "@/lib/olist";
 import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
-import { resolverContaPedidoManual } from "@/lib/pedido-manual-acesso";
+import { resolverContaPedidoManual, listarReferenciasPedidoManual } from "@/lib/pedido-manual-acesso";
 import { validarVendedorPedidoOlist } from "@/lib/olist-escopo-vendedor";
 import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { chaveContatoPorNome, normalizarDocumentoContato } from "@/lib/olist-sync/dominio";
@@ -24,7 +23,7 @@ type CaminhoConsulta = "contatos" | "vendedores" | `contatos/${number}`;
 type PessoaReferencia = ReferenciaPedidoManual["vendedor"];
 type EntradaReferencia = { aplicativoOrigemId?: string; vendedorOrigemId: number; clienteOrigemId: number };
 export interface DependenciasCorrespondenciaPedidoManual {
-  listarAplicativos(aplicativoId: string): Promise<Array<{ id: string; nome: string }>>;
+  listarAplicativos(aplicativoId: string): Promise<Array<{ id: string; nome: string; fornecedorId?: string }>>;
   autorizarConta(usuario: UsuarioCorrespondenciaPedidoManual, aplicativoId: string): Promise<{ vendedorId: number | null }>;
   consultar(aplicativoId: string, caminho: CaminhoConsulta, parametros: Record<string, string>, timeoutMs: number): Promise<unknown>;
   agora?: () => number;
@@ -86,8 +85,7 @@ function validarHomonimoDocumentado(ref: PessoaReferencia, candidato: PessoaRefe
 
 const dependenciasPadrao: DependenciasCorrespondenciaPedidoManual = {
   async listarAplicativos(aplicativoId) {
-    return prisma.aplicativo.findMany({ where: { OR: [{ id: aplicativoId }, { aplicativoPaiId: aplicativoId }] },
-      select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }], take: 1001 });
+    return listarReferenciasPedidoManual(aplicativoId);
   },
   autorizarConta: resolverContaPedidoManual,
   async consultar(aplicativoId, caminho, parametros, timeoutMs) {
@@ -246,10 +244,14 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     if (!esperada) {
       const aplicativos = await deps.listarAplicativos(usuario.aplicativoId);
       if (!aplicativos.length || aplicativos.length > 1000) throw new ErroFilaOlist("Não foi possível definir o aplicativo de referência.", 409);
-      const filhos = aplicativos.filter(app => app.id !== usuario.aplicativoId);
-      const primeiro = (filhos.length ? filhos : aplicativos)[0];
-      if (origem && origem !== primeiro.id) throw new ErroFilaOlist("Use o primeiro aplicativo de referência definido pelo sistema.", 403);
-      origem = primeiro.id;
+      const internos = aplicativos.filter(app => !app.fornecedorId);
+      const filhos = internos.filter(app => app.id !== usuario.aplicativoId);
+      const primeiro = (filhos.length ? filhos : internos)[0];
+      if (!primeiro) throw new ErroFilaOlist("Nenhum aplicativo de referência autorizado.", 403);
+      if (origem && origem !== primeiro.id && !aplicativos.some(app => app.id === origem && app.fornecedorId)) {
+        throw new ErroFilaOlist("Use o primeiro aplicativo de referência definido pelo sistema ou um fornecedor autorizado.", 403);
+      }
+      origem ??= primeiro.id;
     }
     if (!origem) throw new ErroFilaOlist("Aplicativo de referência inválido.");
     const { vendedorId } = await autorizar(usuario, origem);

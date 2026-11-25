@@ -30,6 +30,7 @@ Object.assign(window, { usuariosTeste: estado });
 document.documentElement.classList.toggle("dark", parametros.get("tema") === "dark");
 window.fetch = async (input, init) => {
   const url = new URL(String(input), "https://example.test");
+  if (url.pathname === "/api/usuarios/clientes") return Response.json({usuarios:[],paginacao:{pagina:1,total:0,totalPaginas:1}});
   if (url.pathname !== "/api/usuarios") throw new Error(`Endpoint inesperado: ${input}`);
   const aplicativoId = auth.usuario.aplicativo_id;
   estado.consultas.push({ url: String(input), aplicativoId });

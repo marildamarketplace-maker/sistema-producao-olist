@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { selecoesFilaOlistParciaisSchema } from "./fila-olist-contrato";
 import type { DadosPedidoFila } from "./fila-fornecedor-contrato";
-import { referenciaPedidoManualSchema } from "./pedido-manual-referencia";
+import { referenciaPedidoManualSchema, fornecedorManualSchema } from "./pedido-manual-referencia";
 import { decisaoDirecionamentoSchema } from "./direcionamento-pedidos-contrato";
 
 const texto = z.string().trim().max(500);
@@ -31,15 +31,19 @@ function validarItens(p: { itens: ItemPedidoManual[]; selecoes: z.infer<typeof s
 export const pedidoManualLegadoSchema = z.object(camposPedidoManual).strict().superRefine(validarItens);
 export const pedidoManualSchema = z.object({ ...camposPedidoManual, versao: z.literal(2),
   origemManual: referenciaPedidoManualSchema, decisaoDirecionamento: decisaoDirecionamentoSchema,
+  fornecedorManual: fornecedorManualSchema.optional(),
 }).strict().superRefine(validarItens);
 export type EntradaPedidoManual = z.infer<typeof pedidoManualSchema>;
 export type EntradaPedidoManualLegada = z.infer<typeof pedidoManualLegadoSchema>;
 export const resolucaoPedidoManualSchema = z.object({ referencia: referenciaPedidoManualSchema, decisao: decisaoDirecionamentoSchema,
+  fornecedorManual: fornecedorManualSchema.optional(),
+  aplicativoDestino: z.object({ id: z.guid(), nome: z.string().min(1) }).strict().optional(),
   selecoes: z.object({clienteId:z.number().int().positive(),vendedorId:z.number().int().positive(),vendedorFixo:z.boolean()}).strict(),
 }).strict();
 export type ResolucaoPedidoManual = z.infer<typeof resolucaoPedidoManualSchema>;
 export function montarDadosPedidoManual(p: EntradaPedidoManual): DadosPedidoFila {
   return { versao: 1, observacao: p.observacao, origemManual: p.origemManual,
+    ...(p.fornecedorManual ? { fornecedorManual: p.fornecedorManual } : {}),
     direcionamentoManual: { inicial: p.decisaoDirecionamento, alteracoes: [] },
     olist: { filialId: p.aplicativoId, selecoes: p.selecoes },
     itens: p.itens.map(i => ({ produtoId: i.id, sku: "", tecido: { id: i.id, nome: i.tecidoNome, referencia: null },
@@ -48,5 +52,6 @@ export function montarDadosPedidoManual(p: EntradaPedidoManual): DadosPedidoFila
 }
 export const comprovantePedidoManualSchema = z.object({ id: z.guid(), status: z.string().min(1).max(40), createdAt: z.iso.datetime(),
   aplicativo: z.object({ id: z.guid(), nome: z.string() }).nullable(),
+  filaExterna: z.boolean().optional(),
 }).strict();
 export type ComprovantePedidoManual = z.infer<typeof comprovantePedidoManualSchema>;

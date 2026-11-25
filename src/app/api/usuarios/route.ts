@@ -27,19 +27,24 @@ async function getAdministrador(request: Request) {
 
 const selectResumo = {
   id: true, nome: true, email: true, ativo: true, vinculosOlistVersao: true,
-  _count: { select: { vendedoresOlist: true } },
 } satisfies Prisma.UsuarioSelect;
 const selectPermissoes = Object.fromEntries(permissionKeys.map((permission) => [permission, true])) as Record<PermissionKey, true>;
+const escopoVendedores = (aplicativoId: string) => ({
+  origemAplicativoId: null, fornecedorMatrizId: null, revogadoEm: null,
+  OR: [{ aplicativoId }, { aplicativo: { aplicativoPaiId: aplicativoId } }],
+}) satisfies Prisma.UsuarioVendedorOlistWhereInput;
 const selecionarResumo = (aplicativoId: string) => ({
   ...selectResumo,
-  vendedoresOlist: { where: { aplicativoId }, select: { vendedorOlistId: true }, take: 1 },
+  _count: { select: { vendedoresOlist: { where: escopoVendedores(aplicativoId) } } },
+  vendedoresOlist: { where: { aplicativoId, origemAplicativoId: null, fornecedorMatrizId: null, revogadoEm: null }, select: { vendedorOlistId: true }, take: 1 },
 }) satisfies Prisma.UsuarioSelect;
-const selectDetalhe = {
+const selecionarDetalhe = (aplicativoId: string) => ({
   ...selectResumo, ...selectPermissoes,
-  vendedoresOlist: { select: { aplicativoId: true, vendedorOlistId: true }, orderBy: { aplicativoId: "asc" }, take: 1001 },
-} satisfies Prisma.UsuarioSelect;
+  _count: { select: { vendedoresOlist: { where: escopoVendedores(aplicativoId) } } },
+  vendedoresOlist: { where: escopoVendedores(aplicativoId), select: { aplicativoId: true, vendedorOlistId: true }, orderBy: { aplicativoId: "asc" }, take: 1001 },
+}) satisfies Prisma.UsuarioSelect;
 type ResumoSelecionado = Prisma.UsuarioGetPayload<{ select: ReturnType<typeof selecionarResumo> }>;
-type DetalheSelecionado = Prisma.UsuarioGetPayload<{ select: typeof selectDetalhe }>;
+type DetalheSelecionado = Prisma.UsuarioGetPayload<{ select: ReturnType<typeof selecionarDetalhe> }>;
 
 function resumo(usuario: ResumoSelecionado) {
   const { _count, vendedoresOlist, ...dados } = usuario;
@@ -97,7 +102,7 @@ export async function GET(request: Request) {
     if (params.has("recurso")) throw new ErroUsuarios("Recurso inválido.");
     if (params.has("usuarioId")) {
       const usuarioId = z.guid().parse(params.get("usuarioId"));
-      const usuario = await prisma.usuario.findFirst({ where: { id: usuarioId, aplicativoId: administrador.aplicativoId }, select: selectDetalhe });
+      const usuario = await prisma.usuario.findFirst({ where: { id: usuarioId, aplicativoId: administrador.aplicativoId }, select: selecionarDetalhe(administrador.aplicativoId) });
       if (!usuario) throw new ErroUsuarios("Usuário não encontrado neste aplicativo.", 404);
       return responder({ usuario: detalhe(usuario, administrador.aplicativoId) });
     }
@@ -131,7 +136,7 @@ export async function POST(request: Request) {
         await tx.usuario.create({ data: { id: authId, aplicativoId: administrador.aplicativoId, nome: body.nome, email: body.email, ativo: true, ...permissoes }, select: { id: true } });
         if (body.vendedoresOlist !== undefined) await substituirVendedoresOlist(tx, authId, administrador.aplicativoId, body.vendedoresOlist, 0);
         else if (body.vendedorOlistId !== undefined) await alterarVendedorOlistLegado(tx, authId, administrador.aplicativoId, body.vendedorOlistId);
-        return tx.usuario.findUniqueOrThrow({ where: { id: authId }, select: selectDetalhe });
+        return tx.usuario.findUniqueOrThrow({ where: { id: authId }, select: selecionarDetalhe(administrador.aplicativoId) });
       });
       return responder({ usuario: detalhe(usuario, administrador.aplicativoId) }, 201);
     } catch (error) {
@@ -167,7 +172,7 @@ export async function PATCH(request: Request) {
       const usuario = await prisma.$transaction(async (tx) => {
         if (perfil.vendedoresOlist !== undefined && versao !== undefined) await substituirVendedoresOlist(tx, body.usuarioId, administrador.aplicativoId, perfil.vendedoresOlist, versao);
         else if (perfil.vendedorOlistId !== undefined) await alterarVendedorOlistLegado(tx, body.usuarioId, administrador.aplicativoId, perfil.vendedorOlistId);
-        return tx.usuario.update({ where: { id: body.usuarioId, aplicativoId: administrador.aplicativoId }, data: { nome: perfil.nome, email: perfil.email, ativo: perfil.ativo }, select: selectDetalhe });
+        return tx.usuario.update({ where: { id: body.usuarioId, aplicativoId: administrador.aplicativoId }, data: { nome: perfil.nome, email: perfil.email, ativo: perfil.ativo }, select: selecionarDetalhe(administrador.aplicativoId) });
       }).catch((error: unknown) => {
         if (!acessoAtualizado) throw error;
         const status = error instanceof ErroVinculoVendedorOlist ? error.status : 500;
@@ -178,7 +183,7 @@ export async function PATCH(request: Request) {
     const data = "all" in body
       ? Object.fromEntries(permissionKeys.map((permission) => [permission, body.all])) as Record<PermissionKey, boolean>
       : { [body.permission]: body.value };
-    const usuario = await prisma.usuario.update({ where: { id: body.usuarioId, aplicativoId: administrador.aplicativoId }, data, select: selectDetalhe });
+    const usuario = await prisma.usuario.update({ where: { id: body.usuarioId, aplicativoId: administrador.aplicativoId }, data, select: selecionarDetalhe(administrador.aplicativoId) });
     return responder({ usuario: detalhe(usuario, administrador.aplicativoId) });
   } catch (error) { return falha(error); }
 }

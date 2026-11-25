@@ -8,7 +8,7 @@ const alheio = "00000000-0000-0000-0000-000000000099";
 const administrador = "00000000-0000-0000-0000-000000000010";
 const alvo = "00000000-0000-0000-0000-000000000011";
 const novo = "00000000-0000-0000-0000-000000000012";
-type Vinculo = { aplicativoId: string; vendedorOlistId: number };
+type Vinculo = { aplicativoId: string; vendedorOlistId: number; origemAplicativoId?: string | null };
 type Usuario = { id: string; aplicativoId: string; nome: string; email: string; ativo: boolean; vinculosOlistVersao: number; vendedoresOlist: Vinculo[] } & Record<PermissionKey, boolean>;
 type Where = { id?: string | { not: string }; aplicativoId?: string; email?: { equals: string } };
 const permissoes = Object.fromEntries(permissionKeys.map(chave => [chave, false])) as Record<PermissionKey, boolean>;
@@ -41,10 +41,17 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
     if (select.podeEditarConfiguracao && Object.keys(select).length === 3) return { id: item.id, aplicativoId: item.aplicativoId, podeEditarConfiguracao: permitido };
     if (Object.keys(select).length === 1) return select.id ? { id: item.id } : { vinculosOlistVersao: item.vinculosOlistVersao };
     if (!select._count) return { ...item };
-    const relacao = select.vendedoresOlist as { where?: { aplicativoId: string } };
-    const vinculos = relacao.where ? item.vendedoresOlist.filter(v => v.aplicativoId === relacao.where?.aplicativoId) : item.vendedoresOlist;
+    type Filtro = { aplicativoId?: string; origemAplicativoId?: null; OR?: Array<{ aplicativoId?: string; aplicativo?: { aplicativoPaiId: string } }> };
+    const filtrar = (vinculo: Vinculo, filtro?: Filtro) => !filtro || (
+      (!filtro.aplicativoId || vinculo.aplicativoId === filtro.aplicativoId)
+      && (filtro.origemAplicativoId !== null || !vinculo.origemAplicativoId)
+      && (!filtro.OR || filtro.OR.some(termo => termo.aplicativoId === vinculo.aplicativoId || termo.aplicativo?.aplicativoPaiId === app && vinculo.aplicativoId === filho))
+    );
+    const relacao = select.vendedoresOlist as { where?: Filtro };
+    const contagem = select._count as { select: { vendedoresOlist: { where?: Filtro } } };
+    const vinculos = item.vendedoresOlist.filter(v => filtrar(v, relacao.where));
     const dados = { id: item.id, nome: item.nome, email: item.email, ativo: item.ativo, vinculosOlistVersao: item.vinculosOlistVersao,
-      _count: { vendedoresOlist: item.vendedoresOlist.length }, vendedoresOlist: vinculos.map(v => ({ ...v })) };
+      _count: { vendedoresOlist: item.vendedoresOlist.filter(v => filtrar(v, contagem.select.vendedoresOlist.where)).length }, vendedoresOlist: vinculos.map(v => ({ ...v })) };
     return select.podeEditarConfiguracao ? { ...dados, ...Object.fromEntries(permissionKeys.map(chave => [chave, item[chave]])) } : dados;
   }
   function gravarVinculo(usuarioId: string, aplicativoId: string, vendedorId: number | null) {
@@ -84,10 +91,12 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
     aplicativo: { findMany: async () => { opcoesConsultas++; return [{ id: app, nome: "Matriz" }, { id: filho, nome: "Filial" }]; } },
     usuarioVendedorOlist: {
       upsert: async ({ create }: { create: { usuarioId: string; aplicativoId: string; vendedorOlistId: number } }) => { gravarVinculo(create.usuarioId, create.aplicativoId, create.vendedorOlistId); },
-      deleteMany: async ({ where }: { where: { usuarioId: string; aplicativoId: string | { not: string; notIn: string[] } } }) => {
+      deleteMany: async ({ where }: { where: { usuarioId: string; aplicativoId: string | { not: string; notIn: string[] }; origemAplicativoId?: null; aplicativo?: { aplicativoPaiId: string } } }) => {
         const item = usuarios.get(where.usuarioId); assert.ok(item);
         const criterio = where.aplicativoId;
         for (const vinculo of [...item.vendedoresOlist]) {
+          if (where.origemAplicativoId === null && vinculo.origemAplicativoId) continue;
+          if (where.aplicativo?.aplicativoPaiId && vinculo.aplicativoId !== filho) continue;
           if (typeof criterio === "string" ? vinculo.aplicativoId === criterio : vinculo.aplicativoId !== criterio.not && !criterio.notIn.includes(vinculo.aplicativoId)) gravarVinculo(item.id, vinculo.aplicativoId, null);
         }
       },
@@ -151,6 +160,26 @@ test("usuários: cadastro normalizado, compatibilidade própria, paginação e a
     assert.equal((await GET(request("GET", undefined, "?pagina=-1"))).status, 400);
     response = await GET(request("GET", undefined, `?usuarioId=${alvo}`)); assert.equal((await response.json()).usuario.vendedoresOlist.length, 2);
     assert.equal((await GET(request("GET", undefined, `?usuarioId=${alheio}`))).status, 404);
+  });
+  await t.test("detalhe, contagem e respostas de permissão não expõem vínculos de fornecedores externos", async () => {
+    const cadastro = usuarios.get(alvo)!;
+    cadastro.vendedoresOlist.push({ aplicativoId: alheio, vendedorOlistId: 987654, origemAplicativoId: app });
+    const detalhe = await GET(request("GET", undefined, `?usuarioId=${alvo}`));
+    const d = await detalhe.json();
+    assert.equal(d.usuario.vendedoresOlistQuantidade, 2);
+    assert.equal(d.usuario.vendedoresOlist.length, 2);
+    assert.doesNotMatch(JSON.stringify(d), /987654/);
+    const lista = await (await GET(request())).json();
+    assert.equal(lista.usuarios.find((u: {id:string}) => u.id === alvo).vendedoresOlistQuantidade, 2);
+    const alterada = await (await PATCH(request("PATCH", { usuarioId: alvo, permission: "podeCriarOlistPedido", value: true }))).json();
+    assert.doesNotMatch(JSON.stringify(alterada), /987654/);
+    assert.equal(cadastro.vendedoresOlist.find(v => v.aplicativoId === alheio)?.vendedorOlistId, 987654);
+    const mesmaColecao = cadastro.vendedoresOlist.filter(v => !v.origemAplicativoId).map(v => ({aplicativoId:v.aplicativoId,vendedorOlistId:v.vendedorOlistId}));
+    const salva=await PATCH(request("PATCH",{usuarioId:alvo,profile:{...perfil(),vendedoresOlist:mesmaColecao,vinculosOlistVersao:cadastro.vinculosOlistVersao}}));
+    assert.equal(salva.status,200);
+    assert.equal(cadastro.vendedoresOlist.find(v => v.aplicativoId === alheio)?.vendedorOlistId,987654,"salvar coleção interna não apaga o vendedor externo");
+    assert.doesNotMatch(JSON.stringify(await salva.json()),/987654/);
+    cadastro.vendedoresOlist = cadastro.vendedoresOlist.filter(v => v.aplicativoId !== alheio);
   });
   await t.test("validação impede IDs inválidos, duplicidade e conta alheia antes de criar Authentication", async () => {
     const base = { nome: "Novo usuário", email: "novo@example.test", senha: "123456" };

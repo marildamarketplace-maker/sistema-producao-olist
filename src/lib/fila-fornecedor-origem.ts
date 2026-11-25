@@ -10,7 +10,7 @@ export async function autorizarOlistOrigem(request: Request, entrada: { forneced
   if (!usuario?.aplicativoId || !usuario.podeSolicitarProducao || !usuario.podeSelecionarFilialFornecedor) throw new ErroFilaOlist("Sem permissão para selecionar dados da conta destinatária do fornecedor.", 403);
   const solicitacao = await prisma.solicitacaoProducao.findFirst({ where: { id: entrada.solicitacaoId, aplicativoId: usuario.aplicativoId, status: "em_producao" }, select: { id: true } });
   if (!solicitacao) throw new ErroFilaOlist("Solicitação em produção não encontrada neste aplicativo.", 404);
-  const fornecedor = await prisma.fornecedor.findFirst({ where: { id: entrada.fornecedorId, aplicativoId: usuario.aplicativoId }, select: { aplicativoPaiId: true, aplicativoPai: { select: { aplicativoPaiId: true } } } });
+  const fornecedor = await prisma.fornecedor.findFirst({ where: { id: entrada.fornecedorId, aplicativoId: usuario.aplicativoId, ativo: true }, select: { aplicativoPaiId: true, aplicativoPai: { select: { aplicativoPaiId: true } } } });
   if (!fornecedor?.aplicativoPaiId || fornecedor.aplicativoPai.aplicativoPaiId !== null) throw new ErroFilaOlist("Fornecedor não encontrado neste aplicativo.", 404);
   const filial = await prisma.aplicativo.findFirst({ where: destinoFornecedorWhere(fornecedor.aplicativoPaiId, entrada.filialId), select: { id: true, nome: true } });
   if (!filial) throw new ErroFilaOlist("Aplicativo destinatário não vinculado ao fornecedor selecionado.", 403);

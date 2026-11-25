@@ -417,6 +417,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
   await t.test("adaptador padrão limita GET, usa clientes compartilhados e trata 429 sem retry ou exposição", async st => {
     const d = dados();
     Object.assign(bancoSimulado, {
+      fornecedor: { findMany: async () => [], findFirst: async () => null },
       aplicativo: {
         findMany: async () => d.aplicativos,
         findFirst: async ({ where }: { where: { id: string } }) => d.aplicativos.find(a => a.id === where.id),

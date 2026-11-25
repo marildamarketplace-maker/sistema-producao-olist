@@ -16,7 +16,9 @@ export const selecoesFilaOlistParciaisSchema = selecoesFilaOlistSchema.partial()
   tecidos: z.array(produtoParcialSchema.extend({ tecidoId: z.guid() }).strict()).max(500).optional(),
   laser: produtoParcialSchema.nullable().optional(),
 }).strict().refine((s) => !s.planoId || !!s.formaId, { message: "Selecione a forma antes do plano de pagamento." });
-export const dadosOlistFilaSchema = z.object({ filialId: z.guid(), selecoes: selecoesFilaOlistParciaisSchema }).strict();
+export const dadosOlistFilaSchema = z.object({ filialId: z.guid(), selecoes: selecoesFilaOlistParciaisSchema,
+  vendedorFonte: z.enum(["VINCULO", "MANUAL"]).optional(), vendedorRevisao: z.number().int().positive().optional(),
+}).strict();
 export type SelecoesFilaOlistParciais = z.infer<typeof selecoesFilaOlistParciaisSchema>;
 export type RascunhoFilaOlist = Omit<SelecoesFilaOlist, "tipoVenda" | "tecidos" | "laser"> & {
   tipoVenda: SelecoesFilaOlist["tipoVenda"] | "";

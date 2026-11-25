@@ -22,6 +22,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
   const sucessoRef = useRef<HTMLParagraphElement>(null);
   const enviandoRef = useRef(false);
   const vendedorPadrao = useRef<number | null>(null);
+  const vendedorRevisao = useRef<number | null>(null);
+  const vendedorFonte = useRef<"VINCULO" | "MANUAL">("MANUAL");
   const tokenAtual = useRef(token);
   useEffect(() => { tokenAtual.current = token; }, [token]);
   const [padraoCarregando, setPadraoCarregando] = useState(false);
@@ -77,6 +79,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
   // não são dependências deste efeito e nunca reaplicam o vendedor padrão.
   useEffect(() => {
     vendedorPadrao.current = null;
+    vendedorRevisao.current = null;
+    vendedorFonte.current = "MANUAL";
     setComerciais((atual) => criarRascunhoFilaOlist(atual.tecidos.map((item) => item.tecidoId)));
     if (!fornecedorId || !filialSelecionadaId) { setPadraoCarregando(false); return; }
     const controller = new AbortController();
@@ -85,10 +89,12 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
     fetch(`/api/fornecedores/fila/olist?${params}`, {
       headers: { Authorization: `Bearer ${tokenAtual.current}` }, signal: controller.signal, cache: "no-store",
     }).then(async (response) => {
-      const dados = await response.json() as { vendedorOlistPadraoId?: number | null; error?: string };
+      const dados = await response.json() as { vendedorOlistPadraoId?: number | null; vendedorRevisao?: number | null; error?: string };
       if (!response.ok) throw new Error(dados.error || "Não foi possível consultar o vendedor padrão.");
       if (!controller.signal.aborted) {
         vendedorPadrao.current = dados.vendedorOlistPadraoId ?? null;
+        vendedorRevisao.current = dados.vendedorRevisao ?? null;
+        vendedorFonte.current = vendedorPadrao.current && vendedorRevisao.current ? "VINCULO" : "MANUAL";
         setComerciais((atual) => ({ ...atual, vendedorId: vendedorPadrao.current ?? 0 }));
       }
     }).catch((error: unknown) => {
@@ -110,6 +116,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
       const json = await response.json() as { dadosPedido: DadosPedidoFila; tecidos: TecidoFilaOpcao[]; revisao: string; error?: string };
       if (!response.ok) throw new Error(json.error || "Erro ao preparar revisão.");
       setComerciais(criarRascunhoFilaOlist(json.dadosPedido.itens.map((i) => i.tecido.id), undefined, vendedorPadrao.current));
+      vendedorFonte.current = vendedorPadrao.current && vendedorRevisao.current ? "VINCULO" : "MANUAL";
       setDadosOriginais(json.dadosPedido);
       setEdicao(montarEdicaoPedidoFila(json.dadosPedido));
       setTecidos(json.tecidos);
@@ -137,7 +144,8 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
       const response = await fetch("/api/fornecedores/fila", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ fornecedorId, filialId: filialSelecionadaId || null, solicitacaoId, dadosEditados: edicao, revisao,
-          ...(filialSelecionadaId && temSelecao ? { olist: { filialId: filialSelecionadaId, selecoes } } : {}) }),
+          ...(filialSelecionadaId && temSelecao ? { olist: { filialId: filialSelecionadaId, selecoes, vendedorFonte: vendedorFonte.current,
+            ...(vendedorFonte.current === "VINCULO" ? { vendedorRevisao: vendedorRevisao.current } : {}) } } : {}) }),
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Erro ao enviar para a fila.");
@@ -238,7 +246,7 @@ export function EnviarFilaFornecedor({ solicitacaoId, token, onClose, onEnviado 
                   key={`${fornecedorId}-${filialSelecionadaId}`} token={token} disabled={enviando}
                   api={`/api/fornecedores/fila/olist?${new URLSearchParams({ fornecedorId, filialId: filialSelecionadaId, solicitacaoId })}`}
                   itens={edicao.itens.map((item) => ({ tecidoId: item.tecidoId, nome: item.tecidoNome || tecidos.find((t) => t.id === item.tecidoId)?.nome || "Tecido", corteLaser: item.corteLaser }))}
-                  selecoes={comerciais} aoAlterar={setComerciais}
+                  selecoes={comerciais} aoAlterar={(proximas) => { if (proximas.vendedorId !== comerciais.vendedorId) vendedorFonte.current = "MANUAL"; setComerciais(proximas); }}
                 /> : <p className="text-sm text-slate-600">Selecione o aplicativo destinatário na etapa anterior para consultar os cadastros da conta Olist correspondente. Você pode enviar sem preencher esses dados.</p>}
               </section>
               <button type="button" disabled={enviando} onClick={() => void carregarRevisao()} className={botao}>Descartar edições e recarregar dados</button>

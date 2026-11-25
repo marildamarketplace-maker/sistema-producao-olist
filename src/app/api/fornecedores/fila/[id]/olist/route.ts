@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { obterVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
 import { z } from "zod";
+import { capturarVendedorFila, bloquearVendedorFila, validarOperadorFornecedor } from "@/lib/vendedor-fila-producao";
+import { vendedorOrigemFilaSchema } from "@/lib/vendedor-fila-contrato";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { dadosPedidoFilaSchema } from "@/lib/fila-fornecedor-contrato";
@@ -12,7 +14,6 @@ import { montarPedidoFornecedor, ErroMontagemFornecedor } from "@/lib/pedido-for
 import { marcarEnvioInterrompido, enviarFornecedor, envioBloqueado, envioExpirado, marcadorFornecedor, ErroEnvioFornecedor } from "@/lib/envio-fornecedor";
 import { obterPedidoOlistApi } from "@/lib/olist";
 import { consultarCadastrosFilaOlist, validarCadastros, nome, ErroFilaOlist as ErroFila } from "@/lib/fila-olist-cadastros";
-import { getValidOlistAccessToken } from "@/lib/olist";
 import { destinoFornecedorWhere } from "@/lib/fila-fornecedor-destino";
 
 export const maxDuration = 120;
@@ -59,14 +60,16 @@ export async function GET(request: Request, contexto: Contexto) {
       const snapshot = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
       const configuracao = snapshot.success && snapshot.data.olist?.filialId === filial.id ? snapshot.data.olist : null;
       return resposta({ filial, selecoes: configuracao?.selecoes ?? null,
-        vendedorOlistPadraoId: await obterVendedorDoUsuario(usuarioId, filial.id), envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
+        vendedorOrigem: snapshot.success ? snapshot.data.vendedorOrigem ?? null : null,
+        vendedorFixo: snapshot.success && snapshot.data.vendedorOrigem?.tipo === "VINCULO",
+        vendedorOlistPadraoId: snapshot.success && snapshot.data.vendedorOrigem?.aplicativoId === filial.id ? snapshot.data.vendedorOrigem.vendedorOlistId : await obterVendedorDoUsuario(usuarioId, filial.id), envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
         aplicativoNome: envio.aplicativo?.nome, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId } : null });
     }
     return resposta(await consultarCadastrosFilaOlist(filial.id, params));
   } catch (error) { return falha(error); }
 }
 const bodySchema = z.discriminatedUnion("acao", [
-  z.object({ acao: z.literal("preview"), versao: z.number().int(), selecoes: selecoesFilaOlistSchema }).strict(),
+  z.object({ acao: z.literal("preview"), versao: z.number().int(), selecoes: selecoesFilaOlistSchema, vendedorFonte: z.enum(["VINCULO", "MANUAL"]).optional() }).strict(),
   z.object({ acao: z.literal("confirmar"), previaId: z.guid() }).strict(),
   z.object({ acao: z.literal("vincular"), tentativaId: z.guid(), pedidoOlistId: z.string().regex(/^[1-9]\d*$/), justificativa: z.string().trim().min(10).max(1000) }).strict(),
   z.object({ acao: z.literal("confirmar-ausencia"), tentativaId: z.guid(), justificativa: z.string().trim().min(10).max(1000), ausenciaConfirmada: z.literal(true) }).strict(),
@@ -113,12 +116,15 @@ export async function POST(request: Request, contexto: Contexto) {
     if (body.acao === "confirmar") {
       const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
       if (!previa) throw new ErroFila("Prévia expirada ou pedido alterado. Gere outra prévia.", 409);
-      await getValidOlistAccessToken(filial.id);
-      const selecionados = selecoesFilaOlistSchema.parse(previa.selecoes);
+      const confirmado = selecoesFilaOlistSchema.extend({ vendedorOrigem: vendedorOrigemFilaSchema }).safeParse(previa.selecoes);
+      if (!confirmado.success) throw new ErroFila("Revise a origem do vendedor e gere uma nova prévia.", 409);
+      const { vendedorOrigem: origemVendedor, ...selecionados } = confirmado.data;
+      if (origemVendedor.aplicativoSolicitanteId !== fila.aplicativoSolicitanteId || origemVendedor.matrizId !== matrizId || origemVendedor.aplicativoId !== filial.id || origemVendedor.vendedorOlistId !== selecionados.vendedorId) throw new ErroFila("Origem do vendedor alterada. Gere outra prévia.", 409);
+      await prisma.$transaction(tx => bloquearVendedorFila(tx, origemVendedor));
       const dadosAtuais = dadosPedidoFilaSchema.parse(fila.dadosPedido);
       await validarCadastros(filial.id, selecionados, dadosAtuais.itens.some((i) => i.corteLaser));
       const resultado = await enviarFornecedor({ solicitacaoId, fornecedorId, aplicativoId: filial.id, usuarioId,
-        payload: previa.payload as Record<string, unknown>, fila: { id: fila.id, versao: fila.versao, matrizId } });
+        payload: previa.payload as Record<string, unknown>, origemVendedor, fila: { id: fila.id, versao: fila.versao, matrizId } });
       return resposta({ ...resultado, status: "CONCLUIDO" });
     }
     if (fila.versao !== body.versao || !["PENDENTE", "FALHADO"].includes(fila.status)) throw new ErroFila("Pedido alterado ou em processamento. Atualize.", 409);
@@ -127,6 +133,13 @@ export async function POST(request: Request, contexto: Contexto) {
     const dados = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
     if (!dados.success) throw new ErroFila("JSON do pedido inválido.");
     const selecoes = body.selecoes;
+    const salva = dados.data.vendedorOrigem;
+    if (!body.vendedorFonte && !salva) throw new ErroFila("Confirme a escolha manual do vendedor antes de revisar este pedido.", 409);
+    if (salva?.tipo === "VINCULO" && body.vendedorFonte !== "MANUAL" && (salva.aplicativoId !== filial.id || salva.vendedorOlistId !== selecoes.vendedorId)) throw new ErroFila("Vendedor do autor alterado. Confirme uma escolha manual ou corrija o vínculo.", 409);
+    const origemVendedor = salva?.tipo === "VINCULO" && body.vendedorFonte !== "MANUAL" ? salva : await capturarVendedorFila({
+      usuarioId, aplicativoSolicitanteId: fila.aplicativoSolicitanteId, matrizId, aplicativoId: filial.id, vendedorOlistId: selecoes.vendedorId, fonte: "MANUAL",
+    });
+    await prisma.$transaction(tx => bloquearVendedorFila(tx, origemVendedor));
     const tecidos = new Set(dados.data.itens.map((i) => i.tecido.id));
     if (selecoes.tecidos.length !== tecidos.size || new Set(selecoes.tecidos.map((i) => i.tecidoId)).size !== tecidos.size || selecoes.tecidos.some((i) => !tecidos.has(i.tecidoId))) throw new ErroFila("Associe exatamente um produto para cada tecido.");
     const { plano, cliente, forma, vendedor, nomes } = await validarCadastros(filial.id, selecoes, dados.data.itens.some((i) => i.corteLaser));
@@ -141,15 +154,17 @@ export async function POST(request: Request, contexto: Contexto) {
     payload.observacoesInternas += `\n\n${marcadorFornecedor(solicitacaoId)}`;
     const versao = fila.versao + 1;
     const previa = await prisma.$transaction(async (tx) => {
+      await bloquearVendedorFila(tx, origemVendedor);
+      await validarOperadorFornecedor(tx, usuarioId, matrizId);
       await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${solicitacaoId}::uuid FOR UPDATE`;
       const envioAtual = await tx.envioFornecedor.findUnique({ where: { solicitacaoId } });
       if (envioAtual && envioBloqueado(envioAtual.estado)) throw new ErroFila("Existe uma tentativa em andamento ou sem conferência. Atualize a fila.", 409);
       const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId,
         aplicativoFilialId: filial.id, versao: fila.versao, status: { in: ["PENDENTE", "FALHADO"] } },
-        data: { dadosPedido: json({ ...(fila.dadosPedido as Prisma.JsonObject), olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 } } });
+        data: { dadosPedido: json({ ...(fila.dadosPedido as Prisma.JsonObject), olist: { filialId: filial.id, selecoes }, vendedorOrigem: origemVendedor }), versao: { increment: 1 } } });
       if (atualizado.count !== 1) throw new ErroFila("Pedido alterado durante a revisão. Atualize a fila.", 409);
       return tx.previaFornecedor.create({ data: { filaId: fila.id, filialId: filial.id, usuarioId, versao,
-        payload: json(payload), selecoes: json(selecoes), expiraEm: new Date(Date.now() + 15 * 60_000) } });
+        payload: json(payload), selecoes: json({ ...selecoes, vendedorOrigem: origemVendedor }), expiraEm: new Date(Date.now() + 15 * 60_000) } });
     });
     return resposta({ previaId: previa.id, versao, payload, cliente: nome(cliente), vendedor: nome(vendedor), forma: nome(forma), plano: plano.planoPagamento.nome,
       produtos: Object.fromEntries(nomes), filial, expiraEm: previa.expiraEm });

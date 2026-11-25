@@ -9,6 +9,7 @@ export async function resolverVendedorConsultaOlist(usuario: { id: string; aplic
   const vendedorNoGrupo = await prisma.usuarioVendedorOlist.findFirst({
     where: {
       usuarioId: usuario.id,
+      origemAplicativoId: null, fornecedorMatrizId: null, revogadoEm: null,
       OR: [{ aplicativoId: usuario.aplicativoId }, { aplicativo: { aplicativoPaiId: usuario.aplicativoId } }],
     },
     select: { vendedorOlistId: true },

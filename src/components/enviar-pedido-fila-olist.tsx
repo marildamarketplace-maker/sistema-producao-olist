@@ -23,11 +23,15 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const ocupado = useRef(false);
   const alterado = useRef(false);
   const contaInicializada = useRef("");
+  const vendedorVinculadoId = useRef<number | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [vendedorFixo, setVendedorFixo] = useState(false);
+  const [origemVinculada, setOrigemVinculada] = useState(false);
+  const [vendedorFonte, setVendedorFonte] = useState<"VINCULO" | "MANUAL">("MANUAL");
+  const [escolhaManualConfirmada, setEscolhaManualConfirmada] = useState(false);
   const [envio, setEnvio] = useState<EstadoEnvioFila | null>(null);
   const [versao, setVersao] = useState(pedido.versao);
   const [previa, setPrevia] = useState<Previa | null>(null);
@@ -52,10 +56,14 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .then((d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
-        setVendedorFixo(Boolean(d.vendedorFixo));
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
         const conta = `${api}:${d.filial.id}`;
         if (contaInicializada.current !== conta) {
+          setVendedorFixo(Boolean(d.vendedorFixo));
+          vendedorVinculadoId.current = d.vendedorOrigem?.tipo === "VINCULO" ? d.vendedorOrigem.vendedorOlistId : null;
+          setOrigemVinculada(d.vendedorOrigem?.tipo === "VINCULO");
+          setVendedorFonte(d.vendedorOrigem?.tipo === "VINCULO" ? "VINCULO" : "MANUAL");
+          setEscolhaManualConfirmada(Boolean(d.vendedorOrigem));
           setSelecoes(criarRascunhoFilaOlist(pedido.dadosPedido?.itens.map((i) => i.tecido.id) ?? [], d.selecoes ?? undefined, d.vendedorOlistPadraoId));
           contaInicializada.current = conta;
           setVersao(pedido.versao);
@@ -77,6 +85,14 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       setErro(e instanceof Error ? e.message : "Falha na operação.");
       if (acao !== "preview") { setPrevia(null); try { const dados = await requisitar(); setEnvio(dados.envio); } catch { /* A próxima abertura consulta a reserva persistida. */ } }
     } finally { ocupado.current = false; setSalvando(false); }
+  }
+  function alterarEscolhaManual(escolhaManual: boolean) {
+    setEscolhaManualConfirmada(escolhaManual);
+    setVendedorFonte(escolhaManual ? "MANUAL" : origemVinculada ? "VINCULO" : "MANUAL");
+    setVendedorFixo(origemVinculada && !escolhaManual);
+    if (origemVinculada && !escolhaManual) {
+      setSelecoes(atuais => ({ ...atuais, vendedorId: vendedorVinculadoId.current ?? 0, clienteId: 0 }));
+    }
   }
   function fechar() { aoFechar(); if (alterado.current) aoConcluir(); }
   return createPortal(<dialog ref={dialog} aria-labelledby={tituloId}
@@ -100,8 +116,12 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           <button type="button" className={botao} disabled={salvando || !ausencia || justificativa.trim().length < 10 || !!envio.pedidoOlistId} onClick={() => void operar({ acao: "confirmar-ausencia", ausenciaConfirmada: true, tentativaId: envio.tentativaId, justificativa }, "conciliar")}>Registrar ausência e liberar nova tentativa</button>
         </>}
       </div> : !mensagem && !previa ? <div className="space-y-4">
+        {pedido.tipoOrigem !== "MANUAL" && (origemVinculada || !escolhaManualConfirmada) && <label className="flex min-h-11 items-start gap-3 rounded-md border border-slate-200 p-3 text-sm">
+          <input type="checkbox" className="mt-1" checked={vendedorFonte === "MANUAL" && escolhaManualConfirmada} onChange={(event) => alterarEscolhaManual(event.target.checked)} />
+          {origemVinculada ? "Usar uma escolha manual de vendedor para este pedido, após revisar os dados comerciais." : "Revisei e confirmo a escolha manual do vendedor deste pedido, que não possui vínculo de origem registrado."}
+        </label>}
         <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} aoAlterar={setSelecoes} disabled={salvando} vendedorFixo={vendedorFixo} />
-        <button type="button" className={primario} disabled={salvando} onClick={() => void operar({ acao: "preview", versao, selecoes }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
+        <button type="button" className={primario} disabled={salvando || (pedido.tipoOrigem !== "MANUAL" && vendedorFonte === "MANUAL" && !escolhaManualConfirmada)} onClick={() => void operar({ acao: "preview", versao, selecoes, ...(pedido.tipoOrigem !== "MANUAL" ? { vendedorFonte } : {}) }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
       </div> : previa ? <div className="space-y-4">
         <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt>Cliente</dt><dd className="break-words font-medium">{previa.cliente}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{previa.vendedor}</dd></div><div><dt>Forma / plano</dt><dd>{previa.forma} · {previa.plano}</dd></div></dl>
         {previa.payload.itens.map((item, i) => <div key={i} className="space-y-2 rounded-md border border-slate-200 p-3 text-sm"><p className="break-words font-medium">{previa.produtos[`${item.produto.tipo}:${item.produto.id}`] ?? previa.produtos[item.produto.id]} · ID {item.produto.id}</p><p>{item.quantidade} m × {moeda(item.valorUnitario)} = {moeda(item.quantidade * item.valorUnitario)}</p><p className="whitespace-pre-wrap break-words">{item.infoAdicional}</p></div>)}

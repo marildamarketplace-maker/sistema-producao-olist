@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { criarPedidoOlistSeguro, ErroCriacaoOlist } from "@/lib/olist";
 import { bloquearDestinoFornecedor } from "@/lib/fila-fornecedor-destino";
+import { bloquearVendedorFila, validarOperadorFornecedor } from "@/lib/vendedor-fila-producao";
+import type { VendedorOrigemFila } from "@/lib/vendedor-fila-contrato";
 
 export class ErroEnvioFornecedor extends Error {}
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -11,14 +13,25 @@ export function envioBloqueado(estado: string) { return !["REJEITADO", "LIBERADO
 export function envioExpirado(iniciadoEm: Date, agora = new Date()) { return agora.getTime() - iniciadoEm.getTime() > 10 * 60_000; }
 
 type ContextoEnvio = { solicitacaoId: string; fornecedorId: string; aplicativoId: string; usuarioId: string;
-  payload: Record<string, unknown>; fila?: { id: string; versao: number; matrizId: string }; };
+  payload: Record<string, unknown>;
+} & (
+  { fila: { id: string; versao: number; matrizId: string }; origemVendedor: VendedorOrigemFila }
+  | { fila?: undefined; origemVendedor?: never }
+);
 
 // O lock da solicitação protege ambos os fluxos; nenhuma transação permanece aberta durante HTTP.
 export async function enviarFornecedor(contexto: ContextoEnvio) {
+  // A checagem em runtime protege também chamadas JavaScript e consumidores antigos.
+  if (contexto.fila && !contexto.origemVendedor) throw new ErroEnvioFornecedor("Revise a origem do vendedor antes de reservar o envio da fila.");
   const tentativaId = randomUUID();
   const marcador = marcadorFornecedor(contexto.solicitacaoId);
   const payload = { ...contexto.payload, observacoesInternas: String(contexto.payload.observacoesInternas ?? "").includes(marcador) ? contexto.payload.observacoesInternas : [contexto.payload.observacoesInternas, marcador].filter(Boolean).join("\n\n") };
   await prisma.$transaction(async (tx) => {
+    if (contexto.origemVendedor) {
+      if (contexto.origemVendedor.aplicativoId !== contexto.aplicativoId || contexto.origemVendedor.matrizId !== contexto.fila?.matrizId) throw new ErroEnvioFornecedor("Vendedor de outra conta. Gere uma nova prévia.");
+      await bloquearVendedorFila(tx, contexto.origemVendedor);
+      await validarOperadorFornecedor(tx, contexto.usuarioId, contexto.origemVendedor.matrizId);
+    }
     await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${contexto.solicitacaoId}::uuid FOR UPDATE`;
     const existente = await tx.pedidoFornecedorSolicitacao.findFirst({ where: { solicitacaoId: contexto.solicitacaoId } });
     const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: contexto.solicitacaoId } });
