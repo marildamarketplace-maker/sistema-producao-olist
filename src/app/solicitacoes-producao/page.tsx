@@ -4,10 +4,10 @@ import { expandirKitProducaoManual, type OpcaoProdutoKitManual } from "@/lib/pro
 import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
-import { ChevronDown, Download, ExternalLink, Eye, Pencil, Plus, Printer, Send, Trash2, XCircle } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, Eye, Pencil, Plus, Printer, Trash2, XCircle } from "lucide-react";
+import { AcaoFilaProducao, type DisponibilidadeEnvioFornecedor } from "@/components/acao-fila-producao";
 import { DetalhesFilaProducao } from "@/components/detalhes-fila-producao";
 import type { ResumoFilaProducao } from "@/lib/fila-fornecedor-contrato";
-import { EnviarFilaFornecedor } from "@/components/enviar-fila-fornecedor";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
@@ -335,7 +335,7 @@ export default function SolicitacoesProducaoPage() {
   const [detalheFilaId, setDetalheFilaId] = useState<string | null>(null);
   const atualizarFila = useCallback((fila: ResumoFilaProducao) => setFilasPorSolicitacao((atuais) => ({ ...atuais, [fila.solicitacaoProducaoId]: fila })), []);
   const [filaDisponivel, setFilaDisponivel] = useState(false);
-  const [filaSolicitacaoId, setFilaSolicitacaoId] = useState<string | null>(null);
+  const [envioFornecedor, setEnvioFornecedor] = useState<DisponibilidadeEnvioFornecedor | null>(null);
   const [situacoesOlistSelecionadas, setSituacoesOlistSelecionadas] = useState<string[]>(SITUACOES_OLIST_PADRAO);
   const [integrandoOlist, setIntegrandoOlist] = useState(false);
   const [resumoImportacaoOlist, setResumoImportacaoOlist] = useState<ResultadoImportacaoOlist | null>(null);
@@ -354,6 +354,7 @@ export default function SolicitacoesProducaoPage() {
   const carregarDados = useCallback(async () => {
     setLoading(true);
     setFilaDisponivel(false);
+    setEnvioFornecedor(null);
     setErrorMessage(null);
 
     try {
@@ -404,6 +405,7 @@ export default function SolicitacoesProducaoPage() {
       const pedidosJson = await pedidosResponse.json() as {
         pedidos?: Array<{ solicitacaoId: string; pedidoOlistId: string }>;
         filas?: ResumoFilaProducao[];
+        envioFornecedor?: DisponibilidadeEnvioFornecedor;
         error?: string;
       };
       if (!produtosResponse.ok) {
@@ -424,6 +426,7 @@ export default function SolicitacoesProducaoPage() {
       }
       setPedidosOlistPorSolicitacao(pedidosAgrupados);
       setFilasPorSolicitacao(Object.fromEntries((pedidosJson.filas ?? []).map((fila) => [fila.solicitacaoProducaoId, fila])));
+      setEnvioFornecedor(pedidosJson.envioFornecedor ?? null);
       setFilaDisponivel(true);
       return produtosCarregados;
     } catch (error) {
@@ -1360,19 +1363,9 @@ export default function SolicitacoesProducaoPage() {
                             </button>
                           </>
                         )}
-                        {destacarDivisao && (
-                          <button
-                            type="button"
-                            onClick={() => filasPorSolicitacao[solicitacao.id] ? setDetalheFilaId(solicitacao.id) : setFilaSolicitacaoId(solicitacao.id)}
-                            aria-haspopup="dialog"
-                            aria-label={filasPorSolicitacao[solicitacao.id] ? `Ver detalhes da fila: ${filasPorSolicitacao[solicitacao.id].status}` : "Enviar para fila do Fornecedor"}
-                            disabled={!session || !filaDisponivel || (!filasPorSolicitacao[solicitacao.id] && !usuario?.podeSolicitarProducao)}
-                            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 disabled:opacity-40"
-                          >
-                            <Send className="h-4 w-4" aria-hidden="true" />
-                            {filasPorSolicitacao[solicitacao.id]?.status ?? (filaDisponivel ? "Enviar para fila do Fornecedor" : "Status da fila indisponível")}
-                          </button>
-                        )}
+                        {destacarDivisao && <AcaoFilaProducao solicitacaoId={solicitacao.id}
+                          status={filasPorSolicitacao[solicitacao.id]?.status} aoVerDetalhes={() => setDetalheFilaId(solicitacao.id)}
+                          autenticado={Boolean(session)} filaDisponivel={filaDisponivel} podeSolicitar={Boolean(usuario?.podeSolicitarProducao)} disponibilidade={envioFornecedor} />}
                         <button
                           type="button"
                           onClick={() => alternarDetalhesSolicitacao(solicitacao.id)}
@@ -1866,14 +1859,6 @@ export default function SolicitacoesProducaoPage() {
         )}
       </section>
 
-      {filaSolicitacaoId && session?.access_token && (
-        <EnviarFilaFornecedor
-          solicitacaoId={filaSolicitacaoId}
-          token={session.access_token}
-          onClose={() => setFilaSolicitacaoId(null)}
-          onEnviado={() => { void carregarDados(); }}
-        />
-      )}
       {detalheFilaId && session?.access_token && <DetalhesFilaProducao solicitacaoId={detalheFilaId} token={session.access_token} onClose={() => setDetalheFilaId(null)} onAtualizado={atualizarFila} />}
       </div>
     </AccessGuard>

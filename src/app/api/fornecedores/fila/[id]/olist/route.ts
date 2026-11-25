@@ -146,7 +146,7 @@ export async function POST(request: Request, contexto: Contexto) {
     const linhas = dados.data.itens.map((item) => {
       const produto = selecoes.tecidos.find((i) => i.tecidoId === item.tecido.id)!;
       return { referencia: String(produto.id), nome: item.tecido.nome, preco: produto.preco, quantidade: item.quantidadeTecido,
-        quantidadeSolicitada: item.quantidade, sku: item.sku, estampa: item.estampa, variante: item.variante ?? "", laser: item.corteLaser, tamanho: item.tamanho, tipo: item.tipoProduto };
+        quantidadeSolicitada: item.quantidade, unidadeSolicitada: item.unidade, sku: item.sku, estampa: item.estampa, variante: item.variante ?? "", laser: item.corteLaser, tamanho: item.tamanho, tipo: item.tipoProduto };
     });
     const payload = montarPedidoFornecedor(linhas, { clienteId: selecoes.clienteId, vendedorId: selecoes.vendedorId,
       formaId: selecoes.formaId, plano: plano.planoPagamento.nome, tipoVenda: selecoes.tipoVenda, observacao: dados.data.observacao },

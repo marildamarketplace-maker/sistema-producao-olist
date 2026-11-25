@@ -14,7 +14,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   let alterarDuranteConsulta = false;
   const dadosPedido = { versao: 1, observacao: "JSON revisado", itens: [{ produtoId: id(11), sku: "SKU-EST/6861-A/", tecido: { id: tecidoId, nome: "Tecido revisado", referencia: "ref-origem" }, quantidade: 4, unidade: "UN", quantidadeTecido: 7, unidadeTecido: "MT", estampa: "6861 editada", variante: "B", corteLaser: true, tamanho: "145x180", tipoProduto: "Toalha" }] };
   const selecoes = { clienteId: 100, vendedorId: 200, formaId: 300, planoId, tipoVenda: "VENDA", tecidos: [{ tecidoId, id: 400, preco: 10 }], laser: { id: 500, preco: 2 } };
-  const reset = (destino = filial) => { destinoAtual = destino; fila = { id: filaId, fornecedorId, aplicativoFornecedorId: matriz, aplicativoFilialId: destinoAtual, solicitacaoProducaoId: solicitacaoId, dadosPedido: structuredClone(dadosPedido), versao: 0, status: "PENDENTE" }; previa = null; envio = null; registro = null; posts = 0; consultas = []; };
+  const reset = (destino = filial) => { destinoAtual = destino; fila = { id: filaId, fornecedorId, aplicativoSolicitanteId: matriz, aplicativoFornecedorId: matriz, aplicativoFilialId: destinoAtual, solicitacaoProducaoId: solicitacaoId, dadosPedido: structuredClone(dadosPedido), versao: 0, status: "PENDENTE" }; previa = null; envio = null; registro = null; posts = 0; consultas = []; };
   reset();
   const tx: any = {
     usuarioVendedorOlist: { findFirst: async ({ where, select }: { where: { usuarioId: string; aplicativoId: string }; select: unknown }) => {
@@ -31,9 +31,10 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
       return [{ id: solicitacaoId }];
     },
     usuario: { findFirst: async () => ({ id: usuarioId, aplicativoId: matriz }), findUnique: async () => ({ aplicativoId: matriz, podeGerenciarFilaPedidos: permitido }) },
+    fornecedor: { findFirst: async () => ({ id: fornecedorId }) },
     aplicativo: {
       findFirst: async ({ where }: any) => { assert.deepEqual(where, { id: destinoAtual, OR: [{ id: matriz }, { aplicativoPaiId: matriz }] }); return filialValida && [matriz, filial].includes(destinoAtual) ? { id: destinoAtual, nome: destinoAtual === matriz ? "Conta própria" : "Filial A" } : null; },
-      findUnique: async ({ where }: any) => { assert.equal(where.id, destinoAtual); return { id: destinoAtual, nome: "Filial A", olistClientId: integrado ? "fake" : "", olistClientSecret: integrado ? "fake" : "" }; },
+      findUnique: async ({ where }: any) => { assert.equal(where.id, destinoAtual); return { id: destinoAtual, aplicativoPaiId: destinoAtual === matriz ? null : matriz, nome: "Filial A", olistClientId: integrado ? "fake" : "", olistClientSecret: integrado ? "fake" : "" }; },
     },
     integracaoOlistToken: { findUnique: async ({ where }: any) => { assert.equal(where.aplicativoId_provider.aplicativoId, destinoAtual); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }; } },
     pedidoFornecedorQueue: {
@@ -83,7 +84,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   const { GET, POST } = await import("../src/app/api/fornecedores/fila/[id]/olist/route");
   const ctx = { params: Promise.resolve({ id: filaId }) };
   const req = (body?: unknown, query = "") => new Request(`https://example.test/api?${query}`, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer fake" }, ...(body ? { body: JSON.stringify(body) } : {}) });
-  const preview = (s: unknown = selecoes) => POST(req({ acao: "preview", versao: fila.versao, selecoes: s }), ctx);
+  const preview = (s: unknown = selecoes) => POST(req({ acao: "preview", versao: fila.versao, selecoes: s, vendedorFonte: "MANUAL" }), ctx);
   await t.test("nega sem sessão/permissão, outra matriz e filial inválida em leitura e escrita", async () => {
     assert.equal((await GET(new Request("https://example.test"), ctx)).status, 401);
     permitido = false; assert.equal((await GET(req(), ctx)).status, 403); assert.equal((await preview()).status, 403); permitido = true;
@@ -149,9 +150,34 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     assert.equal(d.payload.itens[0].quantidade, 7); assert.equal(d.payload.itens[0].valorUnitario, 10);
     assert.match(d.payload.itens[0].infoAdicional, /6861 editada/); assert.match(d.payload.observacoes, /JSON revisado/);
     assert.deepEqual(d.payload.itens[1].produto, { id: 500, tipo: "S" }); assert.equal(d.payload.itens[1].quantidade, 7);
-    const { olist, ...preservados } = fila.dadosPedido; assert.deepEqual(preservados, antes); assert.deepEqual(olist, { filialId: filial, selecoes }); assert.equal(posts, 0); assert.equal(selecoesSalvas, null);
+    const { olist, vendedorOrigem, ...preservados } = fila.dadosPedido; assert.deepEqual(preservados, antes); assert.equal(vendedorOrigem.tipo, "MANUAL"); assert.deepEqual(olist, { filialId: filial, selecoes }); assert.equal(posts, 0); assert.equal(selecoesSalvas, null);
     assert.ok(consultas.includes("/public-api/v3/servicos/500"));
     assert.equal((await GET(req(), ctx)).status, 200);
+  });
+  await t.test("envia o snapshot final com itens adicionados e removidos, preservando peças UN e consumo MT", async () => {
+    reset();
+    // A solicitação original contém um item com laser. O pedido revisado removeu
+    // esse item e contém duas linhas novas, sem SKU de produção, do mesmo tecido.
+    fila.dadosPedido.itens = [
+      { ...dadosPedido.itens[0], produtoId: id(31), sku: "", corteLaser: false, estampa: "NOVA-A", quantidade: 10, quantidadeTecido: 2.5 },
+      { ...dadosPedido.itens[0], produtoId: id(32), sku: "", corteLaser: false, estampa: "NOVA-B", quantidade: 4, quantidadeTecido: 1.25 },
+    ];
+    const resposta = await preview({ ...selecoes, laser: null });
+    assert.equal(resposta.status, 200);
+    const revisao = await resposta.json();
+    assert.equal(revisao.payload.itens.length, 1);
+    assert.equal(revisao.payload.itens[0].quantidade, 3.75);
+    assert.equal(revisao.payload.itens[0].valorUnitario, 10);
+    assert.match(revisao.payload.itens[0].infoAdicional, /<QTD>10,00<\/QTD><UN>UN<\/UN>/);
+    assert.match(revisao.payload.itens[0].infoAdicional, /<QTD>4,00<\/QTD><UN>UN<\/UN>/);
+    assert.match(revisao.payload.itens[0].infoAdicional, /NOVA-A/);
+    assert.match(revisao.payload.itens[0].infoAdicional, /NOVA-B/);
+    assert.doesNotMatch(revisao.payload.itens[0].infoAdicional, /6861 editada/);
+    assert.equal(posts, 0);
+    assert.equal((await POST(req({ acao: "confirmar", previaId }), ctx)).status, 200);
+    assert.equal(posts, 1);
+    assert.equal(registro.solicitacaoId, solicitacaoId);
+    reset();
   });
   await t.test("bloqueia plano sem associação, cadastro inativo, laser ausente e produto de tecido indevido", async () => {
     integrado = false; const semIntegracao = await preview(); assert.equal(semIntegracao.status, 400); assert.match((await semIntegracao.json()).error, /OAuth/); integrado = true;

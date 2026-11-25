@@ -5,6 +5,7 @@ import axios from "axios";
 test("cadastros da fila respeitam estados por recurso e identificam vendedores pelo contato", async t => {
   let clienteEstado = "B", vendedorEstado = "B", produtoEstado = "A", servicoEstado = "A", formaEstado: string | number = 1;
   const consultas: URL[] = [];
+  let paginaProdutos: Array<Record<string, unknown>> | null = null;
   Object.assign(globalThis, { prisma: {
     aplicativo: { findUnique: async () => ({ olistClientId: "fake", olistClientSecret: "fake" }) },
     integracaoOlistToken: { findUnique: async () => ({ accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }) },
@@ -23,10 +24,10 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
       { id: 30, situacao: "A", nome: "Cliente A" }, { id: 31, situacao: "B", nome: "Cliente B" },
       { id: 32, situacao: "I", nome: "Cliente I" }, { id: 33, situacao: "E", nome: "Cliente E" },
     ], paginacao: { total: 4 } };
-    else if (p.endsWith("/produtos") || p.endsWith("/servicos")) data = { itens: [
-      { id: 40, situacao: "A", descricao: "Ativo", precos: { preco: 10 } },
+    else if (p.endsWith("/produtos") || p.endsWith("/servicos")) data = { itens: p.endsWith("/produtos") && paginaProdutos ? paginaProdutos : [
+      { id: 40, situacao: "A", descricao: p.endsWith("/produtos") ? "Ref Ativo" : "Ativo", precos: { preco: 10 } },
       { id: 41, situacao: "B", descricao: "Bloqueado" }, { id: 42, situacao: "I", descricao: "Inativo" },
-    ], paginacao: { total: 3 } };
+    ], paginacao: { total: p.endsWith("/produtos") && paginaProdutos ? paginaProdutos.length : 3 } };
     else {
       const situacao = p.includes("/contatos/") ? clienteEstado : p.includes("/produtos/") ? produtoEstado
         : p.includes("/servicos/") ? servicoEstado : formaEstado;
@@ -73,5 +74,38 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     await assert.rejects(validarSelecoesParciais("conta", { laser: { id: 50, preco: 1 } }), /inativo/);
     servicoEstado = "A"; formaEstado = "B";
     await assert.rejects(validarSelecoesParciais("conta", { formaId: 60 }), /inativos/);
+  });
+  await t.test("produtos exigem a palavra ref no nome, preservando termo, preço e uma única página remota", async () => {
+    paginaProdutos = [
+      { id: 40, situacao: "A", descricao: "Oxford REF", precos: { preco: 10 } },
+      { id: 41, situacao: "A", nome: "ref - Oxford Premium", precos: { preco: 12 } },
+      { id: 42, situacao: "A", descricao: "Oxford" },
+      { id: 43, situacao: "A", descricao: "Oxford preferido" },
+      { id: 44, situacao: "A", descricao: "Oxford REF123" },
+      { id: 45, situacao: "B", descricao: "REF Oxford bloqueado" },
+    ];
+    const antes = consultas.length;
+    const r = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "  Oxford  ", pagina: "2" }));
+    assert.deepEqual(r.itens.map(i => [i.id, i.nome, "preco" in i ? i.preco : null]), [[40, "Oxford REF", 10], [41, "ref - Oxford Premium", 12]]);
+    assert.equal(consultas.length - antes, 1);
+    const query = consultas.at(-1)!.searchParams;
+    assert.equal(query.get("nome"), "Oxford"); assert.equal(query.get("offset"), "50"); assert.equal(query.get("limit"), "50");
+    assert.equal(r.mais, false);
+    await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "   " }));
+    assert.equal(consultas.at(-1)!.searchParams.get("nome"), "ref");
+    const servicos = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "servicos" }));
+    assert.equal(consultas.at(-1)!.searchParams.has("nome"), false);
+    assert.deepEqual(servicos.itens.map(i => i.id), [40]);
+  });
+  await t.test("página sem produtos elegíveis conserva próxima página conforme os resultados brutos", async () => {
+    paginaProdutos = Array.from({ length: 50 }, (_, i) => ({ id: i + 1, situacao: "A", descricao: `Oxford ${i}` }));
+    const antes = consultas.length;
+    const primeira = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "Oxford" }));
+    assert.deepEqual(primeira.itens, []); assert.equal(primeira.mais, true); assert.equal(primeira.pagina, 1);
+    assert.equal(consultas.length - antes, 1, "Não percorre páginas adicionais dentro da requisição");
+    paginaProdutos = [{ id: 51, situacao: "A", descricao: "Oxford (Ref)" }];
+    const proxima = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "Oxford", pagina: "2" }));
+    assert.deepEqual(proxima.itens.map(i => i.id), [51]); assert.equal(proxima.mais, false);
+    assert.equal(consultas.at(-1)!.searchParams.get("offset"), "50");
   });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { criarRascunhoFilaOlist, serializarRascunhoFilaOlist, dadosOlistFilaSchema } from "../src/lib/fila-olist-contrato";
+import { criarRascunhoFilaOlist, serializarRascunhoFilaOlist, dadosOlistFilaSchema, selecoesFilaOlistSchema } from "../src/lib/fila-olist-contrato";
 import { dadosPedidoFilaSchema } from "../src/lib/fila-fornecedor-contrato";
 const tecido = "00000000-0000-0000-0000-000000000007";
 const filial = "00000000-0000-0000-0000-000000000003";
@@ -40,4 +40,17 @@ test("vendedor salvo prevalece sobre sugestão e ausência permite seleção man
   assert.equal(serializarRascunhoFilaOlist(rascunho).vendedorId, 400);
   rascunho.vendedorId = 0;
   assert.equal(serializarRascunhoFilaOlist(rascunho).vendedorId, undefined);
+});
+
+test("as seleções comerciais acompanham as 1.000 linhas de produção até a prévia completa", () => {
+  const ids = Array.from({ length: 1000 }, (_, i) => `00000000-0000-0000-0000-${String(i + 10).padStart(12, "0")}`);
+  const rascunho = criarRascunhoFilaOlist(ids);
+  rascunho.tecidos = rascunho.tecidos.map(item => ({ ...item, id: 400, preco: 12 }));
+  const parciais = serializarRascunhoFilaOlist(rascunho);
+  assert.equal(parciais.tecidos?.length, 1000);
+  const completas = { ...parciais, clienteId: 1, vendedorId: 2, formaId: 3, planoId: filial, tipoVenda: "VENDA", laser: null };
+  assert.equal(selecoesFilaOlistSchema.safeParse(completas).success, true);
+  const excedentes = [...rascunho.tecidos, { tecidoId: filial, id: 400, preco: 12 }];
+  assert.equal(selecoesFilaOlistSchema.safeParse({ ...completas, tecidos: excedentes }).success, false);
+  assert.throws(() => serializarRascunhoFilaOlist({ ...rascunho, tecidos: excedentes }), /Revise/);
 });

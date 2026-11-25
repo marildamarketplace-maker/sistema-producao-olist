@@ -4,7 +4,7 @@ export const produtoFilaOlistSchema = z.object({ id: idOlist, preco: z.number().
 export const selecoesFilaOlistSchema = z.object({
   clienteId: idOlist, vendedorId: idOlist, formaId: idOlist, planoId: z.guid(),
   tipoVenda: z.enum(["VENDA", "VENDA_G", "VENDA_PC"]),
-  tecidos: z.array(z.object({ tecidoId: z.guid(), ...produtoFilaOlistSchema.shape }).strict()).min(1).max(500),
+  tecidos: z.array(z.object({ tecidoId: z.guid(), ...produtoFilaOlistSchema.shape }).strict()).min(1).max(1000),
   laser: produtoFilaOlistSchema.nullable(),
 }).strict();
 export type SelecoesFilaOlist = z.infer<typeof selecoesFilaOlistSchema>;
@@ -13,7 +13,7 @@ export type EstadoEnvioFila = { estado: string; aplicativoNome?: string; pedidoO
 
 const produtoParcialSchema = produtoFilaOlistSchema.extend({ preco: produtoFilaOlistSchema.shape.preco.optional() });
 export const selecoesFilaOlistParciaisSchema = selecoesFilaOlistSchema.partial().extend({
-  tecidos: z.array(produtoParcialSchema.extend({ tecidoId: z.guid() }).strict()).max(500).optional(),
+  tecidos: z.array(produtoParcialSchema.extend({ tecidoId: z.guid() }).strict()).max(1000).optional(),
   laser: produtoParcialSchema.nullable().optional(),
 }).strict().refine((s) => !s.planoId || !!s.formaId, { message: "Selecione a forma antes do plano de pagamento." });
 export const dadosOlistFilaSchema = z.object({ filialId: z.guid(), selecoes: selecoesFilaOlistParciaisSchema,

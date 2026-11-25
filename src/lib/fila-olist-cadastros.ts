@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasPagamentoOlistApi, obterCadastroFornecedorOlist, getValidOlistAccessToken } from "@/lib/olist";
 import type { SelecoesFilaOlist, SelecoesFilaOlistParciais } from "@/lib/fila-olist-contrato";
+import { nomeProdutoElegivelSync } from "@/lib/olist-sync/produtos";
 export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 const ErroFila = ErroFilaOlist;
 function contatoDoCadastro(item: Record<string, unknown>): Record<string, unknown> | null {
@@ -34,11 +35,16 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
     let resultado;
     if (recurso === "clientes") resultado = await listarContatosOlistApi(filialId, { nome: busca || undefined, idVendedor: escopo?.vendedorId ? String(escopo.vendedorId) : undefined, limit, offset });
     else if (recurso === "vendedores") resultado = await listarVendedoresOlistApi(filialId, { nome: busca || undefined, limit, offset });
-    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca || undefined, situacao: "A", limit, offset });
+    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca.trim() || "ref", situacao: "A", limit, offset });
     else if (recurso === "servicos") resultado = await listarServicosOlistApi(filialId, { nome: busca || undefined, limit, offset });
     else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
     else throw new ErroFila("Consulta inválida.");
-    return ({ itens: resultado.itens.filter((i) => (recurso === "clientes" || recurso === "vendedores" ? pessoaAtiva(i as Record<string, unknown>) : ativo(i as Record<string, unknown>)) && (recurso !== "vendedores" || !escopo?.vendedorId || Number(i.id) === escopo.vendedorId)).map((i) => {
+    // O termo digitado continua sendo pesquisado na Olist. A restrição por "ref"
+    // também é aplicada aqui, sem depender de uma busca remota com semântica AND.
+    // A paginação abaixo usa a página bruta, inclusive quando nenhum item passa.
+    return ({ itens: resultado.itens.filter((i) => (recurso === "clientes" || recurso === "vendedores" ? pessoaAtiva(i as Record<string, unknown>) : ativo(i as Record<string, unknown>)) &&
+      (recurso !== "produtos" || nomeProdutoElegivelSync(nome(i as Record<string, unknown>))) &&
+      (recurso !== "vendedores" || !escopo?.vendedorId || Number(i.id) === escopo.vendedorId)).map((i) => {
       const item = i as Record<string, unknown>, precos = item.precos as Record<string, unknown> | undefined;
       return { id: Number(item.id), nome: nome(item), referencia: String((recurso === "vendedores" ? contatoDoCadastro(item)?.codigo : undefined) ?? item.codigo ?? item.sku ?? ""), preco: Number(precos?.preco ?? item.preco ?? 0) };
     }), pagina, mais: resultado.itens.length === limit });
