@@ -8,9 +8,10 @@ function aguardar(ms: number, signal: AbortSignal) {
     if (signal.aborted) abortar(); else signal.addEventListener("abort", abortar, { once: true });
   });
 }
+const executarFetch: typeof fetch = (...args) => globalThis.fetch(...args);
 /** Somente leitura: até três tentativas, com timeout e cancelamento da seleção anterior. */
 export async function consultarDirecionamentoCliente(url: string, token: string, signal: AbortSignal,
-  dependencias = { fetch, aguardar }) : Promise<unknown> {
+  dependencias = { fetch: executarFetch, aguardar }) : Promise<unknown> {
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     signal.throwIfAborted();
     try {

@@ -26,7 +26,7 @@ export function EstadoCatalogoTecidosOlist({ catalogo, disabled, ocultarAtualiza
 }
 
 /** Filtro e paginação locais: escolher um tecido não consulta novamente a Olist. */
-export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produtoId, preco, aoEncontrar, aoAlterarPreco, rotuloPreco = "Preço do tecido por metro (R$)" }: {
+export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produtoId, preco, aoEncontrar, rotuloPreco = "Preço do tecido por metro (R$)" }: {
   nome: string; catalogo: CatalogoTecidosOlist; disabled: boolean; children: ReactNode; produtoId: number; preco: number | null;
   aoEncontrar: (produto: OpcaoFilaOlist) => void; aoAlterarPreco: (preco: number | null) => void; aoLimparAssociacao: () => void; rotuloPreco?: string;
 }) {
@@ -67,7 +67,7 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
     if (!disabled && event.target instanceof HTMLInputElement && event.target.type !== "number") setAberto(true);
   }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setAberto(false); }}
     onKeyDown={event => { if (event.key === "Escape" && aberto) { event.preventDefault(); event.stopPropagation(); fechar(); } }}>
-    <div className="flex items-end gap-2" aria-describedby={`${id}-estado`}>
+    <div className="flex items-end gap-2" aria-describedby={!selecionado ? `${id}-estado` : undefined}>
       <div className="min-w-0 flex-1">{children}</div>
       <button ref={botaoRef} type="button" disabled={disabled} onClick={() => setAberto(atual => !atual)}
         aria-label="Selecionar tecido" aria-expanded={aberto} aria-controls={`${id}-resultados`} title="Selecionar entre os produtos carregados"
@@ -75,9 +75,7 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
         <ChevronDown aria-hidden="true" size={20} />
       </button>
     </div>
-    <p id={`${id}-estado`} role="status" className="text-xs text-slate-600">
-      {selecionado ? "Produto selecionado na conta Olist." : "Filtre pelo nome ou referência e selecione um produto da lista."}
-    </p>
+    {!selecionado && <p id={`${id}-estado`} className="text-xs text-slate-600">Filtre pelo nome ou referência e selecione um produto da lista.</p>}
     {aberto && <section ref={resultadosRef} id={`${id}-resultados`} tabIndex={-1} aria-label={`Produtos encontrados para ${nome || "seleção"}`} className="absolute left-0 right-0 z-50 max-h-96 min-w-0 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-200 bg-white p-3 shadow-lg focus-visible:outline focus-visible:outline-2">
       <p className="text-xs text-slate-600">{filtrados.length} resultados na lista carregada{!catalogo.completo ? " · Carregamento incompleto" : ""}</p>
       {opcoes.length > 0 ? <ul className="max-h-72 space-y-2 overflow-y-auto">
@@ -97,10 +95,9 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
       <button type="button" className={botao} onClick={fechar}>Fechar opções</button>
     </section>}
     {produtoId > 0 && <label className="block text-sm">{rotuloPreco}
-      <input type="number" min="0" max="1000000000" step="0.01" disabled={disabled}
-        value={preco ?? ""} onChange={event => aoAlterarPreco(event.target.value === "" ? null : Number(event.target.value))}
+      <input type="number" min="0" max="1000000000" step="0.01" disabled
+        value={preco ?? ""}
         className="input mt-1 min-h-11" />
-      <span className="mt-1 block text-xs text-slate-600">Preço aplicado apenas a este pedido.</span>
     </label>}
   </div>;
 }

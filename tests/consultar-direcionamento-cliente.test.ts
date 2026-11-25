@@ -15,3 +15,16 @@ test("limita falhas de rede a três chamadas",async()=>{
 test("cancelamento impede consulta de seleção antiga",async()=>{
  const c=new AbortController();let chamadas=0;await assert.rejects(consultarDirecionamentoCliente("/teste","token",c.signal,{fetch:async()=>{chamadas++;throw new TypeError("Rede");},aguardar:async()=>{c.abort();}}));assert.equal(chamadas,1);
 });
+test("fetch nativo mantém Window como receptor na implementação padrão",async()=>{
+ const original=globalThis.fetch;
+ let chamadas=0;
+ globalThis.fetch=async function(this: unknown) {
+  assert.equal(this,globalThis,"Safari exige receptor Window para fetch");
+  chamadas++;
+  return Response.json({destino:"filial"});
+ };
+ try {
+  assert.deepEqual(await consultarDirecionamentoCliente("/teste","token",new AbortController().signal),{destino:"filial"});
+  assert.equal(chamadas,1);
+ } finally {globalThis.fetch=original;}
+});
