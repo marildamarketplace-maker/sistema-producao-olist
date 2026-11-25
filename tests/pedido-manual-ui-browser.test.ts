@@ -43,6 +43,15 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),nomeDestinoEsperado,"A revisão conserva o destinatário resolvido fora das referências");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
   }
+  async function selecionarClienteDaReferencia() {
+    await clicar("Continuar");await etapa("Cliente");
+    assert.equal(await avaliar('document.body.innerText.includes("Somente clientes da carteira do seu vendedor")'),true);
+    await clicar("Buscar");
+    await ate(()=>avaliar<boolean>('document.querySelector("select")?.options.length===2'),"Carteira da referência não carregou");
+    await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await clicar("Continuar");await etapa("Aplicativo");
+    await aguardarBotaoHabilitado("Continuar","Destino da referência não resolveu");
+  }
   for(const width of [360,390,1440]) for(const theme of ["light","dark"]) await t.test(`${width}px ${theme}`,async () => {
     await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
     await navegar(`${url}?tema=${theme}`);
@@ -194,17 +203,21 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await avaliar('{const s=document.querySelector("select");s.value="20";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");await etapa("Cliente");assert.equal(await avaliar('document.querySelector("select").value'),"");
   });
-  await t.test("padrão próprio sem vínculo mantém o seletor e permite escolher o fornecedor", async () => {
+  const matrizFornecedor = "00000000-0000-0000-0000-000000000004";
+  const filialA = "00000000-0000-0000-0000-000000000005";
+  const filialB = "00000000-0000-0000-0000-000000000007";
+  await t.test("padrão próprio sem vínculo mantém o seletor e permite escolher uma filial do fornecedor", async () => {
     await navegar(`${url}?fornecedor=1&padraoSemVinculo=1`);
     await etapa("Vendedor");
     await ate(()=>avaliar<boolean>('Boolean(document.querySelector("select")) && document.body.innerText.includes("sem vínculo")'),"Seletor não apareceu com a referência própria indisponível");
     assert.equal(await avaliar(`${botao("Continuar")}.disabled`),true);
-    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await avaliar(`{const s=document.querySelector("select");s.value=${JSON.stringify(filialA)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
     await aguardarBotaoHabilitado("Continuar","Fornecedor autorizado não recuperou o fluxo");
     assert.equal(await avaliar('document.body.innerText.includes("sem vínculo")'),false);
-    assert.equal(await avaliar('document.querySelector("select").value'),"00000000-0000-0000-0000-000000000004");
+    assert.equal(await avaliar('document.querySelector("select").value'),filialA);
   });
-  for (const width of [360,1440]) for (const theme of ["light","dark"]) await t.test(`matriz com duas filiais oferece somente referência própria canônica e fornecedor, preserva itens e cria pedido externo em ${width}px ${theme}`, async () => {
+  for (const referenciaInicial of [filialA,filialB]) for (const width of [360,1440]) for (const theme of ["light","dark"]) await t.test(`filial ${referenciaInicial===filialA?"A":"B"} como referência preserva itens na troca e envia para a matriz em ${width}px ${theme}`, async () => {
+    const referenciaFinal = referenciaInicial===filialA?filialB:filialA;
     await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
     await navegar(`${url}?fornecedor=1&tema=${theme}`);
     await etapa("Vendedor");
@@ -212,38 +225,67 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await aguardarBotaoHabilitado("Continuar","Conta de referência não carregou");
     assert.deepEqual(await avaliar('[...document.querySelector("select").options].map(o=>o.value)'),[
       "00000000-0000-0000-0000-000000000002",
-      "00000000-0000-0000-0000-000000000004",
-    ],"A segunda filial própria não é uma referência autorizada pelo servidor");
+      filialA,filialB,
+    ],"A referência própria é preservada e a matriz fornecedora dá lugar às suas filiais");
+    assert.equal(await avaliar('[...document.querySelector("select").options].slice(1).every(o=>o.textContent.includes("Conta do fornecedor"))'),true);
+    assert.equal(await avaliar('document.body.innerText.includes("fila da matriz fornecedora")'),true);
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
-    await avaliar('{window.testeManual.falharCarteira=true;const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
-    await ate(()=>avaliar<boolean>('document.body.innerText.includes("sem vínculo")'),"Ausência do vínculo não bloqueou a referência");
+    await avaliar(`{window.testeManual.semVinculoAplicativoId=${JSON.stringify(referenciaInicial)};const s=document.querySelector("select");s.value=${JSON.stringify(referenciaInicial)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
+    await ate(()=>avaliar<boolean>('document.body.innerText.includes("Aguardando configuração de vendedor pelo fornecedor")'),"Ausência do vínculo na filial não bloqueou a referência");
     assert.equal(await avaliar(`${botao("Continuar")}.disabled`),true);
-    await avaliar('window.testeManual.falharCarteira=false'); await clicar("Atualizar conta");
-    await aguardarBotaoHabilitado("Continuar","Conta fornecedor não recuperou");
-    assert.equal(await avaliar('document.querySelector("select").value'),"00000000-0000-0000-0000-000000000004");
-    await clicar("Continuar"); await etapa("Cliente"); await clicar("Buscar");
-    await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Carteira não carregou");
-    await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
-    await clicar("Continuar"); await etapa("Aplicativo");
-    await aguardarBotaoHabilitado("Continuar","Destino do fornecedor não resolveu");
-    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial do fornecedor");
+    assert.equal(await avaliar('window.testeManual.consultas.some(q=>new URLSearchParams(q).get("recurso")==="clientes")'),false,"Sem vínculo não consulta carteira");
+    await avaliar(`{const s=document.querySelector("select");s.value=${JSON.stringify(referenciaFinal)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
+    await aguardarBotaoHabilitado("Continuar","A outra filial vinculada não recuperou o fluxo");
+    assert.equal(await avaliar('document.body.innerText.includes("Aguardando configuração")'),false);
+    assert.equal(await avaliar('document.body.innerText.includes("Vendedor vinculado · ID 120")'),referenciaFinal===filialB,"Cada filial usa seu próprio vendedor");
+    await avaliar(`{window.testeManual.semVinculoAplicativoId=null;const s=document.querySelector("select");s.value=${JSON.stringify(referenciaInicial)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
+    await aguardarBotaoHabilitado("Continuar","Filial com vínculo confirmado não recuperou");
+    await selecionarClienteDaReferencia();
+    assert.equal(await avaliar(`window.testeManual.consultas.some(q=>{const p=new URLSearchParams(q);return p.get("recurso")==="clientes"&&p.get("aplicativoId")===${JSON.stringify(referenciaInicial)};})`),true);
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial B do fornecedor","A referência não fixa o destinatário das regras");
     await clicar("Continuar"); await etapa("Itens"); await clicar("Adicionar item"); await preencher("Tecido","Oxford preservado");
     await clicar("Voltar");await clicar("Voltar");await clicar("Voltar");await etapa("Vendedor");
-    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000002";s.dispatchEvent(new Event("change",{bubbles:true}));}');
-    await aguardarBotaoHabilitado("Continuar","Referência própria não voltou");
-    await avaliar('{const s=document.querySelector("select");s.value="00000000-0000-0000-0000-000000000004";s.dispatchEvent(new Event("change",{bubbles:true}));}');
-    await aguardarBotaoHabilitado("Continuar","Referência fornecedor não voltou");
+    await avaliar(`{const s=document.querySelector("select");s.value=${JSON.stringify(referenciaFinal)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
+    await aguardarBotaoHabilitado("Continuar","Troca para a outra filial não carregou");
     await clicar("Continuar");await etapa("Cliente");assert.equal(await avaliar('document.querySelector("select").value'),"");
     await clicar("Buscar");await ate(()=>avaliar<boolean>('document.querySelector("select").options.length===2'),"Carteira nova não carregou");
     await avaliar('{const s=document.querySelector("select");s.value="30";s.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");await etapa("Aplicativo");await aguardarBotaoHabilitado("Continuar","Destino novo não resolveu");
     await clicar("Continuar");await etapa("Itens");assert.equal(await avaliar(`${campo("Tecido")}.value`),"Oxford preservado");
     await clicar("Continuar");await clicar("Continuar");await etapa("Revisão");
-    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial do fornecedor","A revisão conserva a filial externa fora das referências");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial B do fornecedor");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
     await clicar("Enviar para fila");await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Pedido externo não enfileirou");
-    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.matrizId'),"00000000-0000-0000-0000-000000000004");
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.matrizId'),matrizFornecedor);
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.referencia.aplicativoId'),referenciaFinal);
+    assert.equal(await avaliar('window.testeManual.envios[0].origemManual.aplicativoId'),referenciaFinal);
+    assert.equal(await avaliar('window.testeManual.envios[0].origemManual.vendedor.id'),referenciaFinal===filialB?120:20);
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.destino.aplicativoId'),filialB);
+    assert.equal(await avaliar('window.testeManual.envios[0].aplicativoId'),filialB);
+    assert.equal(await avaliar('window.testeManual.envios[0].itens[0].tecidoNome'),"Oxford preservado");
+    assert.equal(await avaliar(`window.testeManual.consultas.some(q=>new URLSearchParams(q).get("aplicativoId")===${JSON.stringify(matrizFornecedor)})`),false,"As filiais não exigem consultar vendedor ou carteira da matriz");
     assert.equal(await avaliar('document.querySelector("a[href*=fila-pedidos]")===null'),true);
+  });
+  for (const width of [360,1440]) for (const theme of ["light","dark"]) await t.test(`fornecedor sem filiais usa a matriz como referência e destino em ${width}px ${theme}`,async () => {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
+    await navegar(`${url}?fornecedor=1&fornecedorSemFiliais=1&tema=${theme}`);
+    await aguardarBotaoHabilitado("Continuar","Referências sem filiais não carregaram");
+    assert.deepEqual(await avaliar('[...document.querySelector("select").options].map(o=>o.value)'),[
+      "00000000-0000-0000-0000-000000000002",matrizFornecedor,
+    ]);
+    await avaliar(`{const s=document.querySelector("select");s.value=${JSON.stringify(matrizFornecedor)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
+    await aguardarBotaoHabilitado("Continuar","Matriz sem filiais não carregou");
+    await selecionarClienteDaReferencia();
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"MV Tecidos fornecedor com nome longo");
+    await clicar("Continuar");await etapa("Itens");await clicar("Adicionar item");await preencher("Tecido","Oxford matriz");
+    await clicar("Continuar");await etapa("Dados comerciais");await clicar("Continuar");await etapa("Revisão");
+    assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"MV Tecidos fornecedor com nome longo");
+    assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
+    await clicar("Enviar para fila");await ate(()=>avaliar<boolean>('document.body.innerText.includes("Pedido registrado na fila")'),"Matriz sem filiais não enfileirou");
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.matrizId'),matrizFornecedor);
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.referencia.aplicativoId'),matrizFornecedor);
+    assert.equal(await avaliar('window.testeManual.envios[0].fornecedorManual.destino.aplicativoId'),matrizFornecedor);
+    assert.equal(await avaliar('window.testeManual.envios[0].selecoes.vendedorId'),20);
   });
   assert.deepEqual(cdp.erros,[]);
 });

@@ -28,9 +28,12 @@ um vínculo nativo em externo. Encerrar o fornecedor preserva os vínculos nativ
   O protocolo nativo mantém exclusão e inserção em statements separados sob o
   lock do usuário; o trigger que versiona cada statement conserva a geração
   entre eles, sem acrescentar campo ao contrato público.
-- Criar pedido na fila permite selecionar uma matriz fornecedora ativa como referência.
-  Referência e destino exigem vendedor confirmado, com carteira filtrada. Sem vínculo,
-  o fluxo externo fica bloqueado; não há fallback para consulta geral.
+- Criar pedido na fila oferece as filiais diretas do fornecedor como referência;
+  a matriz é oferecida quando o fornecedor não tem filiais. O cadastro do fornecedor
+  continua ligado à matriz, que recebe a fila e define as regras de direcionamento.
+  Referência e destino exigem vendedor confirmado em cada conta, com carteira filtrada.
+  Não é necessário um vínculo na matriz para usar uma filial confirmada. Sem vínculo
+  na conta escolhida, o fluxo externo fica bloqueado; não há consulta geral como fallback.
 - O pedido continua `MANUAL`, com autor e aplicativo solicitante do cliente,
   fornecedor cadastrado e matriz destinatária do fornecedor. Suas regras decidem
   a conta Olist final. O despacho usa `EnvioPedidoManual`, sem inventar solicitação

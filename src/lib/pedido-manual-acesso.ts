@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import { resolverVendedorConsultaOlist } from "@/lib/olist-escopo-vendedor";
@@ -10,23 +11,49 @@ import { obterVinculoVendedorDoUsuario } from "@/lib/usuario-vendedor-olist";
 export type ReferenciaAplicativoManual = { id: string; nome: string; fornecedorId?: string };
 
 export async function listarReferenciasPedidoManual(aplicativoId: string): Promise<ReferenciaAplicativoManual[]> {
-  const [internos, fornecedores] = await Promise.all([
-    prisma.aplicativo.findMany({ where: { OR: [{ id: aplicativoId }, { aplicativoPaiId: aplicativoId }] },
-      select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }], take: 1001 }),
-    prisma.fornecedor.findMany({ where: { aplicativoId, ativo: true, aplicativoPai: { aplicativoPaiId: null } },
-      select: { id: true, aplicativoPai: { select: { id: true, nome: true } } },
-      orderBy: [{ aplicativoPaiId: "asc" }, { id: "asc" }], take: 1001 }),
-  ]);
-  if (internos.length > 1000 || fornecedores.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.", 409);
-  const filhos = internos.filter(a => a.id !== aplicativoId);
-  const opcoes: ReferenciaAplicativoManual[] = [...(filhos.length ? filhos : internos)];
-  const ids = new Set(opcoes.map(a => a.id));
-  for (const fornecedor of fornecedores) if (!ids.has(fornecedor.aplicativoPai.id)) {
-    ids.add(fornecedor.aplicativoPai.id);
-    opcoes.push({ ...fornecedor.aplicativoPai, fornecedorId: fornecedor.id });
-  }
-  if (opcoes.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.", 409);
-  return opcoes;
+  // As três leituras compartilham a hierarquia vigente: uma matriz não pode ser
+  // apresentada como conta única por misturar o cadastro e as filiais de instantes diferentes.
+  return prisma.$transaction(async tx => {
+    const [internos, fornecedores] = await Promise.all([
+      tx.aplicativo.findMany({ where: { OR: [{ id: aplicativoId }, { aplicativoPaiId: aplicativoId }] },
+        select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }], take: 1001 }),
+      tx.fornecedor.findMany({ where: { aplicativoId, ativo: true, aplicativoPai: { aplicativoPaiId: null } },
+        select: { id: true, aplicativoPai: { select: { id: true, nome: true } } },
+        orderBy: [{ aplicativoPaiId: "asc" }, { id: "asc" }], take: 1001 }),
+    ]);
+    if (internos.length > 1000 || fornecedores.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.", 409);
+    const porMatriz = new Map<string, typeof fornecedores[number]>();
+    for (const fornecedor of fornecedores) if (!porMatriz.has(fornecedor.aplicativoPai.id)) {
+      porMatriz.set(fornecedor.aplicativoPai.id, fornecedor);
+    }
+    const filiais = porMatriz.size ? await tx.aplicativo.findMany({
+      where: { aplicativoPaiId: { in: [...porMatriz.keys()] } },
+      select: { id: true, nome: true, aplicativoPaiId: true },
+      orderBy: [{ aplicativoPaiId: "asc" }, { nome: "asc" }, { id: "asc" }], take: 1001,
+    }) : [];
+    if (filiais.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.", 409);
+    const filhosPorMatriz = new Map<string, Array<{ id: string; nome: string }>>();
+    for (const filial of filiais) {
+      if (filial.aplicativoPaiId === null) continue;
+      const grupo = filhosPorMatriz.get(filial.aplicativoPaiId) ?? [];
+      grupo.push({ id: filial.id, nome: filial.nome });
+      filhosPorMatriz.set(filial.aplicativoPaiId, grupo);
+    }
+    const filhos = internos.filter(a => a.id !== aplicativoId);
+    const opcoes: ReferenciaAplicativoManual[] = [...(filhos.length ? filhos : internos)];
+    // Inclui também o aplicativo próprio omitido pela regra canônica. Reintroduzi-lo
+    // como fornecedor faria a autorização nativa encaminhar o pedido à fila errada.
+    const ids = new Set(internos.map(a => a.id));
+    for (const fornecedor of porMatriz.values()) {
+      const contas = filhosPorMatriz.get(fornecedor.aplicativoPai.id) ?? [fornecedor.aplicativoPai];
+      for (const conta of contas) if (!ids.has(conta.id)) {
+        ids.add(conta.id);
+        opcoes.push({ ...conta, fornecedorId: fornecedor.id });
+      }
+    }
+    if (opcoes.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.", 409);
+    return opcoes;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 10000 });
 }
 
 export async function autorizarPedidoManual(request: Request) {

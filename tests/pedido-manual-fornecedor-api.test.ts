@@ -10,9 +10,12 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
   const clienteId = id(2), matrizId = id(3), outroId = id(4), autorId = id(1), fornecedorId = id(5);
+  const filialA=id(6),filialB=id(7),neto=id(8);
   const autor = { id: autorId, aplicativoId: clienteId, ativo: true, podeCriarOlistPedido: true,
     podeGerenciarFilaPedidos: true, vinculosOlistVersao: 1, podeSelecionarFilialFornecedor: false };
   let ativo = true, vinculado = true, revisao = 1, carteira = 20, consultas = 0, padraoIndisponivel = false;
+  let comFiliais=false,vinculoMatriz=true;
+  const regrasConsultadas:string[]=[];
   let alterarNoTx: (() => void) | null = null;
   const filas: Array<Record<string, unknown>> = [];
   const locks: string[] = [];
@@ -29,21 +32,32 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
     aplicativo: {
       findFirst: async ({ where }: { where: { id?: string; aplicativoPaiId?: string; OR?: Array<{ id?: string }> } }) =>
         where.id === clienteId && where.OR?.some(a => a.id === clienteId) ? { id: clienteId, nome: "Meuryshop" } : null,
-      findMany: async ({ where }: { where: { OR?: unknown; aplicativoPaiId?: string } }) => where.OR ? [{ id: clienteId, nome: "Meuryshop" }] : [],
-      findUnique: async ({ where }: { where: { id: string } }) => [clienteId, matrizId, outroId].includes(where.id)
-        ? { id: where.id, nome: where.id === matrizId ? "MV Tecidos" : "Meuryshop", aplicativoPaiId: null, olistClientId: "fake", olistClientSecret: "fake" } : null,
+      findMany: async ({ where }: { where: { OR?: unknown; aplicativoPaiId?: string|{in:string[]} } }) => {
+        if(where.OR)return [{id:clienteId,nome:"Meuryshop"}];
+        const pais=typeof where.aplicativoPaiId==="string"?[where.aplicativoPaiId]:where.aplicativoPaiId?.in??[];
+        return comFiliais&&pais.includes(matrizId)?[
+          {id:filialA,nome:"MV A",aplicativoPaiId:matrizId},{id:filialB,nome:"MV B",aplicativoPaiId:matrizId},
+        ]:[];
+      },
+      findUnique: async ({ where }: { where: { id: string } }) => [clienteId, matrizId, outroId,filialA,filialB,neto].includes(where.id)
+        ? { id: where.id, nome: where.id === matrizId ? "MV Tecidos" : where.id===filialA?"MV A":where.id===filialB?"MV B":"Meuryshop",
+          aplicativoPaiId:[filialA,filialB].includes(where.id)?matrizId:where.id===neto?filialA:null, olistClientId: "fake", olistClientSecret: "fake" } : null,
     },
     usuarioVendedorOlist: { findFirst: async ({ where }: { where: { usuarioId: string; aplicativoId?: string } }) =>
-      ativo && vinculado && where.usuarioId === autorId && where.aplicativoId === matrizId
-        ? { vendedorOlistId: 20, revisao, origemAplicativoId: clienteId, fornecedorMatrizId: matrizId }
+      ativo && vinculado && where.usuarioId === autorId && (where.aplicativoId === matrizId&&vinculoMatriz||comFiliais&&[filialA,filialB].includes(where.aplicativoId??""))
+        ? { vendedorOlistId: where.aplicativoId===filialB?120:20, revisao, origemAplicativoId: clienteId, fornecedorMatrizId: matrizId }
         : !where.aplicativoId && padraoIndisponivel ? { vendedorOlistId: 99, revisao: 1, origemAplicativoId: null, fornecedorMatrizId: null } : null },
-    integracaoOlistToken: { findUnique: async () => ({ accessToken: "fake", expiresAt: new Date(Date.now() + 3600_000) }) },
+    integracaoOlistToken: { findUnique: async ({where}:{where:{aplicativoId_provider:{aplicativoId:string}}}) => ({ accessToken: where.aplicativoId_provider.aplicativoId, expiresAt: new Date(Date.now() + 3600_000) }) },
+    direcionamentoPedidos:{findUnique:async({where}:{where:{aplicativoPaiId:string}})=>{
+      regrasConsultadas.push(where.aplicativoPaiId);
+      return comFiliais&&where.aplicativoPaiId===matrizId?{versao:7,aplicativoPadraoId:filialB,regras:[]}:null;
+    }},
     pedidoFornecedorQueue: {
       findFirst: async ({ where }: { where: { id?: string; autorId: string; aplicativoSolicitanteId: string; chaveIdempotencia?: string } }) => filas.find(f =>
         f.autorId === where.autorId && f.aplicativoSolicitanteId === where.aplicativoSolicitanteId &&
         (where.id ? f.id === where.id : f.chaveIdempotencia === where.chaveIdempotencia)) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const fila = { ...data, id: id(30 + filas.length), createdAt: new Date(), aplicativoFilial: { id: matrizId, nome: "MV Tecidos" } };
+        const fila = { ...data, id: id(30 + filas.length), createdAt: new Date(), aplicativoFilial: { id: data.aplicativoFilialId, nome: "MV Tecidos" } };
         filas.push(fila); return fila;
       },
       updateMany: async () => ({ count: 1 }),
@@ -59,23 +73,25 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
       const texto = sql.join("?");
       if (texto.includes("fornecedor_relacao_bloquear")) { locks.push("relacao"); return []; }
       if (texto.includes("FROM usuario")) { locks.push("usuario"); return [{ id: autorId }]; }
+      if (texto.includes("FROM direcionamento_pedidos")) return [{versao:7,aplicativoPadraoId:filialB}];
       if (texto.includes("FROM aplicativo")) return [{ id: values[0] }];
       return [];
     },
   };
-  Object.assign(globalThis, { prisma: { ...tx, $transaction: async (fn: (db: typeof tx) => unknown) => {
-    if (alterarNoTx) { const mudar = alterarNoTx; alterarNoTx = null; mudar(); }
+  Object.assign(globalThis, { prisma: { ...tx, $transaction: async (fn: (db: typeof tx) => unknown,opcoes?:{isolationLevel?:string}) => {
+    if (alterarNoTx&&!opcoes?.isolationLevel) { const mudar = alterarNoTx; alterarNoTx = null; mudar(); }
     return fn(tx);
   } } });
   const { supabaseAdmin } = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: autorId, email: "manual@example.test" } }, error: null }));
-  t.mock.method(axios, "get", async (url: string) => {
+  t.mock.method(axios, "get", async (url: string,config:{headers:{Authorization:string}}) => {
     consultas++;
     const u = new URL(url);
-    const cliente = { id: 30, nome: "Cliente", cpfCnpj: "04252011000110", situacao: "A", vendedor: { id: carteira }, endereco: { uf: "MG" } };
-    const vendedor = { id: 20, situacao: "A", contato: { id: 40, nome: "Vendedor", cpfCnpj: "52998224725", codigo: "V20" } };
+    const destinoB=comFiliais&&config.headers.Authorization===`Bearer ${filialB}`;
+    const cliente = { id: destinoB?130:30, nome: "Cliente", cpfCnpj: "04252011000110", situacao: "A", vendedor: { id: destinoB&&carteira===20?120:carteira }, endereco: { uf: "MG" } };
+    const vendedor = { id: destinoB?120:20, situacao: "A", contato: { id: 40, nome: "Vendedor", cpfCnpj: "52998224725", codigo: "V20" } };
     const data = u.pathname.endsWith("/vendedores") ? { itens: [vendedor], paginacao: { total: 1 } }
-      : u.pathname.endsWith("/contatos/30") ? cliente : { itens: [cliente], paginacao: { total: 1 } };
+      : /\/contatos\/(30|130)$/.test(u.pathname) ? cliente : { itens: [cliente], paginacao: { total: 1 } };
     return { status: 200, data, headers: { "content-type": "application/json" } };
   });
   t.mock.method(axios, "post", async () => { throw new Error("Incluir na fila não chama Olist POST"); });
@@ -83,13 +99,13 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
   const req = (query = "", body?: unknown) => new Request(`https://example.test/manual?${query}`, {
     method: body ? "POST" : "GET", headers: { Authorization: "Bearer fake" }, ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  const resolver = () => GET(req(`acao=resolver&aplicativoOrigemId=${matrizId}&vendedorOrigemId=20&clienteOrigemId=30`));
-  const montar = async (chave = id(20)) => {
-    const response = await resolver(); assert.equal(response.status, 200, await response.clone().text());
+  const resolver = (referenciaId=matrizId) => GET(req(`acao=resolver&aplicativoOrigemId=${referenciaId}&vendedorOrigemId=20&clienteOrigemId=30`));
+  const montar = async (chave = id(20),referenciaId=matrizId) => {
+    const response = await resolver(referenciaId); assert.equal(response.status, 200, await response.clone().text());
     const resolucao = resolucaoPedidoManualSchema.parse(await response.json());
     return pedidoManualSchema.parse({ versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao,
-      fornecedorManual: resolucao.fornecedorManual, chaveIdempotencia: chave, aplicativoId: matrizId, observacao: null,
-      selecoes: { clienteId: 30, vendedorId: 20 }, itens: [{ id: id(21), tecidoNome: "Oxford", quantidade: 10,
+      fornecedorManual: resolucao.fornecedorManual, chaveIdempotencia: chave, aplicativoId: resolucao.decisao.aplicativoId, observacao: null,
+      selecoes: { clienteId: resolucao.selecoes.clienteId, vendedorId: resolucao.selecoes.vendedorId }, itens: [{ id: id(21), tecidoNome: "Oxford", quantidade: 10,
         quantidadeTecido: 2, estampa: "A", variante: null, tamanho: "30x30", tipoProduto: "Lenço", corteLaser: false }] });
   };
   await t.test("opções incluem fornecedor ativo; padrão próprio e projeção mínima são preservados", async () => {
@@ -163,5 +179,49 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
     const resultado = await enviarPedidoManual({ ...contexto, guardaReferencia: guardaReferenciaFilaManual(autor, body.origemManual, confirmada) });
     assert.equal(resultado.status, "CONCLUIDO"); assert.equal(posts, 1);
     assert.equal(envio?.usuarioId, operadorId); assert.equal(envio?.estado, "CONCLUIDO");
+  });
+  await t.test("filiais do fornecedor viram referências sem vínculo na matriz; regra e fila continuam pertencendo à matriz",async()=>{
+    const antigo=await montar(id(24));
+    assert.equal((await POST(req("",antigo))).status,201);
+    comFiliais=true;vinculoMatriz=false;
+    try {
+      const inicial=await (await GET(req())).json();
+      assert.deepEqual(inicial.aplicativos,[{id:clienteId,nome:"Meuryshop"},{id:filialA,nome:"MV A",fornecedorId},{id:filialB,nome:"MV B",fornecedorId}]);
+      assert.equal(inicial.aplicativoPadraoId,clienteId);
+      for(const [app,vendedorId] of [[filialA,20],[filialB,120]] as const){
+        const selecionada=await GET(req(`aplicativoId=${app}`));assert.equal(selecionada.status,200);
+        assert.equal((await selecionada.json()).vendedorId,vendedorId);
+      }
+      const semConsulta=consultas;
+      assert.equal((await GET(req(`aplicativoId=${matrizId}&recurso=clientes`))).status,403);
+      assert.equal((await GET(req(`aplicativoId=${neto}&recurso=clientes`))).status,403);
+      vinculado=false;
+      assert.equal((await GET(req(`aplicativoId=${filialA}&recurso=clientes`))).status,403);
+      assert.equal((await resolver(filialA)).status,403);
+      assert.equal(consultas,semConsulta,"sem vínculo na referência não há consulta de cadastros");
+      vinculado=true;
+      regrasConsultadas.length=0;
+      const body=await montar(id(25),filialA);
+      assert.equal(body.decisaoDirecionamento.tipo,"PADRAO");assert.equal(body.decisaoDirecionamento.versao,7);
+      assert.equal(body.aplicativoId,filialB);
+      assert.deepEqual(body.selecoes,{clienteId:130,vendedorId:120});
+      assert.equal(body.fornecedorManual?.matrizId,matrizId);
+      assert.equal(body.fornecedorManual?.referencia.aplicativoId,filialA);
+      assert.equal(body.fornecedorManual?.destino.aplicativoId,filialB);
+      assert.ok(regrasConsultadas.length>0&&regrasConsultadas.every(app=>app===matrizId));
+      const salva=await POST(req("",body));assert.equal(salva.status,201,await salva.clone().text());
+      const fila=filas.at(-1)!;
+      assert.equal(fila.aplicativoFornecedorId,matrizId);assert.equal(fila.aplicativoFilialId,filialB);
+      assert.equal(fila.aplicativoSolicitanteId,clienteId);assert.equal(fila.autorId,autorId);assert.equal(fila.tipoOrigem,"MANUAL");
+      assert.equal(fila.fornecedorId,fornecedorId);
+      const antesReplay=consultas;
+      assert.equal((await POST(req("",antigo))).status,200);
+      assert.equal(consultas,antesReplay,"aceite histórico com referência matriz permanece recuperável");
+      vinculoMatriz=true;
+      const {validarReferenciaPersistidaPedidoManual}=await import("../src/lib/pedido-manual-correspondencia");
+      assert.equal((await validarReferenciaPersistidaPedidoManual(autor,antigo.origemManual,matrizId,antigo.selecoes)).vendedorId,20,
+        "referência persistida na matriz continua revalidada quando surgem filiais");
+      assert.equal((await resolver()).status,403,"matriz omitida não pode virar nova referência por URL adulterada");
+    }finally {comFiliais=false;vinculoMatriz=true;vinculado=true;}
   });
 });
