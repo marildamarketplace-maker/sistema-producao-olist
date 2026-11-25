@@ -175,7 +175,19 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
   }
   async function contatosPorIdentidade(app: string, ref: PessoaReferencia, consultar: Consultar) {
     const filtros: Record<string, string> = ref.cpfCnpj !== null ? { cpfCnpj: ref.cpfCnpj } : { nome: ref.nome };
-    const p = pagina(await consultar(app, "contatos", { ...filtros, limit: String(LIMITE_PAGINA), offset: "0" }), true);
+    let p = pagina(await consultar(app, "contatos", { ...filtros, limit: String(LIMITE_PAGINA), offset: "0" }), true);
+    // Algumas pesquisas podem depender da representação armazenada no ERP.
+    // Só tente a máscara quando a consulta canônica não retornar registros;
+    // identidade e unicidade continuam sendo conferidas abaixo.
+    if (p.total === 0 && ref.cpfCnpj !== null) {
+      const doc = ref.cpfCnpj;
+      const formatado = /^\d{11}$/.test(doc)
+        ? doc.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4")
+        : /^\d{14}$/.test(doc) ? doc.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") : doc;
+      if (formatado !== doc) p = pagina(await consultar(app, "contatos", {
+        cpfCnpj: formatado, limit: String(LIMITE_PAGINA), offset: "0",
+      }), true);
+    }
     const encontrados: Record<string, unknown>[] = [];
     for (const resumo of p.itens) {
       const cadastro = Object.hasOwn(resumo, "cpfCnpj") ? resumo : await detalheCliente(app, idRemoto(resumo.id), consultar);

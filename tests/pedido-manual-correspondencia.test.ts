@@ -135,6 +135,27 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     (d.vendedor(destino).contato as Cadastro).cpfCnpj = docCliente;
     await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /outra pessoa/);
   });
+  await t.test("pesquisa vazia por documento tenta máscara e mantém identidade, unicidade e carteira", async () => {
+    const d = dados();
+    const consultar = d.deps.consultar;
+    d.deps.consultar = async (app, caminho, parametros, timeout) => {
+      if (app === destino && caminho === "contatos" && parametros.cpfCnpj) {
+        const resposta = await consultar(app, caminho, { ...parametros, cpfCnpj: docCliente }, timeout);
+        if (parametros.cpfCnpj === docCliente) return { itens: [], paginacao: { total: 0 } };
+        assert.equal(parametros.cpfCnpj, "04.252.011/0001-10");
+        return resposta;
+      }
+      return consultar(app, caminho, parametros, timeout);
+    };
+    const { servico } = criar(d); const ref = await referencia(servico);
+    assert.equal((await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino)).clienteId, 41);
+    d.contatos.get(destino)!.push({ ...d.cliente(destino), id: 42 });
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /mais de um cliente/);
+    d.contatos.get(destino)!.pop(); d.cliente(destino).vendedor = { id: 999 };
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /vendedor vinculado/);
+    d.cliente(destino).cpfCnpj = "OUTRO";
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino), /Cliente não encontrado/);
+  });
   await t.test("sem vínculo em nenhuma conta permite seleção livre, preservando permissões", async () => {
     const { d, servico } = criar(); d.vinculos.clear();
     d.cliente().vendedor = { id: 999 }; d.cliente(destino).vendedor = { id: 999 };
