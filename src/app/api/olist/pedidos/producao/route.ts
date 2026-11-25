@@ -1,3 +1,4 @@
+import { exigirComerciaisCriacao, detalharErrosFilaOlist } from "@/lib/fila-olist-validacao";
 import { consultarEstampasPedido } from "@/lib/estampas-pedido";
 import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
@@ -29,7 +30,7 @@ function falha(error: unknown) {
   if (error instanceof ErroMetragemPedido) return resposta({ error: error.message, codigo: error.codigo }, error.status);
   if (error instanceof ErroContextoConsultaProducao) return resposta({ error: error.message, codigo: "CONTEXTO_CONSULTA_EXPIRADO" }, 409);
   if (error instanceof ErroFilaOlist || error instanceof ErroAutorizacaoOlist || error instanceof ErroDirecionamentoPedidos) return resposta({ error: error.message }, error.status);
-  if (error instanceof z.ZodError) return resposta({ error: "Revise vendedor, cliente, itens e dados comerciais." }, 400);
+  if (error instanceof z.ZodError) { const detalhes = detalharErrosFilaOlist(error); return resposta(Object.keys(detalhes.campos).length ? detalhes : { error: "Revise vendedor, cliente, itens e dados comerciais." }, 400); }
   return resposta({ error: "Não foi possível concluir a operação. Confira a integração e tente novamente." }, 502);
 }
 async function autorizar(request: Request) {
@@ -168,6 +169,7 @@ export async function POST(request: Request) {
       hash: createHash("sha256").update(JSON.stringify(entrada)).digest("hex") };
     const existente = await recuperar(confirmacao);
     if (existente) return existente;
+    exigirComerciaisCriacao(entrada.selecoes, entrada.itens.some(i => i.corteLaser));
     exigirEmProducao(solicitacao.status);
     const resolucao = await resolver(usuario, { aplicativoOrigemId: entrada.origemManual.aplicativoId,
       vendedorOrigemId: entrada.origemManual.vendedor.id, clienteOrigemId: entrada.origemManual.cliente.id });

@@ -105,7 +105,7 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
     const resolucao = resolucaoPedidoManualSchema.parse(await response.json());
     return pedidoManualSchema.parse({ versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao,
       fornecedorManual: resolucao.fornecedorManual, chaveIdempotencia: chave, aplicativoId: resolucao.decisao.aplicativoId, observacao: null,
-      selecoes: { clienteId: resolucao.selecoes.clienteId, vendedorId: resolucao.selecoes.vendedorId }, itens: [{ id: id(21), tecidoNome: "Oxford", quantidade: 10,
+      selecoes: { clienteId: resolucao.selecoes.clienteId, vendedorId: resolucao.selecoes.vendedorId, formaId: 40, planoId: id(70) }, itens: [{ id: id(21), tecidoNome: "Oxford", quantidade: 10,
         quantidadeTecido: 2, estampa: "A", variante: null, tamanho: "30x30", tipoProduto: "Lenço", corteLaser: false }] });
   };
   await t.test("opções incluem fornecedor ativo; padrão próprio e projeção mínima são preservados", async () => {
@@ -204,7 +204,7 @@ test("manual externo: fornecedor é referência e dono da fila, sem conceder ges
       const body=await montar(id(25),filialA);
       assert.equal(body.decisaoDirecionamento.tipo,"PADRAO");assert.equal(body.decisaoDirecionamento.versao,7);
       assert.equal(body.aplicativoId,filialB);
-      assert.deepEqual(body.selecoes,{clienteId:130,vendedorId:120});
+      assert.deepEqual(body.selecoes,{clienteId:130,vendedorId:120,formaId:40,planoId:id(70)});
       assert.equal(body.fornecedorManual?.matrizId,matrizId);
       assert.equal(body.fornecedorManual?.referencia.aplicativoId,filialA);
       assert.equal(body.fornecedorManual?.destino.aplicativoId,filialB);

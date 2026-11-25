@@ -1,5 +1,6 @@
 "use client";
 
+import { errosComerciaisCriacao, type ErrosComerciaisFila } from "@/lib/fila-olist-validacao";
 import Link from "next/link";
 import { consultarDirecionamentoCliente } from "@/lib/consultar-direcionamento-cliente";
 import { RevisaoProdutosPedido } from "@/components/revisao-produtos-pedido";
@@ -44,6 +45,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   const [erroResolucao, setErroResolucao] = useState("");
   const [revisaoResolucao, setRevisaoResolucao] = useState(0);
   const [etapa, setEtapa] = useState(0);
+  const [errosComerciais, setErrosComerciais] = useState<ErrosComerciaisFila>({});
   const [carregando, setCarregando] = useState(true);
   const [contaPronta, setContaPronta] = useState(false);
   const [falhaCargaConta, setFalhaCargaConta] = useState<"lista" | "vendedor" | null>(null);
@@ -263,11 +265,25 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     }
     return true;
   }
+  function validarCamposComerciais() {
+    const campos = errosComerciaisCriacao(selecoes, itens.some(i => i.corteLaser));
+    setErrosComerciais(campos);
+    if (Object.keys(campos).length) { setErro(""); setEtapa(4); return false; }
+    return true;
+  }
+  useEffect(() => {
+    if (etapa !== 4) return;
+    const chave = Object.keys(errosComerciais)[0];
+    const grupo = [...document.querySelectorAll<HTMLElement>("[data-campo-comercial]")].find(el => el.dataset.campoComercial === chave);
+    const campo = grupo?.querySelector<HTMLElement>("select, [aria-expanded], input, button");
+    campo?.focus(); campo?.scrollIntoView({ block: "nearest" });
+  }, [errosComerciais, etapa]);
   function avancar() {
     setErro("");
     if (etapa === 0 && !vendedor?.id) { setErro("Selecione o vendedor."); return; }
     if (etapa === 1 && !cliente?.id) { setErro("Selecione o cliente."); return; }
     if (etapa === 2 && (!resolucao || resolvendo || Boolean(erroResolucao))) { setErro("Aguarde ou atualize a resolução do aplicativo."); return; }
+    if (etapa >= 4 && !validarCamposComerciais()) return;
     if (etapa >= 3) {
       if (!validarCamposItens()) return;
       try { montarEntrada(); } catch (e) { setErro(e instanceof Error ? e.message : "Revise os itens."); return; }
@@ -304,6 +320,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
           return;
         }
         const revisarMetragem = response.status === 409 && d.codigo === "ITENS_METRAGEM_DESATUALIZADA";
+        const camposComerciais = response.status === 400 ? errosComerciaisCriacao(entrada.selecoes, entrada.itens.some(i => i.corteLaser)) : {};
+        const revisarComerciais = Object.keys(camposComerciais).length > 0;
         if (response.status < 500) {
           // Uma tentativa recuperada após reload também devolve seus campos para correção.
           const origem = "origemManual" in entrada ? entrada.origemManual : null;
@@ -311,8 +329,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
           if (origem) setReferenciaId(origem.aplicativoId);
           setItens(entrada.itens); origemCarregada.current = true;
           if ("revisaoProducao" in entrada) setRevisaoProducao(entrada.revisaoProducao);
-          setObservacao(entrada.observacao ?? ""); setEtapa(revisarMetragem ? 3 : 5);
-          if (revisarMetragem && "decisaoDirecionamento" in entrada) {
+          setObservacao(entrada.observacao ?? ""); setErrosComerciais(camposComerciais); setEtapa(revisarMetragem ? 3 : revisarComerciais ? 4 : 5);
+          if ((revisarMetragem || revisarComerciais) && "decisaoDirecionamento" in entrada) {
             setAplicativoId(entrada.aplicativoId);
             setResolucao(atual => atual ?? { referencia: entrada.origemManual, decisao: entrada.decisaoDirecionamento,
               ...(entrada.fornecedorManual ? { fornecedorManual: entrada.fornecedorManual } : {}),
@@ -408,14 +426,14 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoDuplicarGrupo={duplicarGrupo} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}
-        {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
+        {etapa === 4 && <><p className="text-sm text-slate-600">Selecione a forma e o plano de pagamento. Quando houver itens com corte a laser, selecione também o serviço e seu preço por metro.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} errosCampos={errosComerciais} aoAlterar={novas => { alterarSelecoesComerciais(novas); setErrosComerciais({}); }} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
         {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
           <RevisaoProdutosPedido itens={itens} produtos={selecoes.tecidos} />
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
           <button type="button" className={botao} disabled={etapa === 0 || enviando} onClick={() => { setErro(""); setEtapa(e => e - 1); }}>Voltar</button>
-          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta && validarCamposItens()) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
+          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta && validarCamposItens() && validarCamposComerciais()) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
         </div>
       </section>
     </>}

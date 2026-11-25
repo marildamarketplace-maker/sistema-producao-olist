@@ -48,6 +48,15 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     return { status: 200, data, headers: { "content-type": "application/json" } };
   });
   const { consultarCadastrosFilaOlist, validarSelecoesParciais, nome } = await import("../src/lib/fila-olist-cadastros");
+  await t.test("seletor de corte a laser lista GET /servicos da conta destinatária", async () => {
+    const antes = consultas.length;
+    const r = await consultarCadastrosFilaOlist("destino", new URLSearchParams({ recurso: "servicos", busca: "Corte", pagina: "2" }));
+    const chamadas = consultas.slice(antes);
+    assert.equal(chamadas.length, 1); assert.ok(chamadas[0].pathname.endsWith("/servicos"));
+    assert.equal(chamadas[0].searchParams.get("nome"), "Corte");
+    assert.equal(chamadas[0].searchParams.get("limit"), "50"); assert.equal(chamadas[0].searchParams.get("offset"), "50");
+    assert.deepEqual(r.itens.map(i => i.id), [40]);
+  });
   await t.test("cliente A e B aparecem na mesma página limitada e filtrada por vendedor", async () => {
     const r = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "clientes", pagina: "2", busca: "Ana" }), { vendedorId: 20 });
     assert.deepEqual(r.itens.map(i => i.id), [30, 31]);

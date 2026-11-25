@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { selecoesFilaOlistSchema } from "../src/lib/fila-olist-contrato";
-import { detalharErrosFilaOlist } from "../src/lib/fila-olist-validacao";
+import { detalharErrosFilaOlist, errosComerciaisCriacao, exigirComerciaisCriacao } from "../src/lib/fila-olist-validacao";
 const uuid = "00000000-0000-0000-0000-000000000001";
 const selecoes = { clienteId: 1, vendedorId: 2, formaId: 3, planoId: uuid, tipoVenda: "VENDA", tecidos: [{ tecidoId: uuid, id: 4, preco: 18.99 }], laser: null };
 test("identifica plano pendente tanto no contrato direto quanto no corpo da API", () => {
@@ -25,4 +25,13 @@ test("erro interno desconhecido não expõe valores, mensagens brutas ou caminho
   const erro = new z.ZodError([{ code: "custom", path: ["credencialInterna"], message: "TOKEN PRIVADO SQL" }]);
   const r = detalharErrosFilaOlist(erro);
   assert.deepEqual(r.campos, {}); assert.ok(!/TOKEN|SQL|credencialInterna/.test(JSON.stringify(r)));
+});
+
+test("criação exige forma/plano sempre e serviço/preço somente quando há laser", () => {
+  assert.deepEqual(Object.keys(errosComerciaisCriacao({}, false)), ["formaId", "planoId"]);
+  assert.deepEqual(errosComerciaisCriacao({ formaId: 1, planoId: uuid }, false), {});
+  assert.ok(errosComerciaisCriacao({ formaId: 1, planoId: uuid }, true).laser);
+  assert.ok(errosComerciaisCriacao({ formaId: 1, planoId: uuid, laser: { id: 2 } }, true)["laser.preco"]);
+  assert.deepEqual(errosComerciaisCriacao({ formaId: 1, planoId: uuid, laser: { id: 2, preco: 0 } }, true), {});
+  assert.throws(() => exigirComerciaisCriacao({ formaId: 1, planoId: uuid }, true), z.ZodError);
 });

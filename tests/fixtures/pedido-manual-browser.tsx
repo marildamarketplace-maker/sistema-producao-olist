@@ -69,6 +69,9 @@ window.fetch = async (input,init) => {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     return Response.json({conta:{id:query.get("aplicativoId"),nome:"Conta"},vendedorId:params.has("livre")?null:[id(2),id(4),id(5)].includes(query.get("aplicativoId")??"")?window.testeManual.vendedorAtual:query.get("aplicativoId")===id(7)?window.testeManual.vendedorAtual+100:21,vendedorFixo:!params.has("livre")});
   }
+  if (query.get("recurso") === "planos") return Response.json({ itens: [{ id: id(70), nome: "30/60" }] });
+  if (query.get("recurso") === "formas") return Response.json({ itens: [{ id: 40, nome: "Dinheiro" }], pagina: 1, mais: false });
+  if (query.get("recurso") === "servicos") return Response.json({ itens: [{ id: 50, nome: "Corte a laser A", preco: 2 }, { id: 51, nome: "Corte a laser B", preco: 3 }], pagina: 1, mais: false });
   const pagina=Number(query.get("pagina")??1);
   const produtos=[
     {id:6887,nome:"BASEITWILL FOURWAY 92%POLIESTER8% Ref. 6887",preco:15.99},

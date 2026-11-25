@@ -136,8 +136,15 @@ test("API de produção isola origem, preserva snapshot editado e reconcilia ten
   const resolucao = await resolucaoResponse.json();
   const entrada = { versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao, fornecedorManual: resolucao.fornecedorManual,
     chaveIdempotencia: id(80), aplicativoId: id(3), revisaoProducao: origem.revisao, observacao: "Editada",
-    selecoes: { clienteId: 30, vendedorId: 20 },
+    selecoes: { clienteId: 30, vendedorId: 20, formaId: 40, planoId: id(70), laser: { id: 50, preco: 2 } },
     itens: [{ ...origem.itens[0], quantidade: 9 }, { ...origem.itens[0], id: id(81), tecidoNome: "Novo", corteLaser: false }] };
+  await t.test("novo pedido de produção também exige plano e serviço laser", async () => {
+    for (const selecoes of [{ ...entrada.selecoes, planoId: undefined }, { ...entrada.selecoes, laser: undefined }]) {
+      const resposta = await POST(req("", { ...entrada, selecoes }));
+      assert.equal(resposta.status, 400); const erro = await resposta.json();
+      assert.ok(erro.campos.planoId || erro.campos.laser);
+    }
+  });
   await t.test("bloqueia origem/regra alterada, revogação durante transação e envio incerto", async () => {
     quantidade = 3; assert.equal((await POST(req("", entrada))).status, 409); quantidade = 2;
     revogarFilialTx = true; assert.equal((await POST(req("", entrada))).status, 409); revogarFilialTx = false;

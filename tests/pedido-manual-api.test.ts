@@ -76,7 +76,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
   const req = (query="",body?:unknown) => new Request(`https://example.test/api?${query}`,{method:body?"POST":"GET",headers:{Authorization:"Bearer fake"},...(body?{body:JSON.stringify(body)}:{})});
   const entrada = {versao:2,origemManual:{aplicativoId:id(3),vendedor:{id:20,nome:"Vendedor",cpfCnpj:null},cliente:{id:30,nome:"Cliente",cpfCnpj:documentoCliente,uf:null}},
     decisaoDirecionamento:{tipo:"PADRAO",regraId:null,regraNome:null,versao:1,aplicativoId:id(3),motivo:"Aplicativo padrão configurado pelo pai."},
-    chaveIdempotencia:id(4),aplicativoId:id(3),observacao:null,selecoes:{vendedorId:20,clienteId:30},itens:[{
+    chaveIdempotencia:id(4),aplicativoId:id(3),observacao:null,selecoes:{vendedorId:20,clienteId:30,formaId:40,planoId:id(7),laser:{id:50,preco:2}},itens:[{
     id:id(5),tecidoNome:"Oxford",quantidade:10,quantidadeTecido:2.5,estampa:"A",variante:null,tamanho:"30x30",tipoProduto:"Lenço",corteLaser:true}]};
   function registrarAceiteConcorrente(valor: unknown) {
     const parsed = pedidoManualSchema.parse(valor);
@@ -86,6 +86,15 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
       chaveIdempotencia:parsed.chaveIdempotencia,tipoOrigem:"MANUAL",dadosPedido:montarDadosPedidoManual(parsed) };
     registros.push(registro); return registro;
   }
+  await t.test("novos pedidos exigem plano e serviço laser antes de consultar cadastros", async () => {
+    const antes = consultas;
+    for (const selecoes of [{ ...entrada.selecoes, planoId: undefined }, { ...entrada.selecoes, laser: undefined }]) {
+      const resposta = await POST(req("", { ...entrada, selecoes }));
+      assert.equal(resposta.status, 400); const erro = await resposta.json();
+      assert.ok(erro.campos.planoId || erro.campos.laser);
+    }
+    assert.equal(consultas, antes);
+  });
   await t.test("exige sessão, usuário ativo e permissão",async () => {
     assert.equal((await GET(new Request("https://example.test"))).status,401);
     usuario.ativo=false; assert.equal((await GET(req())).status,401); usuario.ativo=true;

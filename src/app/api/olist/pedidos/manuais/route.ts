@@ -1,3 +1,4 @@
+import { exigirComerciaisCriacao, detalharErrosFilaOlist } from "@/lib/fila-olist-validacao";
 import { consultarEstampasPedido } from "@/lib/estampas-pedido";
 import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
@@ -33,7 +34,7 @@ async function recuperarConfirmacao({ where, hashEntrada }: ConfirmacaoManual) {
 function falha(error: unknown) {
   if (error instanceof ErroMetragemPedido) return resposta({ error: error.message, codigo: error.codigo }, error.status);
   if (error instanceof ErroFilaOlist || error instanceof ErroAutorizacaoOlist || error instanceof ErroDirecionamentoPedidos) return resposta({ error: error.message }, error.status);
-  if (error instanceof z.ZodError) return resposta({ error: "Revise vendedor, cliente, itens e dados comerciais." }, 400);
+  if (error instanceof z.ZodError) { const detalhes = detalharErrosFilaOlist(error); return resposta(Object.keys(detalhes.campos).length ? detalhes : { error: "Revise vendedor, cliente, itens e dados comerciais." }, 400); }
   return resposta({ error: "Não foi possível concluir a operação. Confira a integração e tente novamente." }, 502);
 }
 export async function GET(request: Request) {
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
     if (existente) return existente;
     if (!atual.success) throw new ErroFilaOlist("Atualize a página e revise a origem e o direcionamento do pedido.", 409);
     const entrada = atual.data;
+    exigirComerciaisCriacao(entrada.selecoes, entrada.itens.some(i => i.corteLaser));
     const contextoOrigem = await resolverContaPedidoManual(usuario, entrada.origemManual.aplicativoId);
     const matrizId = contextoOrigem.fornecedor?.matrizId ?? usuario.aplicativoId;
     const origem = await obterReferenciaPedidoManual(usuario, {
