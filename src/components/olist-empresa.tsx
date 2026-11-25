@@ -25,7 +25,7 @@ export function OlistPageHeader(props: Parameters<typeof PageHeader>[0]) {
   return <PageHeader {...props} actions={seletor} />;
 }
 
-export function OlistEmpresa({ children }: { children: ReactNode }) {
+export function OlistEmpresa({ children, contexto }: { children: ReactNode; contexto?: "pedidos" }) {
   const { session, usuario } = useAuth();
   const identidade = session?.user.id;
   const aplicativoUsuario = usuario?.aplicativo_id;
@@ -39,7 +39,7 @@ export function OlistEmpresa({ children }: { children: ReactNode }) {
     setErro(null);
     void (async () => {
       try {
-        const response = await fetch("/api/olist/empresas", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+        const response = await fetch(contexto === "pedidos" ? "/api/olist/empresas?contexto=pedidos" : "/api/olist/empresas", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
         const data = await response.json() as { empresas: Empresa[]; aplicativoId: string; error?: string };
         if (!response.ok) throw new Error(data.error ?? "Não foi possível consultar as empresas.");
         const salva = lerEmpresa(chaveEmpresa(identidade, aplicativoUsuario));
@@ -54,7 +54,7 @@ export function OlistEmpresa({ children }: { children: ReactNode }) {
       }
     })();
     return () => controller.abort();
-  }, [token, identidade, aplicativoUsuario, tentativa]);
+  }, [token, identidade, aplicativoUsuario, tentativa, contexto]);
   useEffect(() => {
     if (token && estado && estado.identidade === identidade && estado.aplicativoUsuario === aplicativoUsuario) {
       salvarEmpresa(chaveEmpresa(estado.identidade, estado.aplicativoUsuario), estado.aplicativoId);

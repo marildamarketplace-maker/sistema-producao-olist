@@ -24,6 +24,7 @@ Object.assign(window, { empresaTeste: estado });
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.href);
   estado.consultas.push(url.pathname + url.search);
+  if (url.pathname === "/api/olist/empresas" && params.has("fornecedor") && url.searchParams.get("contexto") === "pedidos") return Response.json({ aplicativoId: "matriz", empresas: [{ id: "matriz", nome: "Empresa cliente" }, { id: "fornecedor-filial", nome: "Filial do fornecedor" }] });
   if (url.pathname === "/api/olist/empresas") return Response.json({ aplicativoId: params.has("unica") ? "matriz" : "outra-filial", empresas: params.has("unica") ? [{ id: "matriz", nome: "Empresa única" }] : [{ id: "outra-filial", nome: "Filial com nome muito longo para testar o seletor" }, { id: "filial", nome: "Filial" }] });
   if (params.has("exportacao") && /^\/api\/olist\/pedidos\/\d+$/.test(url.pathname)) {
     return new Promise<Response>((resolve) => {

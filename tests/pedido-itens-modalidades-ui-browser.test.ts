@@ -29,7 +29,10 @@ test("pedido misto: modalidades, combinações, cálculo, ajuste e revisão em d
     await avaliar('{const e=document.querySelector("select");e.value="30";e.dispatchEvent(new Event("change",{bubbles:true}));}');
     await clicar("Continuar");
     await ate(() => avaliar<boolean>('!([...document.querySelectorAll("button")].find(b=>b.textContent==="Continuar").disabled)'), "Destino não resolveu");
-    await clicar("Continuar"); await clicar("Adicionar item"); await escolherModalidade(0, "Tecido sem estampa");
+    await clicar("Continuar"); await clicar("Adicionar item");
+    assert.equal(await avaliar(`document.querySelector("fieldset").querySelectorAll('button[aria-pressed="true"]').length`), 0, "Item novo não tem modalidade padrão");
+    assert.equal(await avaliar('document.querySelector("fieldset").querySelectorAll("input,select,textarea").length'), 0, "Formulário aguarda escolha explícita");
+    await escolherModalidade(0, "Tecido sem estampa");
     await preencher(0, "Tecido", "Oxford liso"); await preencher(0, "Quantidade de tecido", "2.5");
     assert.equal(await avaliar('[...document.querySelectorAll("fieldset")][0].innerText.includes("Quantidade de peças")'), false);
     assert.equal(await avaliar('[...document.querySelectorAll("fieldset")][0].querySelectorAll("input[type=checkbox]").length'), 0);

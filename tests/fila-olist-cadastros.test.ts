@@ -6,6 +6,7 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
   let clienteEstado = "B", vendedorEstado = "B", produtoEstado = "A", servicoEstado = "A", formaEstado: string | number = 1;
   const consultas: URL[] = [];
   const configuracoes: Array<AxiosRequestConfig | undefined> = [];
+  let simularFiltroNome = false;
   let paginaProdutos: Array<Record<string, unknown>> | null = null;
   Object.assign(globalThis, { prisma: {
     aplicativo: { findUnique: async () => ({ olistClientId: "fake", olistClientSecret: "fake" }) },
@@ -34,6 +35,15 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
       const situacao = p.includes("/contatos/") ? clienteEstado : p.includes("/produtos/") ? produtoEstado
         : p.includes("/servicos/") ? servicoEstado : formaEstado;
       data = { id: Number(p.split("/").at(-1)), nome: "Cadastro", situacao };
+    }
+    if (simularFiltroNome && p.endsWith("/produtos")) {
+      const filtro = (u.searchParams.get("nome") ?? "").toLocaleLowerCase("pt-BR");
+      const termo = filtro.replace(/^%|%$/g, "");
+      const itens = (paginaProdutos ?? []).filter(item => {
+        const texto = String(item.nome ?? item.descricao).toLocaleLowerCase("pt-BR");
+        return filtro.startsWith("%") && filtro.endsWith("%") ? texto.includes(termo) : texto.startsWith(termo);
+      });
+      data = { itens, paginacao: { total: itens.length } };
     }
     return { status: 200, data, headers: { "content-type": "application/json" } };
   });
@@ -77,6 +87,25 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     servicoEstado = "A"; formaEstado = "B";
     await assert.rejects(validarSelecoesParciais("conta", { formaId: 60 }), /inativos/);
   });
+  await t.test("catálogo pesquisa Ref no meio do nome sem varrer produtos sem referência", async () => {
+    simularFiltroNome = true;
+    paginaProdutos = [
+      { id: 501, situacao: "A", descricao: "BASE I BEMBER 100% POLIESTER Ref. 7391", precos: { preco: 10 } },
+      { id: 502, situacao: "A", descricao: "FOURWAY SUBLIME 3 95%POLI5%ELASTRef. 5168", precos: { preco: 18.99 } },
+      { id: 503, situacao: "A", descricao: "Tecido sem referência" },
+    ];
+    try {
+      for (const busca of ["ref", "Ref", " REF ", ""]) {
+        const antes = consultas.length;
+        const r = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca }));
+        assert.deepEqual(r.itens.map(i => i.id), [501, 502]);
+        assert.equal(consultas.length - antes, 1);
+        assert.equal(consultas.at(-1)!.searchParams.get("nome"), "%Ref%");
+        assert.equal(consultas.at(-1)!.searchParams.get("limit"), "50");
+        assert.equal(consultas.at(-1)!.searchParams.get("situacao"), "A");
+      }
+    } finally { simularFiltroNome = false; paginaProdutos = null; }
+  });
   await t.test("produtos com Ref preservam termo, preço e uma única página remota", async () => {
     paginaProdutos = [
       { id: 40, situacao: "A", descricao: "Oxford REF", precos: { preco: 10 } },
@@ -94,7 +123,7 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     assert.equal(query.get("nome"), "Oxford"); assert.equal(query.get("offset"), "50"); assert.equal(query.get("limit"), "50");
     assert.equal(r.mais, false);
     await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "produtos", busca: "   " }));
-    assert.equal(consultas.at(-1)!.searchParams.get("nome"), "ref");
+    assert.equal(consultas.at(-1)!.searchParams.get("nome"), "%Ref%");
     const servicos = await consultarCadastrosFilaOlist("conta", new URLSearchParams({ recurso: "servicos" }));
     assert.equal(consultas.at(-1)!.searchParams.has("nome"), false);
     assert.deepEqual(servicos.itens.map(i => i.id), [40]);

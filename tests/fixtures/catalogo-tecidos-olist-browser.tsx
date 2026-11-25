@@ -1,5 +1,6 @@
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "../../src/components/pesquisa-tecido-olist";
 import { useCatalogoTecidosOlist } from "../../src/hooks/use-catalogo-tecidos-olist";
 
 type Consulta = { url: string; token: string | null; signal: AbortSignal | null | undefined; responder: (payload: unknown, status?: number) => void };
@@ -28,6 +29,11 @@ window.fetch = async (input, init) => {
     if (params.get("modo") === "erro" && pagina === 2 && !falhouSegunda) {
       falhouSegunda = true; responder({ error: "Falha temporária no catálogo" }, 503); return;
     }
+    const total = Number(params.get("total"));
+    if (total === 85 || total === 89) {
+      const offset = (pagina - 1) * 50;
+      responder({ itens: Array.from({ length: Math.max(0, Math.min(50, total - offset)) }, (_, n) => ({ id: offset + n + 1, nome: `Tecido Ref. ${offset + n + 1}`, referencia: String(offset + n + 1), preco: 10 })), pagina, mais: offset + 50 < total }); return;
+    }
     if (params.get("modo") === "vazio") { responder({ itens: [], pagina, mais: false }); return; }
     if (params.get("modo") === "longo") {
       responder({ itens: [{ id: pagina, nome: `Tecido Ref. ${pagina}`, preco: 10 }], pagina, mais: pagina < 21 }); return;
@@ -40,9 +46,15 @@ window.fetch = async (input, init) => {
 };
 
 function Catalogo({ api, token, usuarioId, ativo, mostrar }: { api: string; token: string; usuarioId: string; ativo: boolean; mostrar: boolean }) {
+  const [busca, setBusca] = useState("");
+  const [selecionado, setSelecionado] = useState(0);
   const catalogo = useCatalogoTecidosOlist({ api, token, usuarioId, ativo, prazoPaginaMs: params.has("prazoCurto") ? 1000 : undefined });
   return <section>
     <output id="estado">{JSON.stringify({ itens: catalogo.itens, carregando: catalogo.carregando, completo: catalogo.completo, erro: catalogo.erro })}</output>
+    {params.has("total") && <><EstadoCatalogoTecidosOlist catalogo={catalogo} disabled={false} /><PesquisaTecidoOlist nome={busca} catalogo={catalogo} produtoId={selecionado} preco={null} disabled={false}
+      aoEncontrar={p => setSelecionado(p.id)} aoAlterarPreco={() => {}} aoLimparAssociacao={() => setSelecionado(0)}>
+      <label>Tecido<input className="input min-h-11" value={busca} onChange={e => setBusca(e.target.value)} /></label>
+    </PesquisaTecidoOlist><output id="selecionado">{selecionado}</output></>}
     {mostrar && <p>Etapa de seleção: {catalogo.itens.length} opções</p>}
     <button type="button" onClick={catalogo.carregarMais}>Continuar carregamento</button>
     <button type="button" onClick={catalogo.atualizar}>Atualizar catálogo</button>

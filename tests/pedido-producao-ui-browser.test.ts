@@ -9,7 +9,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     builder.onResolve({ filter: /^next\/link$/ }, () => ({ path: path.resolve("tests/fixtures/olist-empresa-link.tsx") }));
   } }]);
   const avaliar = <T,>(code: string) => cdp.avaliar<T>(code);
-  const botao = (nome: string) => `[...document.querySelectorAll("button")].find(b=>b.textContent.trim()===${JSON.stringify(nome)})`;
+  const botao = (nome: string) => `[...document.querySelectorAll("button")].find(b=>(b.getAttribute("aria-label")??b.textContent.trim())===${JSON.stringify(nome)})`;
   const clicar = async (nome: string) => { await avaliar(`${botao(nome)}.click()`); };
   const etapa = (nome: string) => ate(() => avaliar<boolean>(`document.querySelector("section h3")?.textContent===${JSON.stringify(nome)}`), `Etapa ${nome} indisponível`);
   const campo = (nome: string) => `[...document.querySelectorAll("label")].find(l=>l.textContent.startsWith(${JSON.stringify(nome)}))?.querySelector("input")`;
@@ -133,8 +133,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     assert.equal(await avaliar(`${campo("Quantidade de peças")}.value`), "11");
     assert.equal(await avaliar(`${campo("Quantidade de tecido")}.value`), "4.25");
     await avaliar('document.querySelector(\'button[aria-label="Selecionar tecido"]\').click()');
-    await ate(() => avaliar<boolean>(`Boolean([...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")===${JSON.stringify(`Selecionar ${nome}`)}))`), "FOURWAY não reabriu após limpar");
-    await avaliar(`[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")===${JSON.stringify(`Selecionar ${nome}`)}).click()`);
+    await ate(() => avaliar<boolean>(`${campo("Preço do tecido por metro")}?.value==="18.99"`), "Resultado único não foi associado automaticamente ao reabrir a busca");
     await clicar("Continuar"); await etapa("Dados comerciais");
     await clicar("Limpar associação");
     await ate(() => avaliar<boolean>(`${campo("Preço por metro")}===undefined`), "Preço não foi removido em Dados comerciais");

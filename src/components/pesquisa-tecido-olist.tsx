@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronDown } from "lucide-react";
 import type { OpcaoFilaOlist } from "@/lib/fila-olist-contrato";
 import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
@@ -10,15 +10,15 @@ const tamanhoPagina = 20;
 const normalizar = (valor: string) => valor.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
 
 /** O carregamento pertence ao pedido; todas as linhas usam a mesma lista. */
-export function EstadoCatalogoTecidosOlist({ catalogo, disabled }: { catalogo: CatalogoTecidosOlist; disabled: boolean }) {
+export function EstadoCatalogoTecidosOlist({ catalogo, disabled, ocultarAtualizar = false }: { catalogo: CatalogoTecidosOlist; disabled: boolean; ocultarAtualizar?: boolean }) {
   return <section aria-label="Produtos com referência" className="space-y-2 rounded-md border border-slate-200 p-3">
     <p role="status" className="text-sm text-slate-600">{catalogo.carregando
-      ? `Carregando produtos com referência... ${catalogo.itens.length} disponíveis.`
-      : catalogo.completo ? `${catalogo.itens.length} produtos disponíveis.`
+      ? `Carregando todos os produtos com referência... ${catalogo.itens.length} disponíveis.`
+      : catalogo.completo ? `${catalogo.itens.length} produtos disponíveis. Lista completa.`
       : `${catalogo.itens.length} produtos disponíveis. A lista ainda não foi carregada por completo.`}</p>
     {catalogo.erro && <p role="alert" className="break-words text-sm text-red-700">{catalogo.erro}</p>}
     <div className="flex flex-wrap gap-2">
-      <button type="button" className={botao} disabled={disabled || catalogo.carregando} onClick={catalogo.atualizar}>Atualizar produtos</button>
+      {!ocultarAtualizar && <button type="button" className={botao} disabled={disabled || catalogo.carregando} onClick={catalogo.atualizar}>Atualizar produtos</button>}
       {catalogo.carregando && <button type="button" className={botao} disabled={disabled} onClick={catalogo.cancelar}>Cancelar carregamento</button>}
       {!catalogo.completo && !catalogo.carregando && <button type="button" className={botao} disabled={disabled} onClick={catalogo.carregarMais}>{catalogo.erro ? "Tentar novamente" : "Carregar mais produtos"}</button>}
     </div>
@@ -44,6 +44,14 @@ export function PesquisaTecidoOlist({ nome, catalogo, disabled, children, produt
       return termos.every(termo => texto.includes(termo));
     });
   }, [aberto, nome, catalogo.itens]);
+  const aoEncontrarAtual = useRef(aoEncontrar);
+  aoEncontrarAtual.current = aoEncontrar;
+  useEffect(() => {
+    if (!disabled && aberto && catalogo.completo && !catalogo.carregando && !catalogo.erro && filtrados.length === 1 && filtrados[0].id !== produtoId) {
+      aoEncontrarAtual.current(filtrados[0]);
+      setAberto(false);
+    }
+  }, [disabled, aberto, catalogo.completo, catalogo.carregando, catalogo.erro, filtrados, produtoId]);
   const totalPaginas = Math.max(1, Math.ceil(filtrados.length / tamanhoPagina));
   const pagina = Math.min(navegacao.nome === nome ? navegacao.pagina : 1, totalPaginas);
   const opcoes = filtrados.slice((pagina - 1) * tamanhoPagina, pagina * tamanhoPagina);

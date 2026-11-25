@@ -9,6 +9,7 @@ if (!params.has("preservar")) sessionStorage.clear();
 document.documentElement.classList.toggle("dark",params.get("tema")==="dark");
 window.testeManual = {envios:[],falhar:false,consumoAlterado:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2),contextoAtual:"contexto-validado-local"};
 let falhouInicial=false;
+let falhouVendedor=false;
 window.fetch = async (input,init) => {
   const url = new URL(typeof input === "string"?input:input instanceof URL?input.href:input.url,location.href);
   const query = url.searchParams;
@@ -60,6 +61,7 @@ window.fetch = async (input,init) => {
     return Response.json({aplicativos:params.has("fornecedor")?[...aplicativos,...contasFornecedor]:aplicativos,aplicativoPadraoId:window.testeManual.referenciaAtual});
   }
   if(!query.has("recurso")) {
+    if(params.has("falhaVendedor")&&!falhouVendedor){falhouVendedor=true;return Response.json({error:"Falha temporária ao carregar vendedor."},{status:502});}
     if(params.has("padraoSemVinculo")&&query.get("aplicativoId")===id(2)) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     if(window.testeManual.semVinculoAplicativoId===query.get("aplicativoId")) return Response.json({error:"Aguardando configuração de vendedor pelo fornecedor."},{status:403});
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});

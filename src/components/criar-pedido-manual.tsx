@@ -44,6 +44,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   const [etapa, setEtapa] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [contaPronta, setContaPronta] = useState(false);
+  const [falhaCargaConta, setFalhaCargaConta] = useState<"lista" | "vendedor" | null>(null);
   const [revisaoConta, setRevisaoConta] = useState(0);
   const [revisaoLista, setRevisaoLista] = useState(0);
   const [vendedorFixo, setVendedorFixo] = useState(false);
@@ -80,6 +81,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   useEffect(() => {
     const controller = new AbortController();
     setCarregando(true);
+    setFalhaCargaConta(null);
     fetch(apiBase, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
       .then(d => { if (!controller.signal.aborted) {
@@ -91,7 +93,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
         setReferenciaId(atual => referencias.some(a => a.id === atual && a.fornecedorId && !a.bloqueio) ? atual : padrao);
         setRevisaoConta(r => r + 1);
       } })
-      .catch(e => { if (!controller.signal.aborted) setErro(e instanceof Error ? e.message : "Falha ao carregar contas."); })
+      .catch(e => { if (!controller.signal.aborted) { setErro(e instanceof Error ? e.message : "Falha ao carregar contas."); setFalhaCargaConta("lista"); } })
       .finally(() => { if (!controller.signal.aborted) setCarregando(false); });
     return () => controller.abort();
   }, [token, revisaoLista, apiBase]);
@@ -121,6 +123,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     if (!referenciaId) return;
     const controller = new AbortController();
     setContaPronta(false);
+    setFalhaCargaConta(null);
     fetch(apiOrigem, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
       .then(d => { if (!controller.signal.aborted) {
@@ -137,7 +140,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
         }
         setContaPronta(true);
       } })
-      .catch(e => { if (!controller.signal.aborted) setErro(e instanceof Error ? e.message : "Falha ao carregar vendedor."); });
+      .catch(e => { if (!controller.signal.aborted) { setErro(e instanceof Error ? e.message : "Falha ao carregar vendedor."); setFalhaCargaConta("vendedor"); } });
     return () => controller.abort();
   }, [apiOrigem, referenciaId, token, revisaoConta]);
 
@@ -339,7 +342,11 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     </section> : <>
       <ol aria-label="Etapas da criação" className="flex flex-wrap gap-2 text-xs">{etapas.map((nome, index) => <li key={nome} aria-current={index === etapa ? "step" : undefined} className={`rounded-md border border-slate-200 px-3 py-2 ${index === etapa ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>{index + 1}. {nome}</li>)}</ol>
       <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6" aria-busy={enviando}>
-        <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold">{etapas[etapa]}</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold">{etapas[etapa]}</h3>
+          {etapa === 2 && <button className={botao} type="button" disabled={resolvendo || !cliente || !vendedor} onClick={() => setRevisaoResolucao(r => r + 1)}>Atualizar direcionamento</button>}
+          {etapa === 3 && <button type="button" className={botao} disabled={enviando || carregandoOrigem || catalogoTecidos.carregando} onClick={catalogoTecidos.atualizar}>Atualizar produtos</button>}
+        </div>
         {solicitacaoId && etapa >= 3 && <button type="button" className={botao} disabled={enviando || resolvendo || !cliente || !vendedor}
           onClick={() => setRevisaoResolucao(atual => atual + 1)}>Atualizar direcionamento</button>}
         {etapa === 0 && <>{aplicativos.some(a => a.fornecedorId) ? <label className="block text-sm text-slate-700">Aplicativo de referência<select className="input mt-1 min-h-11 w-full" value={referenciaId} disabled={enviando || carregando} onChange={e => selecionarReferencia(e.target.value)}>
@@ -353,11 +360,15 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
               <button type="button" disabled className={`${botao} pointer-events-none break-words`}>{a.nome} · Sem vendedor</button>
             </BloqueioExplicado>)}</div>
           </div>}
-          {referenciaId && (vendedorFixo ? <p className="text-sm">Vendedor fixo do usuário: <strong>{vendedor?.nome}</strong></p> : <PesquisaOlist key={apiOrigem} titulo="Vendedor" recurso="vendedores" api={apiOrigem} token={token} valor={vendedor?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setVendedor(o); setCliente(null); }} />)}
+          {referenciaId && (vendedorFixo ? <p className="text-sm">Vendedor fixo do usuário: <strong>{vendedor?.nome}</strong></p> : <PesquisaOlist key={apiOrigem} titulo="Vendedor" recurso="vendedores" carregarInicialmente api={apiOrigem} token={token} valor={vendedor?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setVendedor(o); setCliente(null); }} />)}
           {referenciaId && !contaPronta && !erro && <p role="status" className="text-sm">Consultando vendedor da conta...</p>}
-          <button type="button" className={botao} onClick={() => { setContaPronta(false); setResolucao(null); setRevisaoLista(atual => atual + 1); }}>Atualizar conta</button>
+          {falhaCargaConta && <button type="button" className={botao} onClick={() => {
+            setErro(""); setFalhaCargaConta(null); setContaPronta(false);
+            if (falhaCargaConta === "lista") setRevisaoLista(atual => atual + 1);
+            else setRevisaoConta(atual => atual + 1);
+          }}>Tentar novamente</button>}
           {solicitacaoId && referenciaId && !revisaoProducao && !carregandoOrigem && <button type="button" className={botao} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>}</>}
-        {etapa === 1 && <><p className="text-sm text-slate-600">O cliente precisa ter CPF/CNPJ cadastrado. O mesmo documento será localizado no aplicativo destinatário.</p><PesquisaOlist key={`${apiOrigem}:${vendedor?.id}`} titulo="Cliente" recurso="clientes" api={apiOrigem} token={token} valor={cliente?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setCliente(o); }} />{vendedorFixo && <p className="text-sm text-slate-600">Somente clientes da carteira do seu vendedor são exibidos.</p>}</>}
+        {etapa === 1 && <><p className="text-sm text-slate-600">O cliente precisa ter CPF/CNPJ cadastrado. O mesmo documento será localizado no aplicativo destinatário.</p><PesquisaOlist key={`${apiOrigem}:${vendedor?.id}`} titulo="Cliente" recurso="clientes" carregarInicialmente api={apiOrigem} token={token} valor={cliente?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setCliente(o); }} />{vendedorFixo && <p className="text-sm text-slate-600">Somente clientes da carteira do seu vendedor são exibidos.</p>}</>}
         {etapa === 2 && <div className="space-y-4">
           {resolvendo ? <p role="status">Aplicando regras e localizando os cadastros no destino...</p> : resolucao ? <>
             <dl className="grid gap-4 text-sm sm:grid-cols-2">
@@ -367,7 +378,6 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
               <div><dt>UF do endereço principal</dt><dd>{resolucao.referencia.cliente.uf || "Não informada"}</dd></div>
             </dl><p className="text-sm text-slate-600">O aplicativo segue as regras configuradas. Após incluir, quem gerencia a fila poderá alterar o destino enquanto o pedido aguarda aprovação.</p>
           </> : erroResolucao ? <p role="alert" className="break-words text-sm text-red-700">{erroResolucao}</p> : <p role="status">Selecione vendedor e cliente válidos para resolver o destino.</p>}
-          <button className={botao} type="button" disabled={resolvendo || !cliente || !vendedor} onClick={() => setRevisaoResolucao(r => r + 1)}>Atualizar direcionamento</button>
         </div>}
         {etapa === 3 && <>
           {solicitacaoId && <div className="space-y-3">
@@ -375,7 +385,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             {carregandoOrigem && <p role="status">Carregando dados da produção...</p>}
             <button type="button" className={botao} disabled={enviando || carregandoOrigem} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>
           </div>}
-          <ItensPedidoEditor aoAlterarGrupo={alterarItens} apiTamanhos={apiBase} token={token} catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
+          <ItensPedidoEditor atualizarNoCabecalho aoAlterarGrupo={alterarItens} apiTamanhos={apiBase} token={token} catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
             aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}

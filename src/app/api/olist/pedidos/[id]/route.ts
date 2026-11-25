@@ -1,5 +1,5 @@
-import { resolverVendedorConsultaOlist, validarVendedorPedidoOlist } from "@/lib/olist-escopo-vendedor";
-import { resolverEmpresaOlist } from "@/lib/olist-empresa";
+import { validarVendedorPedidoOlist } from "@/lib/olist-escopo-vendedor";
+import { resolverEscopoPedidosOlist } from "@/lib/olist-pedidos-empresa";
 import { NextResponse } from "next/server";
 import { obterPedidoOlistApi } from "@/lib/olist";
 import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
@@ -15,8 +15,7 @@ export async function GET(
     }
 
     const usuario = await autorizarOlist(request, "podeVisualizarOlistPedidos");
-    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
-    const vendedorId = await resolverVendedorConsultaOlist(usuario, aplicativoId);
+    const { aplicativoId, vendedorId } = await resolverEscopoPedidosOlist(request, usuario);
     const pedido = await obterPedidoOlistApi(aplicativoId, id);
     validarVendedorPedidoOlist(pedido, vendedorId);
     return NextResponse.json(pedido, { headers: { "Cache-Control": "private, no-store" } });

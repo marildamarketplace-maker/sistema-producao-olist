@@ -1,3 +1,5 @@
+import { listarEmpresasFornecedorPedidos } from "@/lib/olist-pedidos-empresa";
+import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
@@ -12,9 +14,16 @@ export async function GET(request: Request) {
     });
     const filiais = empresas.filter((empresa) => empresa.id !== usuario.aplicativoId);
     const opcoes = filiais.length ? filiais : empresas;
+    if (new URL(request.url).searchParams.get("contexto") === "pedidos") {
+      const autorizado = await autorizarOlist(request, "podeVisualizarOlistPedidos");
+      const externas = await listarEmpresasFornecedorPedidos(autorizado);
+      const ids = new Set(opcoes.map(a => a.id));
+      opcoes.push(...externas.filter(a => !ids.has(a.id)));
+    }
     const aplicativoId = opcoes[0]?.id ?? usuario.aplicativoId;
     return NextResponse.json({ empresas: opcoes, aplicativoId }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch {
+  } catch (erro) {
+    if (erro instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: erro.message }, { status: erro.status });
     return NextResponse.json({ error: "Não foi possível consultar as empresas." }, { status: 500 });
   }
 }

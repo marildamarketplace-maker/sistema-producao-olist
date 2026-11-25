@@ -279,5 +279,5 @@ function PedidosOlistPage() {
 }
 
 export default function PedidosOlistAccessPage() {
-  return <AccessGuard permissions={["podeVisualizarOlistPedidos"]}><OlistEmpresa><PedidosOlistPage /></OlistEmpresa></AccessGuard>;
+  return <AccessGuard permissions={["podeVisualizarOlistPedidos"]}><OlistEmpresa contexto="pedidos"><PedidosOlistPage /></OlistEmpresa></AccessGuard>;
 }

@@ -1,5 +1,4 @@
-import { resolverVendedorConsultaOlist } from "@/lib/olist-escopo-vendedor";
-import { resolverEmpresaOlist } from "@/lib/olist-empresa";
+import { resolverEscopoPedidosOlist } from "@/lib/olist-pedidos-empresa";
 import { NextResponse } from "next/server";
 import { listarPedidosOlistApi } from "@/lib/olist";
 import { autorizarOlist, ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
@@ -20,8 +19,7 @@ export async function GET(request: Request) {
   const origem = params.get("origemPedido")?.trim();
   try {
     const usuario = await autorizarOlist(request, "podeVisualizarOlistPedidos");
-    const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
-    const vendedorId = await resolverVendedorConsultaOlist(usuario, aplicativoId);
+    const { aplicativoId, vendedorId } = await resolverEscopoPedidosOlist(request, usuario);
     const resultado = await listarPedidosOlistApi(aplicativoId, {
       idVendedor: vendedorId !== null ? String(vendedorId) : undefined,
       numero: params.get("numero")?.trim() || undefined,

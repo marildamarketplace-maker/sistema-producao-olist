@@ -40,7 +40,13 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
     let resultado;
     if (recurso === "clientes") resultado = await listarContatosOlistApi(filialId, { nome: busca || undefined, idVendedor: escopo?.vendedorId ? String(escopo.vendedorId) : undefined, limit, offset });
     else if (recurso === "vendedores") resultado = await listarVendedoresOlistApi(filialId, { nome: busca || undefined, limit, offset });
-    else if (recurso === "produtos") resultado = await listarProdutosOlistApi(filialId, { nome: busca.trim() || "ref", situacao: "A", limit, offset, timeoutMs: 20_000, signal });
+    else if (recurso === "produtos") {
+      const termo = busca.trim();
+      // A pesquisa simples da Olist não encontra Ref no meio do nome.
+      // O curinga mantém o filtro remoto e evita baixar todo o catálogo.
+      const nomeProduto = !termo || termo.toLocaleLowerCase("pt-BR") === "ref" ? "%Ref%" : termo;
+      resultado = await listarProdutosOlistApi(filialId, { nome: nomeProduto, situacao: "A", limit, offset, timeoutMs: 20_000, signal });
+    }
     else if (recurso === "servicos") resultado = await listarServicosOlistApi(filialId, { nome: busca || undefined, limit, offset });
     else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
     else throw new ErroFila("Consulta inválida.");

@@ -33,6 +33,20 @@ test("catálogo compartilhado: carga Ref, cache da tela, retomada e isolamento",
     await ate(async () => await consultas() === 4 && (await estado()).completo, "Atualização explícita não recarregou");
     assert.equal(await avaliar('new URL(window.catalogoTeste.consultas[2].url).searchParams.get("contextoConsulta")'), "assinado-2");
   });
+  for (const total of [85, 89]) for (const width of [360, 1440]) await t.test(`${total} produtos em ${width}px: segunda página disponível na busca sem clique adicional`, async () => {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+    await abrir(`&total=${total}`); await pronto();
+    assert.equal((await estado()).itens.length, total);
+    assert.equal(await consultas(), 2);
+    assert.equal(await avaliar('document.body.innerText.includes("Lista completa.")'), true);
+    await avaliar(`{const e=document.querySelector("label input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,${JSON.stringify("Tecido Ref. ")}+${total});e.dispatchEvent(new Event("input",{bubbles:true}));}`);
+    await avaliar(`document.querySelector('button[aria-label="Selecionar tecido"]').click()`);
+    await ate(() => avaliar<boolean>(`Boolean(document.querySelector('button[aria-label="Selecionar Tecido Ref. ${total}"]'))`), "Último produto não apareceu na busca");
+    await avaliar(`document.querySelector('button[aria-label="Selecionar Tecido Ref. ${total}"]').click()`);
+    assert.equal(await avaliar('Number(document.querySelector("#selecionado").textContent)'), total);
+    assert.equal(await consultas(), 2, "Pesquisar e selecionar reutiliza o catálogo completo");
+    assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'), true);
+  });
   await t.test("sem conta ativa aguarda e catálogo vazio não entra em loop", async () => {
     await abrir("&inativo=1&modo=vazio");
     assert.equal(await consultas(), 0);

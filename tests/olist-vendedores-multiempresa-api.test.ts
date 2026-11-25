@@ -48,7 +48,7 @@ test("Olist: permissões no servidor, vendedor por empresa e autorização de co
       assert.equal(where.aplicativoPaiId, app);
       return where.id === "00000000-0000-0000-0000-000000000003" ? { id: where.id } : null;
     }, findUnique: async ({ where }: { where: { id: string } }) => {
-      assert.equal(where.id, contaEsperada); return { id: contaEsperada, nome: "Conta", olistClientId: "fake", olistClientSecret: "fake" };
+      if (where.id !== contaEsperada) return null; return { id: contaEsperada, nome: "Conta", olistClientId: "fake", olistClientSecret: "fake" };
     } },
     integracaoOlistToken: { findUnique: async ({ where }: { where: { aplicativoId_provider: { aplicativoId: string } } }) => {
       assert.equal(where.aplicativoId_provider.aplicativoId, contaEsperada); return { accessToken: "fake", expiresAt: new Date(Date.now() + 3600000) };

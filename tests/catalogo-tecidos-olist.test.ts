@@ -19,6 +19,21 @@ test("catálogo Ref carrega páginas sequenciais, deduplica ID e conserva nome e
   await carregarLoteCatalogoTecidosOlist({ anterior: lote, signal: new AbortController().signal, carregar: async () => assert.fail("Não recarrega catálogo completo") });
 });
 
+for (const total of [85, 89]) test(`catálogo de ${total} produtos carrega as duas páginas automaticamente`, async () => {
+  const chamadas: number[] = [];
+  const lote = await carregarLoteCatalogoTecidosOlist({ anterior: vazio(), signal: new AbortController().signal,
+    carregar: async pagina => {
+      chamadas.push(pagina);
+      const offset = (pagina - 1) * 50;
+      return { itens: Array.from({ length: Math.min(50, total - offset) }, (_, indice) => produto(offset + indice + 1)), pagina, mais: offset + 50 < total };
+    },
+  });
+  assert.deepEqual(chamadas, [1, 2]);
+  assert.equal(lote.completo, true);
+  assert.equal(lote.itens.length, total);
+  assert.equal(lote.itens.at(-1)?.id, total, "Inclui o último produto da segunda página");
+});
+
 test("limite por carga preserva lista incompleta e continuação começa na próxima página", async () => {
   const chamadas: number[] = [];
   const carregar = async (pagina: number) => { chamadas.push(pagina); return { itens: [produto(pagina)], pagina, mais: pagina < 3 }; };

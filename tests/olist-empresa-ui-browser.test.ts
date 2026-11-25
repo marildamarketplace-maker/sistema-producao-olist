@@ -23,6 +23,17 @@ test("seis telas Olist: seletor no título, troca de empresa e empresa única", 
       assert.equal(await cdp.avaliar('document.documentElement.scrollWidth <= innerWidth'), true);
     }
   }
+  for (const width of [360, 1440]) {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+    await cdp.pedir("Page.navigate", { url: `${url}?tela=pedidos&fornecedor=1` });
+    await ate(() => cdp.avaliar<boolean>(`Boolean(document.querySelector('header option[value="fornecedor-filial"]'))`), "Filial autorizada do fornecedor não apareceu");
+    await cdp.avaliar('{const e=document.querySelector("header select");e.value="fornecedor-filial";e.dispatchEvent(new Event("change",{bubbles:true}));}');
+    await ate(() => cdp.avaliar<boolean>('window.empresaTeste.consultas.some(u=>u.startsWith("/api/olist/pedidos?")&&u.includes("aplicativoId=fornecedor-filial"))'), "Consulta não seguiu filial do fornecedor");
+    assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'), true);
+    await cdp.pedir("Page.navigate", { url: `${url}?tela=produtos&fornecedor=1` });
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("header select"))'), "Produtos não carregaram");
+    assert.equal(await cdp.avaliar(`Boolean(document.querySelector('header option[value="fornecedor-filial"]'))`), false, "Permissão externa não se estende a produtos");
+  }
   await cdp.pedir("Page.navigate", { url: `${url}?tela=produtos&renovacao=1` });
   await ate(() => cdp.avaliar<boolean>('location.search.includes("renovacao") && Boolean(document.querySelector("header select"))'), "Tela não carregou");
   await cdp.avaliar('const select=document.querySelector("header select"); select.value="filial"; select.dispatchEvent(new Event("change",{bubbles:true}));');
