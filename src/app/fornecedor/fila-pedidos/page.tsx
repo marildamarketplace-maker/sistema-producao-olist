@@ -11,7 +11,7 @@ export default function FilaPedidosFornecedorPage() {
   return (
     <AccessGuard permissions={["podeGerenciarFilaPedidos"]}>
       <PageHeader title="Fila de pedidos" description="Consulte os pedidos recebidos e escolha como destino o próprio aplicativo ou um filho direto." />
-      {session && usuario?.podeGerenciarFilaPedidos ? <FilaPedidosFornecedorClient key={usuario.aplicativo_id} token={session.access_token} /> : <p role="alert" className="text-sm text-red-700">Entre no sistema para acessar a fila.</p>}
+      {session && usuario?.podeGerenciarFilaPedidos ? <FilaPedidosFornecedorClient key={usuario.aplicativo_id} aplicativoId={usuario.aplicativo_id} token={session.access_token} /> : <p role="alert" className="text-sm text-red-700">Entre no sistema para acessar a fila.</p>}
     </AccessGuard>
   );
 }

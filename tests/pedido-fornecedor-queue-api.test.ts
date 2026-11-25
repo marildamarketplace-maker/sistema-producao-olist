@@ -100,9 +100,9 @@ test("API da fila autoriza, isola aplicativos e registra snapshot sem chamar Oli
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: "usuario", email: "teste@example.test" } }, error: null }));
   const { GET, POST } = await import("../src/app/api/fornecedores/fila/route");
   const request = (body: unknown = { fornecedorId, solicitacaoId, aplicativoFornecedorId: app, dadosPedido: {} }) => new Request("https://example.test", { method: "POST", headers: { Authorization: "Bearer token" }, body: JSON.stringify(body) });
-  await t.test("lista apenas fornecedores do aplicativo", async () => {
+  await t.test("lista apenas fornecedores do aplicativo e oculta a conta pai quando há filhos", async () => {
     const response = await GET(request()); assert.equal(response.status, 200);
-    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: destino, nome: "Matriz fornecedor", descricao: null }, { id: filialId, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] }]);
+    assert.deepEqual((await response.json()).fornecedores, [{ id: fornecedorId, nome: "Fornecedor", filiais: [{ id: filialId, nome: "Filial", descricao: "Especializada em corte" }, { id: app, nome: "Outra filial", descricao: null }] }]);
   });
   await t.test("ignora dados e aplicativo de destino enviados pelo cliente", async () => {
     assert.equal((await POST(request())).status, 201); assert.equal(gravacoes, 1);

@@ -67,9 +67,26 @@ model Aplicativo {
   sincronizacaoOlist        OlistSyncConfiguracao?
   participacoesOlistSync    OlistSyncParticipante[]
   pedidoSemEnvioJob         PedidoSemEnvioJob?
+  direcionamentoPedidos    DirecionamentoPedidos? @relation("DirecionamentoPai")
+  direcionamentosPadrao     DirecionamentoPedidos[] @relation("DirecionamentoPadrao")
 
   @@index([aplicativoPaiId], map: "idx_aplicativo_pai_id")
   @@map("aplicativo")
+}
+
+model DirecionamentoPedidos {
+  aplicativoPaiId String @id @map("aplicativo_pai_id") @db.Uuid
+  aplicativoPadraoId String @map("aplicativo_padrao_id") @db.Uuid
+  versao Int @default(1)
+  regras Json @default("[]")
+  atualizadoPorId String @map("atualizado_por_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  aplicativoPai Aplicativo @relation("DirecionamentoPai", fields:[aplicativoPaiId], references:[id], onDelete:Restrict, onUpdate:NoAction)
+  aplicativoPadrao Aplicativo @relation("DirecionamentoPadrao", fields:[aplicativoPadraoId], references:[id], onDelete:Restrict, onUpdate:NoAction)
+  atualizadoPor Usuario @relation(fields:[atualizadoPorId], references:[id], onDelete:Restrict, onUpdate:NoAction)
+  @@index([aplicativoPadraoId])
+  @@map("direcionamento_pedidos")
 }
 
 model PlanoPagamento {
@@ -157,6 +174,7 @@ model Midia {
 }
 
 model Usuario {
+  direcionamentosEditados DirecionamentoPedidos[]
   enviosPedidosManuais                  EnvioPedidoManual[]
   id                                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   aplicativoId                         String                  @map("aplicativo_id") @db.Uuid

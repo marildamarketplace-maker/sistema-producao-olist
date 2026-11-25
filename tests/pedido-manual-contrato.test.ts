@@ -3,7 +3,9 @@ import test from "node:test";
 import { pedidoManualSchema, montarDadosPedidoManual } from "../src/lib/pedido-manual-contrato";
 import { dadosPedidoFilaSchema } from "../src/lib/fila-fornecedor-contrato";
 const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`;
-const entrada = () => ({ aplicativoId: id(1), chaveIdempotencia: id(2), observacao: null,
+const entrada = () => ({ versao: 2, origemManual: { aplicativoId:id(1), vendedor:{id:20,nome:"Vendedor",cpfCnpj:null},cliente:{id:30,nome:"Cliente",cpfCnpj:null,uf:"MG"} },
+  decisaoDirecionamento:{tipo:"CONTA_UNICA",regraId:null,regraNome:null,versao:0,aplicativoId:id(1),motivo:"Única conta disponível."},
+  aplicativoId: id(1), chaveIdempotencia: id(2), observacao: null,
   selecoes: { vendedorId: 20, clienteId: 30 }, itens: [{ id: id(3), tecidoNome: "Oxford", quantidade: 10,
     quantidadeTecido: 2.5, estampa: "6861", variante: "A", tamanho: "30x30", tipoProduto: "Lenço", corteLaser: true }] });
 test("pedido manual admite dados comerciais parciais e mantém peças e metros independentes", () => {

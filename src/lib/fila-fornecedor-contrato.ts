@@ -1,5 +1,20 @@
 import { z } from "zod";
 import { dadosOlistFilaSchema } from "./fila-olist-contrato";
+import { referenciaPedidoManualSchema } from "./pedido-manual-referencia";
+
+export const direcionamentoPedidoManualSchema = z.object({
+  inicial: z.object({
+    tipo: z.enum(["REGRA", "PADRAO", "CONTA_UNICA"]),
+    regraId: z.guid().nullable(),
+    regraNome: z.string().trim().max(120).nullable(),
+    versao: z.number().int().nonnegative().max(2147483647),
+    aplicativoId: z.guid(),
+    motivo: z.string().trim().min(1).max(500),
+  }).strict(),
+  alteracoes: z.array(z.object({
+    usuarioId: z.guid(), em: z.iso.datetime(), anteriorId: z.guid(), aplicativoId: z.guid(),
+  }).strict()).max(1000).default([]),
+}).strict();
 
 const itemSchema = z.object({
   produtoId: z.string(),
@@ -21,6 +36,8 @@ export const dadosPedidoFilaSchema = z.object({
   olist: dadosOlistFilaSchema.optional(),
   itens: z.array(itemSchema).min(1),
   observacao: z.string().nullable().optional(),
+  origemManual: referenciaPedidoManualSchema.optional(),
+  direcionamentoManual: direcionamentoPedidoManualSchema.optional(),
 });
 
 export type DadosPedidoFila = z.infer<typeof dadosPedidoFilaSchema>;

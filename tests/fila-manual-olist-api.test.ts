@@ -16,21 +16,27 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   let previa:{id:string;usuarioId:string;filaId:string;filialId:string;versao:number;selecoes:unknown;payload:unknown;expiraEm:Date}|null=null;
   let posts=0,permitido=true,modo="sucesso",carteira=20,vinculo:number|null=20,marcadorCorreto=true;
   let consultas=0, detalhesProdutos=0;
+  const urlsConsultadas:string[]=[];
+  let referenciaNova=false,semVinculoDestino=false,autorVersao=0,mudarAutorNaTransacao=false,emTransacao=false,revogarOperadorNaTransacao=false;
   const reset=()=>{
     fila={id:filaId,aplicativoSolicitanteId:matriz,aplicativoFornecedorId:matriz,aplicativoFilialId:matriz,solicitacaoProducaoId:null,fornecedorId:null,
       tipoOrigem:"MANUAL",autorId,chaveIdempotencia:id(6),hashEntrada:"hash",vendedorFixo:true,createdAt:new Date(),direcionadoEm:new Date(),direcionadoPorId:autorId,
       status:"PENDENTE",versao:0,dadosPedido:structuredClone(dados) as Prisma.JsonObject};
     envio=null;previa=null;posts=0;modo="sucesso";carteira=20;vinculo=20;marcadorCorreto=true;
+    referenciaNova=false;semVinculoDestino=false;autorVersao=0;mudarAutorNaTransacao=false;revogarOperadorNaTransacao=false;permitido=true;
   };
   reset();
   type Patch={status?:PedidoFornecedorQueue["status"];versao?:{increment:number};dadosPedido?:Prisma.JsonValue;aplicativoFilialId?:string;direcionadoEm?:Date;direcionadoPorId?:string};
   const aplicar=(data:Patch)=>{const {versao,...resto}=data;Object.assign(fila,resto);if(versao)fila.versao+=versao.increment;};
   const tx={
-    usuario:{findFirst:async()=>({id:adminId,ativo:true,aplicativoId:matriz}),findUnique:async()=>({id:adminId,ativo:true,aplicativoId:matriz,podeGerenciarFilaPedidos:permitido})},
-    usuarioVendedorOlist:{findFirst:async({where}:{where:{usuarioId:string;aplicativoId:string}})=>{assert.equal(where.usuarioId,autorId,"usar vínculo do autor, não do administrador");return vinculo===null?null:{vendedorOlistId:vinculo};}},
-    aplicativo:{findFirst:async({where}:{where:{id:string}})=>[matriz,filial].includes(where.id)?{id:where.id,nome:"Conta"}:null,
+    usuario:{findFirst:async({where}:{where:{id:string}})=>where.id===autorId?{id:autorId,ativo:true,aplicativoId:matriz,podeSelecionarFilialFornecedor:true,vinculosOlistVersao:autorVersao}:{id:adminId,ativo:true,aplicativoId:matriz},
+      findUnique:async({where}:{where:{id:string}})=>where.id===autorId?{id:autorId,ativo:true,aplicativoId:matriz,podeSelecionarFilialFornecedor:true,vinculosOlistVersao:autorVersao}:{id:adminId,ativo:true,aplicativoId:matriz,podeGerenciarFilaPedidos:permitido}},
+    usuarioVendedorOlist:{findFirst:async({where}:{where:{usuarioId:string;aplicativoId?:string}})=>{assert.equal(where.usuarioId,autorId,"usar vínculo do autor, não do administrador");
+      if(referenciaNova)return where.aplicativoId===filial?(semVinculoDestino?null:{vendedorOlistId:120}):{vendedorOlistId:20};
+      return vinculo===null?null:{vendedorOlistId:vinculo};}},
+    aplicativo:{findFirst:async({where}:{where:{id?:string;aplicativoPaiId?:string}})=>where.aplicativoPaiId===matriz?{id:filial,nome:"Conta filha"}:[matriz,filial].includes(where.id??"")?{id:where.id,nome:"Conta"}:null,
       findUnique:async()=>({olistClientId:"fake",olistClientSecret:"fake"})},
-    integracaoOlistToken:{findUnique:async()=>({accessToken:"fake",expiresAt:new Date(Date.now()+3600_000)})},
+    integracaoOlistToken:{findUnique:async({where}:{where:{aplicativoId_provider:{aplicativoId:string}}})=>({accessToken:`fake-${where.aplicativoId_provider.aplicativoId}`,expiresAt:new Date(Date.now()+3600_000)})},
     formaPagamentoOlistPlano:{findFirst:async()=>({planoPagamento:{nome:"30/60"}})},
     pedidoFornecedorQueue:{
       findFirst:async({where}:{where:{id:string;aplicativoFornecedorId:string}})=>where.id===fila.id&&where.aplicativoFornecedorId===matriz?structuredClone(fila):null,
@@ -63,11 +69,23 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     },
   };
   let corrente:Promise<unknown>=Promise.resolve();
-  Object.assign(globalThis,{prisma:{...tx,$transaction:(fn:(c:typeof tx)=>unknown)=>{const next=corrente.then(()=>fn(tx));corrente=next.catch(()=>undefined);return next;}}});
+  Object.assign(globalThis,{prisma:{...tx,$transaction:(fn:(c:typeof tx)=>unknown)=>{const next=corrente.then(async()=>{if(mudarAutorNaTransacao){autorVersao++;mudarAutorNaTransacao=false;}if(revogarOperadorNaTransacao){permitido=false;revogarOperadorNaTransacao=false;}emTransacao=true;try{return await fn(tx);}finally{emTransacao=false;}});corrente=next.catch(()=>undefined);return next;}}});
   const {supabaseAdmin}=await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth,"getUser",async()=>({data:{user:{id:adminId,email:"test@example.test"}},error:null}));
-  t.mock.method(axios,"get",async(url:string)=>{
-    consultas++;const p=new URL(url).pathname; if (p.endsWith("/produtos/50")) detalhesProdutos++; let data:unknown;
+  t.mock.method(axios,"get",async(url:string,opcoes?:{headers?:{Authorization?:string}})=>{
+    consultas++;urlsConsultadas.push(url);const parsed=new URL(url),p=parsed.pathname; if (p.endsWith("/produtos/50")) detalhesProdutos++; let data:unknown;
+    if(referenciaNova){
+      assert.equal(emTransacao,false,"consultas Olist devem ocorrer fora dos locks da fila");
+      const destino=opcoes?.headers?.Authorization?.endsWith(filial)??false;
+      const vendedorId=destino?120:20,clienteId=destino?130:30;
+      const vendedor={id:vendedorId,situacao:"A",contato:{id:destino?210:200,nome:"Vendedor",cpfCnpj:"98765432100",codigo:destino?"VEN-D":"VEN-O"}};
+      const cliente={id:clienteId,nome:"Cliente",cpfCnpj:"12345678909",situacao:"A",vendedor:{id:vendedorId},endereco:{uf:destino?"SP":"MG"}};
+      if(p.endsWith("/vendedores"))data={itens:[vendedor],paginacao:{total:1}};
+      else if(p.endsWith("/contatos"))data={itens:[parsed.searchParams.get("cpfCnpj")==="98765432100"?{...vendedor.contato,situacao:"A"}:cliente],paginacao:{total:1}};
+      else if(/\/contatos\/(30|130)$/.test(p))data=cliente;
+      else data={id:Number(p.split("/").at(-1)),nome:"Cadastro",situacao:"A",vendedor:{id:vendedorId}};
+      return {status:200,data,headers:{"content-type":"application/json"}};
+    }
     if(p.endsWith("/vendedores"))data={itens:[{id:20,nome:"Vendedor",situacao:"A"}],paginacao:{total:1}};
     else if(p.endsWith("/pedidos/123"))data={id:123,observacoesInternas:marcadorCorreto?`Outra observação\nPedido manual da fila: ${filaId}`:"Outro pedido"};
     else data={id:Number(p.split("/").at(-1)),nome:"Cadastro",situacao:"A",vendedor:{id:carteira}};
@@ -86,6 +104,13 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   const preview=(s:unknown=selecoes)=>rota.POST(req({acao:"preview",versao:fila.versao,selecoes:s}),ctx);
   const confirmar=()=>rota.POST(req({acao:"confirmar",previaId}),ctx);
   const cancelar=()=>admin.POST(req({acao:"CANCELAR",pedidoId:filaId,versao:fila.versao}));
+  const adicionarReferencia=()=>{
+    referenciaNova=true;
+    fila.dadosPedido={...dados,origemManual:{aplicativoId:matriz,vendedor:{id:20,nome:"Vendedor",cpfCnpj:"98765432100"},
+      cliente:{id:30,nome:"Cliente",cpfCnpj:"12345678909",uf:"MG"}},direcionamentoManual:{
+      inicial:{tipo:"PADRAO",regraId:null,regraNome:null,versao:3,aplicativoId:matriz,motivo:"Aplicativo padrão"},alteracoes:[],
+    }} as Prisma.JsonObject;
+  };
   await t.test("vendedor salvo não é substituído pelo administrador; carteira é verificada na prévia",async()=>{
     const inicial=await (await rota.GET(req(),ctx)).json();assert.equal(inicial.vendedorFixo,true);assert.equal(inicial.selecoes.vendedorId,20);
     const antes=consultas;assert.equal((await preview({...selecoes,vendedorId:99})).status,403);assert.equal(consultas,antes);
@@ -136,5 +161,61 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   await t.test("fila manual própria é cancelável mesmo quando o aplicativo é filial",async()=>{
     reset();assert.equal((await cancelar()).status,200);assert.equal(fila.status,"CANCELADO");assert.equal((await preview()).status,409);
     reset();permitido=false;assert.equal((await rota.GET(req(),ctx)).status,403);assert.equal((await cancelar()).status,403);permitido=true;
+  });
+  await t.test("novo pedido remapeia antes do redirecionamento, preserva origem e histórico e envia ao destino manual",async()=>{
+    reset();adicionarReferencia();
+    assert.equal((await preview()).status,200);
+    const antes=urlsConsultadas.length;
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao:fila.versao,filialId:filial},"PATCH"))).status,200);
+    const {dadosPedidoFilaSchema}=await import("../src/lib/fila-fornecedor-contrato");
+    const snapshot=dadosPedidoFilaSchema.parse(fila.dadosPedido);
+    assert.equal(fila.aplicativoFilialId,filial);
+    assert.deepEqual(snapshot.olist,{filialId:filial,selecoes:{clienteId:130,vendedorId:120}});
+    assert.equal(snapshot.origemManual?.cliente.uf,"MG");
+    assert.equal(snapshot.direcionamentoManual?.inicial.aplicativoId,matriz);
+    assert.equal(snapshot.direcionamentoManual?.alteracoes.length,1);
+    assert.equal(snapshot.direcionamentoManual?.alteracoes[0].usuarioId,adminId);
+    assert.equal((await confirmar()).status,409,"a prévia anterior não vale no novo destino");
+    const novas=urlsConsultadas.slice(antes).map(url=>new URL(url));
+    assert.ok(novas.filter(u=>u.pathname.endsWith("/vendedores")).every(u=>u.searchParams.has("codigo")),"reaproveitar correspondência filtrada, sem varrer vendedores novamente");
+    const destinoSelecoes={...selecoes,clienteId:130,vendedorId:120};
+    assert.equal((await preview(destinoSelecoes)).status,200);
+    assert.equal(dadosPedidoFilaSchema.parse(fila.dadosPedido).direcionamentoManual?.alteracoes.length,1,"regravação preserva metadados");
+    assert.equal((await confirmar()).status,200);
+    assert.equal(posts,1);assert.equal(fila.aplicativoFilialId,filial);assert.equal(envio?.aplicativoId,filial);
+  });
+  await t.test("falha de vínculo ou mudança concorrente não altera o destino novo nem seus IDs",async()=>{
+    reset();adicionarReferencia();semVinculoDestino=true;
+    const versao=fila.versao;
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao,filialId:filial},"PATCH"))).status,403);
+    assert.equal(fila.aplicativoFilialId,matriz);assert.equal(fila.versao,versao);
+    semVinculoDestino=false;mudarAutorNaTransacao=true;
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao,filialId:filial},"PATCH"))).status,409);
+    assert.equal(fila.aplicativoFilialId,matriz);assert.equal(fila.versao,versao);
+    assert.equal(posts,0);
+  });
+  await t.test("novo pedido bloqueia troca para pai com filhos e não aceita outro cliente na aprovação",async()=>{
+    reset();adicionarReferencia();
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao:fila.versao,filialId:filial},"PATCH"))).status,200);
+    const antes=fila.versao;
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao:antes,filialId:matriz},"PATCH"))).status,403);
+    assert.equal(fila.aplicativoFilialId,filial);assert.equal(fila.versao,antes);
+    assert.equal((await preview({...selecoes,clienteId:999,vendedorId:120})).status,409);
+    assert.equal(posts,0);
+  });
+  await t.test("alteração do autor entre validação e reserva final bloqueia envio sem POST externo",async()=>{
+    reset();adicionarReferencia();
+    assert.equal((await preview()).status,200);
+    const versao=fila.versao;mudarAutorNaTransacao=true;
+    assert.equal((await confirmar()).status,409);
+    assert.equal(fila.status,"PENDENTE");assert.equal(fila.versao,versao);assert.equal(posts,0);assert.equal(envio,null);
+  });
+  await t.test("revogar permissão do operador durante consultas bloqueia redirecionamento e reserva",async()=>{
+    reset();adicionarReferencia();revogarOperadorNaTransacao=true;
+    assert.equal((await admin.PATCH(req({pedidoId:filaId,versao:fila.versao,filialId:filial},"PATCH"))).status,403);
+    assert.equal(fila.aplicativoFilialId,matriz);assert.equal(fila.versao,0);
+    reset();adicionarReferencia();assert.equal((await preview()).status,200);
+    revogarOperadorNaTransacao=true;assert.equal((await confirmar()).status,403);
+    assert.equal(posts,0);assert.equal(envio,null);assert.equal(fila.status,"PENDENTE");
   });
 });

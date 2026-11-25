@@ -1,5 +1,6 @@
-import { alterarFilaManual } from "@/lib/fila-manual-administracao";
+import { alterarFilaManual, prepararRedirecionamentoFilaManual } from "@/lib/fila-manual-administracao";
 import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
+import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -38,7 +39,7 @@ async function autorizar(request: Request) {
 }
 
 function falha(error: unknown) {
-  if (error instanceof ErroAdministracaoFila || error instanceof ErroFilaOlist) {
+  if (error instanceof ErroAdministracaoFila || error instanceof ErroFilaOlist || error instanceof ErroAutorizacaoOlist) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
   return NextResponse.json({ error: "Não foi possível acessar a fila de pedidos. Tente novamente." }, { status: 500 });
@@ -94,6 +95,16 @@ export async function PATCH(request: Request) {
     if (!parsed.success) throw new ErroAdministracaoFila("Informe pedido, aplicativo destinatário e versão válidos.", 400);
     const { pedidoId, filialId, versao, enviarOlist } = parsed.data;
     if (enviarOlist) throw new ErroAdministracaoFila("Use a revisão e confirmação de Enviar para a Olist.", 400);
+    const origem = await prisma.pedidoFornecedorQueue.findFirst({
+      where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { tipoOrigem: true },
+    });
+    if (!origem) throw new ErroAdministracaoFila("Pedido não encontrado na fila deste aplicativo.", 404);
+    if (origem.tipoOrigem === "MANUAL") {
+      const entrada = { pedidoId, aplicativoId, usuarioId, versao, filialId };
+      const referencia = await prepararRedirecionamentoFilaManual(entrada);
+      const resultado = await prisma.$transaction(tx => alterarFilaManual(tx, entrada, referencia));
+      return NextResponse.json(resultado);
+    }
     const resultado = await prisma.$transaction(async (tx) => {
       const pedido = await tx.pedidoFornecedorQueue.findFirst({
         where: { id: pedidoId, aplicativoFornecedorId: aplicativoId }, select: { id: true, status: true, solicitacaoProducaoId: true, tipoOrigem: true },

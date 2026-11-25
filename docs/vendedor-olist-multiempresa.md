@@ -22,6 +22,8 @@ Não concede acesso à conta: permissões e escopo de empresas continuam obrigat
   refresh da sessão não altera o snapshot nem uma edição em andamento.
   Os destinos incluem o aplicativo próprio do fornecedor e seus filhos diretos. Assim, um
   fornecedor independente, sem filhos, também pode receber pedidos pela fila na própria conta.
+  No envio para a fila, o seletor mostra somente os filhos quando existirem; a conta própria
+  aparece apenas para fornecedores sem filhos.
   A seleção permanece explícita e exige as permissões existentes. Os campos técnicos
   `filialId`, `filiais` e `aplicativo_filial_id` são preservados por compatibilidade; nesses
   contratos, representam o aplicativo destinatário, que pode ser o próprio.

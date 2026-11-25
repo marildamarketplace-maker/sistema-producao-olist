@@ -11,6 +11,8 @@ import { validarVendedorPedidoOlist } from "@/lib/olist-escopo-vendedor";
 import { obterPedidoOlistApi } from "@/lib/olist";
 import { envioBloqueado, envioExpirado } from "@/lib/envio-fornecedor";
 import { bloquearPedidoManual, marcarManualInterrompido, marcadorPedidoManual, enviarPedidoManual, jsonManual } from "@/lib/envio-pedido-manual";
+import { validarReferenciaPersistidaPedidoManual } from "@/lib/pedido-manual-correspondencia";
+import { guardaReferenciaFilaManual, obterAutorReferenciaFilaManual, validarAtoresFilaManual } from "@/lib/fila-manual-referencia";
 
 type Contexto = { fila: PedidoFornecedorQueue; matrizId: string; usuarioId: string };
 const schema = z.discriminatedUnion("acao", [
@@ -32,13 +34,17 @@ async function vendedorFixo(fila: PedidoFornecedorQueue, contaId: string) {
   return id;
 }
 async function validarSelecoes(fila: PedidoFornecedorQueue, contaId: string, selecoes: z.infer<typeof selecoesFilaOlistSchema>) {
+  const snapshot = dadosPedidoFilaSchema.parse(fila.dadosPedido);
   const fixo = await vendedorFixo(fila, contaId);
   if (fixo !== null) {
     if (selecoes.vendedorId !== fixo) throw new ErroFilaOlist("Preserve o vendedor vinculado ao autor deste pedido.", 403);
   }
-  const cadastros = await validarCadastros(contaId, selecoes, dadosPedidoFilaSchema.parse(fila.dadosPedido).itens.some(i => i.corteLaser));
+  const autor = snapshot.origemManual ? await obterAutorReferenciaFilaManual(fila.autorId, fila.aplicativoFornecedorId) : null;
+  const referencia = snapshot.origemManual && autor
+    ? await validarReferenciaPersistidaPedidoManual(autor, snapshot.origemManual, contaId, selecoes) : null;
+  const cadastros = await validarCadastros(contaId, selecoes, snapshot.itens.some(i => i.corteLaser), referencia?.cadastros);
   if (fixo !== null) validarVendedorPedidoOlist(cadastros.cliente, fixo);
-  return cadastros;
+  return { ...cadastros, guardaReferencia: autor && snapshot.origemManual ? guardaReferenciaFilaManual(autor, snapshot.origemManual) : undefined };
 }
 export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, params: URLSearchParams) {
   const filial = await contaValida(matrizId, fila.aplicativoFilialId);
@@ -53,7 +59,7 @@ export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, par
   const padrao = fila.vendedorFixo && fila.autorId ? await obterVendedorDoUsuario(fila.autorId, filial.id) : null;
   const salvas = snapshot.olist?.filialId === filial.id ? snapshot.olist.selecoes : null;
   // Mudança do vínculo do autor exige nova escolha de cliente, sem usar o vínculo do administrador.
-  const selecoes = salvas && padrao !== null && salvas.vendedorId !== padrao
+  const selecoes = !snapshot.origemManual && salvas && padrao !== null && salvas.vendedorId !== padrao
     ? { ...salvas, vendedorId: padrao, clienteId: undefined } : salvas;
   return { filial, selecoes, vendedorOlistPadraoId: padrao, vendedorFixo: fila.vendedorFixo, envio };
 }
@@ -87,15 +93,17 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
     const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
     if (!previa) throw new ErroFilaOlist("Prévia expirada ou alterada. Gere outra prévia.", 409);
     const selecionados = selecoesFilaOlistSchema.parse(previa.selecoes);
-    await validarSelecoes(fila, filial.id, selecionados);
-    return enviarPedidoManual({ filaId: fila.id, versao: fila.versao, matrizId, aplicativoId: filial.id, usuarioId, ...(fila.vendedorFixo && fila.autorId ? { vendedorFixo: { autorId: fila.autorId, vendedorId: selecionados.vendedorId } } : {}), payload: previa.payload as Record<string, unknown> });
+    const validacao = await validarSelecoes(fila, filial.id, selecionados);
+    return enviarPedidoManual({ filaId: fila.id, versao: fila.versao, matrizId, aplicativoId: filial.id, usuarioId,
+      ...(fila.vendedorFixo && fila.autorId ? { vendedorFixo: { autorId: fila.autorId, vendedorId: selecionados.vendedorId } } : {}),
+      guardaReferencia: validacao.guardaReferencia, payload: previa.payload as Record<string, unknown> });
   }
   if (body.versao !== fila.versao || !["PENDENTE", "FALHADO"].includes(fila.status)) throw new ErroFilaOlist("Pedido alterado ou bloqueado.", 409);
   const selecoes = body.selecoes;
   const dados = dadosPedidoFilaSchema.parse(fila.dadosPedido);
   const ids = new Set(dados.itens.map(i => i.tecido.id));
   if (selecoes.tecidos.length !== ids.size || new Set(selecoes.tecidos.map(t => t.tecidoId)).size !== ids.size || selecoes.tecidos.some(t => !ids.has(t.tecidoId))) throw new ErroFilaOlist("Associe um produto a cada tecido.");
-  const { plano, cliente, vendedor, forma, nomes } = await validarSelecoes(fila, filial.id, selecoes);
+  const { plano, cliente, vendedor, forma, nomes, guardaReferencia } = await validarSelecoes(fila, filial.id, selecoes);
   const produtos = new Map(selecoes.tecidos.map(t => [t.tecidoId, t]));
   const linhas = dados.itens.map(i => ({ referencia: String(produtos.get(i.tecido.id)!.id), nome: i.tecido.nome,
     preco: produtos.get(i.tecido.id)!.preco, quantidade: i.quantidadeTecido, quantidadeSolicitada: i.quantidade, unidadeSolicitada: i.unidade,
@@ -105,10 +113,12 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
     selecoes.laser ? { referencia: String(selecoes.laser.id), preco: selecoes.laser.preco } : null);
   const versao = fila.versao + 1;
   const previa = await prisma.$transaction(async tx => {
+    await validarAtoresFilaManual(tx, usuarioId, matrizId, guardaReferencia);
     await bloquearPedidoManual(tx, fila.id);
     const envio = await tx.envioPedidoManual.findUnique({ where: { filaId: fila.id } });
     if (envio && envioBloqueado(envio.estado)) throw new ErroFilaOlist("Tentativa em andamento ou sem conciliação.", 409);
     if (!await bloquearDestinoFornecedor(tx, matrizId, filial.id)) throw new ErroFilaOlist("Destino alterado.", 409);
+    if (guardaReferencia && !await bloquearDestinoFornecedor(tx, matrizId, guardaReferencia.origemAplicativoId)) throw new ErroFilaOlist("Aplicativo de referência alterado.", 409);
     const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: fila.id, aplicativoFornecedorId: matrizId, aplicativoFilialId: filial.id,
       versao: body.versao, status: { in: ["PENDENTE", "FALHADO"] } }, data: {
         dadosPedido: jsonManual({ ...dados, olist: { filialId: filial.id, selecoes } }), versao: { increment: 1 },

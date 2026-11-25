@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { criarPedidoOlistSeguro, ErroCriacaoOlist } from "@/lib/olist";
 import { bloquearDestinoFornecedor } from "@/lib/fila-fornecedor-destino";
 import { envioBloqueado, envioExpirado, ErroEnvioFornecedor } from "@/lib/envio-fornecedor";
+import { validarAtoresFilaManual, type GuardaReferenciaFilaManual } from "@/lib/fila-manual-referencia";
 
 export const marcadorPedidoManual = (id: string) => `Pedido manual da fila: ${id}`;
 export const jsonManual = (valor: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(valor));
@@ -19,13 +20,13 @@ export async function marcarManualInterrompido(filaId: string) {
     await tx.pedidoFornecedorQueue.updateMany({ where: { id: filaId, status: "PROCESSAR" }, data: { status: "FALHADO", versao: { increment: 1 } } });
   });
 }
-export async function enviarPedidoManual(contexto: { filaId: string; versao: number; matrizId: string; aplicativoId: string; usuarioId: string; vendedorFixo?: { autorId: string; vendedorId: number }; payload: Record<string, unknown> }) {
+export async function enviarPedidoManual(contexto: { filaId: string; versao: number; matrizId: string; aplicativoId: string; usuarioId: string; vendedorFixo?: { autorId: string; vendedorId: number }; guardaReferencia?: GuardaReferenciaFilaManual; payload: Record<string, unknown> }) {
   const { filaId, aplicativoId, usuarioId } = contexto;
   const tentativaId = randomUUID();
   const payload = { ...contexto.payload, observacoesInternas: `${String(contexto.payload.observacoesInternas ?? "")}\n\n${marcadorPedidoManual(filaId)}` };
   await prisma.$transaction(async tx => {
+    await validarAtoresFilaManual(tx, usuarioId, contexto.matrizId, contexto.guardaReferencia, contexto.vendedorFixo?.autorId);
     if (contexto.vendedorFixo) {
-      await tx.$queryRaw`SELECT id FROM usuario WHERE id=${contexto.vendedorFixo.autorId}::uuid FOR SHARE`;
       const vinculo = await tx.usuarioVendedorOlist.findFirst({ where: {
         usuarioId: contexto.vendedorFixo.autorId, aplicativoId,
         usuario: { aplicativoId: contexto.matrizId },
@@ -36,6 +37,7 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
     const envio = await tx.envioPedidoManual.findUnique({ where: { filaId } });
     if (envio && envioBloqueado(envio.estado)) throw new ErroEnvioFornecedor("Envio em andamento, concluído ou incerto. Confira a tentativa existente.");
     if (!await bloquearDestinoFornecedor(tx, contexto.matrizId, aplicativoId)) throw new ErroEnvioFornecedor("Destino não autorizado.");
+    if (contexto.guardaReferencia && !await bloquearDestinoFornecedor(tx, contexto.matrizId, contexto.guardaReferencia.origemAplicativoId)) throw new ErroEnvioFornecedor("Aplicativo de referência alterado. Gere outra prévia.");
     const atualizado = await tx.pedidoFornecedorQueue.updateMany({ where: { id: filaId, tipoOrigem: "MANUAL",
       aplicativoFornecedorId: contexto.matrizId, aplicativoFilialId: aplicativoId, versao: contexto.versao,
       status: { in: ["PENDENTE", "FALHADO"] } }, data: { status: "PROCESSAR", versao: { increment: 1 } } });

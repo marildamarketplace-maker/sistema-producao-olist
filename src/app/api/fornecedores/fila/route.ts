@@ -50,8 +50,10 @@ export async function GET(request: Request) {
     });
     return NextResponse.json({ fornecedores: fornecedores.map(({ aplicativoPai, ...fornecedor }) => ({
       ...fornecedor,
-      // Mantém o contrato filiais, incluindo agora a conta própria como destino explícito.
-      filiais: aplicativoPai ? [{ id: aplicativoPai.id, nome: aplicativoPai.nome, descricao: aplicativoPai.descricao }, ...aplicativoPai.filiais] : [],
+      // Havendo filhos, o seletor oferece somente eles. A conta própria é
+      // a alternativa para fornecedores sem filhos, preservando o contrato filiais.
+      filiais: aplicativoPai ? (aplicativoPai.filiais.length ? aplicativoPai.filiais
+        : [{ id: aplicativoPai.id, nome: aplicativoPai.nome, descricao: aplicativoPai.descricao }]) : [],
     })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return falha(error); }
 }

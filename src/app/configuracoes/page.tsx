@@ -7,12 +7,15 @@ import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { supabase } from "@/lib/supabase";
 import { solicitarReconexaoOlist } from "@/lib/reconectar-olist";
+import { DirecionamentoPedidosConfiguracao } from "@/components/direcionamento-pedidos-configuracao";
 
 const META_CONFIG_KEY = "META_GERAL_ESTOQUE";
 const MINIMO_CONFIG_KEY = "MINIMO_GERAL_ESTOQUE";
 
 export default function ConfiguracoesPage() {
   const { session, usuario } = useAuth();
+  const [aba, setAba] = useState("geral");
+  const [direcionamentoDisponivel, setDirecionamentoDisponivel] = useState(false);
   const [metaGeral, setMetaGeral] = useState("0");
   const [minimoGeral, setMinimoGeral] = useState("0");
   const [loading, setLoading] = useState(true);
@@ -138,6 +141,11 @@ export default function ConfiguracoesPage() {
         description="Defina parâmetros globais do sistema de produção e estoque."
       />
 
+      {direcionamentoDisponivel && <nav aria-label="Seções de configuração" className="flex flex-wrap gap-2">
+        {[{ id: "geral", nome: "Geral" }, { id: "direcionamento", nome: "Direcionamento de pedidos" }].map(item => <button key={item.id} type="button" aria-pressed={aba === item.id} onClick={() => setAba(item.id)} className={`min-h-11 rounded-md border px-4 py-2 text-sm font-medium ${aba === item.id ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-900"}`}>{item.nome}</button>)}
+      </nav>}
+      <DirecionamentoPedidosConfiguracao ativo={aba === "direcionamento" && direcionamentoDisponivel} onDisponivel={setDirecionamentoDisponivel} />
+      <div hidden={aba !== "geral"} className="space-y-8">
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-slate-900">Parametros de estoque</h3>
 
@@ -201,6 +209,7 @@ export default function ConfiguracoesPage() {
           Use este botão caso a integração retorne erro 401 ou após alterar permissões do aplicativo na Olist/Tiny.
         </p>
       </section>
+      </div>
       </div>
     </AccessGuard>
   );

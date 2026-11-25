@@ -93,9 +93,11 @@ function CancelarPedidoFila({ pedido, token, fechar, concluir }: { pedido: Pedid
   </dialog>, document.body);
 }
 
-function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCancelar }: {
-  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; token: string; aoSalvar: (filial: string, status: StatusFila) => void; aoAtualizar: () => void; aoCancelar: () => void;
+function PedidoFilaCard({ pedido, filiais, aplicativoId, token, aoSalvar, aoAtualizar, aoCancelar }: {
+  pedido: PedidoFilaAdministracao; filiais: FilialFila[]; aplicativoId?: string; token: string; aoSalvar: (filial: string, status: StatusFila) => void; aoAtualizar: () => void; aoCancelar: () => void;
 }) {
+  const destinos = pedido.tipoOrigem === "MANUAL" && pedido.dadosPedido?.origemManual && aplicativoId && filiais.some(f => f.id !== aplicativoId)
+    ? filiais.filter(f => f.id !== aplicativoId) : filiais;
   const [filialId, setFilialId] = useState(pedido.filial?.id ?? "");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -173,10 +175,10 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCance
           <select id={`filial-${pedido.id}`} required className="input min-h-11 min-w-0 flex-1 sm:w-auto" value={filialId} disabled={salvando || conflito || !podeAlterar || filiais.length === 0} onChange={(event) => setFilialId(event.target.value)}>
             <option value="">Selecione o aplicativo destinatário</option>
             {!filialAtualDisponivel && pedido.filial && <option value={pedido.filial.id} disabled>{pedido.filial.nome} (sem vínculo atual)</option>}
-            {filiais.map((filial) => <option key={filial.id} value={filial.id}>{filial.nome}</option>)}
+            {destinos.map((filial) => <option key={filial.id} value={filial.id}>{filial.nome}</option>)}
           </select>
           <div className="flex flex-wrap items-start gap-2">
-            <button type="submit" className={primario} disabled={salvando || conflito || !podeAlterar || !filialId || !filiais.some((filial) => filial.id === filialId)}>
+            <button type="submit" className={primario} disabled={salvando || conflito || !podeAlterar || !filialId || !destinos.some((filial) => filial.id === filialId)}>
               {salvando ? "Salvando..." : "Salvar aplicativo"}
             </button>
             <MaisOpcoesFila
@@ -199,7 +201,7 @@ function PedidoFilaCard({ pedido, filiais, token, aoSalvar, aoAtualizar, aoCance
   );
 }
 
-export function FilaPedidosFornecedorClient({ token }: { token: string }) {
+export function FilaPedidosFornecedorClient({ token, aplicativoId }: { token: string; aplicativoId?: string }) {
   const [situacao, setSituacao] = useState<SituacaoFila>("pendente");
   const [pagina, setPagina] = useState(1);
   const [atualizacao, setAtualizacao] = useState(0);
@@ -258,7 +260,7 @@ export function FilaPedidosFornecedorClient({ token }: { token: string }) {
           {dados.filiais.length === 0 && <p role="status" className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum aplicativo destinatário disponível. Atualize a fila para consultar as opções.</p>}
           <p role="status" className="text-sm text-slate-600">{dados.total} pedido(s) com o filtro selecionado.</p>
           {dados.pedidos.length === 0 ? <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600">Nenhum pedido encontrado nesta página.</p> : dados.pedidos.map((pedido) => (
-            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} aoCancelar={() => { focarAtualizacao.current = true; setMensagem("Pedido cancelado na fila. O envio está bloqueado."); atualizar(); }} />
+            <PedidoFilaCard key={`${pedido.id}-${pedido.versao}`} pedido={pedido} filiais={dados.filiais} aplicativoId={aplicativoId} token={token} aoSalvar={aoSalvar} aoAtualizar={atualizarAposEnvio} aoCancelar={() => { focarAtualizacao.current = true; setMensagem("Pedido cancelado na fila. O envio está bloqueado."); atualizar(); }} />
           ))}
           <nav aria-label="Páginas da fila" className="flex flex-wrap items-center justify-between gap-3">
             <button type="button" disabled={pagina === 1} onClick={() => setPagina((valor) => valor - 1)} className={secundario}>Anterior</button>

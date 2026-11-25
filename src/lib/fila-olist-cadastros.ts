@@ -65,16 +65,21 @@ async function validarIntegracao(filialId: string) {
     throw new ErroFila("Conecte novamente a integração Olist da conta destinatária antes de continuar.");
   });
 }
-export async function validarSelecoesParciais(filialId: string, selecoes: SelecoesFilaOlistParciais, precisaLaser = false) {
+export type PessoasFilaOlistValidadas = { cliente: Record<string, unknown>; vendedor: Record<string, unknown> };
+export async function validarSelecoesParciais(filialId: string, selecoes: SelecoesFilaOlistParciais, precisaLaser = false,
+  pessoasValidadas?: PessoasFilaOlistValidadas) {
+    if (pessoasValidadas && (Number(pessoasValidadas.cliente.id) !== selecoes.clienteId || Number(pessoasValidadas.vendedor.id) !== selecoes.vendedorId)) {
+      throw new ErroFila("Os cadastros validados não correspondem às seleções desta conta.");
+    }
     if (selecoes.clienteId || selecoes.vendedorId || selecoes.formaId || selecoes.tecidos?.length || selecoes.laser) await validarIntegracao(filialId);
     const plano = selecoes.planoId && selecoes.formaId ? await prisma.formaPagamentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } }) : null;
     if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de pagamento nesta conta destinatária.");
-    const cliente = selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null;
+    const cliente = pessoasValidadas?.cliente ?? (selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null);
     const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-pagamento", selecoes.formaId) : null;
     if ((cliente && !pessoaAtiva(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de pagamento inativos.");
     // Vendedores não possuem endpoint de detalhe. Valida por paginação na mesma conta.
-    let vendedor: Record<string, unknown> | undefined;
-    for (let pagina = 0; selecoes.vendedorId && pagina < 100; pagina++) {
+    let vendedor: Record<string, unknown> | undefined = pessoasValidadas?.vendedor;
+    for (let pagina = 0; !vendedor && selecoes.vendedorId && pagina < 100; pagina++) {
       const lista = await listarVendedoresOlistApi(filialId, { limit: 100, offset: pagina * 100 });
       vendedor = lista.itens.find((i) => Number(i.id) === selecoes.vendedorId);
       if (vendedor || lista.itens.length < 100) break;
@@ -95,8 +100,9 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
     return { plano, cliente, forma, vendedor, nomes };
 }
 
-export async function validarCadastros(filialId: string, selecoes: SelecoesFilaOlist, precisaLaser: boolean) {
-  const resultado = await validarSelecoesParciais(filialId, selecoes, precisaLaser);
+export async function validarCadastros(filialId: string, selecoes: SelecoesFilaOlist, precisaLaser: boolean,
+  pessoasValidadas?: PessoasFilaOlistValidadas) {
+  const resultado = await validarSelecoesParciais(filialId, selecoes, precisaLaser, pessoasValidadas);
   const { plano, cliente, forma, vendedor } = resultado;
   if (!plano || !cliente || !forma || !vendedor) throw new ErroFila("Complete os dados comerciais antes de criar o pedido.");
   return { ...resultado, plano, cliente, forma, vendedor };
