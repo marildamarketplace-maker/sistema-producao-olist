@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { agruparRevisaoPedido } from "@/lib/revisao-pedido";
+import { consultarDirecionamentoCliente } from "@/lib/consultar-direcionamento-cliente";
+import { agruparProdutosRevisao } from "@/lib/revisao-pedido";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BloqueioExplicado } from "@/components/bloqueio-explicado";
@@ -149,10 +150,10 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
   useEffect(() => {
     if (!contaPronta || !vendedor?.id || !cliente?.id || tentativa || comprovante) return;
     const controller = new AbortController();
-    setResolucao(null); setContextoConsulta(""); setResolvendo(true); setErro(""); setErroResolucao("");
+    setResolvendo(true); setErro(""); setErroResolucao("");
     const params = new URLSearchParams({ acao: "resolver", aplicativoOrigemId: referenciaId, vendedorOrigemId: String(vendedor.id), clienteOrigemId: String(cliente.id) });
-    fetch(`${apiBase}${separador}${params}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
-      .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "Não foi possível definir o aplicativo."); const parsed = resolucaoConsultaSchema.safeParse(d); if (!parsed.success) throw new Error("Resposta de direcionamento inválida. Atualize e tente novamente."); return { resolucao: parsed.data, contexto: typeof d.contextoConsulta === "string" && d.contextoConsulta.length <= 4096 ? d.contextoConsulta : "" }; })
+    consultarDirecionamentoCliente(`${apiBase}${separador}${params}`, token, controller.signal)
+      .then(d => { const parsed = resolucaoConsultaSchema.safeParse(d); if (!parsed.success) throw new Error("Não foi possível validar o aplicativo destinatário."); return { resolucao: parsed.data, contexto: parsed.data.contextoConsulta ?? "" }; })
       .then(({ resolucao: d, contexto }) => { if (!controller.signal.aborted) {
         setContextoConsulta(contexto);
         const mudouDestino = Boolean(destinoAtual.current && destinoAtual.current !== d.decisao.aplicativoId);
@@ -160,7 +161,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
         setAplicativoId(d.decisao.aplicativoId); setResolucao(d);
         setSelecoes(atual => ({ ...(mudouDestino ? criarRascunhoFilaOlist(atual.tecidos.map(t => t.tecidoId)) : atual), vendedorId: d.selecoes.vendedorId, clienteId: d.selecoes.clienteId }));
       } })
-      .catch(e => { if (!controller.signal.aborted) { const mensagem = e instanceof Error ? e.message : "Falha ao resolver o destino."; setErro(mensagem); setErroResolucao(mensagem); } })
+      .catch(e => { if (!controller.signal.aborted) { const mensagem = e instanceof Error ? e.message : "Falha ao resolver o destino."; setErroResolucao(mensagem); } })
       .finally(() => { if (!controller.signal.aborted) setResolvendo(false); });
     return () => controller.abort();
   }, [contaPronta, vendedor?.id, cliente?.id, referenciaId, token, revisaoResolucao, tentativa, comprovante, apiBase, separador]);
@@ -266,7 +267,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     setErro("");
     if (etapa === 0 && !vendedor?.id) { setErro("Selecione o vendedor."); return; }
     if (etapa === 1 && !cliente?.id) { setErro("Selecione o cliente."); return; }
-    if (etapa === 2 && !resolucao) { setErro("Aguarde ou atualize a resolução do aplicativo."); return; }
+    if (etapa === 2 && (!resolucao || resolvendo || Boolean(erroResolucao))) { setErro("Aguarde ou atualize a resolução do aplicativo."); return; }
     if (etapa >= 3) {
       if (!validarCamposItens()) return;
       try { montarEntrada(); } catch (e) { setErro(e instanceof Error ? e.message : "Revise os itens."); return; }
@@ -274,7 +275,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     setEtapa(atual => atual + 1);
   }
   function montarEntrada(): EntradaPedidoManual | EntradaPedidoProducao {
-    if (!resolucao) throw new Error("Revise o direcionamento do pedido.");
+    if (!resolucao || resolvendo || Boolean(erroResolucao)) throw new Error("Revise o direcionamento do pedido.");
     chave.current ??= crypto.randomUUID();
     if (solicitacaoId && (!revisaoProducao || carregandoOrigem)) throw new Error("Carregue os produtos da produção antes de enviar.");
     if (itens.some(i => !i.modalidade)) throw new Error("Escolha a modalidade de cada item na etapa Itens.");
@@ -362,11 +363,11 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
       <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6" aria-busy={enviando}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold">{etapas[etapa]}</h3>
-          {etapa === 2 && <button className={botao} type="button" disabled={resolvendo || !cliente || !vendedor} onClick={() => setRevisaoResolucao(r => r + 1)}>Atualizar direcionamento</button>}
+
           {etapa === 3 && <button type="button" className={botao} disabled={enviando || carregandoOrigem || catalogoTecidos.carregando} onClick={catalogoTecidos.atualizar}>Atualizar produtos</button>}
         </div>
-        {solicitacaoId && etapa >= 3 && <button type="button" className={botao} disabled={enviando || resolvendo || !cliente || !vendedor}
-          onClick={() => setRevisaoResolucao(atual => atual + 1)}>Atualizar direcionamento</button>}
+        {etapa >= 2 && resolvendo && <p role="status" className="text-sm text-slate-600">Conferindo aplicativo destinatário...</p>}
+        {etapa >= 2 && erroResolucao && <div role="alert" className="space-y-2 text-sm text-red-700"><p>{erroResolucao} Seus dados foram preservados.</p><button type="button" className={botao} onClick={() => setRevisaoResolucao(r => r + 1)}>Tentar novamente</button></div>}
         {etapa === 0 && <>{aplicativos.some(a => a.fornecedorId) ? <label className="block text-sm text-slate-700">Aplicativo de referência<select className="input mt-1 min-h-11 w-full" value={referenciaId} disabled={enviando || carregando} onChange={e => selecionarReferencia(e.target.value)}>
           {!referenciaId && <option value="">Nenhuma conta disponível para selecionar</option>}
           {aplicativos.map(a => <option key={a.id} value={a.id} disabled={Boolean(a.bloqueio)} title={a.bloqueio ?? undefined}>{a.nome}{a.bloqueio ? " · Sem vendedor" : a.fornecedorId ? " · Conta do fornecedor" : " · Aplicativo próprio"}</option>)}
@@ -388,14 +389,14 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
           {solicitacaoId && referenciaId && !revisaoProducao && !carregandoOrigem && <button type="button" className={botao} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>}</>}
         {etapa === 1 && <><p className="text-sm text-slate-600">O cliente precisa ter CPF/CNPJ cadastrado. O mesmo documento será localizado no aplicativo destinatário.</p><PesquisaOlist key={`${apiOrigem}:${vendedor?.id}`} titulo="Cliente" recurso="clientes" carregarInicialmente api={apiOrigem} token={token} valor={cliente?.id ?? 0} disabled={!contaPronta} aoSelecionar={o => { invalidarDestino(); setCliente(o); }} />{vendedorFixo && <p className="text-sm text-slate-600">Somente clientes da carteira do seu vendedor são exibidos.</p>}</>}
         {etapa === 2 && <div className="space-y-4">
-          {resolvendo ? <p role="status">Aplicando regras e localizando os cadastros no destino...</p> : resolucao ? <>
+          {resolucao ? <>
             <dl className="grid gap-4 text-sm sm:grid-cols-2">
               <div><dt>Aplicativo destinatário</dt><dd className="break-words font-semibold">{nomeAplicativoDestino}</dd></div>
               <div><dt>Direcionamento</dt><dd className="break-words">{resolucao.decisao.motivo}</dd></div>
               <div><dt>Cliente de referência</dt><dd className="break-words">{resolucao.referencia.cliente.nome} · {resolucao.referencia.cliente.cpfCnpj || "Sem documento"}</dd></div>
               <div><dt>UF do endereço principal</dt><dd>{resolucao.referencia.cliente.uf || "Não informada"}</dd></div>
             </dl><p className="text-sm text-slate-600">O aplicativo segue as regras configuradas. Após incluir, quem gerencia a fila poderá alterar o destino enquanto o pedido aguarda aprovação.</p>
-          </> : erroResolucao ? <p role="alert" className="break-words text-sm text-red-700">{erroResolucao}</p> : <p role="status">Selecione vendedor e cliente válidos para resolver o destino.</p>}
+          </> : <p role="status">Selecione vendedor e cliente válidos para resolver o destino.</p>}
         </div>}
         {etapa === 3 && <>
           {solicitacaoId && <div className="space-y-3">
@@ -410,22 +411,27 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
         {etapa === 4 && <><p className="text-sm text-slate-600">Opcional nesta etapa. As associações e preços serão conferidos antes de criar o pedido na Olist.</p><DadosComerciaisFilaOlist key={api} api={api} token={token} itens={itens.map(i => ({ tecidoId: i.id, nome: i.tecidoNome, corteLaser: i.corteLaser }))} selecoes={selecoes} aoAlterar={alterarSelecoesComerciais} disabled={enviando} ocultarClienteVendedor ocultarProdutos catalogoTecidos={catalogoTecidos} />
           <label className="block text-sm">Observação do pedido<textarea className="input mt-1 min-h-24" maxLength={5000} value={observacao} onChange={e => setObservacao(e.target.value)} /></label></>}
         {etapa === 5 && <><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt>Aplicativo</dt><dd className="break-words font-medium">{nomeAplicativoDestino}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{vendedor?.nome}</dd></div><div><dt>Cliente</dt><dd className="break-words font-medium">{cliente?.nome}</dd></div><div><dt>Status ao enviar</dt><dd>PENDENTE</dd></div></dl>
-          {agruparRevisaoPedido(itens, selecoes.tecidos).map(grupo => {
-            const base = grupo.itens[0];
-            return <div key={grupo.chave} className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p className="break-words font-semibold">{base.tecidoNome}{base.tipoProduto ? ` · ${base.tipoProduto}` : ""}</p>
-              <p className="font-medium">{grupo.pecas ? `${grupo.pecas.toLocaleString("pt-BR")} peças · ` : "Tecido corrido · "}{grupo.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m</p>
-              <p>Produto Olist: {grupo.produtoId || "Pendente"} · Preço/m: {grupo.preco == null ? "Pendente" : `R$ ${grupo.preco.toFixed(2)}`}</p>
-              <ul className="divide-y divide-slate-200">{grupo.itens.map(i => <li key={i.id} className="space-y-1 py-2">
-                <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"}</p>
-                <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : ""}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
-              </li>)}</ul>
-            </div>;
-          })}
+          {agruparProdutosRevisao(itens, selecoes.tecidos).map(card => <div key={card.chave} className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+            <p className="break-words font-semibold">{card.nome}</p>
+            <p className="font-medium">{card.pecas ? `${card.pecas.toLocaleString("pt-BR")} peças · ` : ""}{card.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m no total</p>
+            <p>Produto Olist: {card.produtoId || "Pendente"}</p>
+            {card.tipos.map(grupo => {
+              const base = grupo.itens[0];
+              const tipo = base.modalidade === "TECIDO_LISO" ? "Tecido sem estampa" : base.modalidade === "TECIDO_SUBLIMADO" ? "Tecido sublimado" : base.tipoProduto || "Produto sublimado";
+              return <section key={grupo.chave} aria-label={tipo} className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
+                <p className="break-words font-semibold">{tipo}</p>
+                <p>{grupo.pecas ? `${grupo.pecas.toLocaleString("pt-BR")} peças · ` : ""}{grupo.metros.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Preço/m: {grupo.preco == null ? "Pendente" : `R$ ${grupo.preco.toFixed(2)}`}</p>
+                <ul className="divide-y divide-slate-200">{grupo.itens.map(i => <li key={i.id} className="space-y-1 py-2">
+                  {i.modalidade !== "TECIDO_LISO" && <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"}{i.tamanho ? ` · Tamanho: ${i.tamanho}` : ""}</p>}
+                  <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : ""}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? ` · Laser: ${i.corteLaser ? "Sim" : "Não"}` : ""}</p>
+                </li>)}</ul>
+              </section>;
+            })}
+          </div>)}
           <p className="text-sm">Forma: {selecoes.formaId ? "Selecionada" : "Pendente"} · Plano: {selecoes.planoId ? "Selecionado" : "Pendente"} · Tipo de venda: {selecoes.tipoVenda || "Pendente"}</p><p className="whitespace-pre-wrap break-words text-sm">{observacao || "Sem observação."}</p><p className="text-sm text-slate-600">A confirmação registra o pedido na fila. Um administrador revisará os dados antes do envio à Olist.</p></>}
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
           <button type="button" className={botao} disabled={etapa === 0 || enviando} onClick={() => { setErro(""); setEtapa(e => e - 1); }}>Voltar</button>
-          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta && validarCamposItens()) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
+          {etapa < 5 ? <button type="button" className={primario} disabled={!contaPronta || (etapa >= 2 && (!resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))))} onClick={avancar}>Continuar</button> : <button type="button" className={primario} disabled={enviando || !contaPronta || !resolucao || resolvendo || Boolean(erroResolucao) || (Boolean(solicitacaoId) && (!revisaoProducao || carregandoOrigem))} onClick={() => { try { if (contaPronta && validarCamposItens()) void enviar(montarEntrada()); } catch (e) { setErro(e instanceof Error ? e.message : "Revise o pedido."); } }}>Enviar para fila</button>}
         </div>
       </section>
     </>}

@@ -15,3 +15,18 @@ export function agruparRevisaoPedido(itens: ItemPedidoManual[], produtos: Array<
   }
   return [...grupos.values()];
 }
+
+/** Um card por produto; modalidades, tipos e preços ficam em seções internas. */
+export function agruparProdutosRevisao(itens: ItemPedidoManual[], produtos: Array<{ tecidoId: string; id: number; preco: number | null }>) {
+  const cards = new Map<string, { chave: string; nome: string; produtoId: number; pecas: number; metros: number; tipos: ReturnType<typeof agruparRevisaoPedido> }>();
+  for (const tipo of agruparRevisaoPedido(itens, produtos)) {
+    const nome = tipo.itens[0].tecidoNome;
+    const chave = JSON.stringify([tipo.produtoId || null, tipo.produtoId ? null : nome]);
+    const card = cards.get(chave) ?? { chave, nome, produtoId: tipo.produtoId, pecas: 0, metros: 0, tipos: [] };
+    card.pecas += tipo.pecas;
+    card.metros = Number((card.metros + tipo.metros).toFixed(6));
+    card.tipos.push(tipo);
+    cards.set(chave, card);
+  }
+  return [...cards.values()];
+}

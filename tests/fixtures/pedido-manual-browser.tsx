@@ -8,6 +8,7 @@ const params = new URLSearchParams(location.search);
 if (!params.has("preservar")) sessionStorage.clear();
 document.documentElement.classList.toggle("dark",params.get("tema")==="dark");
 window.testeManual = {envios:[],falhar:false,consumoAlterado:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2),contextoAtual:"contexto-validado-local"};
+let falhasDirecionamento=0;
 let falhouInicial=false;
 let falhouVendedor=false;
 window.fetch = async (input,init) => {
@@ -33,6 +34,7 @@ window.fetch = async (input,init) => {
     itens: [...[40,41].map((n,index) => ({ id:id(n), tecidoNome:`Oxford da produção ${index+1}`, modalidade:"PRODUTO_SUBLIMADO", quantidade:3, quantidadeTecido:1.5, estampa:"6861",variante:"A",tamanho:"50x50",tipoProduto:"Lenço",corteLaser:false })), {id:id(42), tecidoNome:"", quantidade:1, quantidadeTecido:0, estampa:"", variante:null, tamanho:"", tipoProduto:"", corteLaser:false}], observacao:"Observação original da produção",revisao:"a".repeat(64),revisaoFonte:window.testeManual.fonteAtual,
   });
   if(query.get("acao")==="resolver") {
+    if(params.has("falhaDirecionamento") && falhasDirecionamento++ < 2) return Response.json({error:"Indisponibilidade temporária"},{status:503});
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     if(window.testeManual.clienteSemDocumento) return Response.json({error:"Cadastre o CPF/CNPJ do cliente no aplicativo de referência antes de criar o pedido."},{status:409});
     const referenciaId=query.get("aplicativoOrigemId")??id(2), externa=[id(4),id(5),id(7)].includes(referenciaId);
