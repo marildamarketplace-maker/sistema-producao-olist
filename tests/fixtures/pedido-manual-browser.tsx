@@ -20,7 +20,7 @@ window.fetch = async (input,init) => {
   }
   window.testeManual.consultas.push(url.search);
   if(query.has("pedidoId")) return Response.json({id:id(10),status:"PENDENTE",createdAt:new Date().toISOString(),aplicativo:{id:id(2),nome:"Conta própria"}});
-  if(!query.has("aplicativoId")) return Response.json({aplicativos:params.has("contaUnica")?[{id:id(2),nome:"Conta própria"}]:[{id:id(2),nome:"Conta própria"},{id:id(3),nome:"Filial com nome muito longo para verificar responsividade"}],aplicativoPadraoId:id(2),habilitado:true});
+  if(!query.has("aplicativoId")) return Response.json({aplicativos:params.has("contaUnica")?[{id:id(2),nome:"Conta própria"}]:[{id:id(2),nome:"Conta própria"},{id:id(3),nome:"Filial com nome muito longo para verificar responsividade"}],aplicativoPadraoId:id(2)});
   if(!query.has("recurso")) {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});
     return Response.json({conta:{id:query.get("aplicativoId"),nome:"Conta"},vendedorId:query.get("aplicativoId")===id(2)?window.testeManual.vendedorAtual:21,vendedorFixo:true});

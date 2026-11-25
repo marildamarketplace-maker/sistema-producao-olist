@@ -17,7 +17,6 @@ const novoItem = (): ItemPedidoManual => ({ id: crypto.randomUUID(), tecidoNome:
 export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { token: string; usuarioId: string; podeGerenciarFila: boolean }) {
   const [aplicativos, setAplicativos] = useState<Array<{ id: string; nome: string }>>([]);
   const [aplicativoId, setAplicativoId] = useState("");
-  const [habilitado, setHabilitado] = useState(false);
   const [etapa, setEtapa] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [contaPronta, setContaPronta] = useState(false);
@@ -51,7 +50,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
     setCarregando(true);
     fetch(API, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
       .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
-      .then(d => { if (!controller.signal.aborted) { setAplicativos(d.aplicativos); setAplicativoId(atual => atual || d.aplicativoPadraoId); setHabilitado(d.habilitado); } })
+      .then(d => { if (!controller.signal.aborted) { setAplicativos(d.aplicativos); setAplicativoId(atual => atual || d.aplicativoPadraoId); } })
       .catch(e => { if (!controller.signal.aborted) setErro(e instanceof Error ? e.message : "Falha ao carregar contas."); })
       .finally(() => { if (!controller.signal.aborted) setCarregando(false); });
     return () => controller.abort();
@@ -73,7 +72,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
     return () => controller.abort();
   }, [storageKey, token]);
   useEffect(() => {
-    if (!aplicativoId || !habilitado) return;
+    if (!aplicativoId) return;
     const controller = new AbortController();
     setContaPronta(false);
     fetch(api, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" })
@@ -93,7 +92,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
       } })
       .catch(e => { if (!controller.signal.aborted) setErro(e instanceof Error ? e.message : "Falha ao carregar vendedor."); });
     return () => controller.abort();
-  }, [api, aplicativoId, habilitado, token, revisaoConta]);
+  }, [api, aplicativoId, token, revisaoConta]);
 
   function trocarConta(id: string) {
     if (id === aplicativoId) return;
@@ -168,8 +167,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila }: { tok
       <div className="flex flex-wrap gap-3">{podeGerenciarFila && <Link className={primario} href="/fornecedor/fila-pedidos">Abrir fila de pedidos</Link>}<button className={botao} type="button" onClick={novoPedido}>Criar outro pedido</button></div>
     </section> : tentativa ? <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5">
       <h3 className="font-semibold">Confirmar resultado do envio para a fila</h3><p className="text-sm">Há uma confirmação pendente nesta sessão. Consulte novamente com os mesmos dados para evitar duplicidade.</p>
-      <button type="button" className={primario} disabled={enviando || !habilitado} onClick={() => void enviar(tentativa)}>{enviando ? "Confirmando..." : "Confirmar resultado"}</button>
-    </section> : !habilitado ? <p role="status" className="rounded-lg border border-slate-200 bg-white p-5">A criação manual na fila ainda não foi habilitada.</p> : <>
+      <button type="button" className={primario} disabled={enviando} onClick={() => void enviar(tentativa)}>{enviando ? "Confirmando..." : "Confirmar resultado"}</button>
+    </section> : <>
       <ol aria-label="Etapas da criação" className="flex flex-wrap gap-2 text-xs">{etapas.map((nome, index) => <li key={nome} aria-current={index === etapa ? "step" : undefined} className={`rounded-md border border-slate-200 px-3 py-2 ${index === etapa ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>{index + 1}. {nome}</li>)}</ol>
       <section className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6" aria-busy={enviando}>
         <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold">{etapas[etapa]}</h3>

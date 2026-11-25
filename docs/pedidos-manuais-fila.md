@@ -17,7 +17,7 @@
 
 `/api/olist/pedidos/manuais` requer Bearer da sessão existente:
 
-- `GET`: contas permitidas, conta padrão e sinal de habilitação.
+- `GET`: contas permitidas e conta padrão.
 - `GET ?aplicativoId=UUID`: conta autorizada e vendedor fixo, quando houver.
 - `GET ?aplicativoId=UUID&recurso=clientes|vendedores|produtos|servicos|formas&busca=...&pagina=...`: consultas limitadas a 50 resultados por página, até página 1000. O filtro de carteira vem do servidor.
 - `GET ?aplicativoId=UUID&recurso=planos&formaId=ID`: planos locais ativos associados.
@@ -34,14 +34,11 @@ A reserva é persistida antes do POST Olist; não há retry automático desse PO
 
 Falhas ambíguas tornam o envio `INCERTO` e bloqueiam reenvio. Reserva interrompida por mais de dez minutos é exposta para conciliação. Vincular um pedido existente exige o marcador exato `Pedido manual da fila: UUID` nas observações internas da conta da tentativa. Liberar outra tentativa exige conferência explícita de ausência e justificativa. Se houver ID Olist salvo, a ausência não pode ser registrada.
 
-## Implantação gradual
+## Implantação e disponibilidade
 
-1. Aplicar a migration Prisma `20261125010000_pedidos_manuais_fila` pelo procedimento habitual, mantendo `PEDIDOS_MANUAIS_HABILITADOS` ausente ou `false`.
-2. Publicar todos os consumidores compatíveis com as origens `PRODUCAO` e `MANUAL`. A migration mantém os registros existentes como `PRODUCAO`; versões antigas não devem receber registros manuais.
-3. Configurar **somente no servidor** `PEDIDOS_MANUAIS_HABILITADOS=true` e publicar/reiniciar a aplicação para habilitar a criação.
-4. Conferir criação PENDENTE e comprovante com usuário autorizado; só testar criação real na Olist quando explicitamente autorizada.
+O recurso fica disponível a usuários com `podeCriarOlistPedido`, sem configuração adicional de habilitação. Antes da primeira publicação em outro ambiente, aplicar a migration Prisma `20261125010000_pedidos_manuais_fila` e garantir consumidores compatíveis com as origens `PRODUCAO` e `MANUAL`.
 
-Desabilitar a flag interrompe novas criações e buscas do formulário, mas preserva comprovantes e administração de pedidos já aceitos. Depois do primeiro pedido manual, rollback exige manter consumidores compatíveis; não retornar ao código antigo que pressupõe solicitação obrigatória.
+Conferir criação PENDENTE e comprovante com usuário autorizado; só testar criação real na Olist quando explicitamente autorizada. Depois do primeiro pedido manual, rollback exige manter consumidores compatíveis; não retornar ao código antigo que pressupõe solicitação obrigatória.
 
 ## Egress e validação
 

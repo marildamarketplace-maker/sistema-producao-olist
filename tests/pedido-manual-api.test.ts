@@ -7,7 +7,6 @@ const id = (n:number) => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`
 test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante idempotente sem criar na Olist", async t => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
-  process.env.PEDIDOS_MANUAIS_HABILITADOS = "true";
   const usuario = { id:id(1), aplicativoId:id(2), ativo:true, podeCriarOlistPedido:true, podeSelecionarFilialFornecedor:true,
     podeGerenciarFilaPedidos:false, vinculosOlistVersao:1 };
   let vinculado = true, noGrupo = true, carteira = 20, falharDetalhe = false, consultas = 0;
@@ -59,13 +58,12 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
   const req = (query="",body?:unknown) => new Request(`https://example.test/api?${query}`,{method:body?"POST":"GET",headers:{Authorization:"Bearer fake"},...(body?{body:JSON.stringify(body)}:{})});
   const entrada = {chaveIdempotencia:id(4),aplicativoId:id(2),observacao:null,selecoes:{vendedorId:20,clienteId:30},itens:[{
     id:id(5),tecidoNome:"Oxford",quantidade:10,quantidadeTecido:2.5,estampa:"A",variante:null,tamanho:"30x30",tipoProduto:"Lenço",corteLaser:true}]};
-  await t.test("exige sessão, usuário ativo, permissão e habilitação",async () => {
+  await t.test("exige sessão, usuário ativo e permissão",async () => {
     assert.equal((await GET(new Request("https://example.test"))).status,401);
     usuario.ativo=false; assert.equal((await GET(req())).status,401); usuario.ativo=true;
     usuario.podeCriarOlistPedido=false; assert.equal((await POST(req("",entrada))).status,403); usuario.podeCriarOlistPedido=true;
-    process.env.PEDIDOS_MANUAIS_HABILITADOS="false";
-    assert.equal((await GET(req())).status,200); assert.equal((await POST(req("",entrada))).status,503);
-    process.env.PEDIDOS_MANUAIS_HABILITADOS="true";
+    const inicial=await GET(req()); assert.equal(inicial.status,200);
+    assert.deepEqual(Object.keys(await inicial.json()).sort(),["aplicativoPadraoId","aplicativos"]);
     assert.equal(registros.length,0);
   });
   await t.test("conta padrão, filho autorizado e vendedor fixo; netos e grupos externos são bloqueados",async () => {

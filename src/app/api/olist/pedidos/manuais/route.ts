@@ -20,9 +20,6 @@ function falha(error: unknown) {
   if (error instanceof z.ZodError) return resposta({ error: "Revise vendedor, cliente, itens e dados comerciais." }, 400);
   return resposta({ error: "Não foi possível concluir a operação. Confira a integração e tente novamente." }, 502);
 }
-function exigirHabilitacao() {
-  if (process.env.PEDIDOS_MANUAIS_HABILITADOS !== "true") throw new ErroFilaOlist("A criação manual na fila ainda não foi habilitada.", 503);
-}
 export async function GET(request: Request) {
   try {
     const usuario = await autorizarPedidoManual(request);
@@ -41,9 +38,8 @@ export async function GET(request: Request) {
         ? { OR: [{ id: usuario.aplicativoId }, { aplicativoPaiId: usuario.aplicativoId }] } : { id: usuario.aplicativoId },
         select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }], take: 1001 });
       if (aplicativos.length > 1000) throw new ErroFilaOlist("Limite de aplicativos excedido.");
-      return resposta({ aplicativos, aplicativoPadraoId: usuario.aplicativoId, habilitado: process.env.PEDIDOS_MANUAIS_HABILITADOS === "true" });
+      return resposta({ aplicativos, aplicativoPadraoId: usuario.aplicativoId });
     }
-    exigirHabilitacao();
     const { conta, vendedorId } = await resolverContaPedidoManual(usuario, params.get("aplicativoId")!);
     if (!params.has("recurso")) return resposta({ conta, vendedorId, vendedorFixo: vendedorId !== null });
     return resposta(await consultarCadastrosFilaOlist(conta.id, params, { vendedorId }));
@@ -52,7 +48,6 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const usuario = await autorizarPedidoManual(request);
-    exigirHabilitacao();
     const entrada = pedidoManualSchema.parse(await request.json().catch(() => null));
     const hashEntrada = createHash("sha256").update(JSON.stringify(entrada)).digest("hex");
     const where = { aplicativoSolicitanteId: usuario.aplicativoId, autorId: usuario.id, chaveIdempotencia: entrada.chaveIdempotencia };
