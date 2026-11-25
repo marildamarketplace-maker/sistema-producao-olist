@@ -229,9 +229,14 @@ export function criarServicoCorrespondenciaPedidoManual(deps: DependenciasCorres
     const cliente = pessoa(cadastroCliente, entrada.clienteOrigemId);
     let vendedor: { cadastro: Record<string, unknown>; referencia: PessoaReferencia };
     if (esperada) {
-      const candidatos = await vendedoresPorIdentidade(origem, esperada.vendedor, consultar);
+      // Na origem já conhecemos o ID. O código do contato não é
+      // necessariamente o código do vendedor; não o use para reencontrá-lo.
+      // Sem documento, preserve a busca conservadora de homônimos.
+      const candidatos = esperada.vendedor.cpfCnpj !== null
+        ? [await vendedorPorId(origem, esperada.vendedor.id, consultar)]
+        : await vendedoresPorIdentidade(origem, esperada.vendedor, consultar);
       if (esperada.vendedor.cpfCnpj === null && candidatos.length > 1) throw new ErroFilaOlist("Há mais de um vendedor com o mesmo nome no aplicativo de referência. Revise os cadastros.", 409);
-      const encontrado = candidatos.find(v => v.referencia.id === esperada.vendedor.id);
+      const encontrado = candidatos.find(v => v.referencia.id === esperada.vendedor.id && mesmaPessoa(esperada.vendedor, v.referencia));
       if (!encontrado) throw new ErroFilaOlist("O vendedor de referência foi alterado ou está indisponível.", 409);
       vendedor = encontrado;
       if (!mesmaPessoa(esperada.cliente, cliente)) throw new ErroFilaOlist("O cliente de referência foi alterado. Revise o pedido.", 409);

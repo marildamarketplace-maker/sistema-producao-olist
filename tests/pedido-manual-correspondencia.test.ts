@@ -110,6 +110,20 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     assert.equal(r.cadastros.cliente.id, 41); assert.equal(r.cadastros.vendedor.id, 31);
     assert.ok(d.consultas.every(c => c.timeout > 0 && c.timeout <= 5000));
   });
+  await t.test("revalidação da origem usa ID mesmo com código de contato diferente ou ausente", async () => {
+    for (const codigo of ["CODIGO-DIFERENTE", undefined]) {
+      const { d, servico } = criar(); const ref = await referencia(servico);
+      d.contatos.get(origem)![0].codigo = codigo;
+      const antes = d.consultas.length;
+      const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, origem);
+      assert.equal(r.vendedorId, 11);
+      assert.equal(r.vendedorFixo, true);
+      assert.deepEqual(d.consultas.slice(antes).map(c => c.caminho), ["contatos/21", "vendedores"]);
+      assert.equal(d.consultas.at(-1)!.parametros.codigo, undefined);
+      (d.vendedor().contato as Cadastro).cpfCnpj = docCliente;
+      await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, ref, origem), /vendedor de referência/);
+    }
+  });
   await t.test("sem vínculo em nenhuma conta permite seleção livre, preservando permissões", async () => {
     const { d, servico } = criar(); d.vinculos.clear();
     d.cliente().vendedor = { id: 999 }; d.cliente(destino).vendedor = { id: 999 };
@@ -284,7 +298,7 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
     const antes = d.consultas.length;
     const r = await servico.resolverCorrespondenciaPedidoManual(usuario, ref, destino, { validarDadosDirecionamento: true });
     assert.equal(r.clienteId, 41); assert.equal(r.vendedorId, 31);
-    assert.equal(d.consultas.length - antes, 7);
+    assert.equal(d.consultas.length - antes, 6);
   });
   await t.test("fila histórica mantém destino e snapshot após alteração de nome/UF com a mesma identidade", async () => {
     const { d, servico } = criar(); const ref = await referencia(servico); const original = structuredClone(ref);
