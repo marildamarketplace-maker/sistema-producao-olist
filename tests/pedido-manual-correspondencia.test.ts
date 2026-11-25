@@ -30,8 +30,8 @@ function dados() {
   let agora = 0, custoConsulta = 0, falha = false, paginaIncompleta = false;
   const deps: DependenciasCorrespondenciaPedidoManual = {
     listarAplicativos: async () => aplicativos,
-    autorizarConta: async (autor, app) => {
-      if (!aplicativos.some(a => a.id === app) || app !== autor.aplicativoId && !autor.podeSelecionarFilialFornecedor) {
+    autorizarConta: async (_autor, app) => {
+      if (!aplicativos.some(a => a.id === app)) {
         const { ErroFilaOlist } = await import("../src/lib/fila-olist-cadastros"); throw new ErroFilaOlist("não autorizado", 403);
       }
       if (vinculos.size && !vinculos.has(app)) {
@@ -88,7 +88,8 @@ test("correspondência manual: origem canônica, identidade e isolamento entre a
   });
   await t.test("autorização e vínculo da referência não são substituídos por outra conta", async () => {
     const { d, servico } = criar();
-    await assert.rejects(servico.obterReferenciaPedidoManual({ ...usuario, podeSelecionarFilialFornecedor: false }, entrada), /não autorizado/);
+    await assert.rejects(servico.resolverCorrespondenciaPedidoManual(usuario, await referencia(servico), uuid(99)), /não autorizado/);
+    d.consultas.length = 0;
     d.vinculos.delete(origem);
     await assert.rejects(referencia(servico), /sem vínculo/);
     assert.equal(d.consultas.length, 0);

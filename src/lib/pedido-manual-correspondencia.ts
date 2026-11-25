@@ -12,7 +12,7 @@ import { normalizarNomeDirecionamento, UFS_DIRECIONAMENTO } from "@/lib/direcion
 import { referenciaPedidoManualSchema, type ReferenciaPedidoManual } from "./pedido-manual-referencia";
 
 export type UsuarioCorrespondenciaPedidoManual = {
-  id: string; aplicativoId: string; podeSelecionarFilialFornecedor: boolean;
+  id: string; aplicativoId: string;
 };
 export type CorrespondenciaPedidoManual = {
   clienteId: number; vendedorId: number; vendedorFixo: boolean;

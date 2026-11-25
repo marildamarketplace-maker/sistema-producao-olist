@@ -108,10 +108,9 @@ export async function POST(request: Request) {
       // O cadastro de vínculos usa FOR UPDATE no mesmo usuário.
       await tx.$queryRaw`SELECT id FROM usuario WHERE id=${usuario.id}::uuid FOR SHARE`;
       const atual = await tx.usuario.findUnique({ where: { id: usuario.id }, select: {
-        ativo: true, aplicativoId: true, podeCriarOlistPedido: true, podeSelecionarFilialFornecedor: true, vinculosOlistVersao: true,
+        ativo: true, aplicativoId: true, podeCriarOlistPedido: true, vinculosOlistVersao: true,
       } });
-      if (!atual?.ativo || !atual.podeCriarOlistPedido || atual.aplicativoId !== usuario.aplicativoId ||
-          (conta.id !== usuario.aplicativoId && !atual.podeSelecionarFilialFornecedor)) throw new ErroFilaOlist("Permissões alteradas. Atualize a página.", 403);
+      if (!atual?.ativo || !atual.podeCriarOlistPedido || atual.aplicativoId !== usuario.aplicativoId) throw new ErroFilaOlist("Permissões alteradas. Atualize a página.", 403);
       if (atual.vinculosOlistVersao !== usuario.vinculosOlistVersao) throw new ErroFilaOlist("Vínculos do vendedor alterados. Revise o pedido.", 409);
       await validarVersaoDirecionamento(tx, usuario.aplicativoId, decisao);
       if (!await bloquearDestinoFornecedor(tx, usuario.aplicativoId, origem.aplicativoId)) throw new ErroFilaOlist("Referência alterada. Revise o pedido.", 409);

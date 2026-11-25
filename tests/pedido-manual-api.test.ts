@@ -9,10 +9,10 @@ const id = (n:number) => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`
 test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante idempotente sem criar na Olist", async t => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
-  const usuario = { id:id(1), aplicativoId:id(2), ativo:true, podeCriarOlistPedido:true, podeSelecionarFilialFornecedor:true,
+  const usuario = { id:id(1), aplicativoId:id(2), ativo:true, podeCriarOlistPedido:true, podeSelecionarFilialFornecedor:false,
     podeGerenciarFilaPedidos:false, vinculosOlistVersao:1 };
   let vinculado = true, noGrupo = true, carteira = 20, falharDetalhe = false, consultas = 0;
-  let mudouVinculo = false;
+  let mudouVinculo = false, revogouCriacao = false;
   let versaoConfiguracao = 1, criacoesTentadas = 0;
   let aposLookupVazio: (() => void) | null = null;
   let ufCliente: string | null = null;
@@ -58,7 +58,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
       return [{id:usuario.id}];
     },
   };
-  Object.assign(globalThis,{prisma:{...tx,$transaction:async (fn:(client:typeof tx)=>unknown)=>fn({...tx,usuario:{...tx.usuario,findUnique:async () => ({...usuario,vinculosOlistVersao:mudouVinculo?2:1})}})}});
+  Object.assign(globalThis,{prisma:{...tx,$transaction:async (fn:(client:typeof tx)=>unknown)=>fn({...tx,usuario:{...tx.usuario,findUnique:async () => ({...usuario,podeCriarOlistPedido:!revogouCriacao,vinculosOlistVersao:mudouVinculo?2:1})}})}});
   const {supabaseAdmin} = await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth,"getUser",async () => ({data:{user:{id:usuario.id,email:"test@example.test"}},error:null}));
   t.mock.method(axios,"get",async (url:string) => {
@@ -102,8 +102,8 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
     const vendedores=await (await GET(req(`aplicativoId=${id(2)}&recurso=vendedores`))).json();
     assert.equal(vendedores.itens[0].nome,"Vendedor"); assert.equal(vendedores.itens[0].referencia,"VEN20");
     assert.equal((await GET(req(`aplicativoId=${id(99)}`))).status,403);
-    usuario.podeSelecionarFilialFornecedor=false;
-    assert.equal((await GET(req(`aplicativoId=${id(3)}`))).status,403); usuario.podeSelecionarFilialFornecedor=true;
+    assert.equal(usuario.podeSelecionarFilialFornecedor,false);
+    assert.equal((await GET(req(`aplicativoId=${id(3)}`))).status,200);
     vinculado=false; assert.equal((await GET(req(`aplicativoId=${id(3)}`))).status,403);
     noGrupo=false; assert.equal((await (await GET(req(`aplicativoId=${id(3)}`))).json()).vendedorFixo,false);
     vinculado=true; noGrupo=true;
@@ -117,6 +117,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
     carteira=99; assert.equal((await POST(req("",entrada))).status,403); carteira=20;
     falharDetalhe=true; const r=await POST(req("",entrada)); assert.equal(r.status,502); assert.doesNotMatch(await r.text(),/segredo/); falharDetalhe=false;
     mudouVinculo=true; assert.equal((await POST(req("",entrada))).status,409); mudouVinculo=false;
+    revogouCriacao=true; assert.equal((await POST(req("",entrada))).status,403); revogouCriacao=false;
     assert.equal(registros.length,0);
   });
   await t.test("cliente sem documento bloqueia resolução e inclusão mesmo que o navegador envie documento",async () => {

@@ -4,7 +4,7 @@ import { ErroFilaOlist } from "@/lib/fila-olist-cadastros";
 import type { ReferenciaPedidoManual } from "@/lib/pedido-manual-referencia";
 import type { UsuarioCorrespondenciaPedidoManual } from "@/lib/pedido-manual-correspondencia";
 
-export type AutorReferenciaFilaManual = UsuarioCorrespondenciaPedidoManual & { vinculosOlistVersao: number };
+export type AutorReferenciaFilaManual = UsuarioCorrespondenciaPedidoManual & { vinculosOlistVersao: number; podeSelecionarFilialFornecedor: boolean };
 export type GuardaReferenciaFilaManual = {
   autorId: string;
   aplicativoId: string;
