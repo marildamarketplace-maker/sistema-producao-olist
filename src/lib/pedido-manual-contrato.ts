@@ -6,12 +6,31 @@ import { decisaoDirecionamentoSchema } from "./direcionamento-pedidos-contrato";
 
 const texto = z.string().trim().max(500);
 export const itemPedidoManualSchema = z.object({
-  id: z.guid(), tecidoNome: texto.min(1),
-  quantidade: z.number().int().positive().max(2147483647),
-  quantidadeTecido: z.number().min(0.000001).max(1e9),
+  id: z.guid(), tecidoNome: texto.min(1, "Informe o tecido."),
+  quantidade: z.number().int("Informe peças inteiras.").nonnegative().max(2147483647),
+  quantidadeTecido: z.number().min(0.000001, "Informe uma metragem positiva.").max(1e9),
   estampa: texto, variante: texto.nullable(), tamanho: texto, tipoProduto: texto,
   corteLaser: z.boolean(),
-}).strict();
+  modalidade: z.enum(["TECIDO_LISO", "TECIDO_SUBLIMADO", "PRODUTO_SUBLIMADO"]).optional(),
+  grupoId: z.guid().optional(),
+  tamanhoId: z.guid().nullable().optional(),
+  modoMetragem: z.enum(["AUTOMATICA", "MANUAL"]).optional(),
+  consumoUnidade: z.number().positive().max(1e9).nullable().optional(),
+  revisarMetragem: z.boolean().optional(),
+}).strict().superRefine((item, ctx) => {
+  const erro = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
+  if (!item.modalidade || item.modalidade === "PRODUTO_SUBLIMADO") {
+    if (item.quantidade < 1) erro("quantidade", "Informe a quantidade de peças.");
+  } else {
+    if (item.quantidade !== 0) erro("quantidade", "Tecido corrido usa somente metros.");
+    if (item.corteLaser || item.tamanho || item.tipoProduto || item.tamanhoId || item.modoMetragem === "AUTOMATICA") erro("modalidade", "Tecido corrido não possui tamanho, tipo de produto ou laser.");
+    if (item.modalidade === "TECIDO_LISO" && (item.estampa || item.variante)) erro("estampa", "Tecido sem estampa não possui variante.");
+  }
+  if (item.modalidade && item.modalidade !== "TECIDO_LISO" && (!item.estampa || !item.variante)) erro("estampa", "Informe estampa e variante.");
+  if (item.modalidade === "PRODUTO_SUBLIMADO" && (!item.tamanho || !item.tipoProduto)) erro("tamanho", "Informe tamanho e tipo de produto.");
+  if (item.modoMetragem === "AUTOMATICA" && (!item.tamanhoId || !item.consumoUnidade)) erro("tamanhoId", "Selecione um tamanho com consumo válido.");
+  if (item.revisarMetragem) erro("quantidadeTecido", "Revise a metragem ajustada após alterar as peças.");
+});
 export type ItemPedidoManual = z.infer<typeof itemPedidoManualSchema>;
 export const chavePedidoManualSchema = z.guid();
 const camposPedidoManual = {
@@ -46,8 +65,11 @@ export function montarDadosPedidoManual(p: EntradaPedidoManual): DadosPedidoFila
     ...(p.fornecedorManual ? { fornecedorManual: p.fornecedorManual } : {}),
     direcionamentoManual: { inicial: p.decisaoDirecionamento, alteracoes: [] },
     olist: { filialId: p.aplicativoId, selecoes: p.selecoes },
-    itens: p.itens.map(i => ({ produtoId: i.id, sku: "", tecido: { id: i.id, nome: i.tecidoNome, referencia: null },
-      quantidade: i.quantidade, unidade: "UN", quantidadeTecido: i.quantidadeTecido, unidadeTecido: "MT",
+    itens: p.itens.map(i => ({
+      ...(i.modalidade ? { modalidade: i.modalidade } : {}),
+      ...(i.modoMetragem ? { modoMetragem: i.modoMetragem, consumoUnidade: i.consumoUnidade ?? null } : {}),
+      produtoId: i.id, sku: "", tecido: { id: i.id, nome: i.tecidoNome, referencia: null },
+      quantidade: i.modalidade && i.modalidade !== "PRODUTO_SUBLIMADO" ? i.quantidadeTecido : i.quantidade, unidade: i.modalidade && i.modalidade !== "PRODUTO_SUBLIMADO" ? "MT" : "UN", quantidadeTecido: i.quantidadeTecido, unidadeTecido: "MT",
       estampa: i.estampa, variante: i.variante, tamanho: i.tamanho, tipoProduto: i.tipoProduto, corteLaser: i.corteLaser })) };
 }
 export const comprovantePedidoManualSchema = z.object({ id: z.guid(), status: z.string().min(1).max(40), createdAt: z.iso.datetime(),

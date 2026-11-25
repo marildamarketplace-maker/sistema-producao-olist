@@ -3,11 +3,11 @@ import { CriarPedidoManual } from "../../src/components/criar-pedido-manual";
 import type { EntradaPedidoProducao } from "../../src/lib/pedido-producao-contrato";
 import type { EntradaPedidoManual } from "../../src/lib/pedido-manual-contrato";
 const id = (n:number) => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`;
-declare global { interface Window { testeManual: { envios:(EntradaPedidoManual | EntradaPedidoProducao)[]; falhar:boolean; fonteAtual:string; falharCarteira:boolean; semVinculoAplicativoId:string|null; conflitoExistente:boolean; clienteSemDocumento:boolean; vendedorAtual:number; consultas:string[]; referenciaAtual:string; contextoAtual:string } } }
+declare global { interface Window { testeManual: { envios:(EntradaPedidoManual | EntradaPedidoProducao)[]; falhar:boolean; consumoAlterado:boolean; fonteAtual:string; falharCarteira:boolean; semVinculoAplicativoId:string|null; conflitoExistente:boolean; clienteSemDocumento:boolean; vendedorAtual:number; consultas:string[]; referenciaAtual:string; contextoAtual:string } } }
 const params = new URLSearchParams(location.search);
 if (!params.has("preservar")) sessionStorage.clear();
 document.documentElement.classList.toggle("dark",params.get("tema")==="dark");
-window.testeManual = {envios:[],falhar:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2),contextoAtual:"contexto-validado-local"};
+window.testeManual = {envios:[],falhar:false,consumoAlterado:false,fonteAtual:"b".repeat(64),falharCarteira:false,semVinculoAplicativoId:null,conflitoExistente:false,clienteSemDocumento:false,vendedorAtual:20,consultas:[],referenciaAtual:id(2),contextoAtual:"contexto-validado-local"};
 let falhouInicial=false;
 window.fetch = async (input,init) => {
   const url = new URL(typeof input === "string"?input:input instanceof URL?input.href:input.url,location.href);
@@ -15,6 +15,7 @@ window.fetch = async (input,init) => {
   if (init?.method === "POST") {
     const body=JSON.parse(String(init.body)) as EntradaPedidoManual | EntradaPedidoProducao;
     window.testeManual.envios.push(body);
+    if(window.testeManual.consumoAlterado) return Response.json({error:"O consumo do tamanho mudou. Selecione o tamanho novamente.",codigo:"ITENS_METRAGEM_DESATUALIZADA"},{status:409});
     if(window.testeManual.falhar) throw new Error("Conexão interrompida após envio");
     if(window.testeManual.conflitoExistente) return Response.json({error:"Esta confirmação já foi usada para outro conteúdo. As alterações atuais não foram aplicadas.",pedidoExistente:{id:id(10),status:"CANCELADO",createdAt:new Date().toISOString(),aplicativo:{id:id(3),nome:"Destino atual do pedido aceito"}}},{status:409});
     const vendedorEsperado=[id(2),id(4),id(5)].includes(body.aplicativoId)?window.testeManual.vendedorAtual:window.testeManual.vendedorAtual+100;
@@ -22,8 +23,13 @@ window.fetch = async (input,init) => {
     return Response.json({id:id(10),status:"PENDENTE",createdAt:new Date().toISOString(),aplicativo:{id:body.aplicativoId,nome:"Conta própria"},filaExterna:Boolean(body.fornecedorManual)},{status:201});
   }
   window.testeManual.consultas.push(url.search);
+  if (query.get("acao") === "tamanhos") return Response.json({ itens: [
+    { id: id(70), titulo: "70 × 70", sku: "70", consumo: 0.5 },
+    { id: id(90), titulo: "90 × 90", sku: "90", consumo: 0.8 },
+    { id: id(99), titulo: "Sem consumo", sku: "99", consumo: null },
+  ], mais: false });
   if (query.has("solicitacaoId") && query.get("acao") === "origem") return Response.json({
-    itens: [40,41].map((n,index) => ({ id:id(n), tecidoNome:`Oxford da produção ${index+1}`, quantidade:3, quantidadeTecido:1.5, estampa:"6861",variante:"A",tamanho:"50x50",tipoProduto:"Lenço",corteLaser:false })), observacao:"Observação original da produção",revisao:"a".repeat(64),revisaoFonte:window.testeManual.fonteAtual,
+    itens: [40,41].map((n,index) => ({ id:id(n), tecidoNome:`Oxford da produção ${index+1}`, modalidade:"PRODUTO_SUBLIMADO", quantidade:3, quantidadeTecido:1.5, estampa:"6861",variante:"A",tamanho:"50x50",tipoProduto:"Lenço",corteLaser:false })), observacao:"Observação original da produção",revisao:"a".repeat(64),revisaoFonte:window.testeManual.fonteAtual,
   });
   if(query.get("acao")==="resolver") {
     if(window.testeManual.falharCarteira) return Response.json({error:"Usuário vendedor sem vínculo nesta empresa."},{status:403});

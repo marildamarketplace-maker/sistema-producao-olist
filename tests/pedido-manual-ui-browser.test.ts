@@ -13,6 +13,12 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
   const etapa = async (nome:string) => ate(()=>avaliar<boolean>(`document.querySelector("section h3")?.textContent===${JSON.stringify(nome)}`),`Etapa ${nome} não abriu`);
   const campo = (label:string) => `[...document.querySelectorAll("label")].find(l=>l.textContent.startsWith(${JSON.stringify(label)}))?.querySelector("input,select,textarea")`;
   const preencher = async (label:string,value:string) => avaliar(`{ const e=${campo(label)}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)}); e.dispatchEvent(new Event('input',{bubbles:true})); }`);
+  async function adicionarProduto() {
+    await clicar("Adicionar item");
+    await avaliar(`{const grupo=[...document.querySelectorAll("fieldset")].at(-1);[...grupo.querySelectorAll("button")].find(b=>b.textContent==="Produto sublimado").click();}`);
+    await avaliar(`{const grupo=[...document.querySelectorAll("fieldset")].at(-1);for(const [nome,valor] of [["Estampa","6861"],["Variante","A"],["Tipo de produto","Lenço"],["Quantidade de tecido","1"]]){const e=[...grupo.querySelectorAll("label")].find(l=>l.textContent.startsWith(nome)).querySelector("input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,valor);e.dispatchEvent(new Event("input",{bubbles:true}));}const label=[...grupo.querySelectorAll("label")].find(l=>l.textContent==="Tamanho");const e=document.getElementById(label.htmlFor);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,"70");e.dispatchEvent(new Event("input",{bubbles:true}));}`);
+    await avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Confirmar metragem")?.click()');
+  }
   let navegacao = 0;
   async function navegar(endereco:string) {
     const destino = new URL(endereco);
@@ -34,7 +40,7 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     assert.equal(await avaliar('document.querySelectorAll("select").length'),0,"Destino é definido pela regra");
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),nomeDestinoEsperado);
     await clicar("Continuar"); await etapa("Itens");
-    await clicar("Adicionar item");
+    await adicionarProduto();
     await preencher("Tecido","Oxford com nome longo para testar quebra no resumo comercial");
     await preencher("Quantidade de peças","10"); await preencher("Quantidade de tecido","2.5");
     await preencher("Estampa","6861");
@@ -243,7 +249,7 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await selecionarClienteDaReferencia();
     assert.equal(await avaliar(`window.testeManual.consultas.some(q=>{const p=new URLSearchParams(q);return p.get("recurso")==="clientes"&&p.get("aplicativoId")===${JSON.stringify(referenciaInicial)};})`),true);
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"Filial B do fornecedor","A referência não fixa o destinatário das regras");
-    await clicar("Continuar"); await etapa("Itens"); await clicar("Adicionar item"); await preencher("Tecido","Oxford preservado");
+    await clicar("Continuar"); await etapa("Itens"); await adicionarProduto(); await preencher("Tecido","Oxford preservado");
     await clicar("Voltar");await clicar("Voltar");await clicar("Voltar");await etapa("Vendedor");
     await avaliar(`{const s=document.querySelector("select");s.value=${JSON.stringify(referenciaFinal)};s.dispatchEvent(new Event("change",{bubbles:true}));}`);
     await aguardarBotaoHabilitado("Continuar","Troca para a outra filial não carregou");
@@ -277,7 +283,7 @@ test("pedido manual: fluxo completo responsivo, vendedor fixo, carteira e recupe
     await aguardarBotaoHabilitado("Continuar","Matriz sem filiais não carregou");
     await selecionarClienteDaReferencia();
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"MV Tecidos fornecedor com nome longo");
-    await clicar("Continuar");await etapa("Itens");await clicar("Adicionar item");await preencher("Tecido","Oxford matriz");
+    await clicar("Continuar");await etapa("Itens");await adicionarProduto();await preencher("Tecido","Oxford matriz");
     await clicar("Continuar");await etapa("Dados comerciais");await clicar("Continuar");await etapa("Revisão");
     assert.equal(await avaliar('document.querySelector("section dl dd").textContent'),"MV Tecidos fornecedor com nome longo");
     assert.equal(await avaliar('document.documentElement.scrollWidth<=innerWidth'),true);

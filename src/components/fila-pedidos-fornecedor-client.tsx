@@ -155,7 +155,7 @@ function PedidoFilaCard({ pedido, filiais, aplicativoId, token, aoSalvar, aoAtua
               <div key={`${item.produtoId}-${index}`} className="space-y-2 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
                 <p className="break-words font-medium">{item.tecido.nome}{item.tecido.referencia ? ` · Ref. ${item.tecido.referencia}` : ""}</p>
                 <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  <div><dt className="text-xs text-slate-500">Quantidade do pedido</dt><dd>{item.quantidade.toLocaleString("pt-BR")} un.</dd></div>
+                  <div><dt className="text-xs text-slate-500">Quantidade do pedido</dt><dd>{item.quantidade.toLocaleString("pt-BR")} {item.unidade === "MT" ? "m" : "un."}</dd></div>
                   <div><dt className="text-xs text-slate-500">Consumo de tecido</dt><dd>{item.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m</dd></div>
                   <div><dt className="text-xs text-slate-500">Estampa / variante</dt><dd className="break-words">{item.estampa || "Não informada"}{item.variante ? ` / ${item.variante}` : ""}</dd></div>
                   <div><dt className="text-xs text-slate-500">Corte a laser</dt><dd>{item.corteLaser ? "Sim" : "Não"}</dd></div>

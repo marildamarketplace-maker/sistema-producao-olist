@@ -33,7 +33,9 @@ export async function carregarOrigemPedidoProducao(aplicativoId: string, solicit
   const revisao = createHash("sha256").update(JSON.stringify({ itens, snapshot, observacao: solicitacao.observacaoGeral,
     fornecedor: { fornecedorId: fornecedor.fornecedorId, matrizId: fornecedor.matrizId }, referenciaId })).digest("hex");
   return { revisao, revisaoFonte, observacao: solicitacao.observacaoGeral,
-    itens: snapshot.itens.map((item, index) => ({ id: itens[index].id, tecidoNome: item.tecido.nome,
+    itens: snapshot.itens.map((item, index) => ({
+      ...(item.estampa && item.variante && item.tamanho && item.tipoProduto ? { modalidade: "PRODUTO_SUBLIMADO" as const } : {}),
+      id: itens[index].id, tecidoNome: item.tecido.nome,
       quantidade: item.quantidade, quantidadeTecido: item.quantidadeTecido,
       estampa: item.estampa, variante: item.variante, tamanho: item.tamanho, tipoProduto: item.tipoProduto, corteLaser: item.corteLaser })),
     originais: itens,

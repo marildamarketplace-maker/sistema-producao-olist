@@ -1,3 +1,4 @@
+import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -24,6 +25,7 @@ function comprovante(p: { id: string; status: string; createdAt: Date; aplicativ
   return { id: p.id, status: p.status, createdAt: p.createdAt.toISOString(), aplicativo: p.aplicativoFilial, filaExterna: true };
 }
 function falha(error: unknown) {
+  if (error instanceof ErroMetragemPedido) return resposta({ error: error.message, codigo: error.codigo }, error.status);
   if (error instanceof ErroContextoConsultaProducao) return resposta({ error: error.message, codigo: "CONTEXTO_CONSULTA_EXPIRADO" }, 409);
   if (error instanceof ErroFilaOlist || error instanceof ErroAutorizacaoOlist || error instanceof ErroDirecionamentoPedidos) return resposta({ error: error.message }, error.status);
   if (error instanceof z.ZodError) return resposta({ error: "Revise vendedor, cliente, itens e dados comerciais." }, 400);
@@ -107,6 +109,7 @@ export async function GET(request: Request) {
       return resposta(comprovante(pedido));
     }
     exigirEmProducao(solicitacao.status);
+    if (params.get("acao") === "tamanhos") return resposta(await consultarTamanhosPedido(params));
     if (params.get("acao") === "resolver") {
       const ids = idsResolucao(params);
       const resolucao = await resolver(usuario, ids);
@@ -196,6 +199,7 @@ export async function POST(request: Request) {
       const vendedorOrigem = await capturarVendedorFila({ usuarioId: usuario.id, aplicativoSolicitanteId: usuario.aplicativoId,
         matrizId: fornecedor.matrizId, aplicativoId: entrada.aplicativoId, vendedorOlistId: entrada.selecoes.vendedorId!,
         fonte: "VINCULO", revisaoEsperada: fornecedor.destino.revisao }, tx);
+      await validarMetragensPedido(entrada.itens, tx);
       return tx.pedidoFornecedorQueue.create({ data: {
         aplicativoSolicitanteId: usuario.aplicativoId, solicitacaoProducaoId: solicitacaoId, aplicativoFornecedorId: fornecedor.matrizId,
         fornecedorId: fornecedor.fornecedorId, tipoOrigem: "PRODUCAO", autorId: usuario.id,

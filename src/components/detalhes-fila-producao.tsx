@@ -49,7 +49,7 @@ export function DetalhesFilaProducao({ solicitacaoId, token, onClose, onAtualiza
               {pedido.dadosPedido.itens.map((item, index) => <article key={`${item.produtoId}-${index}`} className="min-w-0 rounded-md border border-slate-200 p-4 text-sm">
                 <h4 className="break-all font-semibold">{item.sku}</h4>
                 <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
-                  {[["Tecido", [item.tecido.nome, item.tecido.referencia].filter(Boolean).join(" · ")], ["Quantidade", `${item.quantidade} UN`], ["Consumo de tecido", `${item.quantidadeTecido} MT`], ["Estampa", item.estampa || "—"], ["Variante", item.variante || "—"], ["Tamanho", item.tamanho || "—"], ["Tipo de produto", item.tipoProduto || "—"], ["Corte a laser", item.corteLaser ? "Sim" : "Não"]].map(([rotulo, valor]) => <div key={rotulo} className="min-w-0"><dt className="text-slate-500">{rotulo}</dt><dd className="mt-1 break-words">{valor}</dd></div>)}
+                  {[["Tecido", [item.tecido.nome, item.tecido.referencia].filter(Boolean).join(" · ")], ["Quantidade", `${item.quantidade} ${item.unidade}`], ["Consumo de tecido", `${item.quantidadeTecido} MT`], ["Estampa", item.estampa || "—"], ["Variante", item.variante || "—"], ["Tamanho", item.tamanho || "—"], ["Tipo de produto", item.tipoProduto || "—"], ["Corte a laser", item.corteLaser ? "Sim" : "Não"]].map(([rotulo, valor]) => <div key={rotulo} className="min-w-0"><dt className="text-slate-500">{rotulo}</dt><dd className="mt-1 break-words">{valor}</dd></div>)}
                 </dl>
               </article>)}
             </section>

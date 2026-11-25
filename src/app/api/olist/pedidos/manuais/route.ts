@@ -1,3 +1,4 @@
+import { consultarTamanhosPedido, validarMetragensPedido, ErroMetragemPedido } from "@/lib/tamanhos-pedido";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -29,6 +30,7 @@ async function recuperarConfirmacao({ where, hashEntrada }: ConfirmacaoManual) {
   return resposta(comprovante(pedido));
 }
 function falha(error: unknown) {
+  if (error instanceof ErroMetragemPedido) return resposta({ error: error.message, codigo: error.codigo }, error.status);
   if (error instanceof ErroFilaOlist || error instanceof ErroAutorizacaoOlist || error instanceof ErroDirecionamentoPedidos) return resposta({ error: error.message }, error.status);
   if (error instanceof z.ZodError) return resposta({ error: "Revise vendedor, cliente, itens e dados comerciais." }, 400);
   return resposta({ error: "Não foi possível concluir a operação. Confira a integração e tente novamente." }, 502);
@@ -37,6 +39,7 @@ export async function GET(request: Request) {
   try {
     const usuario = await autorizarPedidoManual(request);
     const params = new URL(request.url).searchParams;
+    if (params.get("acao") === "tamanhos") return resposta(await consultarTamanhosPedido(params));
     const pedidoId = params.get("pedidoId");
     if (pedidoId) {
       if (!z.guid().safeParse(pedidoId).success) throw new ErroFilaOlist("Pedido inválido.");
@@ -125,6 +128,7 @@ export async function POST(request: Request) {
       await validarVersaoDirecionamento(tx, matrizId, decisao);
       if (!await bloquearDestinoFornecedor(tx, matrizId, origem.aplicativoId)) throw new ErroFilaOlist("Referência alterada. Revise o pedido.", 409);
       if (!await bloquearDestinoFornecedor(tx, matrizId, conta.id)) throw new ErroFilaOlist("Destino alterado. Revise o pedido.", 409);
+      await validarMetragensPedido(entrada.itens, tx);
       return tx.pedidoFornecedorQueue.create({ data: { ...where, aplicativoFornecedorId: matrizId,
         fornecedorId: fornecedorManual?.fornecedorId ?? null,
         tipoOrigem: "MANUAL", hashEntrada, vendedorFixo: vendedorId !== null,

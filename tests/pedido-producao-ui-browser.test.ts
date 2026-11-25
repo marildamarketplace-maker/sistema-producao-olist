@@ -15,6 +15,12 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
   const campo = (nome: string) => `[...document.querySelectorAll("label")].find(l=>l.textContent.startsWith(${JSON.stringify(nome)}))?.querySelector("input")`;
   const preencher = (nome: string, valor: string) => avaliar(`{const e=${campo(nome)};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,${JSON.stringify(valor)});e.dispatchEvent(new Event("input",{bubbles:true}));}`);
   const consultasProdutos = () => avaliar<number>('window.testeManual.consultas.filter(q=>new URLSearchParams(q).get("recurso")==="produtos").length');
+  async function adicionarProduto() {
+    await clicar("Adicionar item");
+    await avaliar(`{const grupo=[...document.querySelectorAll("fieldset")].at(-1);[...grupo.querySelectorAll("button")].find(b=>b.textContent==="Produto sublimado").click();}`);
+    await avaliar(`{const grupo=[...document.querySelectorAll("fieldset")].at(-1);for(const [nome,valor] of [["Estampa","6861"],["Variante","A"],["Tipo de produto","Lenço"],["Quantidade de tecido","1"]]){const e=[...grupo.querySelectorAll("label")].find(l=>l.textContent.startsWith(nome)).querySelector("input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,valor);e.dispatchEvent(new Event("input",{bubbles:true}));}const label=[...grupo.querySelectorAll("label")].find(l=>l.textContent==="Tamanho");const e=document.getElementById(label.htmlFor);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,"70");e.dispatchEvent(new Event("input",{bubbles:true}));}`);
+    await avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Confirmar metragem")?.click()');
+  }
   let rodada = 0;
   async function abrir(extra = "") {
     await cdp.pedir("Page.navigate", { url: `${url}?solicitacaoId=${solicitacaoId}&rodada=${++rodada}${extra}` });
@@ -33,7 +39,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     await abrir(`&tema=${tema}`); await produtos();
     assert.equal(await avaliar(`${campo("Tecido")}.value`), "Oxford da produção 1");
     assert.equal(await avaliar('document.querySelectorAll("fieldset").length'), 2);
-    await preencher("Quantidade de peças", "8"); await clicar("Remover item 2"); await clicar("Adicionar item");
+    await preencher("Quantidade de peças", "8"); await clicar("Confirmar metragem"); await clicar("Remover item 2"); await adicionarProduto();
     await avaliar('{const inputs=[...document.querySelectorAll("label")].filter(l=>l.textContent.startsWith("Tecido")).map(l=>l.querySelector("input"));const e=inputs[1];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,"Oxford adicionado");e.dispatchEvent(new Event("input",{bubbles:true}));}');
     await clicar("Continuar"); await etapa("Dados comerciais"); await clicar("Voltar"); await etapa("Itens");
     assert.equal(await avaliar(`${campo("Quantidade de peças")}.value`), "8");
@@ -62,7 +68,7 @@ test("pedido de produção: edição livre preserva origem, contexto e recupera�
     await ate(() => avaliar<boolean>(`${campo("Tecido")}.value===${JSON.stringify(nome)}`), "Escolha não conservou o nome completo");
     assert.equal(await avaliar('document.querySelector(".tecido-olist-encontrado")!==null'), true);
     assert.equal(await avaliar(`${campo("Preço do tecido por metro")}.value`), "18.99");
-    await clicar("Adicionar item"); await clicar("Remover item 3");
+    await adicionarProduto(); await clicar("Remover item 3");
     assert.equal(await consultasProdutos(), 2, "Adicionar/remover uma linha não repete a carga");
     await clicar("Continuar"); await etapa("Dados comerciais");
     await avaliar('[...document.querySelectorAll("button[aria-label]")].find(e=>e.getAttribute("aria-label")==="Selecionar tecido").click()');

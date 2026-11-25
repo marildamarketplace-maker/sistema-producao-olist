@@ -17,7 +17,7 @@ const resolucaoConsultaSchema = resolucaoPedidoManualSchema.safeExtend({ context
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500 disabled:opacity-50";
 const primario = `${botao} bg-slate-900 text-white`;
 const etapas = ["Vendedor", "Cliente", "Aplicativo", "Itens", "Dados comerciais", "Revisão"];
-const novoItem = (): ItemPedidoManual => ({ id: crypto.randomUUID(), tecidoNome: "", quantidade: 1, quantidadeTecido: 1,
+const novoItem = (): ItemPedidoManual => ({ id: crypto.randomUUID(), tecidoNome: "", quantidade: 1, quantidadeTecido: 0,
   estampa: "", variante: null, tamanho: "", tipoProduto: "", corteLaser: false });
 type EntradaPedido = EntradaPedidoManual | EntradaPedidoManualLegada | EntradaPedidoProducao;
 type AplicativoReferenciaManual = { id: string; nome: string; fornecedorId?: string; bloqueio?: string | null; vendedorId?: number | null };
@@ -201,10 +201,12 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     setContaPronta(false); setVendedor(null); setCliente(null); setErro(""); setEtapa(0);
     invalidarDestino(); setReferenciaId(id);
   }
-  function alterarItem(id: string, patch: Partial<ItemPedidoManual>) {
-    setItens(atuais => atuais.map(i => i.id === id ? { ...i, ...patch } : i));
-    if (patch.tecidoNome !== undefined) setSelecoes(atuais => ({ ...atuais, tecidos: atuais.tecidos.map(t => t.tecidoId === id ? { ...t, id: 0, preco: null } : t) }));
+  function alterarItens(ids: string[], patch: Partial<ItemPedidoManual>) {
+    const conjunto = new Set(ids);
+    setItens(atuais => atuais.map(i => conjunto.has(i.id) ? { ...i, ...patch } : i));
+    if (patch.tecidoNome !== undefined) setSelecoes(atuais => ({ ...atuais, tecidos: atuais.tecidos.map(t => conjunto.has(t.tecidoId) ? { ...t, id: 0, preco: null } : t) }));
   }
+  function alterarItem(id: string, patch: Partial<ItemPedidoManual>) { alterarItens([id], patch); }
   function alterarSelecoesComerciais(novas: typeof selecoes) {
     const anteriores = new Map(selecoes.tecidos.map(tecido => [tecido.tecidoId, tecido.id]));
     const nomes = new Map<string, string>();
@@ -214,16 +216,31 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
       if (produto) nomes.set(tecido.tecidoId, produto.nome);
     }
     // A escolha comercial muda apenas os itens deste pedido, preservando a produção.
-    if (nomes.size) setItens(atuais => atuais.map(item => {
+    const alterados = new Set(novas.tecidos.filter(t => {
+      const anterior = selecoes.tecidos.find(a => a.tecidoId === t.tecidoId);
+      return anterior?.id !== t.id || anterior?.preco !== t.preco;
+    }).map(t => t.tecidoId));
+    const gruposDestacados = new Map([...alterados].map(id => [id, crypto.randomUUID()]));
+    if (alterados.size) setItens(atuais => atuais.map(item => {
       const nome = nomes.get(item.id);
-      return nome !== undefined ? { ...item, tecidoNome: nome } : item;
+      // Ajuste comercial individual destaca a combinação, conservando os dados das demais.
+      return alterados.has(item.id) ? { ...item, ...(nome !== undefined ? { tecidoNome: nome } : {}), grupoId: gruposDestacados.get(item.id) } : item;
     }));
     setSelecoes(novas);
   }
-  function adicionar() {
+  function adicionar(modelo?: ItemPedidoManual, combinar = false) {
     if (itens.length >= limite) return;
-    const item = novoItem(); setItens(atual => [...atual, item]);
-    setSelecoes(atual => ({ ...atual, tecidos: [...atual.tecidos, { tecidoId: item.id, id: 0, preco: null }] }));
+    const grupoId = combinar && modelo ? modelo.grupoId ?? modelo.id : undefined;
+    const item = modelo ? { ...modelo, id: crypto.randomUUID(), grupoId,
+      ...(combinar ? { variante: null, tamanho: "", tamanhoId: null, consumoUnidade: null, modoMetragem: undefined, quantidade: 1, quantidadeTecido: 0, revisarMetragem: false, corteLaser: false } : {}) } : novoItem();
+    setItens(atual => [...atual.map(i => combinar && i.id === modelo?.id ? { ...i, grupoId } : i), item]);
+    const associacao = modelo ? selecoes.tecidos.find(t => t.tecidoId === modelo.id) : undefined;
+    setSelecoes(atual => ({ ...atual, tecidos: [...atual.tecidos, { tecidoId: item.id, id: associacao?.id ?? 0, preco: associacao?.preco ?? null }] }));
+    requestAnimationFrame(() => {
+      const linha = document.querySelector(`[data-item-id="${item.id}"]`);
+      const campo = (combinar ? linha : linha?.closest("fieldset"))?.querySelector<HTMLInputElement>("input");
+      campo?.focus(); campo?.scrollIntoView({ block: "nearest" });
+    });
   }
   function avancar() {
     setErro("");
@@ -239,12 +256,13 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
     if (!resolucao) throw new Error("Revise o direcionamento do pedido.");
     chave.current ??= crypto.randomUUID();
     if (solicitacaoId && (!revisaoProducao || carregandoOrigem)) throw new Error("Carregue os produtos da produção antes de enviar.");
+    if (itens.some(i => !i.modalidade)) throw new Error("Escolha a modalidade de cada item na etapa Itens.");
     const schema = solicitacaoId ? pedidoProducaoSchema : pedidoManualSchema;
     const parsed = schema.safeParse({ ...(solicitacaoId ? { revisaoProducao } : {}), versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao,
       ...(resolucao.fornecedorManual ? { fornecedorManual: resolucao.fornecedorManual } : {}),
       chaveIdempotencia: chave.current, aplicativoId, itens, observacao: observacao || null,
       selecoes: { ...serializarRascunhoFilaOlist(selecoes), vendedorId: resolucao.selecoes.vendedorId, clienteId: resolucao.selecoes.clienteId } });
-    if (!parsed.success) throw new Error("Revise os itens: informe tecido, peças inteiras e metragem positiva; vendedor e cliente são obrigatórios.");
+    if (!parsed.success) { const issue = parsed.error.issues[0]; const indice = issue.path[0] === "itens" && typeof issue.path[1] === "number" ? `Item ${issue.path[1] + 1}: ` : ""; throw new Error(`${indice}${issue.message}`); }
     return parsed.data;
   }
   async function enviar(entrada: EntradaPedido) {
@@ -263,6 +281,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
           setErro(d.error || "Esta confirmação já possui um pedido. As alterações atuais não foram aplicadas.");
           return;
         }
+        const revisarMetragem = response.status === 409 && d.codigo === "ITENS_METRAGEM_DESATUALIZADA";
         if (response.status < 500) {
           // Uma tentativa recuperada após reload também devolve seus campos para correção.
           const origem = "origemManual" in entrada ? entrada.origemManual : null;
@@ -270,12 +289,18 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
           if (origem) setReferenciaId(origem.aplicativoId);
           setItens(entrada.itens); origemCarregada.current = true;
           if ("revisaoProducao" in entrada) setRevisaoProducao(entrada.revisaoProducao);
-          setObservacao(entrada.observacao ?? ""); setEtapa(5);
+          setObservacao(entrada.observacao ?? ""); setEtapa(revisarMetragem ? 3 : 5);
+          if (revisarMetragem && "decisaoDirecionamento" in entrada) {
+            setAplicativoId(entrada.aplicativoId);
+            setResolucao(atual => atual ?? { referencia: entrada.origemManual, decisao: entrada.decisaoDirecionamento,
+              ...(entrada.fornecedorManual ? { fornecedorManual: entrada.fornecedorManual } : {}),
+              selecoes: { clienteId: entrada.selecoes.clienteId ?? 0, vendedorId: entrada.selecoes.vendedorId ?? 0, vendedorFixo } });
+          }
           setVendedor(origem ? { id: origem.vendedor.id, nome: origem.vendedor.nome } : null);
           setCliente(origem ? { id: origem.cliente.id, nome: origem.cliente.nome } : null);
           setSelecoes(criarRascunhoFilaOlist(entrada.itens.map(i => i.id), entrada.selecoes));
           setTentativa(null); try { sessionStorage.removeItem(storageKey); } catch { /* opcional */ }
-          if (response.status === 403 || response.status === 409) {
+          if (response.status === 403 || (response.status === 409 && !revisarMetragem)) {
             setResolucao(null); setAplicativoId("");
             setSelecoes(criarRascunhoFilaOlist(entrada.itens.map(i => i.id)));
             setContaPronta(false); setRevisaoLista(atual => atual + 1); setEtapa(0);
@@ -350,7 +375,7 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             {carregandoOrigem && <p role="status">Carregando dados da produção...</p>}
             <button type="button" className={botao} disabled={enviando || carregandoOrigem} onClick={() => { substituirOrigem.current = true; setErro(""); setRecarregarOrigem(atual => atual + 1); }}>Descartar edições e recarregar dados da produção</button>
           </div>}
-          <ItensPedidoEditor catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
+          <ItensPedidoEditor aoAlterarGrupo={alterarItens} apiTamanhos={apiBase} token={token} catalogo={catalogoTecidos} itens={itens} selecoes={selecoes} disabled={enviando || carregandoOrigem} limite={limite}
             aoAlterarItem={alterarItem} aoAdicionar={adicionar} aoAlterarSelecoes={setSelecoes}
             aoRemover={id => { setItens(atuais => atuais.filter(item => item.id !== id)); setSelecoes(atual => ({ ...atual, tecidos: atual.tecidos.filter(item => item.tecidoId !== id) })); }} />
         </>}
@@ -362,7 +387,8 @@ export function CriarPedidoManual({ token, usuarioId, podeGerenciarFila, solicit
             const cadastro = catalogoTecidos.itens.find(item => item.id === produto?.id);
             return <div key={i.id} className="space-y-1 rounded-md border border-slate-200 p-3 text-sm">
               <p className="break-words font-semibold">Item {index + 1}: {i.tecidoNome}</p>
-              <p>{i.quantidade.toLocaleString("pt-BR")} peças · {i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
+              <p>{(!i.modalidade || i.modalidade === "PRODUTO_SUBLIMADO") ? `${i.quantidade.toLocaleString("pt-BR")} peças · ` : "Tecido corrido · "}{i.quantidadeTecido.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m · Laser: {i.corteLaser ? "Sim" : "Não"}</p>
+              {i.modoMetragem === "MANUAL" && i.modalidade === "PRODUTO_SUBLIMADO" && <p className="text-amber-700">Metragem ajustada manualmente</p>}
               <p className="break-words">Estampa: {i.estampa || "—"} · Variante: {i.variante || "—"} · Tamanho: {i.tamanho || "—"} · Tipo: {i.tipoProduto || "—"}</p>
               <p className="break-words">Produto Olist: {produto?.id ? `${cadastro ? `${cadastro.nome} · ` : ""}ID ${produto.id}` : "Pendente"} · Preço/m: {produto?.preco == null ? "Pendente" : `R$ ${produto.preco.toFixed(2)}`}</p>
             </div>;
