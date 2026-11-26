@@ -54,7 +54,7 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     },
   };
   Object.assign(globalThis, { prisma: banco });
-  t.mock.method(axios, "post", async () => { posts++; if (timeout) throw new Error("ETIMEDOUT token-secreto"); return { status: http, data: resposta }; });
+  t.mock.method(axios, "post", async () => { posts++; if (timeout) throw new Error("ETIMEDOUT token-secreto"); return { status: http, data: resposta, headers: { "retry-after": "30" } }; });
   const { enviarFornecedor, envioExpirado } = await import("../src/lib/envio-fornecedor");
   const base = { solicitacaoId: "solicitacao", fornecedorId: "fornecedor", aplicativoId: "filial", usuarioId: "usuario", payload: { observacoesInternas: "Revisado", itens: [] } };
   const origemManual = (aplicativoId = "filial") => ({tipo:"MANUAL" as const,usuarioId:"usuario",aplicativoSolicitanteId:"cliente",matrizId:"matriz",aplicativoId,vendedorOlistId:101});
@@ -86,6 +86,20 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
   await t.test("filial inválida e versão concorrente não fazem chamada externa", async () => {
     reset(); filialValida = false; await assert.rejects(enviar()); assert.equal(posts, 0); assert.equal(estado, null);
     filialValida = true; await assert.rejects(enviarFornecedor({ ...base, origemVendedor:origemManual(), fila: { id: "fila", versao: 999, matrizId: "matriz" } })); assert.equal(posts, 0);
+  });
+  await t.test("429 preserva dados, respeita Retry-After e exige nova tentativa explícita", async () => {
+    reset(); http = 429;
+    await assert.rejects(enviar(), /limite de requisições/);
+    const versaoRejeitada = versao;
+    const evento = estado?.historico.find((e: { acao: string }) => e.acao === "LIMITE_REQUISICOES");
+    assert.ok(Date.parse(evento.tentarNovamenteEm) > Date.now() + 25_000);
+    assert.equal(status, "PENDENTE"); assert.equal(estado?.estado, "REJEITADO");
+    await assert.rejects(enviar(), /limite de requisições/);
+    assert.equal(posts, 1); assert.equal(versao, versaoRejeitada);
+    estado!.historico.find((e: { acao: string }) => e.acao === "LIMITE_REQUISICOES").tentarNovamenteEm = new Date(Date.now() - 1000).toISOString();
+    http = 200;
+    await enviar();
+    assert.equal(posts, 2); assert.equal(status, "CONCLUIDO");
   });
   await t.test("rejeição conhecida registra FALHADO e permite tentativa manual corrigida", async () => {
     reset(); http = 422; resposta = { error: "dados sensíveis" }; await assert.rejects(enviar(), /HTTP 422/);

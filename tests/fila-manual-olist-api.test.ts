@@ -94,6 +94,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   });
   t.mock.method(axios,"post",async(_url:string,payload:Record<string,unknown>)=>{
     posts++;assert.match(String(payload.observacoesInternas),new RegExp(`Pedido manual da fila: ${filaId}`));
+    if(modo==="limite")return {status:429,data:{},headers:{"retry-after":"60"}};
     if(modo==="timeout")throw new Error("network-secret");
     if(modo==="rejeitado")return {status:400,data:{error:"invalid"}};
     return {status:200,data:{id:123}};
@@ -136,6 +137,19 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     const results=await Promise.all([confirmar(),confirmar()]);assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
     assert.equal(posts,1);assert.equal(fila.status,"CONCLUIDO");assert.equal((await rota.GET(req(),ctx)).status,200);
     assert.equal((await cancelar()).status,409);
+  });
+  await t.test("429 retorna prazo, mantém pendente e impede prévia ou confirmação durante espera", async () => {
+    reset(); assert.equal((await preview()).status, 200); modo = "limite";
+    const r = await confirmar(); assert.equal(r.status, 429);
+    const erro = await r.json(); assert.equal(erro.codigo, "OLIST_LIMITE_REQUISICOES");
+    assert.ok(Number(r.headers.get("Retry-After")) > 0);
+    assert.equal(fila.status, "PENDENTE"); assert.equal(posts, 1);
+    const chamadasAntes = consultas;
+    assert.equal((await preview()).status, 429); assert.equal((await confirmar()).status, 429);
+    assert.equal(consultas, chamadasAntes); assert.equal(posts, 1);
+    const atual = await (await rota.GET(req(), ctx)).json();
+    assert.equal(atual.versao, fila.versao); assert.equal(atual.envio.limitado, true);
+    assert.equal(atual.envio.tentarNovamenteEm, erro.tentarNovamenteEm);
   });
   await t.test("timeout bloqueia reenvio, cancelamento e redirecionamento até conciliar",async()=>{
     reset();assert.equal((await preview()).status,200);modo="timeout";

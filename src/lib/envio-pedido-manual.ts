@@ -1,3 +1,4 @@
+import { exigirPrazoEnvioOlist } from "@/lib/fila-olist-espera";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -22,6 +23,7 @@ export async function marcarManualInterrompido(filaId: string) {
 }
 export async function enviarPedidoManual(contexto: { filaId: string; versao: number; matrizId: string; aplicativoId: string; usuarioId: string; vendedorFixo?: { autorId: string; vendedorId: number }; guardaReferencia?: GuardaReferenciaFilaManual; payload: Record<string, unknown> }) {
   const { filaId, aplicativoId, usuarioId } = contexto;
+  let historicoReserva: Prisma.InputJsonValue = [];
   const tentativaId = randomUUID();
   const payload = { ...contexto.payload, observacoesInternas: `${String(contexto.payload.observacoesInternas ?? "")}\n\n${marcadorPedidoManual(filaId)}` };
   await prisma.$transaction(async tx => {
@@ -36,6 +38,7 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
     }
     await bloquearPedidoManual(tx, filaId);
     const envio = await tx.envioPedidoManual.findUnique({ where: { filaId } });
+    exigirPrazoEnvioOlist(envio);
     if (envio && envioBloqueado(envio.estado)) throw new ErroEnvioFornecedor("Envio em andamento, concluído ou incerto. Confira a tentativa existente.");
     if (!await bloquearDestinoFornecedor(tx, contexto.matrizId, aplicativoId)) throw new ErroEnvioFornecedor("Destino não autorizado.");
     if (contexto.guardaReferencia && !await bloquearDestinoFornecedor(tx, contexto.matrizId, contexto.guardaReferencia.origemAplicativoId)) throw new ErroEnvioFornecedor("Aplicativo de referência alterado. Gere outra prévia.");
@@ -47,6 +50,7 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
     const dados = { tentativaId, aplicativoId, usuarioId, estado: "RESERVADO", iniciadoEm: new Date(), chamadaEm: null,
       pedidoOlistId: null, diagnostico: null, payload: jsonManual(payload),
       historico: jsonManual([...historico, ...(envio ? [{ acao: "RESULTADO_ANTERIOR", tentativaId: envio.tentativaId, estado: envio.estado, pedidoOlistId: envio.pedidoOlistId }] : []), { acao: "RESERVA", tentativaId, aplicativoId, usuarioId, em: new Date().toISOString() }]) };
+    historicoReserva = dados.historico;
     await tx.envioPedidoManual.upsert({ where: { filaId }, create: { filaId, ...dados }, update: dados });
   });
   let pedidoOlistId: string | undefined;
@@ -65,13 +69,14 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
     return { ...resultado, status: "CONCLUIDO" };
   } catch (error) {
     const rejeitado = error instanceof ErroCriacaoOlist && error.rejeitado;
+    const prazo = error instanceof ErroCriacaoOlist ? error.tentarNovamenteEm : null;
     const diagnostico = rejeitado ? error.message : "Resultado incerto. Confira o pedido na conta Olist antes de liberar outra tentativa.";
     await prisma.$transaction(async tx => {
       await bloquearPedidoManual(tx, filaId);
       const alterado = await tx.envioPedidoManual.updateMany({ where: { filaId, tentativaId, estado: { in: ["RESERVADO", "INCERTO"] } },
-        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
-      if (alterado.count) await tx.pedidoFornecedorQueue.updateMany({ where: { id: filaId, status: { not: "CONCLUIDO" } }, data: { status: "FALHADO", versao: { increment: 1 } } });
+        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: jsonManual([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
+      if (alterado.count) await tx.pedidoFornecedorQueue.updateMany({ where: { id: filaId, status: { not: "CONCLUIDO" } }, data: { status: prazo ? "PENDENTE" : "FALHADO", versao: { increment: 1 } } });
     }).catch(() => undefined); // A reserva durável bloqueia duplicidade se o banco cair.
-    throw new ErroEnvioFornecedor(diagnostico);
+    throw new ErroEnvioFornecedor(diagnostico, prazo, error instanceof ErroCriacaoOlist ? error.campos : undefined);
   }
 }

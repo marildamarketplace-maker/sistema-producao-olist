@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { getVercelBlobPublicHost } from "./vercelBlobStorageService";
 import { isIP } from "node:net";
 
 import type { EstampaCatalogo } from "@/repositories/catalogo-estampas-repository";
@@ -269,7 +270,7 @@ function normalizarHostsPermitidos(override?: readonly string[]) {
     process.env.ESTAMPA_PREVIEW_ALLOWED_HOSTS
       ?.split(",")
       .map((host) => host.trim())
-      .filter(Boolean) ?? DEFAULT_ALLOWED_HOSTS
+      .filter(Boolean) ?? [...DEFAULT_ALLOWED_HOSTS, ...(getVercelBlobPublicHost() ? [getVercelBlobPublicHost()!] : [])]
   );
   const hosts = [...new Set(configured.map((host) => host.toLowerCase()))];
   if (hosts.length === 0 || hosts.some((host) => !hostValidoParaAllowlist(host))) {

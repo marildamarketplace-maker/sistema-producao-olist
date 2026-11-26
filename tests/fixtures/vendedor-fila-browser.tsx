@@ -21,10 +21,17 @@ const selecoesIniciais = new URLSearchParams(location.search).has("legado") ? se
 if(new URLSearchParams(location.search).has("dadosCriacao") && pedido.dadosPedido) pedido.dadosPedido.olist={filialId:new URLSearchParams(location.search).has("destinoAlterado")?id(4):id(3),selecoes:selecoesIniciais};
 if (new URLSearchParams(location.search).has("semPlano")) selecoesCriacao.planoId = "";
 window.testeVendedorFila = { trocarToken: () => undefined, leituras: 0, fechado: false, previas: [] };
+let versaoServidor = 0;
+const limite = new URLSearchParams(location.search).has("limite");
+const prazo = new Date(Date.now() + 60_000).toISOString();
 window.fetch = async (input, init) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.origin);
   if (init?.method === "POST") {
     window.testeVendedorFila.previas.push(JSON.parse(String(init.body)) as unknown);
+    if (limite) {
+      versaoServidor = 2;
+      return Response.json({ error: "A Olist atingiu o limite de requisições (HTTP 429).", codigo: "OLIST_LIMITE_REQUISICOES", tentarNovamenteEm: prazo }, { status: 429 });
+    }
     if (new URLSearchParams(location.search).has("falhaCadastro")) return Response.json({ error: "Forma de recebimento: Cadastro não encontrado na conta destinatária. Selecione novamente.", campos: { formaId: "Forma de recebimento não encontrada." } }, { status: 400 });
     return Response.json({ error: "Prévia interceptada para conferir as seleções enviadas." }, { status: 400 });
   }
@@ -38,7 +45,7 @@ window.fetch = async (input, init) => {
   }
   window.testeVendedorFila.leituras++;
   const vinculado = new URLSearchParams(location.search).get("vinculado") === "1";
-  return Response.json({ filial: pedido.filial, vendedorOlistPadraoId: 200, envio: new URLSearchParams(location.search).has("rejeitado") ? { estado: "REJEITADO", diagnostico: "A Olist respondeu HTTP 400. Parcela 1: valor ou configuração recusados.", aplicativoId: id(3), tentativaId: id(50), pedidoOlistId: null, iniciadoEm: "2026-11-26T12:00:00Z" } : null,
+  return Response.json({ versao: versaoServidor, filial: pedido.filial, vendedorOlistPadraoId: 200, envio: limite && versaoServidor ? { estado: "REJEITADO", diagnostico: "HTTP 429", limitado: true, tentarNovamenteEm: prazo, aplicativoId: id(3), tentativaId: id(50), pedidoOlistId: null, iniciadoEm: new Date().toISOString() } : new URLSearchParams(location.search).has("rejeitado") ? { estado: "REJEITADO", diagnostico: "A Olist respondeu HTTP 400. Parcela 1: valor ou configuração recusados.", aplicativoId: id(3), tentativaId: id(50), pedidoOlistId: null, iniciadoEm: "2026-11-26T12:00:00Z" } : null,
     vendedorFixo: vinculado, vendedorOrigem: vinculado ? { tipo: "VINCULO", usuarioId: id(20), aplicativoSolicitanteId: id(21), matrizId: id(22), aplicativoId: pedido.filial?.id, vendedorOlistId: 200, revisao: 1 } : null,
     selecoes: new URLSearchParams(location.search).has("dadosCriacao") && !new URLSearchParams(location.search).has("destinoAlterado") ? selecoesIniciais : vinculado ? { recursoForma: "RECEBIMENTO" as const, vendedorId: 200, clienteId: 100 } : new URLSearchParams(location.search).get("salvo") === "1" ? { recursoForma: "RECEBIMENTO" as const, vendedorId: 300 } : null });
 };

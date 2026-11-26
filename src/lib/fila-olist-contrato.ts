@@ -10,7 +10,7 @@ export const selecoesFilaOlistSchema = z.object({
 }).strict();
 export type SelecoesFilaOlist = z.infer<typeof selecoesFilaOlistSchema>;
 export type OpcaoFilaOlist = { id: number; nome: string; referencia?: string; preco?: number };
-export type EstadoEnvioFila = { estado: string; aplicativoNome?: string; pedidoOlistId: string | null; diagnostico: string | null; iniciadoEm: string; aplicativoId: string; tentativaId: string };
+export type EstadoEnvioFila = { estado: string; aplicativoNome?: string; pedidoOlistId: string | null; diagnostico: string | null; iniciadoEm: string; aplicativoId: string; tentativaId: string; limitado?: boolean; tentarNovamenteEm?: string | null };
 
 const produtoParcialSchema = produtoFilaOlistSchema.extend({ preco: produtoFilaOlistSchema.shape.preco.optional() });
 export const selecoesFilaOlistParciaisSchema = selecoesFilaOlistSchema.partial().extend({

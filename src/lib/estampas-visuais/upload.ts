@@ -1,9 +1,9 @@
 import { ErroBuscaVisual, MAX_IMAGEM_BYTES } from "./imagem";
 
-export async function lerUploadVisual(request: Request): Promise<FormData> {
-  const limite = MAX_IMAGEM_BYTES + 64 * 1024;
+export async function lerUploadVisual(request: Request, maxBytes = MAX_IMAGEM_BYTES): Promise<FormData> {
+  const limite = maxBytes + 64 * 1024;
   const tamanho = Number(request.headers.get("content-length"));
-  if (tamanho > limite) throw new ErroBuscaVisual("Envie uma imagem de até 10 MB.", 413);
+  if (tamanho > limite) throw new ErroBuscaVisual(`Envie uma imagem de até ${Math.floor(maxBytes / 1024 / 1024)} MB.`, 413);
   if (!request.headers.get("content-type")?.startsWith("multipart/form-data;")) throw new ErroBuscaVisual("Envio inválido.");
   const reader = request.body?.getReader();
   if (!reader) throw new ErroBuscaVisual("Envie uma foto.");
@@ -14,7 +14,7 @@ export async function lerUploadVisual(request: Request): Promise<FormData> {
       const { value, done } = await reader.read();
       if (done) break;
       total += value.length;
-      if (total > limite) { await reader.cancel(); throw new ErroBuscaVisual("Envie uma imagem de até 10 MB.", 413); }
+      if (total > limite) { await reader.cancel(); throw new ErroBuscaVisual(`Envie uma imagem de até ${Math.floor(maxBytes / 1024 / 1024)} MB.`, 413); }
       partes.push(value);
     }
     const bytes = Buffer.concat(partes);

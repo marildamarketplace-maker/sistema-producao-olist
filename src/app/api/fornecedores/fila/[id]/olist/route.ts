@@ -1,3 +1,4 @@
+import { ErroEsperaEnvioOlist, esperaEnvioOlist, exigirPrazoEnvioOlist } from "@/lib/fila-olist-espera";
 import { detalharErrosFilaOlist } from "@/lib/fila-olist-validacao";
 import { operarRecuperacaoFila } from "@/lib/fila-recuperacao-operacao";
 import { estadoRecuperacao } from "@/lib/fila-recuperacao-olist";
@@ -42,10 +43,15 @@ async function filialValida(matrizId: string, filialId: string | null) {
   return filial;
 }
 function falha(error: unknown) {
+  if (error instanceof ErroEsperaEnvioOlist || error instanceof ErroEnvioFornecedor) {
+    const prazo = error.tentarNovamenteEm;
+    if (prazo) return NextResponse.json({ error: error.message, codigo: "OLIST_LIMITE_REQUISICOES", tentarNovamenteEm: prazo },
+      { status: 429, headers: { "Retry-After": String(Math.max(1, Math.ceil((Date.parse(prazo) - Date.now()) / 1000))) } });
+  }
   if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof z.ZodError) return NextResponse.json(detalharErrosFilaOlist(error), { status: 400 });
   if (error instanceof ErroCadastroOlist) return NextResponse.json({ error: error.message }, { status: 502 });
-  if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message, ...(error instanceof ErroFila && error.campos ? { campos: error.campos } : {}) }, { status: error instanceof ErroFila ? error.status : 409 });
+  if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message, ...((error instanceof ErroFila || error instanceof ErroEnvioFornecedor) && error.campos ? { campos: error.campos } : {}) }, { status: error instanceof ErroFila ? error.status : 409 });
   return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da conta destinatária e tente atualizar a fila." }, { status: 502 });
 }
 const resposta = (value: unknown) => NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
@@ -61,14 +67,14 @@ export async function GET(request: Request, contexto: Contexto) {
     const recurso = params.get("recurso") ?? "inicial";
     if (recurso === "inicial") {
       await marcarEnvioInterrompido(solicitacaoId);
-      const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId }, include: { aplicativo: { select: { nome: true } } } });
+      const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId }, select: { estado: true, pedidoOlistId: true, diagnostico: true, iniciadoEm: true, aplicativoId: true, tentativaId: true, historico: true, aplicativo: { select: { nome: true } } } });
       const snapshot = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
       const configuracao = snapshot.success && snapshot.data.olist?.filialId === filial.id ? snapshot.data.olist : null;
       return resposta({ filial, versao: fila.versao, selecoes: configuracao?.selecoes ?? null, recuperacao: snapshot.success ? estadoRecuperacao(snapshot.data, filial.id) : null,
         vendedorOrigem: snapshot.success ? snapshot.data.vendedorOrigem ?? null : null,
         vendedorFixo: snapshot.success && snapshot.data.vendedorOrigem?.tipo === "VINCULO",
         vendedorOlistPadraoId: snapshot.success && snapshot.data.vendedorOrigem?.aplicativoId === filial.id ? snapshot.data.vendedorOrigem.vendedorOlistId : await obterVendedorDoUsuario(usuarioId, filial.id), envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId,
-        aplicativoNome: envio.aplicativo?.nome, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId } : null });
+        aplicativoNome: envio.aplicativo?.nome, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId, ...esperaEnvioOlist(envio) } : null });
     }
     return resposta(await consultarCadastrosFilaOlist(filial.id, params));
   } catch (error) { return falha(error); }
@@ -120,6 +126,7 @@ export async function POST(request: Request, contexto: Contexto) {
       return resposta({ status: body.acao === "vincular" ? "CONCLUIDO" : "PENDENTE" });
     }
     if (body.acao === "confirmar") {
+      exigirPrazoEnvioOlist(await prisma.envioFornecedor.findUnique({ where: { solicitacaoId } }));
       const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
       if (!previa) throw new ErroFila("Prévia expirada ou pedido alterado. Gere outra prévia.", 409);
       const confirmado = selecoesFilaOlistSchema.extend({ vendedorOrigem: vendedorOrigemFilaSchema }).safeParse(previa.selecoes);
@@ -135,6 +142,7 @@ export async function POST(request: Request, contexto: Contexto) {
     }
     if (fila.versao !== body.versao || !["PENDENTE", "FALHADO"].includes(fila.status)) throw new ErroFila("Pedido alterado ou em processamento. Atualize.", 409);
     const envio = await prisma.envioFornecedor.findUnique({ where: { solicitacaoId } });
+    exigirPrazoEnvioOlist(envio);
     if (envio && envioBloqueado(envio.estado)) throw new ErroFila("Existe uma tentativa sem conciliação. Confira o resultado antes de enviar novamente.", 409);
     const dados = dadosPedidoFilaSchema.safeParse(fila.dadosPedido);
     if (!dados.success) throw new ErroFila("JSON do pedido inválido.");

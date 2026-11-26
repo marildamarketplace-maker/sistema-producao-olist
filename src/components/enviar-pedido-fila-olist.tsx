@@ -8,6 +8,7 @@ import { conterFocoNoDialogo } from "@/lib/dialogo-foco";
 import { createPortal } from "react-dom";
 import type { PedidoFilaAdministracao } from "@/lib/fila-fornecedor-contrato";
 import type { EstadoEnvioFila, RascunhoFilaOlist } from "@/lib/fila-olist-contrato";
+import { mensagemLimiteEnvioOlist } from "@/lib/fila-olist-espera";
 
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-50";
 const primario = `${botao} bg-slate-900 text-white`;
@@ -48,6 +49,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const [vendedorFonte, setVendedorFonte] = useState<"VINCULO" | "MANUAL">("MANUAL");
   const [escolhaManualConfirmada, setEscolhaManualConfirmada] = useState(false);
   const [envio, setEnvio] = useState<EstadoEnvioFila | null>(null);
+  const [agora, setAgora] = useState(Date.now);
   const [versao, setVersao] = useState(pedido.versao);
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [justificativa, setJustificativa] = useState("");
@@ -57,6 +59,14 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   const bloqueado = !!envio && !["LIBERADO", "REJEITADO"].includes(envio.estado);
   const temPendencias = !!recuperacao && (!selecoesFilaOlistSchema.safeParse(selecoes).success || pedido.dadosPedido?.itens.some(i => i.corteLaser) && !selecoes.laser);
   const concluido = envio?.estado === "CONCLUIDO" || pedido.status === "CONCLUIDO";
+  const limitado = envio?.limitado || /HTTP\s+429\b/.test(envio?.diagnostico ?? "");
+  const prazoLimite = envio?.tentarNovamenteEm ? Date.parse(envio.tentarNovamenteEm) : NaN;
+  const aguardandoLimite = limitado && Number.isFinite(prazoLimite) && prazoLimite > agora;
+  useEffect(() => {
+    if (!aguardandoLimite) return;
+    const timer = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [aguardandoLimite]);
   useEffect(() => {
     const anterior = document.activeElement, elemento = dialog.current; elemento?.showModal();
     return () => { elemento?.close(); if (anterior instanceof HTMLElement) anterior.focus(); };
@@ -64,6 +74,10 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
   async function requisitar(body?: unknown) {
     const response = await fetch(api, { method: body ? "POST" : "GET", cache: "no-store", headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const dados = await response.json(); if (!response.ok) {
+      if (dados.codigo === "OLIST_LIMITE_REQUISICOES" && typeof dados.tentarNovamenteEm === "string" && Number.isFinite(Date.parse(dados.tentarNovamenteEm))) {
+        setAgora(Date.now());
+        setEnvio(atual => atual ? { ...atual, limitado: true, tentarNovamenteEm: dados.tentarNovamenteEm } : atual);
+      }
       if (dados.campos && typeof dados.campos === "object" && !Array.isArray(dados.campos)) {
         const campos = Object.fromEntries(Object.entries(dados.campos).filter(([k,v]) => /^(clienteId|vendedorId|formaId|planoId|tipoVenda|laser(\.(id|preco))?|tecidos(\.\d+(\.(id|preco|tecidoId))?)?)$/.test(k) && typeof v === "string"));
         setErrosCampos(campos as ErrosComerciaisFila); if (Object.keys(campos).length) { setEditarDados(true); setEdicaoManual(true); }
@@ -78,7 +92,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .then(async (d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
-        if (d.envio?.estado === "REJEITADO" && d.envio.diagnostico) setErro(d.envio.diagnostico);
+        if (d.envio?.estado === "REJEITADO" && d.envio.diagnostico) setErro(d.envio.limitado || /HTTP\s+429\b/.test(d.envio.diagnostico) ? mensagemLimiteEnvioOlist : d.envio.diagnostico);
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
         const conta = `${api}:${d.filial.id}:${pedido.versao}`;
         const inicializar = contaInicializada.current !== conta;
@@ -124,16 +138,17 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .catch((e) => { if (!controller.signal.aborted) setErro(e.message); }).finally(() => { if (!controller.signal.aborted) { setCarregando(false); setRecuperando(false); } });
     return () => controller.abort();
   }, [api, token, pedido.status, pedido.dadosPedido, pedido.filial?.id, pedido.versao, pedido.tipoOrigem, tentativaRecuperacao]);
-  useEffect(() => { if (erro || mensagem || previa) alerta.current?.focus(); }, [erro, mensagem, previa]);
+  useEffect(() => { if ((erro || mensagem || previa) && !Object.keys(errosCampos).length) alerta.current?.focus(); }, [erro, mensagem, previa, errosCampos]);
   useEffect(() => {
     const chave = Object.keys(errosCampos)[0];
-    if (!chave) return;
+    if (!chave || salvando) return;
     const alvo = [...(dialog.current?.querySelectorAll<HTMLElement>("[data-campo-comercial]") ?? [])].find(el => el.dataset.campoComercial === chave);
     const campo = alvo?.querySelector<HTMLElement>("select, [aria-expanded], input, button");
     campo?.focus(); campo?.scrollIntoView({ block: "nearest" });
-  }, [errosCampos]);
+  }, [errosCampos, salvando]);
   async function operar(body: unknown, acao: "preview" | "confirmar" | "conciliar") {
     if (ocupado.current) return;
+    if (acao !== "conciliar" && aguardandoLimite) return;
     if (acao === "preview") {
       const validacao = selecoesFilaOlistSchema.safeParse(selecoes);
       const campos = validacao.success ? {} : detalharErrosFilaOlist(validacao.error).campos;
@@ -151,7 +166,15 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       else { setMensagem(acao === "confirmar" ? `Pedido Olist ${dados.id} criado. Status CONCLUIDO.` : `Conferência registrada. Status ${dados.status}. Feche e atualize a fila.`); setPrevia(null); setEnvio((v) => v ? { ...v, estado: dados.status === "CONCLUIDO" ? "CONCLUIDO" : "LIBERADO", pedidoOlistId: dados.id ? String(dados.id) : idExistente || null } : null); }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha na operação.");
-      if (acao !== "preview") { setPrevia(null); try { const dados = await requisitar(); setEnvio(dados.envio); } catch { /* A próxima abertura consulta a reserva persistida. */ } }
+      setPrevia(null);
+      // A reserva e seu resultado incrementam a versão mesmo quando o envio falha.
+      // Recarrega apenas o estado; nunca repete a mutação nem apaga as edições.
+      try {
+        const dados = await requisitar();
+        setEnvio(dados.envio);
+        if (contaInicializada.current.startsWith(`${api}:${dados.filial.id}:`)) setVersao(dados.versao ?? pedido.versao);
+        else setMensagem("O aplicativo destinatário mudou. Feche e atualize a fila antes de revisar novamente.");
+      } catch { /* Uma nova abertura consulta a tentativa persistida. */ }
     } finally { ocupado.current = false; setSalvando(false); }
   }
   function alterarEscolhaManual(escolhaManual: boolean) {
@@ -185,7 +208,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           <button type="button" className={botao} disabled={salvando || !ausencia || justificativa.trim().length < 10 || !!envio.pedidoOlistId} onClick={() => void operar({ acao: "confirmar-ausencia", ausenciaConfirmada: true, tentativaId: envio.tentativaId, justificativa }, "conciliar")}>Registrar ausência e liberar nova tentativa</button>
         </>}
       </div> : !mensagem && !previa ? <div className="space-y-4">
-        {envio?.estado === "REJEITADO" && <p role="status" className="rounded-md border border-amber-200 p-3 text-sm text-amber-800">A última tentativa foi rejeitada pela Olist. A fila ficou como Falhado e os dados foram preservados. Corrija os campos indicados e gere uma nova prévia antes de confirmar outro envio.</p>}
+        {envio?.estado === "REJEITADO" && <p role="status" className="rounded-md border border-amber-200 p-3 text-sm text-amber-800">{limitado ? <>A tentativa foi interrompida pelo limite de requisições da Olist. Os dados foram preservados. {aguardandoLimite ? `Aguarde ${Math.ceil((prazoLimite - agora) / 1000)} segundos para revisar novamente.` : "Você pode gerar uma nova prévia quando o limite da conta estiver liberado."} Não é necessário alterar os dados por causa desse limite.</> : "A última tentativa foi rejeitada pela Olist. A fila ficou como Falhado e os dados foram preservados. Corrija os campos indicados e gere uma nova prévia antes de confirmar outro envio."}</p>}
         {pedido.tipoOrigem !== "MANUAL" && (origemVinculada || !escolhaManualConfirmada) && <label className="flex min-h-11 items-start gap-3 rounded-md border border-slate-200 p-3 text-sm">
           <input type="checkbox" className="mt-1" disabled={recuperando} checked={vendedorFonte === "MANUAL" && escolhaManualConfirmada} onChange={(event) => alterarEscolhaManual(event.target.checked)} />
           {origemVinculada ? "Usar uma escolha manual de vendedor para este pedido, após revisar os dados comerciais." : "Revisei e confirmo a escolha manual do vendedor deste pedido, que não possui vínculo de origem registrado."}
@@ -211,14 +234,14 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
         </>}
 
         {!recuperando && temPendencias && <p className="text-sm text-slate-600">Preencha os campos pendentes para revisar o pedido.</p>}
-        <button type="button" className={primario} disabled={salvando || recuperando || temPendencias || (pedido.tipoOrigem !== "MANUAL" && vendedorFonte === "MANUAL" && !escolhaManualConfirmada)} onClick={() => void operar({ acao: "preview", versao, selecoes, ...(pedido.tipoOrigem !== "MANUAL" ? { vendedorFonte } : {}) }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
+        <button type="button" className={primario} disabled={salvando || recuperando || aguardandoLimite || temPendencias || (pedido.tipoOrigem !== "MANUAL" && vendedorFonte === "MANUAL" && !escolhaManualConfirmada)} onClick={() => void operar({ acao: "preview", versao, selecoes, ...(pedido.tipoOrigem !== "MANUAL" ? { vendedorFonte } : {}) }, "preview")}>{salvando ? "Validando na Olist..." : "Revisar pedido"}</button>
       </div> : previa ? <div className="space-y-4">
         <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt>Cliente</dt><dd className="break-words font-medium">{previa.cliente}</dd></div><div><dt>Vendedor</dt><dd className="break-words font-medium">{previa.vendedor}</dd></div><div><dt>Forma / plano</dt><dd>{previa.forma} · {previa.plano}</dd></div></dl>
         {previa.payload.itens.map((item, i) => <div key={i} className="space-y-2 rounded-md border border-slate-200 p-3 text-sm"><p className="break-words font-medium">{previa.produtos[`${item.produto.tipo}:${item.produto.id}`] ?? previa.produtos[item.produto.id]} · ID {item.produto.id}</p><p>{item.quantidade} m × {moeda(item.valorUnitario)} = {moeda(item.quantidade * item.valorUnitario)}</p><p className="whitespace-pre-wrap break-words">{item.infoAdicional}</p></div>)}
         <p className="font-semibold">Total: {moeda(previa.payload.itens.reduce((v, i) => v + i.quantidade * i.valorUnitario, 0))}</p>
         <ul className="text-sm">{previa.payload.pagamento.parcelas.map((p, i) => <li key={i}>Parcela {i + 1}: {p.dias} dias · {moeda(p.valor)}</li>)}</ul>
         <p className="whitespace-pre-wrap break-words text-sm">{previa.payload.observacoes}</p><p className="whitespace-pre-wrap break-words text-sm">{previa.payload.observacoesInternas}</p>
-        <div className="flex flex-wrap gap-3"><button type="button" className={botao} disabled={salvando} onClick={() => setPrevia(null)}>Voltar e corrigir</button><button type="button" className={primario} disabled={salvando} onClick={() => void operar({ acao: "confirmar", previaId: previa.previaId }, "confirmar")}>{salvando ? "Criando pedido..." : "Confirmar e criar na Olist"}</button></div>
+        <div className="flex flex-wrap gap-3"><button type="button" className={botao} disabled={salvando} onClick={() => setPrevia(null)}>Voltar e corrigir</button><button type="button" className={primario} disabled={salvando || aguardandoLimite} onClick={() => void operar({ acao: "confirmar", previaId: previa.previaId }, "confirmar")}>{salvando ? "Criando pedido..." : "Confirmar e criar na Olist"}</button></div>
       </div> : null}
       <div className="flex justify-end border-t border-slate-200 pt-4"><button type="button" className={botao} disabled={salvando} onClick={fechar}>{alterado.current ? "Fechar e atualizar fila" : "Fechar"}</button></div>
     </div>

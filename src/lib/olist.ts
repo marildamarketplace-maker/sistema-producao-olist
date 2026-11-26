@@ -17,7 +17,8 @@ import {
   obterDataAtualizacaoPadrao,
   type FiltroDataPedidosOlist,
 } from "@/lib/olist-filtro-data";
-import { ErroCadastroOlist, resumirRejeicaoPedidoOlist, LimiteRequisicoesOlistError, NenhumItemElegivelOlistError } from "@/lib/olist-errors";
+import { ErroCadastroOlist, camposRejeicaoPedidoOlist, resumirRejeicaoPedidoOlist, LimiteRequisicoesOlistError, NenhumItemElegivelOlistError } from "@/lib/olist-errors";
+import { mensagemLimiteEnvioOlist } from "@/lib/fila-olist-espera";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -300,7 +301,7 @@ function aguardar(ms: number) {
 }
 
 function esperaRetryAfter(response: AxiosResponse<unknown>) {
-  const valor = response.headers["retry-after"];
+  const valor = response.headers?.["retry-after"];
   if (valor === undefined || valor === null) return null;
 
   const segundos = Number(valor);
@@ -2358,7 +2359,7 @@ export async function gerarSolicitacaoPorPedidosOlist(
 
 /** Erros sem corpo de resposta: evita expor cadastros comerciais nos logs e na UI. */
 export class ErroCriacaoOlist extends Error {
-  constructor(message: string, readonly rejeitado: boolean) { super(message); }
+  constructor(message: string, readonly rejeitado: boolean, readonly tentarNovamenteEm: string | null = null, readonly campos?: Record<string, string>) { super(message); }
 }
 export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Record<string, unknown>) {
   // Nunca repetir um POST automaticamente, inclusive em 401.
@@ -2371,9 +2372,14 @@ export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Recor
     });
   } catch { throw new ErroCriacaoOlist("Sem confirmação da Olist. Resultado incerto.", false); }
   if (response.status < 200 || response.status >= 300) {
+    if (response.status === 429) {
+      const informado = Date.now() + Math.max(1000, esperaRetryAfter(response) ?? 60_000);
+      const prazo = new Date(Number.isFinite(new Date(informado).getTime()) ? informado : Date.now() + 60_000).toISOString();
+      throw new ErroCriacaoOlist(mensagemLimiteEnvioOlist, true, prazo);
+    }
     const rejeitado = [400, 401, 403, 404, 422, 429].includes(response.status);
     const detalhes = rejeitado ? resumirRejeicaoPedidoOlist(response.data) : "";
-    throw new ErroCriacaoOlist(`A Olist respondeu HTTP ${response.status}.${detalhes ? ` ${detalhes}` : rejeitado ? " Corrija os dados ou a integração antes de tentar novamente." : " Resultado incerto."}`, rejeitado);
+    throw new ErroCriacaoOlist(`A Olist respondeu HTTP ${response.status}.${detalhes ? ` ${detalhes}` : rejeitado ? " Corrija os dados ou a integração antes de tentar novamente." : " Resultado incerto."}`, rejeitado, null, rejeitado ? camposRejeicaoPedidoOlist(response.data) : undefined);
   }
   return response.data as { id?: number; numeroPedido?: string };
 }

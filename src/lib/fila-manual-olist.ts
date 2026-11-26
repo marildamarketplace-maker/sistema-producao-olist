@@ -1,3 +1,4 @@
+import { esperaEnvioOlist, exigirPrazoEnvioOlist } from "@/lib/fila-olist-espera";
 import { estadoRecuperacao } from "./fila-recuperacao-olist";
 import type { PedidoFornecedorQueue } from "@prisma/client";
 import { z } from "zod";
@@ -60,7 +61,7 @@ export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, par
   }
   await marcarManualInterrompido(fila.id);
   const envio = await prisma.envioPedidoManual.findUnique({ where: { filaId: fila.id }, select: {
-    estado: true, pedidoOlistId: true, diagnostico: true, iniciadoEm: true, aplicativoId: true, tentativaId: true,
+    estado: true, pedidoOlistId: true, diagnostico: true, iniciadoEm: true, aplicativoId: true, tentativaId: true, historico: true,
   } });
   const snapshot = dadosPedidoFilaSchema.parse(fila.dadosPedido);
   const padrao = fila.vendedorFixo && fila.autorId ? await obterVendedorDoUsuario(fila.autorId, filial.id) : null;
@@ -68,7 +69,7 @@ export async function consultarFilaManualOlist({ fila, matrizId }: Contexto, par
   // Mudança do vínculo do autor exige nova escolha de cliente, sem usar o vínculo do administrador.
   const selecoes = !snapshot.origemManual && salvas && padrao !== null && salvas.vendedorId !== padrao
     ? { ...salvas, vendedorId: padrao, clienteId: undefined } : salvas;
-  return { filial, versao: fila.versao, selecoes, recuperacao: estadoRecuperacao(snapshot, filial.id), vendedorOlistPadraoId: padrao, vendedorFixo: fila.vendedorFixo, envio };
+  return { filial, versao: fila.versao, selecoes, recuperacao: estadoRecuperacao(snapshot, filial.id), vendedorOlistPadraoId: padrao, vendedorFixo: fila.vendedorFixo, envio: envio ? { estado: envio.estado, pedidoOlistId: envio.pedidoOlistId, diagnostico: envio.diagnostico, iniciadoEm: envio.iniciadoEm, aplicativoId: envio.aplicativoId, tentativaId: envio.tentativaId, ...esperaEnvioOlist(envio) } : null };
 }
 export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Contexto, entrada: unknown) {
   const body = schema.parse(entrada);
@@ -97,6 +98,7 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
     return { status, ...(body.acao === "vincular" ? { id: body.pedidoOlistId } : {}) };
   }
   if (body.acao === "confirmar") {
+    exigirPrazoEnvioOlist(await prisma.envioPedidoManual.findUnique({ where: { filaId: fila.id } }));
     const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
     if (!previa) throw new ErroFilaOlist("Prévia expirada ou alterada. Gere outra prévia.", 409);
     const { fornecedorManual, ...selecionados } = selecoesPreviaSchema.parse(previa.selecoes);
@@ -109,6 +111,7 @@ export async function operarFilaManualOlist({ fila, matrizId, usuarioId }: Conte
       guardaReferencia: validacao.guardaReferencia, payload: previa.payload as Record<string, unknown> });
   }
   if (body.versao !== fila.versao || !["PENDENTE", "FALHADO"].includes(fila.status)) throw new ErroFilaOlist("Pedido alterado ou bloqueado.", 409);
+  exigirPrazoEnvioOlist(await prisma.envioPedidoManual.findUnique({ where: { filaId: fila.id } }));
   const selecoes = body.selecoes;
   const dados = dadosPedidoFilaSchema.parse(fila.dadosPedido);
   const ids = new Set(dados.itens.map(i => i.tecido.id));

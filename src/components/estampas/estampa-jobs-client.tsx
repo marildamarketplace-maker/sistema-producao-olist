@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Eye, RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useModalFocus } from "@/hooks/use-modal-focus";
+import { CadastroEstampaManual } from "./cadastro-estampa-manual";
 import { ConfiguracaoJobEstampasPainel } from "./configuracao-job-estampas";
 import { PageHeader } from "@/components/page-header";
 import type { EstampaJobPainel } from "@/services/consultarEstampaJobsPainelService";
@@ -105,6 +106,12 @@ export function EstampaJobsClient() {
       <PageHeader title="Jobs de IA das estampas" description="Acompanhe o processamento visual e solicite novas análises quando necessário." />
 
       {podeReprocessar && session?.access_token && <ConfiguracaoJobEstampasPainel key={usuario?.id} token={session.access_token} />}
+
+      {podeReprocessar && session?.access_token && <CadastroEstampaManual token={session.access_token} onCadastrada={(novoCodigo, novaVariante) => {
+        setCodigo(novoCodigo); setVariante(novaVariante); setStatus("TODOS"); setPagina(1);
+        setFiltros({ codigo: novoCodigo, variante: novaVariante, status: "TODOS" });
+        setAtualizacao(valor => valor + 1);
+      }} />}
 
       {mensagem && <p role="status" className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{mensagem}</p>}
       {erro && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{erro}</p>}

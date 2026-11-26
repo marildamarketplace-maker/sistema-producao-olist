@@ -51,3 +51,19 @@ export function resumirRejeicaoPedidoOlist(valor: unknown): string {
   }
   return [...new Set(mensagens)].join(" ");
 }
+
+/** Traduz somente campos comerciais conhecidos; mensagens seguem o mesmo filtro seguro. */
+export function camposRejeicaoPedidoOlist(valor: unknown): Record<string, string> {
+  const campos: Record<string, string> = {};
+  if (!valor || typeof valor !== "object" || !("detalhes" in valor) || !Array.isArray(valor.detalhes)) return campos;
+  for (const item of valor.detalhes.slice(0, 20)) {
+    if (!item || typeof item !== "object" || typeof item.campo !== "string") continue;
+    const path = item.campo.replace(/^\$\./, "");
+    const campo = /^pagamento\.(?:formaRecebimento(?:\.id)?|meioPagamento)$/.test(path) ? "formaId"
+      : /^pagamento\.parcelas(?:\[\d+\]|\.\d+)(?:\.|$)/.test(path) ? "planoId"
+      : path === "idContato" ? "clienteId" : /^vendedor(?:\.id)?$/.test(path) ? "vendedorId" : null;
+    const mensagem = resumirRejeicaoPedidoOlist({ detalhes: [item] });
+    if (campo && mensagem) campos[campo] = mensagem;
+  }
+  return campos;
+}

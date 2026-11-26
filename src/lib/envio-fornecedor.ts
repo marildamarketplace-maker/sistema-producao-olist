@@ -1,3 +1,4 @@
+import { exigirPrazoEnvioOlist } from "@/lib/fila-olist-espera";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -6,7 +7,7 @@ import { bloquearDestinoFornecedor } from "@/lib/fila-fornecedor-destino";
 import { bloquearVendedorFila, validarOperadorFornecedor } from "@/lib/vendedor-fila-producao";
 import type { VendedorOrigemFila } from "@/lib/vendedor-fila-contrato";
 
-export class ErroEnvioFornecedor extends Error {}
+export class ErroEnvioFornecedor extends Error { constructor(message: string, readonly tentarNovamenteEm: string | null = null, readonly campos?: Record<string, string>) { super(message); } }
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 export const marcadorFornecedor = (id: string) => `Solicitacao fornecedor: ${id}`;
 export function envioBloqueado(estado: string) { return !["REJEITADO", "LIBERADO"].includes(estado); }
@@ -23,6 +24,7 @@ type ContextoEnvio = { solicitacaoId: string; fornecedorId: string; aplicativoId
 export async function enviarFornecedor(contexto: ContextoEnvio) {
   // A checagem em runtime protege também chamadas JavaScript e consumidores antigos.
   if (contexto.fila && !contexto.origemVendedor) throw new ErroEnvioFornecedor("Revise a origem do vendedor antes de reservar o envio da fila.");
+  let historicoReserva: Prisma.InputJsonValue = [];
   const tentativaId = randomUUID();
   const marcador = marcadorFornecedor(contexto.solicitacaoId);
   const payload = { ...contexto.payload, observacoesInternas: String(contexto.payload.observacoesInternas ?? "").includes(marcador) ? contexto.payload.observacoesInternas : [contexto.payload.observacoesInternas, marcador].filter(Boolean).join("\n\n") };
@@ -35,6 +37,7 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
     await tx.$queryRaw`SELECT id FROM solicitacoes_producao WHERE id = ${contexto.solicitacaoId}::uuid FOR UPDATE`;
     const existente = await tx.pedidoFornecedorSolicitacao.findFirst({ where: { solicitacaoId: contexto.solicitacaoId } });
     const envio = await tx.envioFornecedor.findUnique({ where: { solicitacaoId: contexto.solicitacaoId } });
+    exigirPrazoEnvioOlist(envio);
     if (existente || (envio && envioBloqueado(envio.estado))) throw new ErroEnvioFornecedor("Solicitação já enviada, em envio ou com resultado incerto. Confira o resultado antes de tentar novamente.");
     if (contexto.fila) {
       if (!await bloquearDestinoFornecedor(tx, contexto.fila.matrizId, contexto.aplicativoId)) {
@@ -54,6 +57,7 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
       filaId: contexto.fila?.id ?? null, estado: "RESERVADO", iniciadoEm: new Date(), chamadaEm: null,
       pedidoOlistId: null, diagnostico: null, payload: json(payload),
       historico: json([...historico, ...(envio ? [{ acao: "RESULTADO_ANTERIOR", tentativaId: envio.tentativaId, estado: envio.estado, pedidoOlistId: envio.pedidoOlistId, diagnostico: envio.diagnostico, chamadaEm: envio.chamadaEm }] : []), { acao: "RESERVA", tentativaId, usuarioId: contexto.usuarioId, aplicativoId: contexto.aplicativoId, em: new Date().toISOString() }]) };
+    historicoReserva = dados.historico;
     await tx.envioFornecedor.upsert({ where: { solicitacaoId: contexto.solicitacaoId }, create: { solicitacaoId: contexto.solicitacaoId, ...dados }, update: dados });
   });
   let pedidoOlistId: string | undefined;
@@ -74,13 +78,14 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
     return { ...resultado, registroId: registro.id };
   } catch (error) {
     const rejeitado = error instanceof ErroCriacaoOlist && error.rejeitado;
+    const prazo = error instanceof ErroCriacaoOlist ? error.tentarNovamenteEm : null;
     const diagnostico = rejeitado ? error.message : "Resultado incerto. Confira o pedido na conta Olist antes de liberar outra tentativa.";
     await prisma.$transaction(async (tx) => {
       await tx.envioFornecedor.updateMany({ where: { solicitacaoId: contexto.solicitacaoId, tentativaId, estado: "RESERVADO" },
-        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
-      await tx.pedidoFornecedorQueue.updateMany({ where: { solicitacaoProducaoId: contexto.solicitacaoId, status: { not: "CONCLUIDO" } }, data: { status: "FALHADO", versao: { increment: 1 } } });
+        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: json([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
+      await tx.pedidoFornecedorQueue.updateMany({ where: { solicitacaoProducaoId: contexto.solicitacaoId, status: { not: "CONCLUIDO" } }, data: { status: prazo ? "PENDENTE" : "FALHADO", versao: { increment: 1 } } });
     }).catch(() => undefined); // A reserva permanece bloqueada mesmo se o banco estiver indisponível.
-    throw new ErroEnvioFornecedor(diagnostico);
+    throw new ErroEnvioFornecedor(diagnostico, prazo, error instanceof ErroCriacaoOlist ? error.campos : undefined);
   }
 }
 
