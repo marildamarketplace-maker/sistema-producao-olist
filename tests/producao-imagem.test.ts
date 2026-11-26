@@ -73,6 +73,17 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
   assert.equal((await interno.POST(req("sessao"), contexto)).status, 403);
   permitido = true;
   assert.equal((await interno.POST(req("sessao"), contexto)).status, 200);
+  const reqCorpoVazio = (token: string) => new Request("https://example.test/imagem", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: "",
+  });
+  assert.notEqual(reqCorpoVazio("sessao").body, null);
+  assert.equal((await interno.POST(reqCorpoVazio("sessao"), contexto)).status, 200);
+  const { lerImagemInvalida } = await import("../src/lib/producao-imagem");
+  const reqJson = (body: string) => new Request("https://example.test/imagem", { method: "POST", body });
+  assert.equal(await lerImagemInvalida(reqJson(JSON.stringify({ imagemInvalida: "https://example.test/antiga.jpg" }))), "https://example.test/antiga.jpg");
+  for (const body of ["{", "null", "[]", "{}", " ", '{"imagemInvalida":"https://example.test/a.jpg","extra":true}']) {
+    await assert.rejects(lerImagemInvalida(reqJson(body)), /Dados de imagem inválidos/);
+  }
   const publico = await import("../src/app/api/public/confirmacao-entrega-producao/itens/[itemId]/imagem/route");
   const { criarTokenPublicoConfirmacaoProducao } = await import("../src/lib/confirmacao-entrega-producao-publica");
   const token = criarTokenPublicoConfirmacaoProducao({ aplicativoId: app, solicitacaoId: sol });
@@ -88,6 +99,7 @@ test("carregamento de imagem respeita empresa, solicitação, token e cache", as
   itemExiste = true;
   const response = await publico.POST(req(token), ctx);
   assert.equal(response.status, 200);
+  assert.equal((await publico.POST(reqCorpoVazio(token), ctx)).status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.deepEqual(await response.json(), { imagemUrl: "https://example.test/produto.jpg" });
   assert.equal(chamadas, 1);

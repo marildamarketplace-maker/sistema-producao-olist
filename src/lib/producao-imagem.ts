@@ -52,9 +52,11 @@ export async function carregarImagemItemProducao(aplicativoId: string, solicitac
 }
 
 export async function lerImagemInvalida(request: Request): Promise<string | null> {
-  if (!request.body) return null;
+  // O adaptador HTTP pode fornecer um stream mesmo em um POST sem conteúdo.
+  const texto = await request.text();
+  if (texto.length === 0) return null;
   let body: unknown;
-  try { body = await request.json(); } catch { throw new DetalheProducaoError("Dados de imagem inválidos.", 400); }
+  try { body = JSON.parse(texto); } catch { throw new DetalheProducaoError("Dados de imagem inválidos.", 400); }
   if (!body || typeof body !== "object" || !("imagemInvalida" in body) || Object.keys(body).some((key) => key !== "imagemInvalida")) throw new DetalheProducaoError("Dados de imagem inválidos.", 400);
   const valor = body.imagemInvalida;
   const url = typeof valor === "string" && valor.length <= 4096 ? urlImagemProduto(valor) : null;
