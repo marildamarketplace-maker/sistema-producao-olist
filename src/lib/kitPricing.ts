@@ -18,7 +18,10 @@ export const KIT_PROFIT_REDUCTIONS = [2, 3, 5].map(quantity => ({
   profitReductionPercentage: PROFIT_REDUCTION_PER_ITEM * quantity,
 }));
 
-export function calculateKitPrices(input: PricingInput, channelId: SalesChannelId, options: KitOptions) {
+export function calculateKitPrices(input: PricingInput, channelId: SalesChannelId, options: KitOptions, quantities: readonly number[] = KIT_PROFIT_REDUCTIONS.map(kit => kit.quantity)) {
+  if (quantities.some(quantity => !Number.isSafeInteger(quantity) || quantity < 2)) {
+    throw new Error("Informe uma quantidade inteira de pelo menos 2 unidades por kit.");
+  }
   if (Object.values(input).some(value => !Number.isFinite(value) || value < 0)
     || Object.values(options).some(value => !Number.isFinite(value) || value < 0)
     || input.pricePerMeter <= 0 || input.metersUsed <= 0) {
@@ -38,7 +41,8 @@ export function calculateKitPrices(input: PricingInput, channelId: SalesChannelI
   const [unit] = PricingCalculatorUtils.calculateChannelPrices({
     ...input, extraCosts: input.extraCosts + shipping,
   }, [effectiveConfig]);
-  return KIT_PROFIT_REDUCTIONS.map(({ quantity, profitReductionPercentage }) => {
+  return [...new Set(quantities)].map(quantity => {
+    const profitReductionPercentage = Math.min(100, PROFIT_REDUCTION_PER_ITEM * quantity);
     const targetProfitPerUnit = unit.estimatedProfit * (1 - profitReductionPercentage / 100);
     const [result] = PricingCalculatorUtils.calculateChannelPrices({
       ...input,

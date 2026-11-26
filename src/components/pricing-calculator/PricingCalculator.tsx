@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { calculateFabricConsumption } from "@/lib/fabricConsumption";
 import { calculateAdvertisingScenarios } from "@/lib/advertisingReturn";
 import { calculateKitPrices, EMPTY_KIT_OPTIONS, KitOptions } from "@/lib/kitPricing";
 import { SalesChannelId } from "@/lib/marketplaceFees";
@@ -65,21 +66,21 @@ const INITIAL_KIT_FORM: KitFormState = {
   shipping: "0", advertisingPercentage: "0", affiliatePercentage: "0", shippingPercentage: "0",
 };
 
-function KitSimulation({ input, channelId, options }: { input: PricingInput; channelId: SalesChannelId; options: KitFormState }) {
+function KitSimulation({ input, channelId, options, quantity }: { input: PricingInput; channelId: SalesChannelId; options: KitFormState; quantity: string }) {
   const ownDomain = channelId === "dominioProprio";
   const simulation = useMemo(() => {
     try {
       const values = Object.fromEntries(Object.entries(options).map(([key, value]) => [key, parseDecimal(value)])) as KitOptions;
-      return calculateKitPrices(input, channelId, ownDomain ? EMPTY_KIT_OPTIONS : values);
+      return calculateKitPrices(input, channelId, ownDomain ? EMPTY_KIT_OPTIONS : values, quantity === "" ? [2, 3, 5] : [2, 3, 5, Number(quantity)]);
     } catch {
       return null;
     }
-  }, [input, channelId, options, ownDomain]);
+  }, [input, channelId, options, ownDomain, quantity]);
   return <details className="mt-5 min-w-0 border-t border-slate-200 pt-4">
     <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">Preço recomendado para kits</summary>
-    <p className="mt-2 text-xs text-slate-600">Metragem por peça × quantidade do kit. Gastos extras são por kit, sem multiplicar. Taxas recalculadas pelo preço final do kit. A meta de lucro por peça tem redução de 7% × quantidade de peças: 14% no kit de 2, 21% no de 3 e 35% no de 5, em relação à venda avulsa nas mesmas condições. A margem desejada e o arredondamento podem elevar o lucro final.</p>
+    <p className="mt-2 text-xs text-slate-600">Metragem por peça × quantidade do kit. Gastos extras são por kit, sem multiplicar. Taxas recalculadas pelo preço final do kit. A meta de lucro por peça tem redução de 7% × quantidade de peças: 14% no kit de 2, 21% no de 3 e 35% no de 5, em relação à venda avulsa nas mesmas condições, limitada a 100% para kits maiores. A margem desejada e o arredondamento podem elevar o lucro final.</p>
     <p className="mt-3 text-xs text-slate-600">{ownDomain ? "Sem taxas de marketplace ou reserva para anúncios." : "Configure os custos em Percentuais do cálculo, no início da tela; zero significa que o custo não será considerado. Lucro desejado preservado após a reserva para anúncios. As taxas são as cadastradas na calculadora; confirme as condições do anúncio."}</p>
-    {!simulation ? <p role="alert" className="mt-3 text-sm text-red-700">Não foi possível calcular os kits. Revise os custos e reduza os percentuais; a soma das taxas e margens deve ser menor que 100%.</p> : <div className="mt-4 space-y-3" aria-live="polite">
+    {!simulation ? <p role="alert" className="mt-3 text-sm text-red-700">Não foi possível calcular os kits. Informe uma quantidade inteira de pelo menos 2 unidades, revise os custos e reduza os percentuais; a soma das taxas e margens deve ser menor que 100%.</p> : <div className="mt-4 space-y-3" aria-live="polite">
       {simulation.map(kit => <details key={kit.quantity} className="rounded-md border border-slate-200 p-3">
         <summary className="min-h-11 cursor-pointer rounded-md py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
           <span className="font-semibold">Kit de {kit.quantity} — {formatCurrency(kit.recommendedPrice)}</span>
@@ -112,7 +113,7 @@ function KitSimulation({ input, channelId, options }: { input: PricingInput; cha
   </details>;
 }
 
-function ResultCard({ result, isLowest, input, kitOptions }: { result: MarketplacePricing; isLowest: boolean; input: PricingInput; kitOptions: KitFormState }) {
+function ResultCard({ result, isLowest, input, kitOptions, kitQuantity }: { result: MarketplacePricing; isLowest: boolean; input: PricingInput; kitOptions: KitFormState; kitQuantity: string }) {
   const isOwnDomain = result.marketplaceId === "dominioProprio";
   const scenarios = calculateAdvertisingScenarios(result);
   const metric = result.marketplaceId === "tiktokShop" ? "ROI" : "ROAS";
@@ -161,12 +162,47 @@ function ResultCard({ result, isLowest, input, kitOptions }: { result: Marketpla
       <span className="font-medium text-slate-600">Margem antes de anúncios</span>
       <span className="font-semibold text-slate-900">{percentageFormatter.format(result.netMargin)}%</span>
     </div>
-    <KitSimulation input={input} channelId={result.marketplaceId} options={kitOptions} />
+    <KitSimulation input={input} channelId={result.marketplaceId} options={kitOptions} quantity={kitQuantity} />
   </article>;
+}
+
+function FabricConsumption({ onApply }: { onApply: (meters: string) => void }) {
+  const [dimensions, setDimensions] = useState({ fabricWidth: "145", pieceWidth: "45", pieceLength: "35" });
+  let result: ReturnType<typeof calculateFabricConsumption> | null = null;
+  let error = "";
+  try {
+    result = calculateFabricConsumption(parseDecimal(dimensions.fabricWidth), parseDecimal(dimensions.pieceWidth), parseDecimal(dimensions.pieceLength));
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : "Revise as medidas.";
+  }
+  const fields: Array<{ key: keyof typeof dimensions; label: string }> = [
+    { key: "fabricWidth", label: "Largura útil do tecido (cm)" },
+    { key: "pieceWidth", label: "Largura da peça no tecido (cm)" },
+    { key: "pieceLength", label: "Comprimento da peça (cm)" },
+  ];
+  return <details className="mt-5 min-w-0 border-t border-slate-200 pt-4">
+    <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">Calcular metragem pelas medidas da peça</summary>
+    <p className="mt-2 text-xs text-slate-600">Informe as medidas de corte, incluindo bainha e margens necessárias. A largura da peça fica na largura do tecido; para girar o corte, inverta largura e comprimento.</p>
+    <div className="mt-4 grid gap-4 md:grid-cols-3">
+      {fields.map(field => <label key={field.key} className="block min-w-0 text-sm font-medium text-slate-700">
+        {field.label}
+        <input className="input mt-1.5 min-h-11" inputMode="decimal" value={dimensions[field.key]}
+          onChange={event => setDimensions(current => ({ ...current, [field.key]: event.target.value }))} />
+      </label>)}
+    </div>
+    {result ? <div className="mt-4 space-y-3">
+      <p role="status" className="text-sm text-slate-700">{result.piecesPerRow} peças por fileira · {percentageFormatter.format(parseDecimal(dimensions.pieceLength))} cm ÷ {result.piecesPerRow} = {percentageFormatter.format(result.exactCmPerPiece)} cm por peça. Arredondado para cima: <strong>{result.roundedCmPerPiece} cm ({percentageFormatter.format(result.metersPerPiece)} m) por peça.</strong></p>
+      <p className="text-xs text-slate-600">Consumo médio para fileiras completas, com a sobra lateral já considerada. Um lote que termine com fileira incompleta pode consumir mais por peça.</p>
+      <button type="button" className="min-h-11 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
+        onClick={() => { if (result) onApply(String(result.metersPerPiece).replace(".", ",")); }}>Usar {percentageFormatter.format(result.metersPerPiece)} m por peça</button>
+    </div> : <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+  </details>;
 }
 
 export function PricingCalculator() {
   const [form, setForm] = useState(INITIAL_FORM);
+  const [kitQuantity, setKitQuantity] = useState("");
+  const invalidKitQuantity = kitQuantity !== "" && (!Number.isSafeInteger(Number(kitQuantity)) || Number(kitQuantity) < 2);
   const [kitForms, setKitForms] = useState<Record<SalesChannelId, KitFormState>>({
     shopee: { ...INITIAL_KIT_FORM }, mercadoLivre: { ...INITIAL_KIT_FORM },
     tiktokShop: { ...INITIAL_KIT_FORM }, dominioProprio: { ...INITIAL_KIT_FORM },
@@ -214,6 +250,17 @@ export function PricingCalculator() {
         </label>)}
       </div>
 
+      <FabricConsumption onApply={meters => updateField("metersUsed", meters)} />
+
+      <label className="mt-5 block text-sm font-medium text-slate-700">
+        Quantidade personalizada de unidades por kit
+        <input className="input mt-1.5 min-h-11" type="number" inputMode="numeric" min={2} step={1}
+          value={kitQuantity} onChange={event => setKitQuantity(event.target.value)}
+          placeholder="Ex.: 4, 6 ou 10" aria-invalid={invalidKitQuantity} aria-describedby="kit-quantity-help" />
+      </label>
+      <p id="kit-quantity-help" className="mt-2 text-xs text-slate-600">A quantidade informada aparece junto dos kits de 2, 3 e 5 em todos os canais. Deixe vazio para ver somente os exemplos.</p>
+      {invalidKitQuantity && <p role="alert" className="mt-2 text-sm text-red-700">Informe um número inteiro de pelo menos 2 unidades.</p>}
+
       <details className="mt-5 border-t border-slate-200 pt-4">
         <summary className="cursor-pointer select-none text-sm font-medium text-slate-700">Percentuais do cálculo</summary>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -248,7 +295,7 @@ export function PricingCalculator() {
     {calculation && <>
       <p className="text-sm text-slate-600">ROAS (Shopee, Mercado Livre e Domínio Próprio) e ROI (TikTok) são múltiplos de receita por real gasto em publicidade. Mínimo = preço ÷ sobra após material, extras, taxas, impostos e trabalho. Intermediário e bom são simulações que preservam 25% e 50% dessa sobra como lucro após anúncios. Inclua todos os custos por venda; a simulação não consulta campanhas e considera a receita atribuída igual ao preço recomendado.</p>
       <div className="grid gap-5 xl:grid-cols-2">
-        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} kitOptions={kitForms[result.marketplaceId]} input={Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as PricingInput} isLowest={result.recommendedPrice === lowestPrice} />)}
+        {calculation.map((result) => <ResultCard key={result.marketplaceId} result={result} kitOptions={kitForms[result.marketplaceId]} kitQuantity={kitQuantity} input={Object.fromEntries(Object.entries(form).map(([key, value]) => [key, parseDecimal(value)])) as PricingInput} isLowest={result.recommendedPrice === lowestPrice} />)}
       </div>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

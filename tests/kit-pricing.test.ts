@@ -65,3 +65,24 @@ test('Premium: simula reduções de 14%, 21% e 35% no exemplo de material de R$ 
   assert.deepEqual(kits.map(k => k.recommendedPrice), [40.9, 50.9, 70.9]);
   assert.deepEqual(kits.map(k => Number(k.estimatedProfit.toFixed(2))), [7.27, 8.47, 11.37]);
 });
+
+for (const channel of ['shopee', 'mercadoLivre', 'tiktokShop', 'dominioProprio'] as SalesChannelId[]) {
+  test(`${channel}: aceita kits personalizados sem duplicar quantidades e sem meta negativa`, () => {
+    const kits = calculateKitPrices(input, channel, EMPTY_KIT_OPTIONS, [2, 4, 6, 15, 20, 4]);
+    assert.deepEqual(kits.map(kit => kit.quantity), [2, 4, 6, 15, 20]);
+    for (const kit of kits) {
+      assert.equal(kit.materialCost, input.pricePerMeter * input.metersUsed * kit.quantity);
+      assert.equal(kit.extraCosts, input.extraCosts);
+      assert.equal(kit.profitReductionPercentage, Math.min(100, 7 * kit.quantity));
+      assert.ok(kit.targetProfitPerUnit >= 0);
+      assert.ok(Number.isFinite(kit.recommendedPrice));
+      assert.ok(kit.netMargin + 0.001 >= input.profitPercentage);
+    }
+  });
+}
+
+test('rejeita quantidades de kit inválidas', () => {
+  for (const quantity of [0, 1, -2, 2.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => calculateKitPrices(input, 'shopee', EMPTY_KIT_OPTIONS, [quantity]));
+  }
+});
