@@ -1,3 +1,4 @@
+import { diagnosticarLimiteOlist } from "@/lib/olist-limite-diagnostico";
 import type { Prisma } from "@prisma/client";
 import { registrarOperacaoErroBaixa, type OperacaoConfirmacaoBaixa } from "@/lib/diagnostico-baixa-estoque-olist";
 import { expandirItemKit } from "@/lib/kits-estoque";
@@ -2359,7 +2360,7 @@ export async function gerarSolicitacaoPorPedidosOlist(
 
 /** Erros sem corpo de resposta: evita expor cadastros comerciais nos logs e na UI. */
 export class ErroCriacaoOlist extends Error {
-  constructor(message: string, readonly rejeitado: boolean, readonly tentarNovamenteEm: string | null = null, readonly campos?: Record<string, string>) { super(message); }
+  constructor(message: string, readonly rejeitado: boolean, readonly tentarNovamenteEm: string | null = null, readonly campos?: Record<string, string>, readonly limite?: ReturnType<typeof diagnosticarLimiteOlist>) { super(message); }
 }
 export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Record<string, unknown>) {
   // Nunca repetir um POST automaticamente, inclusive em 401.
@@ -2373,9 +2374,11 @@ export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Recor
   } catch { throw new ErroCriacaoOlist("Sem confirmação da Olist. Resultado incerto.", false); }
   if (response.status < 200 || response.status >= 300) {
     if (response.status === 429) {
-      const informado = Date.now() + Math.max(1000, esperaRetryAfter(response) ?? 60_000);
-      const prazo = new Date(Number.isFinite(new Date(informado).getTime()) ? informado : Date.now() + 60_000).toISOString();
-      throw new ErroCriacaoOlist(mensagemLimiteEnvioOlist, true, prazo);
+      const limite = diagnosticarLimiteOlist(response.headers ?? {});
+      const orientacao = limite.origemPrazo === "ESTIMATIVA_LOCAL"
+        ? " A Olist não informou quando a cota será liberada; a espera de 60 segundos é uma estimativa local e não garante a liberação."
+        : " O prazo de espera foi informado pela Olist.";
+      throw new ErroCriacaoOlist(mensagemLimiteEnvioOlist + orientacao, true, limite.tentarNovamenteEm, undefined, limite);
     }
     const rejeitado = [400, 401, 403, 404, 422, 429].includes(response.status);
     const detalhes = rejeitado ? resumirRejeicaoPedidoOlist(response.data) : "";

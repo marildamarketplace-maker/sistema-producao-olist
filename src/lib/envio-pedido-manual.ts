@@ -74,7 +74,7 @@ export async function enviarPedidoManual(contexto: { filaId: string; versao: num
     await prisma.$transaction(async tx => {
       await bloquearPedidoManual(tx, filaId);
       const alterado = await tx.envioPedidoManual.updateMany({ where: { filaId, tentativaId, estado: { in: ["RESERVADO", "INCERTO"] } },
-        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: jsonManual([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
+        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: jsonManual([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo, ...(error instanceof ErroCriacaoOlist ? { cota: error.limite } : {}) }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
       if (alterado.count) await tx.pedidoFornecedorQueue.updateMany({ where: { id: filaId, status: { not: "CONCLUIDO" } }, data: { status: prazo ? "PENDENTE" : "FALHADO", versao: { increment: 1 } } });
     }).catch(() => undefined); // A reserva durável bloqueia duplicidade se o banco cair.
     throw new ErroEnvioFornecedor(diagnostico, prazo, error instanceof ErroCriacaoOlist ? error.campos : undefined);

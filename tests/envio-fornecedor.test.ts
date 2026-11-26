@@ -93,6 +93,8 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     const versaoRejeitada = versao;
     const evento = estado?.historico.find((e: { acao: string }) => e.acao === "LIMITE_REQUISICOES");
     assert.ok(Date.parse(evento.tentarNovamenteEm) > Date.now() + 25_000);
+    assert.equal(evento.cota.origemPrazo, "RETRY_AFTER_OLIST");
+    assert.equal(evento.cota.recurso, "/pedidos");
     assert.equal(status, "PENDENTE"); assert.equal(estado?.estado, "REJEITADO");
     await assert.rejects(enviar(), /limite de requisições/);
     assert.equal(posts, 1); assert.equal(versao, versaoRejeitada);

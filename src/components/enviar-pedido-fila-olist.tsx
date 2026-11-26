@@ -92,7 +92,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .then(async (d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
-        if (d.envio?.estado === "REJEITADO" && d.envio.diagnostico) setErro(d.envio.limitado || /HTTP\s+429\b/.test(d.envio.diagnostico) ? mensagemLimiteEnvioOlist : d.envio.diagnostico);
+        if (d.envio?.estado === "REJEITADO" && d.envio.diagnostico) setErro((d.envio.limitado || /HTTP\s+429\b/.test(d.envio.diagnostico)) && !d.envio.diagnostico.startsWith("A Olist atingiu") ? mensagemLimiteEnvioOlist : d.envio.diagnostico);
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
         const conta = `${api}:${d.filial.id}:${pedido.versao}`;
         const inicializar = contaInicializada.current !== conta;

@@ -82,7 +82,7 @@ export async function enviarFornecedor(contexto: ContextoEnvio) {
     const diagnostico = rejeitado ? error.message : "Resultado incerto. Confira o pedido na conta Olist antes de liberar outra tentativa.";
     await prisma.$transaction(async (tx) => {
       await tx.envioFornecedor.updateMany({ where: { solicitacaoId: contexto.solicitacaoId, tentativaId, estado: "RESERVADO" },
-        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: json([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
+        data: { estado: rejeitado ? "REJEITADO" : "INCERTO", diagnostico, ...(prazo ? { historico: json([...(Array.isArray(historicoReserva) ? historicoReserva : []), { acao: "LIMITE_REQUISICOES", tentativaId, tentarNovamenteEm: prazo, ...(error instanceof ErroCriacaoOlist ? { cota: error.limite } : {}) }]) } : {}), ...(pedidoOlistId ? { pedidoOlistId } : {}) } });
       await tx.pedidoFornecedorQueue.updateMany({ where: { solicitacaoProducaoId: contexto.solicitacaoId, status: { not: "CONCLUIDO" } }, data: { status: prazo ? "PENDENTE" : "FALHADO", versao: { increment: 1 } } });
     }).catch(() => undefined); // A reserva permanece bloqueada mesmo se o banco estiver indisponível.
     throw new ErroEnvioFornecedor(diagnostico, prazo, error instanceof ErroCriacaoOlist ? error.campos : undefined);
