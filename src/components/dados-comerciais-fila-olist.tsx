@@ -5,8 +5,8 @@ import { EstadoCatalogoTecidosOlist, PesquisaTecidoOlist } from "@/components/pe
 import type { CatalogoTecidosOlist } from "@/lib/catalogo-tecidos-olist";
 import type { OpcaoFilaOlist, RascunhoFilaOlist } from "@/lib/fila-olist-contrato";
 const botao = "min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-50";
-export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar, disabled, carregarInicialmente = false, invalido = false, descricaoErro }: {
-  titulo: string; recurso: string; valor: number; api: string; token: string; aoSelecionar: (opcao: OpcaoFilaOlist) => void; disabled: boolean; carregarInicialmente?: boolean; invalido?: boolean; descricaoErro?: string;
+export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar, disabled, carregarInicialmente = false, invalido = false, descricaoErro, selecionarUnica = true }: {
+  titulo: string; recurso: string; valor: number; api: string; token: string; aoSelecionar: (opcao: OpcaoFilaOlist) => void; disabled: boolean; carregarInicialmente?: boolean; invalido?: boolean; descricaoErro?: string; selecionarUnica?: boolean;
 }) {
   const id = useId();
   const [aberto, setAberto] = useState(false);
@@ -20,8 +20,8 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
   const controller = useRef<AbortController | null>(null);
-  const selecaoAtual = useRef({ valor, aoSelecionar });
-  selecaoAtual.current = { valor, aoSelecionar };
+  const selecaoAtual = useRef({ valor, aoSelecionar, selecionarUnica });
+  selecaoAtual.current = { valor, aoSelecionar, selecionarUnica };
   const pesquisar = useCallback(async (proxima = 1, termo = "", inicial = false) => {
     controller.current?.abort(); const atual = new AbortController(); controller.current = atual;
     setCarregando(true); setErro("");
@@ -29,7 +29,7 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
       const response = await fetch(`${api}${api.includes("?") ? "&" : "?"}${new URLSearchParams({ recurso, busca: termo, pagina: String(proxima) })}`, { headers: { Authorization: `Bearer ${token}` }, signal: atual.signal });
       const dados = await response.json(); if (!response.ok) throw new Error(dados.error);
       if (!atual.signal.aborted) { setOpcoes(dados.itens); setPagina(proxima); setMais(dados.mais);
-        if ((!inicial || !selecaoAtual.current.valor) && proxima === 1 && dados.mais === false && dados.itens.length === 1 && selecaoAtual.current.valor !== dados.itens[0].id) selecaoAtual.current.aoSelecionar(dados.itens[0]);
+        if (selecaoAtual.current.selecionarUnica && (!inicial || !selecaoAtual.current.valor) && proxima === 1 && dados.mais === false && dados.itens.length === 1 && selecaoAtual.current.valor !== dados.itens[0].id) selecaoAtual.current.aoSelecionar(dados.itens[0]);
       }
     } catch (e) { if (!atual.signal.aborted) setErro(e instanceof Error ? e.message : "Falha na pesquisa."); }
     finally { if (!atual.signal.aborted) setCarregando(false); }
@@ -45,18 +45,13 @@ export function PesquisaOlist({ titulo, recurso, valor, api, token, aoSelecionar
     if (carregarInicialmente && !disabled) void pesquisar(1, "", true);
     return () => controller.current?.abort();
   }, [pesquisar, carregarInicialmente, disabled]);
-  useEffect(() => {
-    if (recurso !== "formas" || filtroForma === null || disabled) return;
-    const timer = setTimeout(() => void pesquisar(1, filtroForma), 300);
-    return () => clearTimeout(timer);
-  }, [recurso, filtroForma, disabled, pesquisar]);
   const encontrada = opcoes.find(o => o.id === valor);
   if (encontrada) selecionada.current = encontrada;
   if (recurso === "formas" || recurso === "servicos" || recurso === "clientes") return <div className="relative min-w-0 self-start space-y-2" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAberto(false); }} onKeyDown={e => { if (e.key === "Escape") { gatilho.current?.focus(); setAberto(false); } }}>
     <label htmlFor={`${id}-gatilho`} className="block text-sm">{titulo}</label>
     {recurso === "formas" ? <div className="flex items-center gap-2">
-      <input id={`${id}-gatilho`} aria-invalid={invalido} aria-describedby={descricaoErro} className="input min-h-11 min-w-0 flex-1" disabled={disabled} value={filtroForma ?? (valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : "")} placeholder="Selecione uma forma de pagamento" onFocus={() => setAberto(true)} onClick={() => setAberto(true)} onChange={e => { setBusca(e.target.value); setFiltroForma(e.target.value); setAberto(true); }} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, filtroForma ?? ""); } }}/>
-      <button ref={gatilho} type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 focus-visible:outline focus-visible:outline-2" disabled={disabled} aria-label="Selecionar forma de pagamento" aria-expanded={aberto} aria-controls={`${id}-lista`} onClick={() => setAberto(v=>!v)}><ChevronDown aria-hidden="true" className="h-5 w-5"/></button>
+      <input id={`${id}-gatilho`} aria-invalid={invalido} aria-describedby={descricaoErro} className="input min-h-11 min-w-0 flex-1" disabled={disabled} value={filtroForma ?? (valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : "")} placeholder="Selecione uma forma de recebimento" onFocus={() => setAberto(true)} onClick={() => setAberto(true)} onChange={e => { setBusca(e.target.value); setFiltroForma(e.target.value); setAberto(true); }} onKeyDown={e => { if(e.key === "Enter") { e.preventDefault(); void pesquisar(1, filtroForma ?? ""); } }}/>
+      <button ref={gatilho} type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-300 focus-visible:outline focus-visible:outline-2" disabled={disabled} aria-label="Selecionar forma de recebimento" aria-expanded={aberto} aria-controls={`${id}-lista`} onClick={() => setAberto(v=>!v)}><ChevronDown aria-hidden="true" className="h-5 w-5"/></button>
     </div> : <>
     <button id={`${id}-gatilho`} aria-describedby={descricaoErro} ref={gatilho} type="button" disabled={disabled} aria-expanded={aberto} aria-controls={`${id}-lista`} className="input flex min-h-11 w-full items-center justify-between gap-2 text-left" onClick={() => setAberto(v => !v)}>
       <span className="min-w-0 break-words">{valor ? selecionada.current?.id === valor ? selecionada.current.nome : `ID ${valor}` : `Selecione ${titulo.toLocaleLowerCase("pt-BR")}`}</span><ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0" />
@@ -107,10 +102,10 @@ function ProdutoCatalogoOlist({ titulo, catalogo, produtoId, preco, aoSelecionar
   </fieldset>;
 }
 
-export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, ocultarProdutos = false, vendedorFixo = false, catalogoTecidos, somentePendentes = false, errosCampos = {} }: {
+export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAlterar, disabled, ocultarClienteVendedor = false, ocultarProdutos = false, vendedorFixo = false, catalogoTecidos, somentePendentes = false, exigirSelecaoForma = false, errosCampos = {} }: {
   api: string; token: string; itens: Array<{ tecidoId: string; nome: string; corteLaser: boolean }>;
   selecoes: RascunhoFilaOlist; aoAlterar: (selecoes: RascunhoFilaOlist) => void; disabled: boolean; ocultarClienteVendedor?: boolean; ocultarProdutos?: boolean; vendedorFixo?: boolean;
-  catalogoTecidos?: CatalogoTecidosOlist; somentePendentes?: boolean; errosCampos?: Record<string, string>;
+  catalogoTecidos?: CatalogoTecidosOlist; somentePendentes?: boolean; exigirSelecaoForma?: boolean; errosCampos?: Record<string, string>;
 }) {
   const [planos, setPlanos] = useState<{ id: string; nome: string }[]>([]);
   const [erro, setErro] = useState("");
@@ -133,7 +128,7 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
   </div>;
   const pesquisa = (titulo: string, recurso: string, valor: number, aoSelecionar: (o: OpcaoFilaOlist) => void, chave?: string) => {
     const chaveCampo = chave ?? ({ clientes: "clienteId", vendedores: "vendedorId", formas: "formaId", servicos: errosCampos.laser ? "laser" : "laser.id" }[recurso] ?? recurso);
-    return campo(chaveCampo, <PesquisaOlist carregarInicialmente={!somentePendentes && (recurso === "formas" || recurso === "servicos")} titulo={titulo} recurso={recurso} valor={valor} api={api} token={token} disabled={disabled} aoSelecionar={aoSelecionar}
+    return campo(chaveCampo, <PesquisaOlist selecionarUnica={recurso !== "formas" || !exigirSelecaoForma} carregarInicialmente={!somentePendentes && (recurso === "formas" || recurso === "servicos")} titulo={titulo} recurso={recurso} valor={valor} api={api} token={token} disabled={disabled} aoSelecionar={aoSelecionar}
       invalido={!!errosCampos[chaveCampo]} descricaoErro={errosCampos[chaveCampo] ? `${erroPrefixo}-${chaveCampo}` : undefined} />);
   };
   return <div className="space-y-4">
@@ -144,9 +139,9 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
           {!ocultarClienteVendedor && (!somentePendentes || !selecoes.clienteId) && pesquisa("Cliente", "clientes", selecoes.clienteId, (o) => aoAlterar({ ...selecoes, clienteId: o.id }))}
           {!ocultarClienteVendedor && (!somentePendentes || !selecoes.vendedorId) && (vendedorFixo ? <p className="text-sm">Vendedor do autor (fixo): <strong>{selecoes.vendedorId || "Vínculo pendente nesta conta"}</strong></p> : pesquisa("Vendedor", "vendedores", selecoes.vendedorId, (o) => aoAlterar({ ...selecoes, vendedorId: o.id, clienteId: 0 })))}
-          {(!somentePendentes || !selecoes.formaId) && pesquisa("Forma de pagamento", "formas", selecoes.formaId, (o) => aoAlterar({ ...selecoes, formaId: o.id, planoId: "" }))}
-          {(!somentePendentes || !selecoes.planoId) && campo("planoId", <label className="block text-sm">Plano de pagamento local<select className="input mt-2 min-h-11" value={selecoes.planoId} aria-invalid={!!errosCampos.planoId} aria-describedby={errosCampos.planoId ? `${erroPrefixo}-planoId` : undefined} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, planoId: e.target.value })}><option value="">Selecione um plano associado</option>{planos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
-            {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano disponível. Confira a associação da forma nesta conta.</span>}</label>)}
+          {(!somentePendentes || !selecoes.formaId) && pesquisa("Forma de recebimento", "formas", selecoes.formaId, (o) => aoAlterar({ ...selecoes, formaId: o.id, planoId: "" }))}
+          {(!somentePendentes || !selecoes.planoId) && campo("planoId", <label className="block text-sm">Plano de recebimento<select className="input mt-2 min-h-11" value={selecoes.planoId} aria-invalid={!!errosCampos.planoId} aria-describedby={errosCampos.planoId ? `${erroPrefixo}-planoId` : undefined} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, planoId: e.target.value })}><option value="">Selecione um plano associado</option>{planos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+            {selecoes.formaId > 0 && planos.length === 0 && <span className="mt-2 block text-xs text-amber-700">Nenhum plano associado. Configure os planos em Olist → Formas de recebimento nesta conta.</span>}</label>)}
           {(!somentePendentes || !selecoes.tipoVenda) && campo("tipoVenda", <label className="block text-sm">Tipo de venda<select className="input mt-2 min-h-11" value={selecoes.tipoVenda} aria-invalid={!!errosCampos.tipoVenda} aria-describedby={errosCampos.tipoVenda ? `${erroPrefixo}-tipoVenda` : undefined} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, tipoVenda: e.target.value as RascunhoFilaOlist["tipoVenda"] })}><option value="">Selecione</option><option value="VENDA">Venda</option><option value="VENDA_G">Venda G</option><option value="VENDA_PC">Venda PC</option></select></label>)}
         </div>
         {!ocultarProdutos && selecoes.tecidos.map((tecido, index) => {

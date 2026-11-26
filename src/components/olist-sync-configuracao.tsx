@@ -10,7 +10,7 @@ export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
   salvar: (dados: SalvarConfiguracaoSync) => Promise<void>;
 }) {
   const [form, setForm] = useState<SalvarConfiguracaoSync>(() => ({
-    versao: configuracao.versao, ativo: configuracao.ativo, entidades: configuracao.entidades,
+    versao: configuracao.versao, ativo: configuracao.ativo, entidades: configuracao.entidades.filter(e => e !== "FORMA_PAGAMENTO"),
     participantesIds: configuracao.participantes.filter((item) => item.habilitado).map((item) => item.id),
     horaDiaria: configuracao.horaDiaria, limiteAlteracoes: configuracao.limiteAlteracoes, prontidao: configuracao.prontidao,
   }));
@@ -41,7 +41,7 @@ export function ConfiguracaoSync({ configuracao, podeEditar, salvar }: {
           </label>)}</div>
         </fieldset>
         <fieldset><legend className="mb-2 text-sm font-medium">Entidades auditadas</legend>
-          <div className="grid gap-2 sm:grid-cols-2">{(Object.keys(ENTIDADES_SYNC_LABEL) as EntidadeSyncApi[]).map((entidade) => <label key={entidade} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+          <div className="grid gap-2 sm:grid-cols-2">{(Object.keys(ENTIDADES_SYNC_LABEL) as EntidadeSyncApi[]).filter(e => e !== "FORMA_PAGAMENTO").map((entidade) => <label key={entidade} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
             <input type="checkbox" checked={form.entidades.includes(entidade)} onChange={(event) => alternarEntidade(entidade, event.target.checked)} className="h-5 w-5 shrink-0" />
             <span>{ENTIDADES_SYNC_LABEL[entidade]}{entidade === "SERVICO" && <span className="block text-xs text-slate-500">Código como referência; sem código, nome exato. Coleta completa.</span>}{["FORMA_PAGAMENTO", "VENDEDOR"].includes(entidade) && <span className="block text-xs text-slate-500">Somente auditoria e equivalência manual</span>}</span>
           </label>)}</div>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 import {
   criarPedidoOlistApi,
-  listarFormasPagamentoOlistApi,
+  listarFormasRecebimentoOlistApi,
   listarContatosOlistApi,
   listarProdutosOlistApi,
   listarVendedoresOlistApi,
@@ -33,23 +33,23 @@ function lerIdOlist(valor: unknown, nome: string) {
   return id;
 }
 
-function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
+function criarPagamentoPedido(formaRecebimentoId: number, nomePlano: string, valorTotal: number) {
   const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
     ? [0]
     : nomePlano.split("/").map(Number);
   if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
-    throw new ErroEntradaPedidoOlist("O plano de pagamento possui parcelas inválidas.");
+    throw new ErroEntradaPedidoOlist("O plano de recebimento possui parcelas inválidas.");
   }
 
   const totalCentavos = Math.round(valorTotal * 100);
   const baseCentavos = Math.floor(totalCentavos / dias.length);
   const resto = totalCentavos - baseCentavos * dias.length;
   return {
-    formaRecebimento: { id: formaPagamentoId },
+    formaRecebimento: { id: formaRecebimentoId },
     parcelas: dias.map((dia, indice) => ({
       dias: dia,
       valor: (baseCentavos + (indice < resto ? 1 : 0)) / 100,
-      formaRecebimento: { id: formaPagamentoId },
+      formaRecebimento: { id: formaRecebimentoId },
     })),
   };
 }
@@ -134,28 +134,21 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, max-age=0" } },
       );
     }
-    if (recurso === "formas-pagamento") {
-      const formas = [];
-      let offset = 0;
-      let total = 0;
-      do {
-        const resposta = await listarFormasPagamentoOlistApi(usuario.aplicativoId, {
-          situacao: 1,
-          limit: 100,
-          offset,
-        });
-        formas.push(...resposta.itens);
-        total = resposta.paginacao.total;
-        offset += 100;
-      } while (offset < total);
-
-      const associacoes = await prisma.formaPagamentoOlistPlano.findMany({
-        where: { aplicativoId: usuario.aplicativoId },
+    if (recurso === "formas-pagamento") return NextResponse.json({ error: "Utilize formas-recebimento e selecione um novo plano." }, { status: 410 });
+    if (recurso === "formas-recebimento") {
+      const offset = Number(params.get("offset") ?? "0");
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) throw new ErroEntradaPedidoOlist("Página de recebimentos inválida.");
+      const resposta = await listarFormasRecebimentoOlistApi(usuario.aplicativoId, { nome, situacao: 1, limit: 50, offset });
+      const formas = resposta.itens;
+      const associacoes = await prisma.formaRecebimentoOlistPlano.findMany({
+        where: { aplicativoId: usuario.aplicativoId, formaOlistId: { in: formas.map(f => String(f.id)) }, planoPagamento: { ativo: true } },
+        take: 5001,
         select: {
           formaOlistId: true,
           planoPagamento: { select: { id: true, nome: true, ativo: true } },
         },
       });
+      if (associacoes.length > 5000) throw new ErroEntradaPedidoOlist("Revise a quantidade de planos associados.");
       const planosPorForma = new Map<string, Array<{ id: string; nome: string }>>();
       for (const associacao of associacoes) {
         if (!associacao.planoPagamento.ativo) continue;
@@ -165,6 +158,7 @@ export async function GET(request: Request) {
       }
 
       return NextResponse.json({
+        paginacao: resposta.paginacao,
         itens: formas.map((forma) => ({
           ...forma,
           planos: planosPorForma.get(String(forma.id)) ?? [],
@@ -204,7 +198,7 @@ export async function POST(request: Request) {
     const body = bodyJson as {
       vendedorId?: unknown;
       clienteId?: unknown;
-      formaPagamentoId?: unknown;
+      formaRecebimentoId?: unknown;
       planoPagamentoId?: unknown;
       tipoVenda?: unknown;
       observacaoPedido?: unknown;
@@ -214,28 +208,28 @@ export async function POST(request: Request) {
     };
     const vendedorId = lerIdOlist(body.vendedorId, "vendedor");
     const clienteId = lerIdOlist(body.clienteId, "cliente");
-    const formaPagamentoId = String(body.formaPagamentoId ?? "").trim();
+    const formaRecebimentoId = String(body.formaRecebimentoId ?? "").trim();
     const planoPagamentoId = String(body.planoPagamentoId ?? "").trim();
     const tipoVenda = String(body.tipoVenda ?? "").trim().toLowerCase();
     const observacaoPedido = String(body.observacaoPedido ?? "").trim();
     const observacaoEntrega = String(body.observacaoEntrega ?? "").trim();
-    if (!/^\d+$/.test(formaPagamentoId)) throw new ErroEntradaPedidoOlist("Selecione uma forma de pagamento válida.");
-    if (!planoPagamentoId) throw new ErroEntradaPedidoOlist("Selecione um plano de pagamento.");
+    if (!/^\d+$/.test(formaRecebimentoId)) throw new ErroEntradaPedidoOlist("Selecione uma forma de recebimento válida.");
+    if (!planoPagamentoId) throw new ErroEntradaPedidoOlist("Selecione um plano de recebimento.");
     if (!["venda", "venda g", "venda pc"].includes(tipoVenda)) throw new ErroEntradaPedidoOlist("Selecione um tipo de venda válido.");
     if (!Array.isArray(body.itens) || body.itens.length === 0) throw new ErroEntradaPedidoOlist("Adicione ao menos um produto.");
 
-    const associacaoPlano = await prisma.formaPagamentoOlistPlano.findUnique({
+    const associacaoPlano = await prisma.formaRecebimentoOlistPlano.findUnique({
       where: {
         aplicativoId_formaOlistId_planoPagamentoId: {
           aplicativoId: usuario.aplicativoId,
-          formaOlistId: formaPagamentoId,
+          formaOlistId: formaRecebimentoId,
           planoPagamentoId,
         },
       },
       select: { planoPagamento: { select: { nome: true, ativo: true } } },
     });
     if (!associacaoPlano?.planoPagamento.ativo) {
-      throw new ErroEntradaPedidoOlist("O plano selecionado não está associado à forma de pagamento.");
+      throw new ErroEntradaPedidoOlist("O plano selecionado não está associado à forma de recebimento.");
     }
 
     const observacoesLinhas: LinhaObservacaoPedidoOlist[] = [];
@@ -317,7 +311,7 @@ export async function POST(request: Request) {
       observacoes,
       observacoesInternas,
       pagamento: criarPagamentoPedido(
-        Number(formaPagamentoId),
+        Number(formaRecebimentoId),
         associacaoPlano.planoPagamento.nome,
         itens.reduce((total, item) => total + item.quantidade * (item.valorUnitario ?? 0), 0),
       ),

@@ -21,7 +21,7 @@ type DecisaoPendencia = z.infer<typeof decisaoSchema>;
 export async function declararOrigemSync(db: PrismaClient, config: ConfiguracaoSync, usuarioId: string, id: string, input: DeclaracaoOrigem) {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM olist_sync_registro WHERE id=${id}::uuid AND configuracao_id=${config.id}::uuid FOR UPDATE`;
-    const registro = await tx.olistSyncRegistro.findFirst({ where: { id, configuracaoId: config.id }, select: { id: true, revisao: true, origemTipo: true, aplicativoOrigemId: true, registroOlistOrigemId: true } });
+    const registro = await tx.olistSyncRegistro.findFirst({ where: { id, configuracaoId: config.id }, select: { id: true, entidade: true, revisao: true, origemTipo: true, aplicativoOrigemId: true, registroOlistOrigemId: true } });
     if (!registro)
       throw new ErroRepositorioSync("Registro não encontrado.", 404);
     const anterior = await tx.olistSyncEvento.findFirst({ where: { configuracaoId: config.id, registroId: id, tipo: { in: ["ORIGEM_DECLARADA", "ORIGEM_CORRIGIDA"] }, metadadosJson: { path: ["idempotencia"], equals: input.idempotencia } }, select: { metadadosJson: true } });
@@ -31,6 +31,7 @@ export async function declararOrigemSync(db: PrismaClient, config: ConfiguracaoS
         throw new ErroRepositorioSync("Chave de idempotência já usada com outra declaração.");
       return;
     }
+    if (registro.entidade === "FORMA_PAGAMENTO") throw new ErroRepositorioSync("Formas de pagamento estão disponíveis somente para consulta histórica.", 409);
     if (registro.revisao !== input.revisao)
       throw new ErroRepositorioSync("O registro mudou. Atualize a comparação.");
     if (!await tx.aplicativo.findFirst({ where: { id: input.aplicativoOrigemId, aplicativoPaiId: config.aplicativoPaiId }, select: { id: true } }))
@@ -70,6 +71,7 @@ export async function resolverPendenciaSync(db: PrismaClient, config: Configurac
     // Rejeitar/ignorar continua possível para encerrar pendências de um grupo parado.
     if (["APROVAR", "VINCULAR"].includes(input.acao) && (membros.length < 2 || membros.some(m => !aplicativoElegivelSync(atualConfig, m.aplicativo))))
       throw new ErroRepositorioSync("A aprovação e o vínculo exigem ao menos dois filhos habilitados sem bloqueios no grupo.", 400);
+    if (p.entidade === "FORMA_PAGAMENTO") throw new ErroRepositorioSync("Formas de pagamento estão disponíveis somente para consulta histórica.", 409);
     if (input.acao === "VINCULAR") {
       if (["PRODUTO", "SERVICO"].includes(p.entidade) || !input.vinculos)
         throw new ErroRepositorioSync("Informe ao menos dois IDs locais da mesma entidade. Produtos e serviços usam a identidade automática do cadastro.", 400);

@@ -25,7 +25,7 @@ const params = new URLSearchParams(location.search);
 localStorage.setItem("sistema_producao_theme", params.get("tema") === "dark" ? "dark" : "light");
 
 export const controle = {
-  escopos: [] as string[], redirects: [] as string[], consultas: 0, fallbacks: 0,
+  escopos: [] as string[], redirects: [] as string[], consultas: 0, fallbacks: 0, projecoesFallback: [] as string[],
   estado: { session: false, usuario: false, signingOut: false, signOutError: null as string | null },
   sair: async () => {}, atualizar: async () => {},
   emitir(session: Session | null = sessao) {
@@ -61,10 +61,18 @@ export const supabase = {
     },
   },
   from: () => {
+    let colunaRemovida = false;
     const consulta = {
-      select: () => consulta, ilike: () => consulta, eq: () => consulta, limit: () => consulta,
+      select: (campos: string) => {
+        controle.projecoesFallback.push(campos);
+        colunaRemovida = campos.split(",").some(campo => campo.trim() === "pode_visualizar_olist_formas_pagamento");
+        return consulta;
+      }, ilike: () => consulta, eq: () => consulta, limit: () => consulta,
       maybeSingle: async () => {
         controle.fallbacks++;
+        if (params.has("recebimentoFallback")) return colunaRemovida
+          ? { data: null, error: { code: "42703", message: "Coluna removida" } }
+          : { data: { ...usuario, pode_visualizar_olist_formas_recebimento: true }, error: null };
         return respostaFallback ? respostaFallback.promise : { data: null, error: null };
       },
     };
@@ -76,6 +84,7 @@ window.fetch = async (input) => {
   if (String(input) !== "/api/usuario/me") throw new Error("Requisição fora do teste");
   controle.consultas++;
   if (respostaUsuario) return respostaUsuario.promise;
+  if (params.has("recebimentoFallback")) return Response.json({ error: "Serviço indisponível" }, { status: 503 });
   return params.has("semAcesso") ? Response.json({ error: "Acesso indisponível" }, { status: 403 }) : Response.json(usuario);
 };
 

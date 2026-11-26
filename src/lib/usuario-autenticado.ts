@@ -16,7 +16,6 @@ export async function getUsuarioAutenticado(request: Request) {
       ativo: true,
       aplicativoId: true,
       podeEditarConfiguracao: true,
-      podeVisualizarOlistFormasPagamento: true,
       podeVisualizarOlistFormasRecebimento: true,
     } as const;
   // O UUID autenticado tem precedência. E-mails repetidos em tenants diferentes

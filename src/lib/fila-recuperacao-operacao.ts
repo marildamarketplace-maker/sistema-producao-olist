@@ -27,7 +27,7 @@ export async function operarRecuperacaoFila(fila: PedidoFornecedorQueue, matrizI
   const fixo = fila.tipoOrigem === "MANUAL" && fila.vendedorFixo && fila.autorId ? await obterVendedorDoUsuario(fila.autorId, body.filialId) : null;
   if (fila.vendedorFixo && fila.tipoOrigem === "MANUAL" && !fixo) throw new ErroFilaOlist("Vínculo do vendedor indisponível nesta conta.", 409);
   const resultado = await recuperarCampoOlist(dados, body.filialId, body.chave, fixo);
-  const antigos = dados.recuperacaoOlist?.filialId === body.filialId ? dados.recuperacaoOlist.campos : [];
+  const antigos = dados.recuperacaoOlist?.filialId === body.filialId ? dados.recuperacaoOlist.campos.filter(c => !["formaId", "planoId"].includes(c.chave) || c.estado === "PENDENTE" || referencia.selecoes.recursoForma === "RECEBIMENTO") : [];
   const novos = [...antigos.filter(c => c.chave !== body.chave), resultado.campo];
   const atualizado = { ...dados, olistAnterior: referencia, olist: { filialId: body.filialId, selecoes: resultado.selecoes },
     recuperacaoOlist: { filialId: body.filialId, campos: novos } };
@@ -48,7 +48,7 @@ export async function operarRecuperacaoFila(fila: PedidoFornecedorQueue, matrizI
   });
   const anteriores = dados.olist?.filialId === body.filialId ? dados.olist.selecoes : {};
   const alteracoes: SelecoesFilaOlistParciais = {};
-  for (const campo of ["clienteId", "vendedorId", "formaId", "planoId", "tipoVenda", "laser"] as const) {
+  for (const campo of ["recursoForma", "clienteId", "vendedorId", "formaId", "planoId", "tipoVenda", "laser"] as const) {
     if (JSON.stringify(resultado.selecoes[campo]) !== JSON.stringify(anteriores[campo])) Object.assign(alteracoes, { [campo]: resultado.selecoes[campo] });
   }
   const tecidos = resultado.selecoes.tecidos?.filter(t => !anteriores.tecidos?.some(a => a.tecidoId === t.tecidoId && a.id === t.id && a.preco === t.preco));

@@ -168,7 +168,7 @@ export async function GET(request:Request,contexto:Contexto) {
         const estados=await prisma.olistSyncEstado.findMany({where:{configuracaoId:config.id,...estadoFiltro,participante:{habilitado:true}},select:{aplicativoId:true,remoteId:true,dadosCriptografados:true,participante:{select:{aplicativo:{select:{nome:true}}}}},take:20});
         const comparacao=estados.flatMap(s=>s.dadosCriptografados?[{aplicativoId:s.aplicativoId,nome:s.participante.aplicativo.nome,registroOlistId:s.remoteId,campos:observacaoProtegida(c.decifrar(s.dadosCriptografados,`${config.id}:estado:${s.aplicativoId}:${p.entidade}:${s.remoteId}`)).campos}]:[]);
         const aprovavel=p.registroId&&["PRODUTO","CONTATO","SERVICO"].includes(p.entidade)&&!/DUPLIC|IDENTIDADE|INCONCLUSIVO|REFERENCIA_|ESTRUTURA|VARIACAO|INATIVO|REMOVIDO/.test(p.tipo);
-        return json({...pendenciaDto(p),comparacao,acoesPermitidas:p.status==="AGUARDANDO_REVISAO"?[...(aprovavel?["APROVAR"]:[]),...(!p.registroId&&!["PRODUTO","SERVICO"].includes(p.entidade)?["VINCULAR"]:[]),"REJEITAR","IGNORAR","REAUDITAR"]:[]});
+        return json({...pendenciaDto(p),comparacao,acoesPermitidas:p.entidade!=="FORMA_PAGAMENTO"&&p.status==="AGUARDANDO_REVISAO"?[...(aprovavel?["APROVAR"]:[]),...(!p.registroId&&!["PRODUTO","SERVICO"].includes(p.entidade)?["VINCULAR"]:[]),"REJEITAR","IGNORAR","REAUDITAR"]:[]});
       }
       const where:Prisma.OlistSyncPendenciaWhereInput={configuracaoId:config.id,entidade:filtros.entidade,status:filtros.status,severidade:filtros.severidade,tipo:filtros.tipo,...(filtros.aplicativoId?{OR:[
         {aplicativoId:filtros.aplicativoId},

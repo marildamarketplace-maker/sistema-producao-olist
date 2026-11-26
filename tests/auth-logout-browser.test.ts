@@ -135,7 +135,21 @@ test("logout local: interface real, erros e concorrência", { skip: chrome ? fal
     await avaliar('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(await avaliar("window.logoutTeste.estado.usuario || window.logoutTeste.estado.session"), false);
   });
+  await t.test("fallback após remoção da permissão antiga mantém acesso e recebimento quando a API falha", async () => {
+    for (const width of [390, 1440]) {
+      await cdp.pedir("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+      await cdp.pedir("Page.navigate", { url: `${url}?recebimentoFallback=1` });
+      await ate(() => avaliar<boolean>("Boolean(window.logoutTeste?.estado.usuario)"), "Fallback não recuperou o usuário após a remoção da coluna");
+      assert.ok(await avaliar<number>("window.logoutTeste.fallbacks") > 0);
+      const projecoes = await avaliar<string[]>("window.logoutTeste.projecoesFallback");
+      assert.ok(projecoes.every(p => !p.includes("pode_visualizar_olist_formas_pagamento")));
+      assert.ok(projecoes.every(p => p.includes("pode_visualizar_olist_formas_recebimento")));
+      assert.equal(await avaliar('Boolean(document.querySelector(\'a[href="/olist/formas-recebimento"]\'))'), true);
+      assert.equal(await avaliar('document.body.textContent.includes("Acesso não autorizado")'), false);
+    }
+  });
   await t.test("botão da tela de acesso não autorizado também trata falhas", async () => {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await abrir("semAcesso=1");
     assert.match(await avaliar<string>("document.body.textContent"), /Acesso não autorizado/);
     await clicar(); await terminar("erro");

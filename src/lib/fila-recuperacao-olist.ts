@@ -8,7 +8,7 @@ import { ErroFilaOlist } from "./fila-olist-cadastros";
 import { prisma } from "./prisma";
 
 type Cadastro = Record<string, unknown>;
-type Recurso = "contatos" | "vendedores" | "produtos" | "servicos" | "formas-pagamento";
+type Recurso = "contatos" | "vendedores" | "produtos" | "servicos" | "formas-recebimento";
 export type CampoRecuperacao = { chave: string; estado: "RECUPERADO" | "PENDENTE"; mensagem: string };
 export const entradaRecuperacaoSchema = z.object({ acao: z.literal("recuperar"), versao: z.number().int().nonnegative(),
   filialId: z.guid(), chave: z.union([z.enum(["clienteId", "vendedorId", "formaId", "planoId", "laser"]), z.string().regex(/^tecido:[0-9a-f-]{36}$/i)]),
@@ -22,7 +22,8 @@ export interface DependenciasRecuperacao {
 export const dependenciasRecuperacao: DependenciasRecuperacao = {
   consultar: consultarCorrespondenciaOlist,
   async vinculo(origem, destino, recurso, id) {
-    const entidade = { contatos: "CONTATO", vendedores: "VENDEDOR", produtos: "PRODUTO", servicos: "SERVICO", "formas-pagamento": "FORMA_PAGAMENTO" }[recurso];
+    if (recurso === "formas-recebimento") return null;
+    const entidade = { contatos: "CONTATO", vendedores: "VENDEDOR", produtos: "PRODUTO", servicos: "SERVICO" }[recurso];
     if (recurso === "vendedores") return null;
     const fonte = await prisma.olistSyncEstado.findUnique({ where: { aplicativoId_entidade_remoteId: { aplicativoId: origem, entidade, remoteId: String(id) } }, select: { registroId: true, configuracaoId: true } });
     if (!fonte?.registroId) return null;
@@ -31,7 +32,7 @@ export const dependenciasRecuperacao: DependenciasRecuperacao = {
     return alvo?.presente && alvo.configuracaoId === fonte.configuracaoId && alvo.entidade === entidade ? identificador(alvo.remoteId) : null;
   },
   async planos(app, formaId) {
-    const linhas = await prisma.formaPagamentoOlistPlano.findMany({ where: { aplicativoId: app, formaOlistId: String(formaId), planoPagamento: { ativo: true } },
+    const linhas = await prisma.formaRecebimentoOlistPlano.findMany({ where: { aplicativoId: app, formaOlistId: String(formaId), planoPagamento: { ativo: true } },
       take: 101, select: { planoPagamento: { select: { id: true, nome: true } } } });
     if (linhas.length > 100) throw new Error("Muitos planos associados.");
     return linhas.map(l => l.planoPagamento);
@@ -43,8 +44,8 @@ function contato(c: Cadastro) { return objeto(c.contato) ? c.contato : c; }
 function nome(c: Cadastro) { return nomeServicoSync(c.nome ?? contato(c).nome ?? c.descricao); }
 function codigo(c: Cadastro) { return codigoServicoSync(c.codigo ?? c.sku); }
 function ativo(c: Cadastro, recurso: Recurso) {
-  const s = String(c.situacao ?? (recurso === "formas-pagamento" ? "1" : "A")).trim().toUpperCase();
-  return recurso === "contatos" || recurso === "vendedores" ? ["A", "B"].includes(s) : recurso === "formas-pagamento" ? ["1", "A"].includes(s) : s === "A";
+  const s = String(c.situacao ?? (recurso === "formas-recebimento" ? "1" : "A")).trim().toUpperCase();
+  return recurso === "contatos" || recurso === "vendedores" ? ["A", "B"].includes(s) : recurso === "formas-recebimento" ? ["1", "A"].includes(s) : s === "A";
 }
 function doc(c: Cadastro) { return normalizarDocumentoContato(contato(c).cpfCnpj); }
 /** Um nome nunca sobrepõe dois identificadores preenchidos e conflitantes. */
@@ -76,7 +77,7 @@ export function chavesRecuperacao(dados: DadosPedidoFila, destinoId: string): st
 export function estadoRecuperacao(dados: DadosPedidoFila, destinoId: string) {
   const chaves = chavesRecuperacao(dados, destinoId);
   if (!chaves.length) return null;
-  const campos = dados.recuperacaoOlist?.filialId === destinoId ? dados.recuperacaoOlist.campos : [];
+  const campos = dados.recuperacaoOlist?.filialId === destinoId ? dados.recuperacaoOlist.campos.filter(c => !["formaId", "planoId"].includes(c.chave) || c.estado === "PENDENTE" || referenciaRecuperacao(dados, destinoId)?.selecoes.recursoForma === "RECEBIMENTO") : [];
   return { campos, restantes: chaves.filter(chave => !campos.some(c => c.chave === chave)) };
 }
 /** Cada campo é uma unidade curta, persistida pelo chamador; nunca percorre catálogos inteiros. */
@@ -85,7 +86,10 @@ export async function recuperarCampoOlist(dados: DadosPedidoFila, destinoId: str
   const ref = referenciaRecuperacao(dados, destinoId);
   if (!ref || !chavesRecuperacao(dados, destinoId).includes(chave)) throw new ErroFilaOlist("Campo sem referência para recuperação.", 400);
   const selecoes: SelecoesFilaOlistParciais = dados.olist?.filialId === destinoId ? structuredClone(dados.olist.selecoes) : { tipoVenda: ref.selecoes.tipoVenda };
+  if (selecoes.recursoForma !== "RECEBIMENTO") { delete selecoes.formaId; delete selecoes.planoId; }
+  selecoes.recursoForma = "RECEBIMENTO";
   const pendente = (mensagem: string) => ({ selecoes, campo: { chave, estado: "PENDENTE" as const, mensagem } });
+  if (["formaId", "planoId"].includes(chave) && ref.selecoes.recursoForma !== "RECEBIMENTO") return pendente("Selecione novamente a forma e o plano de recebimento; a origem usa pagamento.");
   if (chave.startsWith("tecido:") && selecoes.tecidos?.some(t => t.tecidoId === chave.slice(7)) && dados.recuperacaoOlist?.campos.some(c => c.chave.startsWith("tecido:") && c.estado === "RECUPERADO")) {
     return { selecoes, campo: { chave, estado: "RECUPERADO", mensagem: "Produto equivalente já recuperado nesta conta." } };
   }
@@ -134,7 +138,7 @@ export async function recuperarCampoOlist(dados: DadosPedidoFila, destinoId: str
       selecoes.planoId = candidatos[0].id;
     } else {
       const tecido = chave.startsWith("tecido:") ? chave.slice(7) : null;
-      const recurso: Recurso = tecido ? "produtos" : chave === "laser" ? "servicos" : chave === "formaId" ? "formas-pagamento" : chave === "vendedorId" ? "vendedores" : "contatos";
+      const recurso: Recurso = tecido ? "produtos" : chave === "laser" ? "servicos" : chave === "formaId" ? "formas-recebimento" : chave === "vendedorId" ? "vendedores" : "contatos";
       const idOrigem = tecido ? ref.selecoes.tecidos?.find(t => t.tecidoId === tecido)?.id : chave === "laser" ? ref.selecoes.laser?.id : chave === "formaId" ? ref.selecoes.formaId : chave === "vendedorId" ? ref.selecoes.vendedorId : ref.selecoes.clienteId;
       if (!idOrigem) return pendente("Cadastro de origem não informado. Selecione no destino.");
       const pessoal = recurso === "contatos" || recurso === "vendedores";

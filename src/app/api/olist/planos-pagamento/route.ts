@@ -1,141 +1,45 @@
+import { z } from "zod";
 import { ErroAutorizacaoOlist } from "@/lib/olist-autorizacao";
 import { resolverEmpresaOlist } from "@/lib/olist-empresa";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
-type TipoForma = "pagamento" | "recebimento";
-
-function tipoValido(valor: unknown): valor is TipoForma {
-  return valor === "pagamento" || valor === "recebimento";
+const chave = z.object({ tipo: z.literal("recebimento"), formaOlistId: z.string().trim().regex(/^[1-9]\d{0,15}$/) });
+const entrada = chave.extend({ formaOlistNome: z.string().trim().max(200).optional(), planoIds: z.array(z.guid()).max(100).transform(ids => [...new Set(ids)]) }).strict();
+function falha(error: unknown) {
+  if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof z.ZodError) return NextResponse.json({ error: "Informe uma forma de recebimento e até 100 planos válidos." }, { status: 400 });
+  return NextResponse.json({ error: "Não foi possível consultar ou salvar os planos de recebimento." }, { status: 500 });
 }
-
-function possuiPermissao(
-  usuario: Awaited<ReturnType<typeof getUsuarioAutenticado>>,
-  tipo: TipoForma,
-) {
-  return tipo === "pagamento"
-    ? usuario.podeVisualizarOlistFormasPagamento
-    : usuario.podeVisualizarOlistFormasRecebimento;
-}
-
 export async function GET(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
+    if (!usuario.podeVisualizarOlistFormasRecebimento) return NextResponse.json({ error: "Sem permissão para associar planos." }, { status: 403 });
     const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
     const params = new URL(request.url).searchParams;
-    const tipo = params.get("tipo");
-    const formaOlistId = params.get("formaOlistId")?.trim();
-
-    if (!tipoValido(tipo) || !formaOlistId) {
-      return NextResponse.json({ error: "Tipo e ID da forma são obrigatórios." }, { status: 400 });
-    }
-    if (!possuiPermissao(usuario, tipo)) {
-      return NextResponse.json({ error: "Sem permissão para associar planos." }, { status: 403 });
-    }
-
+    const { formaOlistId } = chave.parse({ tipo: params.get("tipo"), formaOlistId: params.get("formaOlistId") });
     const [planos, associacoes] = await Promise.all([
-      prisma.planoPagamento.findMany({
-        where: { ativo: true },
-        select: { id: true, nome: true },
-        orderBy: { nome: "asc" },
-      }),
-      tipo === "pagamento"
-        ? prisma.formaPagamentoOlistPlano.findMany({
-            where: { aplicativoId, formaOlistId },
-            select: { planoPagamentoId: true },
-          })
-        : prisma.formaRecebimentoOlistPlano.findMany({
-            where: { aplicativoId, formaOlistId },
-            select: { planoPagamentoId: true },
-          }),
+      prisma.planoPagamento.findMany({ where: { ativo: true }, select: { id: true, nome: true }, orderBy: [{ nome: "asc" }, { id: "asc" }], take: 1000 }),
+      prisma.formaRecebimentoOlistPlano.findMany({ where: { aplicativoId, formaOlistId }, select: { planoPagamentoId: true }, take: 100 }),
     ]);
-
-    return NextResponse.json({
-      planos,
-      planoIdsAssociados: associacoes.map((item) => item.planoPagamentoId),
-    });
-  } catch (error) {
-    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error("Erro ao consultar planos de pagamento:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao consultar planos." },
-      { status: 500 },
-    );
-  }
+    return NextResponse.json({ planos, planoIdsAssociados: associacoes.map(a => a.planoPagamentoId) }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return falha(error); }
 }
-
 export async function PUT(request: Request) {
   try {
     const usuario = await getUsuarioAutenticado(request);
+    if (!usuario.podeVisualizarOlistFormasRecebimento) return NextResponse.json({ error: "Sem permissão para associar planos." }, { status: 403 });
     const aplicativoId = await resolverEmpresaOlist(request, usuario.aplicativoId);
-    const body = await request.json() as {
-      tipo?: unknown;
-      formaOlistId?: unknown;
-      formaOlistNome?: unknown;
-      planoIds?: unknown;
-    };
-    const tipo = body.tipo;
-    const formaOlistId = String(body.formaOlistId ?? "").trim();
-    const formaOlistNome = String(body.formaOlistNome ?? "").trim() || null;
-    const planoIds = Array.isArray(body.planoIds)
-      ? [...new Set(body.planoIds.map(String).map((id) => id.trim()).filter(Boolean))]
-      : [];
-
-    if (!tipoValido(tipo) || !formaOlistId) {
-      return NextResponse.json({ error: "Tipo e ID da forma são obrigatórios." }, { status: 400 });
-    }
-    if (!possuiPermissao(usuario, tipo)) {
-      return NextResponse.json({ error: "Sem permissão para associar planos." }, { status: 403 });
-    }
-
-    const planosValidos = await prisma.planoPagamento.findMany({
-      where: { id: { in: planoIds }, ativo: true },
-      select: { id: true },
+    const { formaOlistId, formaOlistNome, planoIds } = entrada.parse(await request.json().catch(() => null));
+    await prisma.$transaction(async tx => {
+      // Serialize concurrent replacements of this application's associations.
+      await tx.$queryRaw`SELECT id FROM aplicativo WHERE id=${aplicativoId}::uuid FOR UPDATE`;
+      const validos = await tx.planoPagamento.count({ where: { id: { in: planoIds }, ativo: true } });
+      if (validos !== planoIds.length) throw new z.ZodError([{ code: "custom", path: ["planoIds"], message: "Plano inativo ou inexistente." }]);
+      await tx.formaRecebimentoOlistPlano.deleteMany({ where: { aplicativoId, formaOlistId } });
+      if (planoIds.length) await tx.formaRecebimentoOlistPlano.createMany({ data: planoIds.map(planoPagamentoId => ({ aplicativoId, formaOlistId, formaOlistNome: formaOlistNome || null, planoPagamentoId })) });
     });
-    if (planosValidos.length !== planoIds.length) {
-      return NextResponse.json({ error: "Um ou mais planos selecionados são inválidos." }, { status: 400 });
-    }
-
-    await prisma.$transaction(async (tx) => {
-      if (tipo === "pagamento") {
-        await tx.formaPagamentoOlistPlano.deleteMany({
-          where: { aplicativoId, formaOlistId },
-        });
-        if (planoIds.length) {
-          await tx.formaPagamentoOlistPlano.createMany({
-            data: planoIds.map((planoPagamentoId) => ({
-              aplicativoId,
-              formaOlistId,
-              formaOlistNome,
-              planoPagamentoId,
-            })),
-          });
-        }
-      } else {
-        await tx.formaRecebimentoOlistPlano.deleteMany({
-          where: { aplicativoId, formaOlistId },
-        });
-        if (planoIds.length) {
-          await tx.formaRecebimentoOlistPlano.createMany({
-            data: planoIds.map((planoPagamentoId) => ({
-              aplicativoId,
-              formaOlistId,
-              formaOlistNome,
-              planoPagamentoId,
-            })),
-          });
-        }
-      }
-    });
-
     return NextResponse.json({ success: true, quantidade: planoIds.length });
-  } catch (error) {
-    if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error("Erro ao associar planos de pagamento:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao salvar associações." },
-      { status: 500 },
-    );
-  }
+  } catch (error) { return falha(error); }
 }

@@ -19,7 +19,7 @@ type Recuperacao = { campos: Array<{ chave: string; estado: "RECUPERADO" | "PEND
 type Previa = { previaId: string; payload: PedidoPrevia; produtos: Record<string, string>; cliente: string; vendedor: string; forma: string; plano: string };
 
 function rotuloCampo(chave: string, pedido: PedidoFilaAdministracao) {
-  const nomes: Record<string, string> = { clienteId: "Cliente", vendedorId: "Vendedor", formaId: "Forma de pagamento", planoId: "Plano de pagamento", laser: "Corte a laser" };
+  const nomes: Record<string, string> = { clienteId: "Cliente", vendedorId: "Vendedor", formaId: "Forma de recebimento", planoId: "Plano de recebimento", laser: "Corte a laser" };
   return nomes[chave] ?? `Produto ${pedido.dadosPedido?.itens.find(i => i.tecido.id === chave.slice(7))?.tecido.nome ?? "do pedido"}`;
 }
 export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: { pedido: PedidoFilaAdministracao; token: string; aoFechar: () => void; aoConcluir: () => void }) {
@@ -83,7 +83,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
         const inicializar = contaInicializada.current !== conta;
         const recuperar = inicializar || tentativaRecuperacao > 0 || d.recuperacao?.restantes.length > 0;
         if (contaInicializada.current !== conta) {
-          setEditarDados(!(d.selecoes && pedido.dadosPedido?.olist?.filialId === d.filial.id));
+          setEditarDados(!(d.selecoes?.recursoForma === "RECEBIMENTO" && pedido.dadosPedido?.olist?.filialId === d.filial.id));
           setVendedorFixo(Boolean(d.vendedorFixo) && (pedido.tipoOrigem === "MANUAL" || d.vendedorOrigem?.aplicativoId === d.filial.id));
           vendedorVinculadoId.current = d.vendedorOrigem?.tipo === "VINCULO" ? d.vendedorOrigem.vendedorOlistId : null;
           setOrigemVinculada(d.vendedorOrigem?.tipo === "VINCULO" && d.vendedorOrigem?.aplicativoId === d.filial.id);
@@ -196,15 +196,16 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           {!recuperando && !edicaoManual && !temEdicoes && (recuperacao.restantes.length > 0 || recuperacao.campos.some(c => c.estado === "PENDENTE")) && <button type="button" className={botao} onClick={() => { setErro(""); setTentativaRecuperacao(v => v + 1); }}>Tentar recuperar pendências</button>}
           {!recuperando && !edicaoManual && <button type="button" className={botao} onClick={() => setEdicaoManual(true)}>Revisar todos os campos</button>}
         </div>}
+        {editarDados && pedido.dadosPedido?.olist && pedido.dadosPedido.olist.selecoes.recursoForma !== "RECEBIMENTO" && <p role="status" className="text-sm text-amber-700">Selecione novamente a forma e o plano de recebimento. Os demais dados do pedido foram preservados.</p>}
         {!editarDados ? <div className="space-y-3 rounded-md border border-slate-200 p-3 text-sm">
           <p className="font-medium">Dados selecionados na criação do pedido</p>
-          <dl className="grid gap-3 sm:grid-cols-2">{[["Cliente Olist",selecoes.clienteId||"Pendente"],["Vendedor Olist",selecoes.vendedorId||"Pendente"],["Forma de pagamento",selecoes.formaId||"Pendente"],["Plano",selecoes.planoId||"Pendente"],["Tipo de venda",selecoes.tipoVenda||"Pendente"]].map(([label,valor])=><div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="break-words">{valor}</dd></div>)}</dl>
+          <dl className="grid gap-3 sm:grid-cols-2">{[["Cliente Olist",selecoes.clienteId||"Pendente"],["Vendedor Olist",selecoes.vendedorId||"Pendente"],["Forma de recebimento",selecoes.formaId||"Pendente"],["Plano",selecoes.planoId||"Pendente"],["Tipo de venda",selecoes.tipoVenda||"Pendente"]].map(([label,valor])=><div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="break-words">{valor}</dd></div>)}</dl>
           <PessoasDestinoFila pedidoId={pedido.id} token={token}/>
           <ul className="divide-y divide-slate-200">{selecoes.tecidos.map(t=><li key={t.tecidoId} className="space-y-1 py-2"><p className="break-words font-medium">{pedido.dadosPedido?.itens.find(i=>i.tecido.id===t.tecidoId)?.tecido.nome||"Produto"}</p><p>Produto Olist: {t.id||"Pendente"} · Preço/m: {t.preco==null?"Pendente":moeda(t.preco)}</p></li>)}</ul>
           {selecoes.laser && <p>Corte a laser: ID {selecoes.laser.id} · Preço/m: {selecoes.laser.preco==null?"Pendente":moeda(selecoes.laser.preco)}</p>}
           <button type="button" className={botao} disabled={salvando} onClick={()=>setEditarDados(true)}>Editar dados comerciais</button>
         </div> : <>
-        <DadosComerciaisFilaOlist api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} errosCampos={errosCampos} aoAlterar={valor => { setTemEdicoes(true); setSelecoes(valor); setErrosCampos({}); setErro(""); }} disabled={salvando || recuperando} somentePendentes={!!recuperacao && !edicaoManual} vendedorFixo={vendedorFixo} />
+        <DadosComerciaisFilaOlist exigirSelecaoForma={!!pedido.dadosPedido?.olist && pedido.dadosPedido.olist.selecoes.recursoForma !== "RECEBIMENTO"} api={api} token={token} itens={pedido.dadosPedido?.itens.map((i) => ({ tecidoId: i.tecido.id, nome: i.tecido.nome, corteLaser: i.corteLaser })) ?? []} selecoes={selecoes} errosCampos={errosCampos} aoAlterar={valor => { setTemEdicoes(true); setSelecoes(valor); setErrosCampos({}); setErro(""); }} disabled={salvando || recuperando} somentePendentes={!!recuperacao && !edicaoManual} vendedorFixo={vendedorFixo} />
         </>}
 
         {!recuperando && temPendencias && <p className="text-sm text-slate-600">Preencha os campos pendentes para revisar o pedido.</p>}

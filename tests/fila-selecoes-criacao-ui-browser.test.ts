@@ -18,4 +18,19 @@ test("envio reaproveita todas as seleções da criação somente no mesmo destin
  await ate(()=>cdp.avaliar<boolean>('Boolean(document.querySelector("#abrir"))'),"Página ausente");await cdp.avaliar('document.querySelector("#abrir").click()');
  await ate(()=>cdp.avaliar<boolean>('Boolean(document.querySelector("fieldset"))'),"Destino diferente deve permitir novas seleções");
  assert.equal(await cdp.avaliar('document.body.innerText.includes("Dados selecionados na criação do pedido")'),false);
+ for(const width of [390,1440]) for(const tema of ["light","dark"]) {
+ await cdp.pedir("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<768});
+ await cdp.pedir("Page.navigate",{url:`${url}?dadosCriacao=1&legado=1&vinculado=1&tema=${tema}`});
+ await ate(()=>cdp.avaliar<boolean>('Boolean(document.querySelector("#abrir"))'),"Página ausente");
+ await cdp.avaliar('document.querySelector("#abrir").click()');
+ await ate(()=>cdp.avaliar<boolean>('document.body.innerText.includes("Selecione novamente a forma e o plano de recebimento")'),"Aviso de migração ausente");
+ assert.equal(await cdp.avaliar('document.body.innerText.includes("Dados selecionados na criação do pedido")'),false);
+ assert.equal(await cdp.avaliar('document.querySelector("[data-campo-comercial=planoId] select").value'),"");
+ assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'),true);
+ await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Revisar pedido").click()');
+ await ate(()=>cdp.avaliar<boolean>('document.querySelector("[data-campo-comercial=formaId] [role=alert]")!==null'),"Campo de recebimento não sinalizado");
+ assert.equal(await cdp.avaliar('window.testeVendedorFila.previas.length'),0);
+ assert.equal(await cdp.avaliar('document.querySelector("[data-campo-comercial=tipoVenda] select").value'),"VENDA");
+ }
+
 });

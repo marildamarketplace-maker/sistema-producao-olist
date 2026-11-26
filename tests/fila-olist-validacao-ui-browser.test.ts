@@ -13,7 +13,7 @@ test("plano pendente abre o campo, mostra a correção e preserva as demais sele
     await ate(() => cdp.avaliar<boolean>('document.activeElement.getAttribute("aria-invalid")==="true"'), "Não focou o campo inválido");
     assert.equal(await cdp.avaliar('document.activeElement.tagName'), "SELECT");
     assert.equal(await cdp.avaliar('document.activeElement.closest("[data-campo-comercial]").dataset.campoComercial'), "planoId");
-    assert.ok(await cdp.avaliar<boolean>('document.body.innerText.includes("Selecione um plano de pagamento associado à forma escolhida.")'));
+    assert.ok(await cdp.avaliar<boolean>('document.body.innerText.includes("Selecione um plano de recebimento associado à forma escolhida.")'));
     assert.equal(await cdp.avaliar('window.testeVendedorFila.previas.length'), 0, "validação local evita chamada inválida");
     await ate(() => cdp.avaliar<boolean>('document.activeElement.querySelectorAll("option").length===2'), "Planos ausentes");
     await cdp.avaliar('document.activeElement.value="00000000-0000-0000-0000-000000000030"; document.activeElement.dispatchEvent(new Event("change",{bubbles:true}))');

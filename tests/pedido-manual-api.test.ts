@@ -34,7 +34,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
     usuarioVendedorOlist: { findFirst:async ({where}:{where:{aplicativoId?:unknown}}) =>
       (where.aplicativoId ? vinculado : noGrupo)?{vendedorOlistId:20}:null },
     integracaoOlistToken:{findUnique:async () => ({accessToken:"fake",expiresAt:new Date(Date.now()+3600_000)})},
-    formaPagamentoOlistPlano:{findFirst:async () => null},
+    formaRecebimentoOlistPlano:{findFirst:async () => null},
     direcionamentoPedidos:{findUnique:async()=>({versao:versaoConfiguracao,aplicativoPadraoId:id(3),regras:[]})},
     pedidoFornecedorQueue:{
       findFirst:async ({where}:{where:{id?:string;autorId:string;aplicativoSolicitanteId:string;chaveIdempotencia?:string}}) => {
@@ -76,7 +76,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
   const req = (query="",body?:unknown) => new Request(`https://example.test/api?${query}`,{method:body?"POST":"GET",headers:{Authorization:"Bearer fake"},...(body?{body:JSON.stringify(body)}:{})});
   const entrada = {versao:2,origemManual:{aplicativoId:id(3),vendedor:{id:20,nome:"Vendedor",cpfCnpj:null},cliente:{id:30,nome:"Cliente",cpfCnpj:documentoCliente,uf:null}},
     decisaoDirecionamento:{tipo:"PADRAO",regraId:null,regraNome:null,versao:1,aplicativoId:id(3),motivo:"Aplicativo padrão configurado pelo pai."},
-    chaveIdempotencia:id(4),aplicativoId:id(3),observacao:null,selecoes:{vendedorId:20,clienteId:30,formaId:40,planoId:id(7),laser:{id:50,preco:2}},itens:[{
+    chaveIdempotencia:id(4),aplicativoId:id(3),observacao:null,selecoes:{ recursoForma: "RECEBIMENTO" as const,vendedorId:20,clienteId:30,formaId:40,planoId:id(7),laser:{id:50,preco:2}},itens:[{
     id:id(5),tecidoNome:"Oxford",quantidade:10,quantidadeTecido:2.5,estampa:"A",variante:null,tamanho:"30x30",tipoProduto:"Lenço",corteLaser:true}]};
   function registrarAceiteConcorrente(valor: unknown) {
     const parsed = pedidoManualSchema.parse(valor);
@@ -198,7 +198,7 @@ test("API manual autoriza conta/carteira, grava PENDENTE e retorna comprovante i
     const antes=consultas;const retorno=await POST(req("",entrada));assert.equal(retorno.status,200);
     const atual=await retorno.json();assert.equal(atual.status,"CANCELADO");assert.equal(atual.aplicativo.id,id(88));assert.equal(consultas,antes);
     const legado=pedidoManualLegadoSchema.parse({chaveIdempotencia:id(85),aplicativoId:entrada.aplicativoId,
-      observacao:entrada.observacao,selecoes:entrada.selecoes,itens:entrada.itens});
+      observacao:entrada.observacao,selecoes:{...entrada.selecoes,recursoForma:undefined},itens:entrada.itens});
     assert.equal((await POST(req("",legado))).status,409);
     registros.push({...registro,id:id(89),chaveIdempotencia:id(85),hashEntrada:createHash("sha256").update(JSON.stringify(legado)).digest("hex")});
     assert.equal((await POST(req("",legado))).status,200);assert.equal(consultas,antes);

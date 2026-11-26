@@ -121,7 +121,7 @@ export async function POST(request: Request, contexto: Contexto) {
       const previa = await prisma.previaFornecedor.findFirst({ where: { id: body.previaId, filaId: fila.id, filialId: filial.id, usuarioId, versao: fila.versao, expiraEm: { gt: new Date() } } });
       if (!previa) throw new ErroFila("Prévia expirada ou pedido alterado. Gere outra prévia.", 409);
       const confirmado = selecoesFilaOlistSchema.extend({ vendedorOrigem: vendedorOrigemFilaSchema }).safeParse(previa.selecoes);
-      if (!confirmado.success) throw new ErroFila("Revise a origem do vendedor e gere uma nova prévia.", 409);
+      if (!confirmado.success) throw new ErroFila(confirmado.error.issues.some(i => i.path[0] === "recursoForma") ? "Esta prévia usa formas de pagamento. Selecione forma e plano de recebimento e gere uma nova prévia." : "Revise a origem do vendedor e gere uma nova prévia.", 409);
       const { vendedorOrigem: origemVendedor, ...selecionados } = confirmado.data;
       if (origemVendedor.aplicativoSolicitanteId !== fila.aplicativoSolicitanteId || origemVendedor.matrizId !== matrizId || origemVendedor.aplicativoId !== filial.id || origemVendedor.vendedorOlistId !== selecionados.vendedorId) throw new ErroFila("Origem do vendedor alterada. Gere outra prévia.", 409);
       await prisma.$transaction(tx => bloquearVendedorFila(tx, origemVendedor));

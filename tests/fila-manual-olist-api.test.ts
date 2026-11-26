@@ -8,7 +8,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
   process.env.NEXT_PUBLIC_SUPABASE_URL="https://supabase.example.test";
   process.env.SUPABASE_SERVICE_ROLE_KEY="fake";
   const matriz=id(2),filial=id(3),filaId=id(10),autorId=id(1),adminId=id(8),planoId=id(4),previaId=id(20);
-  const selecoes={clienteId:30,vendedorId:20,formaId:40,planoId,tipoVenda:"VENDA",tecidos:[{tecidoId:id(5),id:50,preco:10}],laser:null};
+  const selecoes={ recursoForma: "RECEBIMENTO" as const,clienteId:30,vendedorId:20,formaId:40,planoId,tipoVenda:"VENDA",tecidos:[{tecidoId:id(5),id:50,preco:10}],laser:null};
   const dados={versao:1,observacao:"Observação",olist:{filialId:matriz,selecoes},itens:[{produtoId:id(5),sku:"",tecido:{id:id(5),nome:"Oxford",referencia:null},
     quantidade:10,unidade:"UN",quantidadeTecido:2.5,unidadeTecido:"MT",estampa:"6861",variante:"A",tamanho:"30x30",tipoProduto:"Lenço",corteLaser:false}]};
   let fila:PedidoFornecedorQueue;
@@ -37,7 +37,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     aplicativo:{findFirst:async({where}:{where:{id?:string;aplicativoPaiId?:string}})=>where.aplicativoPaiId===matriz?{id:filial,nome:"Conta filha"}:[matriz,filial].includes(where.id??"")?{id:where.id,nome:"Conta"}:null,
       findUnique:async()=>({olistClientId:"fake",olistClientSecret:"fake"})},
     integracaoOlistToken:{findUnique:async({where}:{where:{aplicativoId_provider:{aplicativoId:string}}})=>({accessToken:`fake-${where.aplicativoId_provider.aplicativoId}`,expiresAt:new Date(Date.now()+3600_000)})},
-    formaPagamentoOlistPlano:{findFirst:async()=>({planoPagamento:{nome:"30/60"}})},
+    formaRecebimentoOlistPlano:{findFirst:async()=>({planoPagamento:{nome:"30/60"}})},
     pedidoFornecedorQueue:{
       findFirst:async({where}:{where:{id:string;aplicativoFornecedorId:string}})=>where.id===fila.id&&where.aplicativoFornecedorId===matriz?structuredClone(fila):null,
       updateMany:async({where,data}:{where:{id:string;versao?:number;status?:{in?:string[];not?:string}|string;aplicativoFilialId?:string};data:Patch})=>{
@@ -117,7 +117,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     const response = await preview({ ...selecoes, planoId: "", tecidos: selecoes.tecidos.map(t => ({ ...t, preco: -1 })) });
     assert.equal(response.status, 400);
     const resultado = await response.json();
-    assert.match(resultado.campos.planoId, /Selecione um plano de pagamento/);
+    assert.match(resultado.campos.planoId, /Selecione um plano de recebimento/);
     assert.match(resultado.campos["tecidos.0.preco"], /Produto 1.*preço/);
     assert.ok(!resultado.error.includes("gere outra prévia"));
     assert.equal(consultas, 0);
@@ -182,7 +182,7 @@ test("fila manual: revisão, reserva durável, concorrência, redirecionamento, 
     const {dadosPedidoFilaSchema}=await import("../src/lib/fila-fornecedor-contrato");
     const snapshot=dadosPedidoFilaSchema.parse(fila.dadosPedido);
     assert.equal(fila.aplicativoFilialId,filial);
-    assert.deepEqual(snapshot.olist,{filialId:filial,selecoes:{vendedorId:120,tipoVenda:"VENDA"}});
+    assert.deepEqual(snapshot.olist,{filialId:filial,selecoes:{ recursoForma: "RECEBIMENTO" as const,vendedorId:120,tipoVenda:"VENDA"}});
     assert.deepEqual(snapshot.olistAnterior,{filialId:matriz,selecoes});
     assert.equal(snapshot.origemManual?.cliente.uf,"MG");
     assert.equal(snapshot.direcionamentoManual?.inicial.aplicativoId,matriz);

@@ -9,8 +9,9 @@ export function detalharErrosFilaOlist(erro: z.ZodError) {
     const mensagens: Record<string, string> = {
       clienteId: "Selecione um cliente válido na conta destinatária.",
       vendedorId: "Selecione um vendedor válido na conta destinatária.",
-      formaId: "Selecione uma forma de pagamento válida.",
-      planoId: "Selecione um plano de pagamento associado à forma escolhida.",
+      recursoForma: "Selecione novamente a forma e o plano de recebimento; a seleção antiga era de pagamento.",
+      formaId: "Selecione uma forma de recebimento válida.",
+      planoId: "Selecione um plano de recebimento associado à forma escolhida.",
       tipoVenda: "Selecione o tipo de venda: Venda, Venda G ou Venda PC.",
       laser: "Selecione o serviço de corte a laser e informe o preço por metro.",
       "laser.id": "Selecione um serviço de corte a laser válido.",
@@ -34,10 +35,10 @@ export function detalharErrosFilaOlist(erro: z.ZodError) {
   return { error: mensagens.length ? mensagens.join(" ") : "Os dados salvos do pedido estão inválidos. Atualize a fila e revise as associações antes de gerar uma nova prévia.", campos };
 }
 
-export function errosComerciaisCriacao(selecoes: { formaId?: number; planoId?: string; laser?: { id: number; preco?: number | null } | null }, precisaLaser: boolean): ErrosComerciaisFila {
+export function errosComerciaisCriacao(selecoes: { recursoForma?: "RECEBIMENTO"; formaId?: number; planoId?: string; laser?: { id: number; preco?: number | null } | null }, precisaLaser: boolean): ErrosComerciaisFila {
   const campos: ErrosComerciaisFila = {};
-  if (!selecoes.formaId || !Number.isSafeInteger(selecoes.formaId) || selecoes.formaId < 1) campos.formaId = "Selecione uma forma de pagamento.";
-  if (!z.guid().safeParse(selecoes.planoId).success) campos.planoId = "Selecione um plano de pagamento associado à forma escolhida.";
+  if (selecoes.recursoForma !== "RECEBIMENTO" || !selecoes.formaId || !Number.isSafeInteger(selecoes.formaId) || selecoes.formaId < 1) campos.formaId = "Selecione uma forma de recebimento.";
+  if (!z.guid().safeParse(selecoes.planoId).success) campos.planoId = "Selecione um plano de recebimento associado à forma escolhida.";
   if (precisaLaser) {
     if (!selecoes.laser?.id || !Number.isSafeInteger(selecoes.laser.id) || selecoes.laser.id < 1) campos.laser = "Selecione o serviço de corte a laser da conta destinatária.";
     if (selecoes.laser?.id && (selecoes.laser.preco == null || !Number.isFinite(selecoes.laser.preco) || selecoes.laser.preco < 0 || selecoes.laser.preco > 1e9)) campos["laser.preco"] = "Informe um preço válido por metro para o corte a laser.";

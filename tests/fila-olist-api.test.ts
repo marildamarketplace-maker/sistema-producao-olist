@@ -13,7 +13,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   let destinoAtual = filial;
   let alterarDuranteConsulta = false;
   const dadosPedido = { versao: 1, observacao: "JSON revisado", itens: [{ produtoId: id(11), sku: "SKU-EST/6861-A/", tecido: { id: tecidoId, nome: "Tecido revisado", referencia: "ref-origem" }, quantidade: 4, unidade: "UN", quantidadeTecido: 7, unidadeTecido: "MT", estampa: "6861 editada", variante: "B", corteLaser: true, tamanho: "145x180", tipoProduto: "Toalha" }] };
-  const selecoes = { clienteId: 100, vendedorId: 200, formaId: 300, planoId, tipoVenda: "VENDA", tecidos: [{ tecidoId, id: 400, preco: 10 }], laser: { id: 500, preco: 2 } };
+  const selecoes = { recursoForma: "RECEBIMENTO" as const, clienteId: 100, vendedorId: 200, formaId: 300, planoId, tipoVenda: "VENDA", tecidos: [{ tecidoId, id: 400, preco: 10 }], laser: { id: 500, preco: 2 } };
   const reset = (destino = filial) => { destinoAtual = destino; fila = { id: filaId, fornecedorId, aplicativoSolicitanteId: matriz, aplicativoFornecedorId: matriz, aplicativoFilialId: destinoAtual, solicitacaoProducaoId: solicitacaoId, dadosPedido: structuredClone(dadosPedido), versao: 0, status: "PENDENTE" }; previa = null; envio = null; registro = null; posts = 0; consultas = []; };
   reset();
   const tx: any = {
@@ -50,7 +50,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
       findUnique: async ({ where }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: destinoAtual }); return selecoesSalvas ? { selecoes: selecoesSalvas } : null; },
       upsert: async ({ where, create }: any) => { assert.deepEqual(where.fornecedorId_filialId, { fornecedorId, filialId: destinoAtual }); selecoesSalvas = create.selecoes; },
     },
-    formaPagamentoOlistPlano: {
+    formaRecebimentoOlistPlano: {
       findFirst: async ({ where }: any) => { assert.equal(where.aplicativoId, destinoAtual); assert.equal(where.formaOlistId, "300"); return associado ? { planoPagamento: { nome: "30/60" } } : null; },
       findMany: async ({ where }: any) => { assert.equal(where.aplicativoId, destinoAtual); return [{ planoPagamento: { id: planoId, nome: "30/60" } }]; },
     },
@@ -76,7 +76,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     let data: any;
     if (u.pathname.endsWith("/vendedores")) data = { itens: [{ id: 200, nome: "Vendedor" }], paginacao: { total: 1 } };
     else if (u.pathname.endsWith("/pedidos/123")) data = { id: 123, observacoesInternas: retornoMarcador ? `Solicitacao fornecedor: ${solicitacaoId}` : "outro pedido" };
-    else if (/\/(contatos|produtos|servicos|formas-pagamento)\/\d+$/.test(u.pathname)) data = { id: Number(u.pathname.split("/").pop()), nome: "Cadastro da filial", situacao: cadastroAtivo ? "A" : "I" };
+    else if (/\/(contatos|produtos|servicos|formas-recebimento)\/\d+$/.test(u.pathname)) data = { id: Number(u.pathname.split("/").pop()), nome: "Cadastro da filial", situacao: cadastroAtivo ? "A" : "I" };
     else data = { itens: [{ id: 100, nome: "Cadastro da filial", descricao: "Produto", preco: 10, situacao: "A" }], paginacao: { total: 1 } };
     return { status: 200, data, headers: { "content-type": "application/json" } };
   });
@@ -90,7 +90,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     const response = await preview({ ...selecoes, planoId: "", tecidos: selecoes.tecidos.map(t => ({ ...t, preco: -1 })) });
     assert.equal(response.status, 400);
     const resultado = await response.json();
-    assert.match(resultado.campos.planoId, /Selecione um plano de pagamento/);
+    assert.match(resultado.campos.planoId, /Selecione um plano de recebimento/);
     assert.match(resultado.campos["tecidos.0.preco"], /Produto 1.*preço/);
     assert.ok(!resultado.error.includes("gere outra prévia"));
     assert.equal(consultas.length, 0);
@@ -142,8 +142,8 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     vendedorPadraoId = null;
     assert.equal((await (await GET(req(), ctx)).json()).vendedorOlistPadraoId, null);
     vendedorPadraoId = 201;
-    fila.dadosPedido.olist = { filialId: filial, selecoes: { clienteId: 100 } };
-    assert.deepEqual((await (await GET(req(), ctx)).json()).selecoes, { clienteId: 100 });
+    fila.dadosPedido.olist = { filialId: filial, selecoes: { recursoForma: "RECEBIMENTO" as const, clienteId: 100 } };
+    assert.deepEqual((await (await GET(req(), ctx)).json()).selecoes, { recursoForma: "RECEBIMENTO" as const, clienteId: 100 });
     fila.dadosPedido.olist.filialId = id(99);
     assert.equal((await (await GET(req(), ctx)).json()).selecoes, null);
     delete fila.dadosPedido.olist; selecoesSalvas = null;
@@ -230,4 +230,17 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     reset(); fila.status = "CANCELADO"; assert.equal((await preview()).status, 409);
     assert.equal((await POST(req({ acao: "confirmar", previaId, payload: {} }), ctx)).status, 400); assert.equal(posts, 0);
   });
+  await t.test("rejeita seleções e prévias de pagamento sem consultar ou criar na Olist", async () => {
+    reset();
+    const { recursoForma: _recurso, ...legadas } = selecoes;
+    const antes = consultas.length;
+    const rejeitada = await POST(req({ acao: "preview", versao: fila.versao, selecoes: legadas }), ctx);
+    assert.equal(rejeitada.status, 400); assert.equal(consultas.length, antes); assert.equal(posts, 0);
+    const detalhes = await rejeitada.json(); assert.match(detalhes.campos.recursoForma, /recebimento/);
+    assert.equal((await POST(req({ acao: "preview", versao: fila.versao, selecoes, vendedorFonte: "MANUAL" }), ctx)).status, 200);
+    delete previa.selecoes.recursoForma;
+    const confirmada = await POST(req({ acao: "confirmar", previaId }), ctx);
+    assert.equal(confirmada.status, 409); assert.equal(posts, 0); assert.equal(envio, null);
+  });
+
 });

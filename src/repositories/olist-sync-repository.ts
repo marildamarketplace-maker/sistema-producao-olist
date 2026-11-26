@@ -194,6 +194,7 @@ export function criarOlistSyncRepository(db: PrismaClient) {
         const disponivel = await disponibilidade(tx, entrada.configuracaoId, entrada.modo === "APLICAR" ? "aplicar" : "auditar");
         if (!disponivel.habilitado || !disponivel.configuracao) throw new ErroRepositorioSync(disponivel.motivo ?? "Job indisponível.", 503);
         const c = disponivel.configuracao;
+        if (c.entidades.includes("FORMA_PAGAMENTO")) throw new ErroRepositorioSync("Salve a configuração sem Formas de pagamento antes de iniciar uma nova execução.", 409);
         if (entrada.modo === "APLICAR" && !c.entidades.some(e => ["PRODUTO", "CONTATO", "SERVICO"].includes(e)))
           throw new ErroRepositorioSync("Não há entidades habilitadas que suportem aplicação de alterações.");
         await exigirUsuario(tx, c, entrada.solicitadoPor, entrada.origem);

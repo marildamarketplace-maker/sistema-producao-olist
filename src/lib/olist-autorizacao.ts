@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getUsuarioAutenticado } from "@/lib/usuario-autenticado";
 
-type PermissaoOlist = "podeVisualizarOlistProdutos" | "podeVisualizarOlistFormasPagamento" | "podeVisualizarOlistFormasRecebimento" | "podeVisualizarOlistPedidos" | "podeCriarOlistPedido" | "podeVisualizarOlistContatos" | "podeVisualizarOlistVendedores";
+type PermissaoOlist = "podeVisualizarOlistProdutos" | "podeVisualizarOlistFormasRecebimento" | "podeVisualizarOlistPedidos" | "podeCriarOlistPedido" | "podeVisualizarOlistContatos" | "podeVisualizarOlistVendedores";
 
 export class ErroAutorizacaoOlist extends Error {
   constructor(message: string, readonly status: 401 | 403) { super(message); }
@@ -16,7 +16,7 @@ export async function autorizarOlist(request: Request, permissao: PermissaoOlist
     where: { id: autenticado.id },
     select: {
       id: true, aplicativoId: true, ativo: true,
-      podeVisualizarOlistProdutos: true, podeVisualizarOlistFormasPagamento: true, podeVisualizarOlistFormasRecebimento: true,
+      podeVisualizarOlistProdutos: true, podeVisualizarOlistFormasRecebimento: true,
       podeVisualizarOlistPedidos: true, podeCriarOlistPedido: true,
       podeVisualizarOlistContatos: true, podeVisualizarOlistVendedores: true,
     },

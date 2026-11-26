@@ -206,27 +206,6 @@ export type ListagemProdutosOlist = {
   };
 };
 
-export type FormaPagamentoOlist = {
-  id?: number | string;
-  nome?: string | null;
-};
-
-export type FiltrosFormasPagamentoOlist = {
-  nome?: string;
-  situacao?: 1 | 2;
-  limit: number;
-  offset: number;
-};
-
-export type ListagemFormasPagamentoOlist = {
-  itens: FormaPagamentoOlist[];
-  paginacao: {
-    limit: number;
-    offset: number;
-    total: number;
-  };
-};
-
 export type FormaRecebimentoOlist = {
   id?: number | string;
   nome?: string | null;
@@ -717,53 +696,6 @@ export async function listarProdutosOlistApi(
       limit: filtros.limit,
       offset: filtros.offset,
       total: total ?? itens.length,
-    },
-  };
-}
-
-export async function listarFormasPagamentoOlistApi(
-  aplicativoId: string,
-  filtros: FiltrosFormasPagamentoOlist,
-): Promise<ListagemFormasPagamentoOlist> {
-  const token = await getValidOlistAccessToken(aplicativoId);
-  const olistConfig = await getAplicativoOlistConfig(aplicativoId);
-  const url = new URL("formas-pagamento", normalizarBaseUrl(olistConfig.apiBaseUrl));
-
-  url.searchParams.set("limit", String(filtros.limit));
-  url.searchParams.set("offset", String(filtros.offset));
-  if (filtros.nome) url.searchParams.set("nome", filtros.nome);
-  if (filtros.situacao) url.searchParams.set("situacao", String(filtros.situacao));
-
-  const response = await executarComRenovacaoApos401(
-    aplicativoId,
-    token,
-    (accessToken) => axios.get(url.toString(), {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      validateStatus: () => true,
-    }),
-  );
-
-  logIntegracaoOlist({
-    endpoint: url.toString(),
-    status: response.status,
-    modulo: "formas-pagamento-listagem",
-  });
-  validarRespostaAxiosJsonOrThrow(response);
-  if (response.status < 200 || response.status >= 300) {
-    if (response.status === 401) throw new Error("Token inválido ou sem permissão.");
-    throw new Error(`Erro Olist ${response.status}`);
-  }
-
-  const payload = response.data as {
-    itens?: FormaPagamentoOlist[];
-    paginacao?: { limit?: number; offset?: number; total?: number };
-  };
-  return {
-    itens: Array.isArray(payload.itens) ? payload.itens : [],
-    paginacao: {
-      limit: Number(payload.paginacao?.limit ?? filtros.limit),
-      offset: Number(payload.paginacao?.offset ?? filtros.offset),
-      total: Number(payload.paginacao?.total ?? 0),
     },
   };
 }
@@ -2444,7 +2376,7 @@ export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Recor
   }
   return response.data as { id?: number; numeroPedido?: string };
 }
-export async function obterCadastroFornecedorOlist(aplicativoId: string, recurso: "produtos" | "contatos" | "formas-pagamento" | "servicos", id: number) {
+export async function obterCadastroFornecedorOlist(aplicativoId: string, recurso: "produtos" | "contatos" | "formas-recebimento" | "servicos", id: number) {
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("ID Olist inválido.");
   const token = await getValidOlistAccessToken(aplicativoId);
   const config = await getAplicativoOlistConfig(aplicativoId);

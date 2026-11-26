@@ -9,7 +9,7 @@ test("rascunho sem JSON deixa selects e preços vazios, sem tipo de venda presum
   assert.equal(r.clienteId, 0); assert.equal(r.tipoVenda, ""); assert.equal(r.planoId, ""); assert.equal(r.laser, null);
   assert.deepEqual(r.tecidos, [{ tecidoId: tecido, id: 0, preco: null }]);
   const salvo = JSON.parse(JSON.stringify(serializarRascunhoFilaOlist(r)));
-  assert.deepEqual(salvo, { tecidos: [], laser: null });
+  assert.deepEqual(salvo, { recursoForma: "RECEBIMENTO", tecidos: [], laser: null });
 });
 test("restaura apenas campos definidos, preserva preço zero explícito e ignora tecido antigo", () => {
   const r = criarRascunhoFilaOlist([tecido], { clienteId: 123, tecidos: [{ tecidoId: tecido, id: 400, preco: 0 }, { tecidoId: filial, id: 999, preco: 50 }] });

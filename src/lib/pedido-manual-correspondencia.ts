@@ -20,8 +20,8 @@ export type CorrespondenciaPedidoManual = {
   cadastros: { cliente: Record<string, unknown>; vendedor: Record<string, unknown> };
 };
 export type OpcoesCorrespondenciaPedidoManual = { validarDadosDirecionamento?: boolean };
-export type CaminhoConsulta = "contatos" | "vendedores" | "produtos" | "servicos" | "formas-pagamento" |
-  `contatos/${number}` | `produtos/${number}` | `servicos/${number}` | `formas-pagamento/${number}`;
+export type CaminhoConsulta = "contatos" | "vendedores" | "produtos" | "servicos" | "formas-recebimento" |
+  `contatos/${number}` | `produtos/${number}` | `servicos/${number}` | `formas-recebimento/${number}`;
 type PessoaReferencia = ReferenciaPedidoManual["vendedor"];
 type EntradaReferencia = { aplicativoOrigemId?: string; vendedorOrigemId: number; clienteOrigemId: number };
 export interface DependenciasCorrespondenciaPedidoManual {

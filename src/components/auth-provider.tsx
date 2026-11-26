@@ -50,7 +50,6 @@ type UsuarioAplicativoFallbackResponse = {
   pode_visualizar_olist_pedidos: boolean;
   pode_criar_olist_pedido: boolean;
   pode_visualizar_olist_vendedores: boolean;
-  pode_visualizar_olist_formas_pagamento: boolean;
   pode_visualizar_olist_formas_recebimento: boolean;
   pode_visualizar_estoque: boolean;
   pode_editar_estoque: boolean;
@@ -127,7 +126,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         pode_visualizar_olist_pedidos,
         pode_criar_olist_pedido,
         pode_visualizar_olist_vendedores,
-        pode_visualizar_olist_formas_pagamento,
         pode_visualizar_olist_formas_recebimento,
         pode_visualizar_estoque,
         pode_editar_estoque,
@@ -196,7 +194,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       podeVisualizarOlistPedidos: Boolean(usuarioData.pode_visualizar_olist_pedidos),
       podeCriarOlistPedido: Boolean(usuarioData.pode_criar_olist_pedido),
       podeVisualizarOlistVendedores: Boolean(usuarioData.pode_visualizar_olist_vendedores),
-      podeVisualizarOlistFormasPagamento: Boolean(usuarioData.pode_visualizar_olist_formas_pagamento),
       podeVisualizarOlistFormasRecebimento: Boolean(usuarioData.pode_visualizar_olist_formas_recebimento),
       podeVisualizarEstoque: Boolean(usuarioData.pode_visualizar_estoque),
       podeEditarEstoque: Boolean(usuarioData.pode_editar_estoque),

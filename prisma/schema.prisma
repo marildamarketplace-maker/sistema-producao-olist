@@ -36,7 +36,6 @@ model Aplicativo {
   enviosFornecedor          EnvioFornecedor[]
   filaMockups               FilaMockup[]
   mockupsCatalogo           MockupCatalogo[]
-  formasPagamentoPlanos     FormaPagamentoOlistPlano[]
   formasRecebimentoPlanos   FormaRecebimentoOlistPlano[]
   fornecedores              Fornecedor[]                  @relation("FornecedorOrigem")
   fornecedoresMatriz        Fornecedor[]                  @relation("FornecedorMatriz")
@@ -95,26 +94,10 @@ model PlanoPagamento {
   ativo                  Boolean                      @default(true)
   createdAt              DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  formasPagamentoOlist   FormaPagamentoOlistPlano[]
   formasRecebimentoOlist FormaRecebimentoOlistPlano[]
   fornecedores           Fornecedor[]
 
   @@map("plano_pagamento")
-}
-
-model FormaPagamentoOlistPlano {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  aplicativoId     String         @map("aplicativo_id") @db.Uuid
-  formaOlistId     String         @map("forma_olist_id")
-  formaOlistNome   String?        @map("forma_olist_nome")
-  planoPagamentoId String         @map("plano_pagamento_id") @db.Uuid
-  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  aplicativo       Aplicativo     @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
-  planoPagamento   PlanoPagamento @relation(fields: [planoPagamentoId], references: [id], onDelete: Cascade)
-
-  @@unique([aplicativoId, formaOlistId, planoPagamentoId], map: "uq_forma_pagamento_olist_plano")
-  @@index([aplicativoId, formaOlistId], map: "idx_forma_pagamento_olist_plano_forma")
-  @@map("forma_pagamento_olist_plano")
 }
 
 model FormaRecebimentoOlistPlano {
@@ -215,7 +198,6 @@ model Usuario {
   podeVisualizarTiposProduto           Boolean                 @default(false) @map("pode_visualizar_tipos_produto")
   podeEditarVariantes                  Boolean                 @default(false) @map("pode_editar_variantes")
   podeVisualizarVariantes              Boolean                 @default(false) @map("pode_visualizar_variantes")
-  podeVisualizarOlistFormasPagamento   Boolean                 @default(false) @map("pode_visualizar_olist_formas_pagamento")
   podeVisualizarOlistFormasRecebimento Boolean                 @default(false) @map("pode_visualizar_olist_formas_recebimento")
   podeVisualizarTarefasMidia           Boolean                 @default(false) @map("pode_visualizar_tarefas_midia")
   podeEscreverAnotarSku                Boolean                 @default(false) @map("pode_escrever_anotar_sku")
@@ -1480,7 +1462,7 @@ model OlistSyncConfiguracao {
   aplicativoPaiId String @unique @map("aplicativo_pai_id") @db.Uuid
   ativo Boolean @default(false)
   aplicativosBloqueados String[] @default([]) @map("aplicativos_bloqueados") @db.Uuid
-  entidades String[] @default(["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"])
+  entidades String[] @default(["PRODUTO", "CONTATO", "VENDEDOR"])
   versao Int @default(1)
   politicasJson Json @default("{}") @map("politicas_json")
   readinessJson Json @default("{}") @map("readiness_json")

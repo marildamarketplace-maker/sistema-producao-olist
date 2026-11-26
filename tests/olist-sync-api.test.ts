@@ -26,7 +26,7 @@ const registro = { id: REGISTRO, entidade: "CONTATO", chave: "a".repeat(64), nom
 const execucao = { id: EXECUCAO, configuracaoId: GRUPO, chaveIdempotencia: IDEMPOTENCIA, modo: "AUDITAR", origem: "MANUAL", completa: true, status: "PENDENTE", versaoConfiguracao: 1, solicitadoPor: "usuario", iniciadaEm: null, finalizadaEm: null, cancelamentoSolicitado: false, contadoresJson: {}, createdAt: agora, updatedAt: agora };
 const empresas = [FILHO, OUTRO].map((id) => ({ id, nome: id === FILHO ? "Filial" : "Seu Olhar", aplicativoPaiId: PAI }));
 function configuracao() {
-  return { id: GRUPO, aplicativoPaiId: PAI, aplicativosBloqueados: [MATRIZ], ativo: true, entidades: ["PRODUTO", "CONTATO", "FORMA_PAGAMENTO", "VENDEDOR"], versao: 1, politicasJson: {}, readinessJson: {}, horaDiaria: "02:00", timezone: "America/Sao_Paulo", proximaExecucaoEm: null, ultimaLimpezaEm: null, autorizadoPor: "usuario", limiteAlteracoes: 100, createdAt: agora, updatedAt: agora,
+  return { id: GRUPO, aplicativoPaiId: PAI, aplicativosBloqueados: [MATRIZ], ativo: true, entidades: ["PRODUTO", "CONTATO", "VENDEDOR"], versao: 1, politicasJson: {}, readinessJson: {}, horaDiaria: "02:00", timezone: "America/Sao_Paulo", proximaExecucaoEm: null, ultimaLimpezaEm: null, autorizadoPor: "usuario", limiteAlteracoes: 100, createdAt: agora, updatedAt: agora,
     aplicativoPai: { id: PAI, jobs: flags }, participantes: empresas.map((app) => ({ id: app.id, aplicativoId: app.id, habilitado: true, contaIdentidade: null, proximaChamadaEm: null, aplicativo: { ...app, aplicativoPaiId: PAI } })),
   };
 }
@@ -724,7 +724,7 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.equal(response.status, 202); const body = await response.json();
     assert.equal(body.id, EXECUCAO); assert.equal(body.status, "PENDENTE"); assert.ok(body.statusUrl.endsWith(EXECUCAO));
     const etapas = chamadasDe("olistSyncEtapa.createMany")[0].args.data as { aplicativoId: string; fase: string }[];
-    assert.equal(etapas.length, 8); assert.ok(etapas.every((item) => item.aplicativoId !== PAI && item.fase === "LISTAR"));
+    assert.equal(etapas.length, 6); assert.ok(etapas.every((item) => item.aplicativoId !== PAI && item.fase === "LISTAR"));
     handlers["olistSyncExecucao.findUnique"] = () => execucao;
     response = await POST(request("execucoes", "POST", input), contexto("execucoes"));
     assert.equal(response.status, 202); assert.equal(chamadasDe("olistSyncExecucao.create").length, 1);
@@ -742,31 +742,35 @@ void test("API de sincronização: autorização, isolamento, validação e trab
     assert.equal((await POST(request("execucoes", "POST", { modo: "AUDITAR", idempotencia: IDEMPOTENCIA, completa: false }), contexto("execucoes"))).status, 409);
   });
 
-  await t.test("vínculo manual de formas de pagamento mantém origem desconhecida e não escreve na Olist", async () => {
+  await t.test("histórico de pagamento continua legível e não admite novas decisões", async () => {
     reset(); const path = `pendencias/${PENDENCIA}/decisao`;
-    const detalhesCriptografados = criptografia.cifrar({ aplicativoId: FILHO, remoteId: "10" }, `${GRUPO}:pendencia:dedupe`);
-    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, registroId: null, entidade: "FORMA_PAGAMENTO", tipo: "IDENTIDADE_REQUER_REVISAO", detalhesCriptografados });
-    const estados = [FILHO, OUTRO].map((app, index) => ({ id: `estado-${index}`, registroId: null, aplicativoId: app, remoteId: String(10 + index), presente: true, detalhePendente: false, metadadosJson: {}, dadosCriptografados: criptografia.cifrar({ id: String(10 + index), chave: null, nome: "Cartão", situacao: "1", completo: true, alteradoEm: null, campos: { nome: "Cartão" }, pendencias: ["IDENTIDADE_REQUER_REVISAO"] }, `${GRUPO}:estado:${app}:FORMA_PAGAMENTO:${10 + index}`) }));
-    handlers["olistSyncEstado.findMany"] = () => estados;
-    handlers["olistSyncRegistro.create"] = () => ({ id: REGISTRO });
-    handlers["olistSyncEstado.update"] = () => ({ id: "estado" });
-    handlers["olistSyncPendencia.updateMany"] = () => ({ count: 1 });
+    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, registroId: null, entidade: "FORMA_PAGAMENTO" });
     const input = { ...decisao, acao: "VINCULAR", vinculos: [{ aplicativoId: FILHO, registroOlistId: "10" }, { aplicativoId: OUTRO, registroOlistId: "11" }] };
-    assert.equal((await POST(request(path, "POST", input), contexto(path))).status, 200);
-    const data = objeto(chamadasDe("olistSyncRegistro.create")[0].args.data);
-    assert.equal(data.origemTipo, "DESCONHECIDA"); assert.match(String(data.chave), /^manual:/);
-    assert.equal(data.aplicativoOrigemId, undefined);
-    assert.equal(chamadasDe("olistSyncEstado.update").length, 2);
-    assert.equal(chamadasDe("olistSyncOperacao.create").length, 0);
+    const resposta = await POST(request(path, "POST", input), contexto(path));
+    assert.equal(resposta.status, 409); assert.match((await resposta.json()).error, /consulta histórica/);
+    assert.equal(chamadasDe("olistSyncRegistro.create").length, 0);
+    assert.equal(chamadasDe("olistSyncEstado.update").length, 0);
+    assert.equal(chamadasDe("olistSyncPendencia.update").length, 0);
+    const detalhe = `pendencias/${PENDENCIA}`;
+    const leitura = await GET(request(detalhe), contexto(detalhe));
+    assert.equal(leitura.status, 200); assert.deepEqual((await leitura.json()).acoesPermitidas, []);
+  });
+  await t.test("configuração antiga bloqueia nova execução, mas preserva comprovante idempotente", async () => {
+    reset();
+    const config = configuracao(); config.entidades.push("FORMA_PAGAMENTO");
+    handlers["olistSyncConfiguracao.findUnique"] = () => config;
+    const input = { modo: "AUDITAR", idempotencia: IDEMPOTENCIA };
+    assert.equal((await POST(request("execucoes", "POST", input), contexto("execucoes"))).status, 409);
     assert.equal(chamadasDe("olistSyncExecucao.create").length, 0);
-    assert.equal(chamadasDe("olistSyncEvento.create").length, 1);
+    handlers["olistSyncExecucao.findUnique"] = () => execucao;
+    assert.equal((await POST(request("execucoes", "POST", input), contexto("execucoes"))).status, 202);
   });
 
   await t.test("vínculo exige empresas distintas habilitadas e não admite produtos com outro SKU", async () => {
     reset(); const path = `pendencias/${PENDENCIA}/decisao`;
     const vinculo = { ...decisao, acao: "VINCULAR", vinculos: [{ aplicativoId: FILHO, registroOlistId: "10" }, { aplicativoId: OUTRO, registroOlistId: "11" }] };
     assert.equal((await POST(request(path, "POST", vinculo), contexto(path))).status, 400);
-    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, registroId: null, entidade: "FORMA_PAGAMENTO" });
+    handlers["olistSyncPendencia.findFirst"] = () => ({ ...pendencia, registroId: null, entidade: "VENDEDOR" });
     assert.equal((await POST(request(path, "POST", { ...vinculo, vinculos: [{ aplicativoId: FILHO, registroOlistId: "10" }, { aplicativoId: EXTERNO, registroOlistId: "11" }] }), contexto(path))).status, 400);
     assert.equal((await POST(request(path, "POST", { ...vinculo, vinculos: [{ aplicativoId: FILHO, registroOlistId: "10" }, { aplicativoId: FILHO, registroOlistId: "11" }] }), contexto(path))).status, 400);
     assert.equal(chamadasDe("olistSyncRegistro.create").length, 0);

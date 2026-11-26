@@ -74,14 +74,14 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
   });
   await t.test("A e B são válidos para cliente/vendedor na confirmação; I e E permanecem bloqueados", async () => {
     for (clienteEstado of ["A", "B"]) for (vendedorEstado of ["A", "B"]) {
-      const r = await validarSelecoesParciais("conta", { clienteId: 30, vendedorId: 20 });
+      const r = await validarSelecoesParciais("conta", { recursoForma: "RECEBIMENTO" as const, clienteId: 30, vendedorId: 20 });
       assert.equal(r.cliente?.situacao, clienteEstado); assert.equal(r.vendedor?.situacao, vendedorEstado);
       assert.equal(nome(r.vendedor!), "Ana Vendedora");
     }
-    clienteEstado = "I"; await assert.rejects(validarSelecoesParciais("conta", { clienteId: 30, vendedorId: 20 }), /inativos/);
-    clienteEstado = "E"; await assert.rejects(validarSelecoesParciais("conta", { clienteId: 30, vendedorId: 20 }), /inativos/);
+    clienteEstado = "I"; await assert.rejects(validarSelecoesParciais("conta", { recursoForma: "RECEBIMENTO" as const, clienteId: 30, vendedorId: 20 }), /inativos/);
+    clienteEstado = "E"; await assert.rejects(validarSelecoesParciais("conta", { recursoForma: "RECEBIMENTO" as const, clienteId: 30, vendedorId: 20 }), /inativos/);
     clienteEstado = "B";
-    for (vendedorEstado of ["I", "E"]) await assert.rejects(validarSelecoesParciais("conta", { clienteId: 30, vendedorId: 20 }), /Vendedor indisponível/);
+    for (vendedorEstado of ["I", "E"]) await assert.rejects(validarSelecoesParciais("conta", { recursoForma: "RECEBIMENTO" as const, clienteId: 30, vendedorId: 20 }), /Vendedor indisponível/);
     vendedorEstado = "B";
   });
   await t.test("aceitar B para pessoas não libera produtos, serviços ou pagamentos bloqueados", async () => {
@@ -94,7 +94,7 @@ test("cadastros da fila respeitam estados por recurso e identificam vendedores p
     produtoEstado = "A"; servicoEstado = "B";
     await assert.rejects(validarSelecoesParciais("conta", { laser: { id: 50, preco: 1 } }), /inativo/);
     servicoEstado = "A"; formaEstado = "B";
-    await assert.rejects(validarSelecoesParciais("conta", { formaId: 60 }), /inativos/);
+    await assert.rejects(validarSelecoesParciais("conta", { recursoForma: "RECEBIMENTO" as const, formaId: 60 }), /inativos/);
   });
   await t.test("catálogo pesquisa Ref no meio do nome sem varrer produtos sem referência", async () => {
     simularFiltroNome = true;

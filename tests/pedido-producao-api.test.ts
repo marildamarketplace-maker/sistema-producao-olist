@@ -136,7 +136,7 @@ test("API de produção isola origem, preserva snapshot editado e reconcilia ten
   const resolucao = await resolucaoResponse.json();
   const entrada = { versao: 2, origemManual: resolucao.referencia, decisaoDirecionamento: resolucao.decisao, fornecedorManual: resolucao.fornecedorManual,
     chaveIdempotencia: id(80), aplicativoId: id(3), revisaoProducao: origem.revisao, observacao: "Editada",
-    selecoes: { clienteId: 30, vendedorId: 20, formaId: 40, planoId: id(70), laser: { id: 50, preco: 2 } },
+    selecoes: { recursoForma: "RECEBIMENTO" as const, clienteId: 30, vendedorId: 20, formaId: 40, planoId: id(70), laser: { id: 50, preco: 2 } },
     itens: [{ ...origem.itens[0], quantidade: 9 }, { ...origem.itens[0], id: id(81), tecidoNome: "Novo", corteLaser: false }] };
   await t.test("novo pedido de produção também exige plano e serviço laser", async () => {
     for (const selecoes of [{ ...entrada.selecoes, planoId: undefined }, { ...entrada.selecoes, laser: undefined }]) {

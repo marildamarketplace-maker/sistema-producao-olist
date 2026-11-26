@@ -10,7 +10,7 @@ const origem = id(1), destino = id(2), tecido = id(3), plano = id(4);
 test("recuperação por campo no novo aplicativo", async t => {
 const { recuperarCampoOlist, estadoRecuperacao, correspondeCadastro, condicoesPlano } = await import("../src/lib/fila-recuperacao-olist");
 function dados(): DadosPedidoFila {
-  return { versao: 1, olist: { filialId: origem, selecoes: { clienteId: 10, vendedorId: 11, formaId: 12, planoId: plano, tipoVenda: "VENDA", tecidos: [{ tecidoId: tecido, id: 13, preco: 9 }], laser: { id: 14, preco: 2 } } },
+  return { versao: 1, olist: { filialId: origem, selecoes: { recursoForma: "RECEBIMENTO" as const, clienteId: 10, vendedorId: 11, formaId: 12, planoId: plano, tipoVenda: "VENDA", tecidos: [{ tecidoId: tecido, id: 13, preco: 9 }], laser: { id: 14, preco: 2 } } },
     itens: [{ produtoId: tecido, sku: "", tecido: { id: tecido, nome: "Oxford Ref. 001", referencia: null }, quantidade: 2, unidade: "UN", quantidadeTecido: 1, unidadeTecido: "MT", estampa: "123", variante: "A", corteLaser: true, tamanho: "70x70", tipoProduto: "Lenço" }] };
 }
 function ambiente() {
@@ -40,7 +40,7 @@ await t.test("recupera produto por código exato com preço do destino, sem tran
 await t.test("ambiguidade, pesquisa incompleta, conflito e falha mantêm os outros campos", async () => {
   for (const config of [{ duplicado: true }, { incompleto: true }, { falha: true }, { codigoDestino: "002" }, { preco: undefined }]) {
     const a = ambiente(); a.configurar(config); const d = dados();
-    d.olistAnterior = d.olist; d.olist = { filialId: destino, selecoes: { clienteId: 110, formaId: 112, tipoVenda: "VENDA" } };
+    d.olistAnterior = d.olist; d.olist = { filialId: destino, selecoes: { recursoForma: "RECEBIMENTO" as const, clienteId: 110, formaId: 112, tipoVenda: "VENDA" } };
     const r = await recuperarCampoOlist(d, destino, `tecido:${tecido}`, null, a.deps);
     assert.equal(r.campo.estado, "PENDENTE"); assert.equal(r.selecoes.clienteId, 110); assert.equal(r.selecoes.formaId, 112);
     assert.ok(!JSON.stringify(r).includes("TOKEN PRIVADO")); assert.ok(a.chamadas.length <= 3);
@@ -53,7 +53,7 @@ await t.test("nome exato único aceita caixa/espaços, mas não similaridade ou 
   assert.equal(correspondeCadastro({ nome: "Oxford", codigo: "001" }, { nome: "Oxford", codigo: "1" }), false);
 });
 await t.test("plano exige nome e condições válidas e associação no novo aplicativo", async () => {
-  const d = dados(); d.olistAnterior = d.olist; d.olist = { filialId: destino, selecoes: { formaId: 112 } };
+  const d = dados(); d.olistAnterior = d.olist; d.olist = { filialId: destino, selecoes: { recursoForma: "RECEBIMENTO" as const, formaId: 112 } };
   const a = ambiente();
   let r = await recuperarCampoOlist(d, destino, "planoId", null, a.deps);
   assert.equal(r.campo.estado, "RECUPERADO"); assert.equal(r.selecoes.planoId, plano);
@@ -81,6 +81,30 @@ await t.test("orçamento por campo interrompe a leitura antes de aceitar resulta
   const consultar = a.deps.consultar; a.deps.consultar = async (...args) => { const r = await consultar(...args); tempo += 13000; return r; };
   const r = await recuperarCampoOlist(dados(), destino, `tecido:${tecido}`, null, a.deps);
   assert.equal(r.campo.estado, "PENDENTE"); assert.equal(a.chamadas.length, 1);
+});
+
+await t.test("origem legada não restaura forma/plano nem consulta pagamento", async () => {
+  const a = ambiente(), d = dados();
+  delete d.olist!.selecoes.recursoForma;
+  d.olistAnterior = structuredClone(d.olist);
+  d.olist = { filialId: destino, selecoes: { ...d.olist!.selecoes, clienteId: 110 } };
+  d.recuperacaoOlist = { filialId: destino, campos: [{ chave: "formaId", estado: "RECUPERADO", mensagem: "Vínculo antigo" }] };
+  assert.ok(estadoRecuperacao(d, destino)?.restantes.includes("formaId"));
+  const antes = structuredClone(d);
+  for (const chave of ["formaId", "planoId"]) {
+    const r = await recuperarCampoOlist(d, destino, chave, null, a.deps);
+    assert.equal(r.campo.estado, "PENDENTE"); assert.match(r.campo.mensagem, /recebimento/);
+    assert.equal(r.selecoes.formaId, undefined); assert.equal(r.selecoes.planoId, undefined);
+    assert.equal(r.selecoes.clienteId, 110); assert.deepEqual(r.selecoes.tecidos, antes.olist?.selecoes.tecidos);
+  }
+  assert.equal(a.chamadas.length, 0); assert.deepEqual(d, antes);
+});
+await t.test("forma recuperada usa detalhes/listagem de recebimento e equivalência única", async () => {
+  const a = ambiente(), d = dados();
+  const r = await recuperarCampoOlist(d, destino, "formaId", null, a.deps);
+  assert.equal(r.campo.estado, "RECUPERADO"); assert.equal(r.selecoes.formaId, 113);
+  assert.ok(a.chamadas.every(c => c.caminho.startsWith("formas-recebimento")));
+  assert.equal(r.selecoes.recursoForma, "RECEBIMENTO");
 });
 
 });

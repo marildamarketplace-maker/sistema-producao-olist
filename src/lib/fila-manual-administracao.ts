@@ -69,7 +69,7 @@ export async function alterarFilaManual(tx: Prisma.TransactionClient, entrada: E
     ...(referencia?.guarda.fornecedorManual ? { fornecedorManual: referencia.guarda.fornecedorManual } : {}),
     olistAnterior: snapshot.olistAnterior ?? snapshot.olist,
     recuperacaoOlist: undefined,
-    olist: referencia && snapshot.origemManual ? { filialId: entrada.filialId!, selecoes: {
+    olist: referencia && snapshot.origemManual ? { filialId: entrada.filialId!, selecoes: { recursoForma: "RECEBIMENTO" as const,
       ...(referencia.vendedorId ? { vendedorId: referencia.vendedorId } : {}), tipoVenda: snapshot.olist?.selecoes.tipoVenda,
     } } : undefined,
     ...(snapshot.direcionamentoManual && pedido.aplicativoFilialId ? { direcionamentoManual: {

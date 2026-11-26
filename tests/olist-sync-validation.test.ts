@@ -95,7 +95,7 @@ test('backoff preserva limite e a agenda atravessa virada de ano no fuso do grup
 test('serviços são uma entidade independente e não aceitam validação incremental',()=>{
   const entrada={versao:1,ativo:false,entidades:['SERVICO'],participantesIds:[crypto.randomUUID(),crypto.randomUUID()],horaDiaria:'02:00',limiteAlteracoes:100,prontidao:{sincronizacaoNativaCompativel:false,semanticaPutValidada:false,incrementalValidado:false}};
   assert.equal(configuracaoSchema.safeParse(entrada).success,true);
-  assert.equal(configuracaoSchema.safeParse({...entrada,entidades:['PRODUTO','CONTATO','FORMA_PAGAMENTO','VENDEDOR','SERVICO']}).success,true);
+  assert.equal(configuracaoSchema.safeParse({...entrada,entidades:['PRODUTO','CONTATO','VENDEDOR','SERVICO']}).success,true);
   assert.equal(filtrosSchema.parse({entidade:'SERVICO'}).entidade,'SERVICO');
   assert.equal(configuracaoSchema.safeParse({...entrada,incrementalValidacoes:[{aplicativoId:entrada.participantesIds[0],entidade:'SERVICO',validado:true,fusoHorario:'America/Sao_Paulo',versaoContrato:1,evidencia:'Coleta de serviços conferida nesta conta.'}]}).success,false);
 });

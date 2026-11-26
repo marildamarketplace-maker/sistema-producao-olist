@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
-import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasPagamentoOlistApi, obterCadastroFornecedorOlist, getValidOlistAccessToken } from "@/lib/olist";
+import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasRecebimentoOlistApi, obterCadastroFornecedorOlist, getValidOlistAccessToken } from "@/lib/olist";
 import type { SelecoesFilaOlist, SelecoesFilaOlistParciais } from "@/lib/fila-olist-contrato";
 export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 const ErroFila = ErroFilaOlist;
@@ -33,8 +33,9 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
     const limit = 50, offset = (pagina - 1) * limit;
     if (recurso === "planos") {
       const formaId = z.coerce.number().int().positive().safeParse(params.get("formaId"));
-      if (!formaId.success) throw new ErroFila("Selecione uma forma de pagamento.");
-      const planos = await prisma.formaPagamentoOlistPlano.findMany({ where: { aplicativoId: filialId, formaOlistId: String(formaId.data), planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { id: true, nome: true } } } });
+      if (!formaId.success) throw new ErroFila("Selecione uma forma de recebimento.");
+      const planos = await prisma.formaRecebimentoOlistPlano.findMany({ where: { aplicativoId: filialId, formaOlistId: String(formaId.data), planoPagamento: { ativo: true } }, take: 101, orderBy: { planoPagamentoId: "asc" }, select: { planoPagamento: { select: { id: true, nome: true } } } });
+      if (planos.length > 100) throw new ErroFila("Há mais de 100 planos associados. Revise as associações em Formas de recebimento.");
       return ({ itens: planos.map((p) => p.planoPagamento) });
     }
     let resultado;
@@ -48,7 +49,7 @@ export async function consultarCadastrosFilaOlist(filialId: string, params: URLS
       resultado = await listarProdutosOlistApi(filialId, { nome: nomeProduto, situacao: "A", limit, offset, timeoutMs: 20_000, signal });
     }
     else if (recurso === "servicos") resultado = await listarServicosOlistApi(filialId, { nome: busca || undefined, limit, offset });
-    else if (recurso === "formas") resultado = await listarFormasPagamentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
+    else if (recurso === "formas") resultado = await listarFormasRecebimentoOlistApi(filialId, { nome: busca || undefined, situacao: 1, limit, offset });
     else throw new ErroFila("Consulta inválida.");
     // O termo digitado continua sendo pesquisado na Olist. A restrição por "ref"
     // também é aplicada aqui, sem depender de uma busca remota com semântica AND.
@@ -85,15 +86,16 @@ async function validarIntegracao(filialId: string) {
 export type PessoasFilaOlistValidadas = { cliente: Record<string, unknown>; vendedor: Record<string, unknown> };
 export async function validarSelecoesParciais(filialId: string, selecoes: SelecoesFilaOlistParciais, precisaLaser = false,
   pessoasValidadas?: PessoasFilaOlistValidadas) {
+    if ((selecoes.formaId || selecoes.planoId) && selecoes.recursoForma !== "RECEBIMENTO") throw new ErroFila("Selecione novamente a forma e o plano de recebimento.");
     if (pessoasValidadas && (Number(pessoasValidadas.cliente.id) !== selecoes.clienteId || Number(pessoasValidadas.vendedor.id) !== selecoes.vendedorId)) {
       throw new ErroFila("Os cadastros validados não correspondem às seleções desta conta.");
     }
     if (selecoes.clienteId || selecoes.vendedorId || selecoes.formaId || selecoes.tecidos?.length || selecoes.laser) await validarIntegracao(filialId);
-    const plano = selecoes.planoId && selecoes.formaId ? await prisma.formaPagamentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } }) : null;
-    if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de pagamento nesta conta destinatária.");
+    const plano = selecoes.planoId && selecoes.formaId ? await prisma.formaRecebimentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } }) : null;
+    if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de recebimento nesta conta destinatária.");
     const cliente = pessoasValidadas?.cliente ?? (selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null);
-    const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-pagamento", selecoes.formaId) : null;
-    if ((cliente && !pessoaAtiva(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de pagamento inativos.");
+    const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-recebimento", selecoes.formaId) : null;
+    if ((cliente && !pessoaAtiva(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de recebimento inativos.");
     // Vendedores não possuem endpoint de detalhe. Valida por paginação na mesma conta.
     let vendedor: Record<string, unknown> | undefined = pessoasValidadas?.vendedor;
     for (let pagina = 0; !vendedor && selecoes.vendedorId && pagina < 100; pagina++) {

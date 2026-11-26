@@ -14,7 +14,7 @@ export const validacaoIncrementalSchema = z.object({
 }).strict().refine(v => !v.validado || (v.evidencia?.length ?? 0) >= 20, { message: "Descreva os ensaios realizados nesta conta e entidade." });
 export const configuracaoSchema = z.object({
   versao: z.number().int().positive(), ativo: z.boolean(),
-  entidades: z.array(entidadeSchema).min(1).max(5).refine(v => new Set(v).size === v.length),
+  entidades: z.array(z.enum(["PRODUTO", "CONTATO", "VENDEDOR", "SERVICO"])).min(1).max(4).refine(v => new Set(v).size === v.length),
   participantesIds: z.array(z.guid()).min(2).max(20).refine(v => new Set(v).size === v.length),
   horaDiaria: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   limiteAlteracoes: z.number().int().min(1).max(100),

@@ -4,12 +4,12 @@ import { z } from "zod";
 import { selecoesFilaOlistSchema } from "../src/lib/fila-olist-contrato";
 import { detalharErrosFilaOlist, errosComerciaisCriacao, exigirComerciaisCriacao } from "../src/lib/fila-olist-validacao";
 const uuid = "00000000-0000-0000-0000-000000000001";
-const selecoes = { clienteId: 1, vendedorId: 2, formaId: 3, planoId: uuid, tipoVenda: "VENDA", tecidos: [{ tecidoId: uuid, id: 4, preco: 18.99 }], laser: null };
+const selecoes = { recursoForma: "RECEBIMENTO" as const, clienteId: 1, vendedorId: 2, formaId: 3, planoId: uuid, tipoVenda: "VENDA", tecidos: [{ tecidoId: uuid, id: 4, preco: 18.99 }], laser: null };
 test("identifica plano pendente tanto no contrato direto quanto no corpo da API", () => {
   for (const schema of [selecoesFilaOlistSchema, z.object({ selecoes: selecoesFilaOlistSchema })]) {
     const dados = { ...selecoes, planoId: "" };
     const parsed = schema.safeParse(schema === selecoesFilaOlistSchema ? dados : { selecoes: dados }); assert.equal(parsed.success, false);
-    if (!parsed.success) assert.deepEqual(detalharErrosFilaOlist(parsed.error).campos, { planoId: "Selecione um plano de pagamento associado à forma escolhida." });
+    if (!parsed.success) assert.deepEqual(detalharErrosFilaOlist(parsed.error).campos, { planoId: "Selecione um plano de recebimento associado à forma escolhida." });
   }
 });
 test("detalha todos os campos inválidos e identifica produto e preço por posição", () => {
@@ -29,9 +29,9 @@ test("erro interno desconhecido não expõe valores, mensagens brutas ou caminho
 
 test("criação exige forma/plano sempre e serviço/preço somente quando há laser", () => {
   assert.deepEqual(Object.keys(errosComerciaisCriacao({}, false)), ["formaId", "planoId"]);
-  assert.deepEqual(errosComerciaisCriacao({ formaId: 1, planoId: uuid }, false), {});
-  assert.ok(errosComerciaisCriacao({ formaId: 1, planoId: uuid }, true).laser);
-  assert.ok(errosComerciaisCriacao({ formaId: 1, planoId: uuid, laser: { id: 2 } }, true)["laser.preco"]);
-  assert.deepEqual(errosComerciaisCriacao({ formaId: 1, planoId: uuid, laser: { id: 2, preco: 0 } }, true), {});
-  assert.throws(() => exigirComerciaisCriacao({ formaId: 1, planoId: uuid }, true), z.ZodError);
+  assert.deepEqual(errosComerciaisCriacao({ recursoForma: "RECEBIMENTO" as const, formaId: 1, planoId: uuid }, false), {});
+  assert.ok(errosComerciaisCriacao({ recursoForma: "RECEBIMENTO" as const, formaId: 1, planoId: uuid }, true).laser);
+  assert.ok(errosComerciaisCriacao({ recursoForma: "RECEBIMENTO" as const, formaId: 1, planoId: uuid, laser: { id: 2 } }, true)["laser.preco"]);
+  assert.deepEqual(errosComerciaisCriacao({ recursoForma: "RECEBIMENTO" as const, formaId: 1, planoId: uuid, laser: { id: 2, preco: 0 } }, true), {});
+  assert.throws(() => exigirComerciaisCriacao({ recursoForma: "RECEBIMENTO" as const, formaId: 1, planoId: uuid }, true), z.ZodError);
 });

@@ -11,24 +11,24 @@ function formatarQuantidadeDivisao(quantidade: number) {
   return quantidade.toFixed(2).replace(".", ",");
 }
 
-function criarPagamentoPedido(formaPagamentoId: number, nomePlano: string, valorTotal: number) {
+function criarPagamentoPedido(formaRecebimentoId: number, nomePlano: string, valorTotal: number) {
   if (!nomePlano.trim()) throw new ErroMontagemFornecedor("Plano de pagamento vazio.");
   const dias = nomePlano.toLocaleLowerCase("pt-BR") === "a vista"
     ? [0]
     : nomePlano.split("/").map(Number);
   if (dias.some((dia) => !Number.isInteger(dia) || dia < 0)) {
-    throw new ErroMontagemFornecedor("O plano de pagamento do fornecedor possui parcelas inválidas.");
+    throw new ErroMontagemFornecedor("O plano de recebimento do fornecedor possui parcelas inválidas.");
   }
   const totalCentavos = Math.round(valorTotal * 100);
   if (!Number.isSafeInteger(totalCentavos)) throw new ErroMontagemFornecedor("Valor total excede a precisão permitida.");
   const baseCentavos = Math.floor(totalCentavos / dias.length);
   const resto = totalCentavos - baseCentavos * dias.length;
   return {
-    formaRecebimento: { id: formaPagamentoId },
+    formaRecebimento: { id: formaRecebimentoId },
     parcelas: dias.map((dia, indice) => ({
       dias: dia,
       valor: (baseCentavos + (indice < resto ? 1 : 0)) / 100,
-      formaRecebimento: { id: formaPagamentoId },
+      formaRecebimento: { id: formaRecebimentoId },
     })),
   };
 }

@@ -14,7 +14,7 @@ window.recuperacaoTeste = { chamadas: [], previas: [], token: () => undefined, l
 const pedido: PedidoFilaAdministracao = {
   id: id(10), solicitacaoProducaoId: id(11), status: "PENDENTE", origem: "Loja", filial: { id: id(3), nome: "Novo aplicativo destinatário" },
   createdAt: "2026-11-24T00:00:00.000Z", direcionadoEm: null, versao: 2,
-  dadosPedido: { versao: 1, olist: { filialId: id(2), selecoes: { clienteId: 1, vendedorId: 2, formaId: 3, tecidos: [{ tecidoId: id(13), id: 4, preco: 9 }] } },
+  dadosPedido: { versao: 1, olist: { filialId: id(2), selecoes: { recursoForma: "RECEBIMENTO" as const, clienteId: 1, vendedorId: 2, formaId: 3, tecidos: [{ tecidoId: id(13), id: 4, preco: 9 }] } },
     itens: [{ produtoId: id(12), sku: "SKU", tecido: { id: id(13), nome: "Oxford Ref. 001 com nome comprido para testar quebra no celular", referencia: null }, quantidade: 1, unidade: "MT", quantidadeTecido: 2, unidadeTecido: "MT", estampa: "", variante: null, corteLaser: false, tamanho: "", tipoProduto: "" }] },
 };
 const recuperacao = () => ({ campos, restantes: keys.filter(k => !campos.some(c => c.chave === k)) });
@@ -29,7 +29,7 @@ window.fetch = async (input, init) => {
     if (body.versao !== versao) return Response.json({ error: "Versão antiga" }, { status: 409 });
     const pendente = params.has("parcial") && body.chave === "clienteId";
     campos.splice(0, campos.length, ...campos.filter(c => c.chave !== body.chave), { chave: body.chave, estado: pendente ? "PENDENTE" : "RECUPERADO", mensagem: pendente ? "Mais de uma correspondência. Selecione o cliente correto." : "Recuperado." });
-    selecoes = { ...selecoes, tipoVenda: "VENDA", ...(body.chave === "vendedorId" ? { vendedorId: 120 } : body.chave === "clienteId" && !pendente ? { clienteId: 130 } : body.chave === "formaId" ? { formaId: 140 } : body.chave.startsWith("tecido:") ? { tecidos: [{ tecidoId: id(13), id: 150, preco: 21.99 }] } : body.chave === "planoId" ? { planoId: id(30) } : {}) };
+    selecoes = { ...selecoes, tipoVenda: "VENDA", ...(body.chave === "vendedorId" ? { recursoForma: "RECEBIMENTO" as const, vendedorId: 120 } : body.chave === "clienteId" && !pendente ? { recursoForma: "RECEBIMENTO" as const, clienteId: 130 } : body.chave === "formaId" ? { recursoForma: "RECEBIMENTO" as const, formaId: 140 } : body.chave.startsWith("tecido:") ? { tecidos: [{ tecidoId: id(13), id: 150, preco: 21.99 }] } : body.chave === "planoId" ? { planoId: id(30) } : {}) };
     versao++;
     return Response.json({ versao, filialId: id(3), alteracoes: selecoes, campo: campos.find(c => c.chave === body.chave) });
   }

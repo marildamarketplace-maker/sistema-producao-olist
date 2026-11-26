@@ -7,7 +7,7 @@ type Plano = { id: string; nome: string };
 type Props = {
   aplicativoId?: string;
   accessToken: string;
-  tipo: "pagamento" | "recebimento";
+  tipo: "recebimento";
   forma: { id: string; nome: string };
   onClose: () => void;
 };
