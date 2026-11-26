@@ -92,6 +92,13 @@ test("reserva compartilhada, resultados e falhas de persistência", async (t) =>
     assert.equal(estado?.estado, "REJEITADO"); assert.equal(status, "FALHADO"); assert.equal(registros.length, 0);
     http = 200; resposta = { id: 321 }; await enviar(); assert.equal(posts, 2); assert.equal(estado?.historico.filter((e: any) => e.acao === "RESERVA").length, 2);
   });
+  await t.test("rejeição 400 preserva campos recusados sem gravar resposta sensível nem repetir POST", async () => {
+    reset(); http = 400;
+    resposta = { mensagem: "TOKEN PRIVADO", detalhes: [{ campo: "pagamento.formaRecebimento.id", mensagem: "Não encontrado: documento 12345678900" }, { campo: "itens[1].quantidade", mensagem: "Quantidade inválida para cliente privado" }] };
+    await assert.rejects(enviar(), (e: Error) => /Forma de recebimento: não encontrado/.test(e.message) && /Item 2: quantidade/.test(e.message) && !/TOKEN|12345678900|cliente privado/.test(e.message));
+    assert.equal(posts, 1); assert.equal(estado?.estado, "REJEITADO"); assert.equal(status, "FALHADO");
+    assert.match(estado?.diagnostico, /Item 2/); assert.equal(registros.length, 0);
+  });
   for (const cenario of ["timeout", "sem ID", "ID zero", "ID inválido", "HTTP 500", "persistência interrompida"]) await t.test(`${cenario} fica incerto e bloqueia repetição`, async () => {
     reset(); timeout = cenario === "timeout"; if (cenario === "sem ID") resposta = {}; if (cenario === "ID zero") resposta = { id: 0 }; if (cenario === "ID inválido") resposta = { id: "abc" }; if (cenario === "HTTP 500") http = 500; persistenciaFalha = cenario === "persistência interrompida";
     await assert.rejects(enviar(), (e: Error) => /incerto/.test(e.message) && !/segredo|token-secreto/.test(e.message));

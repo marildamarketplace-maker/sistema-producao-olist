@@ -6,6 +6,7 @@ const matriz = id(2), filial = id(3), usuarioId = id(4), filaId = id(5), solicit
 test("fila Olist: permissão, conta destinatária, prévia, confirmação e conciliação", async (t) => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test"; process.env.SUPABASE_SERVICE_ROLE_KEY = "fake";
   let integrado = true;
+  let recursoRecusado: string | null = null;
   let permitido = true, existe = true, filialValida = true, associado = true, cadastroAtivo = true, retornoMarcador = true;
   let fila: any, selecoesSalvas: unknown = null, previa: any = null, envio: any = null, registro: any = null;
   let posts = 0, consultas: string[] = [];
@@ -72,6 +73,7 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
   t.mock.method(supabaseAdmin.auth, "getUser", async () => ({ data: { user: { id: usuarioId, email: "teste@example.test" } }, error: null }));
   t.mock.method(axios, "get", async (url: string) => {
     const u = new URL(url); consultas.push(u.pathname);
+    if (recursoRecusado && u.pathname.includes(`/${recursoRecusado}/`)) return { status: 404, data: { mensagem: "TOKEN PRIVADO 12345678900" } };
     if (alterarDuranteConsulta) { fila.versao++; alterarDuranteConsulta = false; }
     let data: any;
     if (u.pathname.endsWith("/vendedores")) data = { itens: [{ id: 200, nome: "Vendedor" }], paginacao: { total: 1 } };
@@ -241,6 +243,18 @@ test("fila Olist: permissão, conta destinatária, prévia, confirmação e conc
     delete previa.selecoes.recursoForma;
     const confirmada = await POST(req({ acao: "confirmar", previaId }), ctx);
     assert.equal(confirmada.status, 409); assert.equal(posts, 0); assert.equal(envio, null);
+  });
+
+  await t.test("cadastro remoto recusado identifica campo e não cria nem altera o pedido", async () => {
+    for (const [recurso, campo, rotulo] of [["contatos", "clienteId", "Cliente"], ["formas-recebimento", "formaId", "Forma de recebimento"], ["produtos", "tecidos.0.id", "Produto"], ["servicos", "laser.id", "Serviço de corte a laser"]]) {
+      reset(); recursoRecusado = recurso;
+      try {
+        const response = await preview(); assert.equal(response.status, 400);
+        const body = await response.json(); assert.match(body.campos[campo], new RegExp(rotulo));
+        assert.match(body.error, /não encontrado/); assert.doesNotMatch(JSON.stringify(body), /TOKEN|12345678900/);
+        assert.equal(posts, 0); assert.equal(fila.versao, 0); assert.equal(previa, null);
+      } finally { recursoRecusado = null; }
+    }
   });
 
 });

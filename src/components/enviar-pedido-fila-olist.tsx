@@ -78,6 +78,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
       .then(async (d) => {
         if (controller.signal.aborted) return;
         setEnvio(d.envio);
+        if (d.envio?.estado === "REJEITADO" && d.envio.diagnostico) setErro(d.envio.diagnostico);
         if (pedido.status === "PROCESSAR" && d.envio?.estado === "INCERTO") alterado.current = true;
         const conta = `${api}:${d.filial.id}:${pedido.versao}`;
         const inicializar = contaInicializada.current !== conta;
@@ -184,6 +185,7 @@ export function EnviarPedidoFilaOlist({ pedido, token, aoFechar, aoConcluir }: {
           <button type="button" className={botao} disabled={salvando || !ausencia || justificativa.trim().length < 10 || !!envio.pedidoOlistId} onClick={() => void operar({ acao: "confirmar-ausencia", ausenciaConfirmada: true, tentativaId: envio.tentativaId, justificativa }, "conciliar")}>Registrar ausência e liberar nova tentativa</button>
         </>}
       </div> : !mensagem && !previa ? <div className="space-y-4">
+        {envio?.estado === "REJEITADO" && <p role="status" className="rounded-md border border-amber-200 p-3 text-sm text-amber-800">A última tentativa foi rejeitada pela Olist. A fila ficou como Falhado e os dados foram preservados. Corrija os campos indicados e gere uma nova prévia antes de confirmar outro envio.</p>}
         {pedido.tipoOrigem !== "MANUAL" && (origemVinculada || !escolhaManualConfirmada) && <label className="flex min-h-11 items-start gap-3 rounded-md border border-slate-200 p-3 text-sm">
           <input type="checkbox" className="mt-1" disabled={recuperando} checked={vendedorFonte === "MANUAL" && escolhaManualConfirmada} onChange={(event) => alterarEscolhaManual(event.target.checked)} />
           {origemVinculada ? "Usar uma escolha manual de vendedor para este pedido, após revisar os dados comerciais." : "Revisei e confirmo a escolha manual do vendedor deste pedido, que não possui vínculo de origem registrado."}

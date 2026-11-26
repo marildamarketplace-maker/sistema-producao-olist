@@ -158,7 +158,7 @@ export function DadosComerciaisFilaOlist({ api, token, itens, selecoes, aoAltera
         })}
         {laser && (!somentePendentes || !selecoes.laser?.id || selecoes.laser.preco === null) && <div className="space-y-2">
           {pesquisa("Serviço de corte a laser", "servicos", selecoes.laser?.id ?? 0, (o) => aoAlterar({ ...selecoes, laser: { id: o.id, preco: o.id ? o.preco ?? null : null } }))}
-          {campo("laser.preco", <label className="block text-sm">Preço do serviço por metro (R$)<input className="input mt-1 min-h-11" type="number" min="0" step="0.01" value={selecoes.laser?.preco ?? ""} aria-invalid={!!errosCampos["laser.preco"]} aria-describedby={errosCampos["laser.preco"] ? `${erroPrefixo}-laser.preco` : undefined} disabled={disabled} onChange={(e) => aoAlterar({ ...selecoes, laser: { id: selecoes.laser?.id ?? 0, preco: e.target.value === "" ? null : Number(e.target.value) } })} /></label>)}
+          {campo("laser.preco", <label className="block text-sm">Preço do serviço por metro (R$)<input className="input mt-1 min-h-11" type="number" min="0" step="0.01" value={selecoes.laser?.preco ?? ""} aria-invalid={!!errosCampos["laser.preco"]} aria-describedby={errosCampos["laser.preco"] ? `${erroPrefixo}-laser.preco` : undefined} disabled /></label>)}
         </div>}
   </div>;
 }

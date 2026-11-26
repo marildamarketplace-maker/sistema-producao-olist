@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { listarServicosOlistApi, listarContatosOlistApi, listarVendedoresOlistApi, listarProdutosOlistApi, listarFormasRecebimentoOlistApi, obterCadastroFornecedorOlist, getValidOlistAccessToken } from "@/lib/olist";
 import type { SelecoesFilaOlist, SelecoesFilaOlistParciais } from "@/lib/fila-olist-contrato";
-export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400) { super(message); } }
+import { ErroCadastroOlist, type RecursoCadastroOlist } from "@/lib/olist-errors";
+export class ErroFilaOlist extends Error { constructor(message: string, readonly status = 400, readonly campos?: Record<string, string>) { super(message); } }
 const ErroFila = ErroFilaOlist;
 function contatoDoCadastro(item: Record<string, unknown>): Record<string, unknown> | null {
   return item.contato && typeof item.contato === "object" && !Array.isArray(item.contato)
@@ -86,6 +87,14 @@ async function validarIntegracao(filialId: string) {
 export type PessoasFilaOlistValidadas = { cliente: Record<string, unknown>; vendedor: Record<string, unknown> };
 export async function validarSelecoesParciais(filialId: string, selecoes: SelecoesFilaOlistParciais, precisaLaser = false,
   pessoasValidadas?: PessoasFilaOlistValidadas) {
+    async function cadastro(recurso: RecursoCadastroOlist, id: number, campo: string) {
+      try { return await obterCadastroFornecedorOlist(filialId, recurso, id); }
+      catch (error) {
+        if (!(error instanceof ErroCadastroOlist)) throw error;
+        const corrigivel = error.httpStatus !== null && [400, 404, 422].includes(error.httpStatus);
+        throw new ErroFila(error.message, corrigivel ? 400 : 502, corrigivel ? { [campo]: error.message } : undefined);
+      }
+    }
     if ((selecoes.formaId || selecoes.planoId) && selecoes.recursoForma !== "RECEBIMENTO") throw new ErroFila("Selecione novamente a forma e o plano de recebimento.");
     if (pessoasValidadas && (Number(pessoasValidadas.cliente.id) !== selecoes.clienteId || Number(pessoasValidadas.vendedor.id) !== selecoes.vendedorId)) {
       throw new ErroFila("Os cadastros validados não correspondem às seleções desta conta.");
@@ -93,8 +102,8 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
     if (selecoes.clienteId || selecoes.vendedorId || selecoes.formaId || selecoes.tecidos?.length || selecoes.laser) await validarIntegracao(filialId);
     const plano = selecoes.planoId && selecoes.formaId ? await prisma.formaRecebimentoOlistPlano.findFirst({ where: { aplicativoId: filialId, formaOlistId: String(selecoes.formaId), planoPagamentoId: selecoes.planoId, planoPagamento: { ativo: true } }, select: { planoPagamento: { select: { nome: true } } } }) : null;
     if (selecoes.planoId && !plano) throw new ErroFila("Plano não associado à forma de recebimento nesta conta destinatária.");
-    const cliente = pessoasValidadas?.cliente ?? (selecoes.clienteId ? await obterCadastroFornecedorOlist(filialId, "contatos", selecoes.clienteId) : null);
-    const forma = selecoes.formaId ? await obterCadastroFornecedorOlist(filialId, "formas-recebimento", selecoes.formaId) : null;
+    const cliente = pessoasValidadas?.cliente ?? (selecoes.clienteId ? await cadastro("contatos", selecoes.clienteId, "clienteId") : null);
+    const forma = selecoes.formaId ? await cadastro("formas-recebimento", selecoes.formaId, "formaId") : null;
     if ((cliente && !pessoaAtiva(cliente)) || (forma && !ativo(forma))) throw new ErroFila("Cliente ou forma de recebimento inativos.");
     // Vendedores não possuem endpoint de detalhe. Valida por paginação na mesma conta.
     let vendedor: Record<string, unknown> | undefined = pessoasValidadas?.vendedor;
@@ -106,12 +115,13 @@ export async function validarSelecoesParciais(filialId: string, selecoes: Seleco
     if (selecoes.vendedorId && (!vendedor || !pessoaAtiva(vendedor))) throw new ErroFila("Vendedor indisponível na conta destinatária.");
     const nomes = new Map<string, string>();
     for (const produto of new Map((selecoes.tecidos ?? []).map(p => [p.id, p])).values()) {
-      const cadastro = await obterCadastroFornecedorOlist(filialId, "produtos", produto.id);
-      if (!ativo(cadastro)) throw new ErroFila("Produto ou serviço inativo na conta destinatária.");
-      nomes.set(`P:${produto.id}`, nome(cadastro));
+      const indice = selecoes.tecidos?.findIndex(t => t.id === produto.id) ?? 0;
+      const produtoRemoto = await cadastro("produtos", produto.id, `tecidos.${indice}.id`);
+      if (!ativo(produtoRemoto)) throw new ErroFila("Produto ou serviço inativo na conta destinatária.");
+      nomes.set(`P:${produto.id}`, nome(produtoRemoto));
     }
     if (selecoes.laser) {
-      const servico = await obterCadastroFornecedorOlist(filialId, "servicos", selecoes.laser.id);
+      const servico = await cadastro("servicos", selecoes.laser.id, "laser.id");
       if (!ativo(servico)) throw new ErroFila("Serviço de laser inativo na conta destinatária.");
       nomes.set(`S:${selecoes.laser.id}`, nome(servico));
     }

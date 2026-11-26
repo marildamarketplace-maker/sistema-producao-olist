@@ -26,6 +26,8 @@ test("criação bloqueia revisão sem plano e serviço laser e permite corrigir 
     await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Buscar").click()');
     await ate(() => cdp.avaliar<boolean>('document.body.innerText.includes("Corte a laser A")'), "Serviços ausentes");
     await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Corte a laser A").click()');
+    assert.equal(await cdp.avaliar('document.querySelector(\'[data-campo-comercial="laser.preco"] input\').disabled'), true);
+    assert.equal(await cdp.avaliar('document.querySelector(\'[data-campo-comercial="laser.preco"] input\').value'), "2");
     await continuar();
     await ate(() => cdp.avaliar<boolean>('document.querySelector("section h3").textContent==="Revisão"'), "Não avançou após corrigir");
     assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'), true);

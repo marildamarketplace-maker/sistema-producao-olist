@@ -17,7 +17,7 @@ import {
   obterDataAtualizacaoPadrao,
   type FiltroDataPedidosOlist,
 } from "@/lib/olist-filtro-data";
-import { LimiteRequisicoesOlistError, NenhumItemElegivelOlistError } from "@/lib/olist-errors";
+import { ErroCadastroOlist, resumirRejeicaoPedidoOlist, LimiteRequisicoesOlistError, NenhumItemElegivelOlistError } from "@/lib/olist-errors";
 
 /* =========================================================
  * CONFIGURAÇÕES
@@ -2372,7 +2372,8 @@ export async function criarPedidoOlistSeguro(aplicativoId: string, pedido: Recor
   } catch { throw new ErroCriacaoOlist("Sem confirmação da Olist. Resultado incerto.", false); }
   if (response.status < 200 || response.status >= 300) {
     const rejeitado = [400, 401, 403, 404, 422, 429].includes(response.status);
-    throw new ErroCriacaoOlist(`A Olist respondeu HTTP ${response.status}.${rejeitado ? " Corrija os dados ou a integração antes de tentar novamente." : " Resultado incerto."}`, rejeitado);
+    const detalhes = rejeitado ? resumirRejeicaoPedidoOlist(response.data) : "";
+    throw new ErroCriacaoOlist(`A Olist respondeu HTTP ${response.status}.${detalhes ? ` ${detalhes}` : rejeitado ? " Corrija os dados ou a integração antes de tentar novamente." : " Resultado incerto."}`, rejeitado);
   }
   return response.data as { id?: number; numeroPedido?: string };
 }
@@ -2380,11 +2381,13 @@ export async function obterCadastroFornecedorOlist(aplicativoId: string, recurso
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("ID Olist inválido.");
   const token = await getValidOlistAccessToken(aplicativoId);
   const config = await getAplicativoOlistConfig(aplicativoId);
-  const response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) => axios.get(
+  let response;
+  try { response = await executarComRenovacaoApos401(aplicativoId, token, (accessToken) => axios.get(
     new URL(`${recurso}/${id}`, normalizarBaseUrl(config.apiBaseUrl)).toString(), {
       headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20_000, validateStatus: () => true,
-    }));
-  if (response.status < 200 || response.status >= 300 || !response.data || typeof response.data !== "object" || Number(response.data.id) !== id) throw new Error("Cadastro indisponível na conta Olist da filial.");
+    })); } catch { throw new ErroCadastroOlist(recurso, null, "REDE"); }
+  if (response.status < 200 || response.status >= 300) throw new ErroCadastroOlist(recurso, response.status, "HTTP");
+  if (!response.data || typeof response.data !== "object" || Number(response.data.id) !== id) throw new ErroCadastroOlist(recurso, response.status, "RESPOSTA");
   return response.data as Record<string, unknown>;
 }
 

@@ -24,4 +24,17 @@ test("plano pendente abre o campo, mostra a correção e preserva as demais sele
     assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'), true);
   }
   assert.deepEqual(cdp.erros, []);
+  for (const width of [390, 1440]) {
+    await cdp.pedir("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+    await cdp.pedir("Page.navigate", { url: `${url}?dadosCriacao=1&vinculado=1&falhaCadastro=1&rejeitado=1&tema=${width < 768 ? "dark" : "light"}` });
+    await ate(() => cdp.avaliar<boolean>('Boolean(document.querySelector("#abrir"))'), "Página ausente");
+    await cdp.avaliar('document.querySelector("#abrir").click()');
+    await ate(() => cdp.avaliar<boolean>('document.body.innerText.includes("A última tentativa foi rejeitada pela Olist")'), "Estado rejeitado não explicado");
+    assert.equal(await cdp.avaliar('document.body.innerText.includes("Parcela 1: valor ou configuração recusados")'), true);
+    await cdp.avaliar('[...document.querySelectorAll("button")].find(b=>b.textContent==="Revisar pedido").click()');
+    await ate(() => cdp.avaliar<boolean>('document.querySelector("[data-campo-comercial=formaId] input")?.getAttribute("aria-invalid")==="true"'), "Forma recusada não sinalizada");
+    assert.equal(await cdp.avaliar('document.activeElement.closest("[data-campo-comercial]")?.getAttribute("data-campo-comercial")'), "formaId");
+    assert.equal(await cdp.avaliar('document.documentElement.scrollWidth<=innerWidth'), true);
+  }
+
 });

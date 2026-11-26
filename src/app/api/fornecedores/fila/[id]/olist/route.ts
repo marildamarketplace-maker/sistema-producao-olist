@@ -18,6 +18,7 @@ import { marcarEnvioInterrompido, enviarFornecedor, envioBloqueado, envioExpirad
 import { obterPedidoOlistApi } from "@/lib/olist";
 import { consultarCadastrosFilaOlist, validarCadastros, nome, ErroFilaOlist as ErroFila } from "@/lib/fila-olist-cadastros";
 import { destinoFornecedorWhere } from "@/lib/fila-fornecedor-destino";
+import { ErroCadastroOlist } from "@/lib/olist-errors";
 
 export const maxDuration = 120;
 
@@ -43,7 +44,8 @@ async function filialValida(matrizId: string, filialId: string | null) {
 function falha(error: unknown) {
   if (error instanceof ErroAutorizacaoOlist) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof z.ZodError) return NextResponse.json(detalharErrosFilaOlist(error), { status: 400 });
-  if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message }, { status: error instanceof ErroFila ? error.status : 409 });
+  if (error instanceof ErroCadastroOlist) return NextResponse.json({ error: error.message }, { status: 502 });
+  if (error instanceof ErroFila || error instanceof ErroEnvioFornecedor || error instanceof ErroMontagemFornecedor) return NextResponse.json({ error: error.message, ...(error instanceof ErroFila && error.campos ? { campos: error.campos } : {}) }, { status: error instanceof ErroFila ? error.status : 409 });
   return NextResponse.json({ error: "Não foi possível concluir a operação. Verifique a integração da conta destinatária e tente atualizar a fila." }, { status: 502 });
 }
 const resposta = (value: unknown) => NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
