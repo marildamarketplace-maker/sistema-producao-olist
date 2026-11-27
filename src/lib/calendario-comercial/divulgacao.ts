@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { catalogoComercial } from "./catalogo";
-import { montarPlanejamento, REGIOES } from "./planejamento";
+import { mesesDivulgacao, montarPlanejamento, REGIOES } from "./planejamento";
 import type { PotencialCompra } from "./potencial-compra";
 
 export type OrdemDivulgacao = "estoque_desc" | "estoque_asc" | "prioridade";
@@ -13,16 +13,20 @@ export const filtrosDivulgacaoSchema = z.object({
 }).strict();
 export type FiltrosDivulgacao = z.infer<typeof filtrosDivulgacaoSchema>;
 export type EventoDivulgacao = {
-  id: string; nome: string; potencial: PotencialCompra["nivel"]; peso: number;
+  id: string; nome: string; potencial: PotencialCompra["nivel"]; peso: number; ultimoMes?: boolean;
 };
 const pesos: Record<PotencialCompra["nivel"], number> = { "Muito alto": 2, Alto: 1.6, Moderado: 1.3, Baixo: 1 };
 export function eventosParaDivulgar({ mes, regiao }: FiltrosDivulgacao): EventoDivulgacao[] {
   return montarPlanejamento(catalogoComercial, {
     mes, regioes: regiao === "Nacional" ? ["Nacional"] : ["Nacional", regiao],
     visao: "mensal", etapa: "divulgar",
-  })[mes - 1].divulgar.map(({ evento }) => ({
-    id: evento.id, nome: evento.nome, potencial: evento.potencialCompra.nivel, peso: pesos[evento.potencialCompra.nivel],
-  }));
+  })[mes - 1].divulgar.map((ocorrencia) => {
+    const { evento } = ocorrencia;
+    const janela = mesesDivulgacao(ocorrencia);
+    const ultimoMes = janela.length < 12 && janela[janela.length - 1] === mes;
+    return { id: evento.id, nome: evento.nome, potencial: evento.potencialCompra.nivel,
+      ultimoMes, peso: Number((pesos[evento.potencialCompra.nivel] * (ultimoMes ? 1.3 : 1)).toFixed(2)) };
+  });
 }
 export type PerfilDivulgacao = "estoque" | "saidas" | "sem_estoque";
 export type ProdutoDivulgacao = {

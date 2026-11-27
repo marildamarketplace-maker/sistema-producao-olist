@@ -22,6 +22,7 @@ const religioso = (id: string, nome: string, mes: number, dia: number, estampas:
 
 export const catalogoComercial: Evento[] = [
   evento("verao", "Verão, praia e férias", "Temporadas/comercial", periodo(12, 2), LP, "Coqueiros, conchas, ondas, frutas, flores grandes e composição náutica.", {
+    janelaDivulgacao: { inicioMes: 12, fimMes: 2 },
     destaques: [
       { regiao: "Nordeste", texto: "Valorizar paisagens e referências do litoral atendido, sem tratar toda a região como uma única estética." },
       { regiao: "Sudeste", texto: "Direcionar divulgação ao litoral de SP, RJ e ES; separar das campanhas voltadas ao interior." },
@@ -75,10 +76,10 @@ export const catalogoComercial: Evento[] = [
   evento("professores", "Dia dos Professores", "Temporadas/comercial", fix(10, 15), ["Lenços", "Painéis"], "Livros, flores e educação; opções para homenagem e presente."),
   evento("halloween", "Halloween", "Festas populares", fix(10, 31), FP, "Abóboras, fantasmas, morcegos e teias; coleção específica para públicos interessados."),
   evento("novembro-azul", "Novembro Azul", "Conscientização", periodo(11), ["Lenços", "Painéis"], "Composições para campanhas de saúde do homem.", { fontes: [saude] }),
-  evento("consciencia-negra", "Consciência Negra", "Conscientização", fix(11, 20), LFP, "Valorização da identidade negra e cultura afro-brasileira.", { recomendacao: "Contextualizar referências e creditar artistas quando aplicável. Não tratar culturas africanas distintas como uma estética única.", fontes: [fonte("Ministério da Cultura", "https://www.gov.br/cultura/pt-br")] }),
+  evento("consciencia-negra", "Consciência Negra", "Conscientização", fix(11, 20), LFP, "Valorização da identidade negra e cultura afro-brasileira.", { janelaDivulgacao: { inicioMes: 11, fimMes: 11 }, recomendacao: "Contextualizar referências e creditar artistas quando aplicável. Não tratar culturas africanas distintas como uma estética única.", fontes: [fonte("Ministério da Cultura", "https://www.gov.br/cultura/pt-br")] }),
   evento("advento", "Advento", "Religioso", { tipo: "advento" }, FP, "Velas, coroas, estrelas e preparação para o Natal.", { recomendacao: "Consultar o calendário litúrgico para atividades específicas. Esta coleção acompanha o período de preparação para o Natal." }),
   religioso("conceicao", "Nossa Senhora da Conceição", 12, 8, "Flores e composição mariana."),
-  evento("natal", "Natal", "Temporadas/comercial", fix(12, 25), FP, "Árvores, renas, laços e presentes; presépio e Sagrada Família em linha religiosa própria."),
+  evento("natal", "Natal", "Temporadas/comercial", fix(12, 25), FP, "Árvores, renas, laços e presentes; presépio e Sagrada Família em linha religiosa própria.", { janelaDivulgacao: { inicioMes: 11, fimMes: 12 } }),
   evento("reveillon", "Réveillon", "Temporadas/comercial", fix(12, 31), todos, "Branco, estrelas, ondas e detalhes dourados impressos, sem prometer acabamento metálico."),
   evento("dezembro-vermelho", "Dezembro Vermelho", "Conscientização", periodo(12), ["Painéis", "Lenços"], "Informação, respeito e conscientização sobre HIV/aids.", { fontes: [saude] }),
 

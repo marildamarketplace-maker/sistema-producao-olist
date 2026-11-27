@@ -19,6 +19,7 @@ export type Evento = {
   id: string; nome: string; regioes: Regiao[]; local?: string; categoria: Categoria;
   produtos: Produto[]; estampas: string; recomendacao: string; data: RegraData;
   divulgacao: "anterior" | "periodo" | "ambos";
+  janelaDivulgacao?: { inicioMes: number; fimMes: number };
   fontes: { titulo: string; url: string }[];
   confirmarProgramacao?: boolean;
   destaques?: { regiao: Regiao; texto: string }[];
@@ -64,6 +65,17 @@ export function filtrarEventos(eventos: Evento[], filtros: Filtros) {
   return eventos.filter((evento) => evento.regioes.some((r) => r === "Nacional" || filtros.regioes.includes(r)));
 }
 
+/** Meses em ordem comercial, inclusive quando a janela atravessa dezembro. */
+export function mesesDivulgacao(o: Ocorrencia): number[] {
+  const janela = o.evento.janelaDivulgacao;
+  if (janela) return intervalo(janela.inicioMes, janela.fimMes);
+  if (o.meses.length === 12) return o.evento.divulgacao === "anterior" ? [] : o.meses;
+  const anterior = (o.meses[0] + 10) % 12 + 1;
+  if (o.evento.divulgacao === "anterior") return [anterior];
+  if (o.evento.divulgacao === "periodo") return o.meses;
+  return [...new Set([anterior, ...o.meses])];
+}
+
 export function montarPlanejamento(eventos: Evento[], filtros: Filtros): MesPlanejamento[] {
   const ocorrencias = [...new Map(filtrarEventos(eventos, filtros).map((e) => [e.id, e])).values()]
     .map((e) => resolverOcorrencia(e)).sort((a, b) => a.evento.nome.localeCompare(b.evento.nome, "pt-BR"));
@@ -72,7 +84,7 @@ export function montarPlanejamento(eventos: Evento[], filtros: Filtros): MesPlan
     const anterior = (o: Ocorrencia) => o.meses.length < 12 && (o.meses[0] + 10) % 12 + 1 === mes;
     return { mes,
       cadastrar: ocorrencias.filter(anterior),
-      divulgar: ocorrencias.filter((o) => (o.evento.divulgacao !== "periodo" && anterior(o)) || (o.evento.divulgacao !== "anterior" && o.meses.includes(mes))),
+      divulgar: ocorrencias.filter((o) => mesesDivulgacao(o).includes(mes)),
       acontecendo: ocorrencias.filter((o) => o.meses.includes(mes)),
     };
   });

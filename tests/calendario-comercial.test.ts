@@ -53,7 +53,7 @@ test("conscientização divulga no próprio mês e anterior é respeitado", () =
   const meses = montarPlanejamento(catalogoComercial, filtros);
   assert.ok(!ids(meses[8].divulgar).includes("outubro-rosa"));
   assert.ok(ids(meses[9].divulgar).includes("outubro-rosa"));
-  const anterior = montarPlanejamento([{ ...evento("natal"), divulgacao: "anterior" }], filtros);
+  const anterior = montarPlanejamento([{ ...evento("natal"), janelaDivulgacao: undefined, divulgacao: "anterior" }], filtros);
   assert.equal(anterior[10].divulgar.length, 1);
   assert.equal(anterior[11].divulgar.length, 0);
 });

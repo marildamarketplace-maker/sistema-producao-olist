@@ -55,6 +55,7 @@ export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onP
                 <p className="break-words font-medium text-slate-900"><span className="mr-2 text-xs text-slate-500">{pagina * PAGINA_DIVULGACAO + indice + 1}.</span>{produto.titulo}</p>
                 <p className="mt-1 text-xs text-slate-600">{perfis[produto.perfil]}</p>
                 {principal && <p className="mt-1 text-xs text-slate-600">{principal.nome} · potencial {principal.potencial.toLocaleLowerCase("pt-BR")}</p>}
+                {principal?.ultimoMes && <p className="mt-1 text-xs text-amber-700">Último mês de divulgação · bônus de 30% no peso do evento</p>}
                 <details className="mt-1"><summary className="flex min-h-11 cursor-pointer items-center rounded text-xs text-slate-600 underline focus-visible:outline focus-visible:outline-2">Por que aparece aqui?</summary>
                   <div className="space-y-1 pb-1 text-xs text-slate-600">
                     <p>Eventos: {produto.eventos.map((id) => porId.get(id)?.nome ?? id).join(" · ")}.</p>
@@ -86,6 +87,7 @@ export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onP
         <p>Entre produtos com saldo positivo, o ciclo destina 60% das posições a maior estoque com poucas saídas e 40% a mais saídas. Se um perfil não tiver candidatos suficientes, o outro completa.</p>
         <p>O corte parte da mediana das contagens do mês; quando ela coincide com o máximo apesar de haver contagens menores, recua ao nível imediatamente inferior. Empates não são separados artificialmente.</p>
         <p>Potencial dos eventos: muito alto 2 · alto 1,6 · moderado 1,3 · baixo 1. É uma avaliação editorial, não uma previsão de vendas. A diversidade considera eventos; variantes da mesma estampa podem aparecer próximas.</p>
+        <p>No último mês da janela de divulgação, o peso do evento recebe bônus de 30%, mantendo o equilíbrio 60/40. O bônus considera o mês selecionado; eventos permanentes não recebem bônus. Fora da janela, o evento não participa da recomendação.</p>
         <p>Produtos com saldo zero ou negativo ficam depois de todos os positivos. A janela de 12 meses afeta apenas a contagem de saídas; o estoque usa todo o histórico até a consulta.</p>
         <p>Dados são consultados a cada página. Mudanças de estoque ou associações podem repetir ou deslocar produtos entre páginas. Atualizar volta ao início da lista.</p>
       </div>

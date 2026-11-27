@@ -134,3 +134,24 @@ padrão, vale a distribuição 60/40 e a diversidade por eventos já descritas. 
 Não há consulta adicional, alteração de payload nem nova migration nesta mudança.
 Testes em PostgreSQL em memória cobrem ambas as direções em duas páginas,
 indisponíveis no final, deduplicação e validação do parâmetro.
+
+## Janelas mensais e encerramento
+
+O catálogo aceita `janelaDivulgacao: { inicioMes, fimMes }`, inclusiva e recorrente,
+com passagem de dezembro para janeiro. Ela prevalece sobre a regra derivada de
+`divulgacao` e afeta tanto a aba de divulgação do calendário como a recomendação.
+Sem configuração explícita, a janela continua derivada do período e da regra
+anterior/período/ambos. Datas de celebração e meses de cadastro não são alterados.
+Natal usa novembro–dezembro; Consciência Negra (campanha afro de novembro) usa
+novembro–novembro; verão usa dezembro–fevereiro, sem antecipação em novembro.
+
+No último mês da janela, o peso do potencial é multiplicado por 1,30, arredondado
+a duas casas. Isso aumenta o peso relativo do evento, não garante 30% das posições
+nem coloca um evento de baixo potencial acima de todos os demais. O ciclo 60/40
+continua aplicado entre perfis; a diversidade ponderada entre eventos e a
+exclusão de eventos fora da janela continuam no banco antes da paginação.
+Janelas permanentes de 12 meses não têm bônus. A referência é sempre o mês
+selecionado, sem corte por dia nem dependência da data atual. No modo manual por
+estoque, o peso continua como parte do desempate da prioridade comercial.
+A tela identifica o último mês e explica o bônus. Não exige migration, consultas
+extras ou integração externa; acrescenta um booleano por evento ao payload.

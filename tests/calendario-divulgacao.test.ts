@@ -9,11 +9,27 @@ const vazio={produtos:[],temMais:false,referenciaEm:"2026-11-27T12:00:00.000Z",i
 test("novembro inclui Natal antecipado e respeita a região sem duplicar nacionais",()=>{
   const nacional=eventosParaDivulgar({mes:11,regiao:"Nacional",pagina:0});
   assert.ok(nacional.some(e=>e.id==="natal"&&e.peso===2));
-  assert.ok(nacional.some(e=>e.id==="primavera"&&e.peso===1.6));
+  assert.ok(nacional.some(e=>e.id==="primavera"&&e.peso===2.08&&e.ultimoMes));
   const regional=eventosParaDivulgar({mes:6,regiao:"Norte",pagina:0});
   assert.ok(regional.some(e=>e.id==="parintins"));
   assert.ok(!eventosParaDivulgar({mes:6,regiao:"Nacional",pagina:0}).some(e=>e.id==="parintins"));
   assert.equal(new Set(regional.map(e=>e.id)).size,regional.length);
+});
+test("janelas mensais: campanha afro encerra em novembro e Natal recebe bônus em dezembro", () => {
+  const eventos = (mes: number) => eventosParaDivulgar({ mes, regiao: "Nacional", pagina: 0 });
+  assert.ok(eventos(11).some(e => e.id === "consciencia-negra" && e.ultimoMes && e.peso === 1.3));
+  assert.ok(!eventos(10).some(e => e.id === "consciencia-negra"));
+  assert.ok(!eventos(12).some(e => e.id === "consciencia-negra"));
+  assert.ok(eventos(11).some(e => e.id === "natal" && !e.ultimoMes && e.peso === 2));
+  assert.ok(eventos(12).some(e => e.id === "natal" && e.ultimoMes && e.peso === 2.6));
+  assert.ok(!eventos(1).some(e => e.id === "natal"));
+});
+test("janela atravessa o ano e eventos permanentes não recebem urgência artificial", () => {
+  const eventos = (mes: number) => eventosParaDivulgar({ mes, regiao: "Nordeste", pagina: 0 });
+  for (const mes of [12, 1]) assert.equal(eventos(mes).find(e => e.id === "verao")?.ultimoMes, false);
+  assert.equal(eventos(2).find(e => e.id === "verao")?.ultimoMes, true);
+  for (const mes of [3, 11]) assert.ok(!eventos(mes).some(e => e.id === "verao"));
+  for (let mes = 1; mes <= 12; mes++) assert.equal(eventos(mes).find(e => e.id === "vaquejadas")?.ultimoMes, false);
 });
 test("fronteira recusa filtros arbitrários, mês/região inválidos e paginação excessiva",async()=>{
   for(const entrada of [{mes:11,ordem:"estoque; DROP TABLE produtos"},{mes:0},{mes:13},{mes:11,regiao:"xxx"},{mes:11,pagina:-1},{mes:11,pagina:10001},{mes:11,pagina:0.5},{mes:11,aplicativoId:app},{mes:11,eventos:["juninas"]}]) {
