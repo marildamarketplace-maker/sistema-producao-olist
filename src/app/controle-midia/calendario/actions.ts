@@ -69,3 +69,34 @@ export async function salvarProdutosCalendario(token: string, entrada: unknown) 
       ? erro.message : "Não foi possível salvar as associações. Verifique sua sessão e tente novamente." };
   }
 }
+
+export async function validarImportacaoCalendario(token: string, entrada: unknown) {
+  const { entradaImportacaoSchema } = await import("@/lib/calendario-comercial/importacao");
+  const { previaImportacaoCalendario } = await import("@/lib/calendario-comercial/importacao-repository");
+  const dados = entradaImportacaoSchema.safeParse(entrada);
+  if (!dados.success || new TextEncoder().encode(JSON.stringify(dados.data)).length > 750000) {
+    return { ok: false as const, erro: "Arquivo inválido ou muito grande. Limite de 5.000 registros e 750 KB de dados de associação." };
+  }
+  try {
+    const aplicativoId = await aplicativoCalendario(token);
+    return { ok: true as const, previa: await previaImportacaoCalendario(aplicativoId, dados.data) };
+  } catch {
+    return { ok: false as const, erro: "Não foi possível validar a importação. Confira o acesso e os limites do arquivo." };
+  }
+}
+
+export async function importarLoteCalendario(token: string, entrada: unknown) {
+  const dados = z.object({ eventoId: eventoSchema, skus: z.array(z.string().trim().min(1).max(255)).min(1).max(100) }).strict().safeParse(entrada);
+  if (!dados.success || new Set(dados.data.skus).size !== dados.data.skus.length) return { ok: false as const, erro: "Lote inválido. Use até 100 SKUs únicos e um evento válido." };
+  try {
+    const aplicativoId = await aplicativoCalendario(token);
+    const produtos = await prisma.produto.findMany({
+      where: { aplicativoId, ativo: true, sku: { in: dados.data.skus } }, select: { id: true }, take: 100,
+    });
+    if (produtos.length !== dados.data.skus.length) return { ok: false as const, erro: "Um SKU foi desativado ou não está disponível neste aplicativo. Valide o CSV novamente." };
+    await salvarProdutosEvento(aplicativoId, { eventoId: dados.data.eventoId, adicionar: produtos.map(p => p.id), remover: [] });
+    return { ok: true as const, processados: produtos.length };
+  } catch {
+    return { ok: false as const, erro: "Não foi possível confirmar este lote. Os lotes anteriores estão preservados; tente novamente ou valide o CSV para retomar." };
+  }
+}

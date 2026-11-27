@@ -144,7 +144,8 @@ function CalendarioConteudo() {
   // Renovar credenciais preserva a seleção; trocar identidade/aplicativo a descarta.
   const escopoAssociacoes = JSON.stringify([session?.user?.id, usuario?.id, usuario?.aplicativo_id]);
   return <ProdutosEventosProvider key={escopoAssociacoes} token={token ?? ""} eventos={eventos ? eventosVisiveis : []}><div className="min-w-0 space-y-6">
-    <PageHeader title="Calendário Comercial" description="Planejamento fixo de janeiro a dezembro: produtos, divulgação e celebrações." />
+    <PageHeader title="Calendário Comercial" description="Planejamento fixo de janeiro a dezembro: produtos, divulgação e celebrações."
+      actions={<Link href="/controle-midia/calendario/importar" className={controle}>Importar associações CSV</Link>} />
     <section aria-label="Planejamento do calendário" className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="titulo-planejamento" className="text-xl font-semibold text-slate-900">{filtros.visao === "mensal" ? `Planejamento de ${MESES[filtros.mes - 1].toLocaleLowerCase("pt-BR")}` : "Planejamento anual"}</h2>
