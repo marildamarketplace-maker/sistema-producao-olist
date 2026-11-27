@@ -1,13 +1,8 @@
--- CONTRAÇÃO: executar somente após o runbook docs/unificacao-recebimento.md.
--- O gate precisa ser definido na MESMA sessão da aplicação deste arquivo.
+-- ETAPA COMPATÍVEL: não remove dados nem estruturas legadas.
+-- A contração destrutiva foi separada em scripts/sql/contrair-recebimento-legado.sql.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
-DO $$ BEGIN
-  IF current_setting('app.unificacao_recebimento_pronta', true) IS DISTINCT FROM 'sim' THEN
-    RAISE EXCEPTION 'Confirme backup, novas associações e retirada de consumidores antigos conforme o runbook de recebimento';
-  END IF;
-END $$;
 -- Serializa admissão de novas execuções com a mudança da configuração.
 LOCK TABLE olist_sync_configuracao IN EXCLUSIVE MODE;
 DO $$ BEGIN
@@ -33,7 +28,6 @@ SET completa_em = NULL, watermark_confirmado = NULL,
     incremental_validado = false, incremental_validado_em = NULL,
     geracao = geracao + 1, updated_at = now()
 WHERE configuracao_id IN (SELECT id FROM configuracoes_recebimento_ajustadas);
--- Não copiar associações: IDs de pagamento e recebimento são recursos distintos.
-DROP TABLE forma_pagamento_olist_plano;
-ALTER TABLE usuario DROP COLUMN pode_visualizar_olist_formas_pagamento;
+-- Preservar associações e permissão legadas nesta etapa compatível.
+-- A exclusão exige o runbook e scripts/sql/contrair-recebimento-legado.sql.
 COMMIT;

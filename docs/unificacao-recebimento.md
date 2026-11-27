@@ -6,7 +6,24 @@ sendo o plano local, vinculado por `forma_recebimento_olist_plano` e aplicativo.
 `plano_pagamento` é compartilhada com fornecedores e permanece intacta.
 Não existe conversão de IDs ou cópia das antigas associações de pagamento.
 
-## Implantação em duas etapas
+## Migration compatível e contração separada
+
+Em 27/11/2026, a migration `20261125211000_unificacao_recebimento`, que ainda
+não tinha execução concluída neste banco, foi revisada: agora ajusta configurações,
+default e cobertura sem remover a tabela de pagamento nem a permissão antiga.
+Não exige o gate de exclusão; mantém o bloqueio contra sincronizações ativas.
+O SQL original de contração foi preservado integralmente em
+`scripts/sql/contrair-recebimento-legado.sql`. Ele continua exigindo todos os
+pré-requisitos abaixo e a confirmação explícita na mesma sessão. Não registrar
+a contração manual como realizada ao aplicar a migration compatível.
+
+Se a versão antiga falhou: conferir rollback da transação, marcar a tentativa como
+`--rolled-back`, executar somente a migration revisada e registrar `--applied`.
+Não executar deploy global sem reconciliar as demais migrations. Em outro ambiente
+que já tenha concluído a versão destrutiva, reconciliar o checksum separadamente;
+não reaplicar nem sobrescrever histórico automaticamente.
+
+## Pré-requisitos da contração manual
 
 1. Faça backup verificável de `usuario`, `forma_pagamento_olist_plano`,
    `olist_sync_configuracao`, `olist_sync_cobertura` e snapshots/prévias/tentativas.
@@ -26,7 +43,7 @@ Não existe conversão de IDs ou cópia das antigas associações de pagamento.
 5. Drene as execuções ativas. Não cancele cegamente operações com efeito remoto:
    concilie resultados inconclusivos primeiro. Confira reservas de pedidos existentes;
    seus payloads, históricos e IDs de tentativa não podem ser substituídos.
-6. Execute a migration de contração `20261125211000_unificacao_recebimento`
+6. Execute o script de contração `scripts/sql/contrair-recebimento-legado.sql`
    somente após comprovar esses critérios. Ela exige que a mesma sessão SQL tenha
    `SET app.unificacao_recebimento_pronta = 'sim'`. O gate não deve ser configurado
    em variáveis globais do banco, no pool ou automaticamente pelo deploy.
@@ -77,5 +94,25 @@ TypeScript, lint e build passaram. Os testes de navegador incluem 390px/1440px e
 os temas, com mocks, sem dispositivo físico ou pedido real. A suíte antiga
 `tests/fila-olist-origem-api.test.ts` apresentou as mesmas falhas numa cópia isolada
 específica do HEAD anterior (9 falhas), portanto não foi alterada neste escopo.
-As migrations foram revisadas, mas não executadas nem ensaiadas em PostgreSQL local;
-o ensaio e as verificações de produção continuam como gates antes da contração.
+A etapa compatível foi ensaiada em PostgreSQL WASM com preservação do legado,
+remoção da entidade legada de configurações, invalidação seletiva de cobertura e
+rollback por execução ativa. A contração manual foi testada quanto ao bloqueio sem
+confirmação; backup/restauração e demais gates continuam obrigatórios antes dela.
+
+## Aplicação verificada em 27/11/2026
+
+No projeto Supabase `junjcjuucnoyiuybhyni`, a tentativa abortada foi marcada como
+revertida, o arquivo compatível foi executado com sucesso e seu checksum foi
+registrado com `prisma migrate resolve --applied`. Consulta posterior confirmou:
+zero migrations com falha pendente, migration concluída, default de entidades
+`PRODUTO/CONTATO/VENDEDOR`, 107 associações de pagamento e 17 de recebimento
+preservadas, além da coluna de permissão legada presente. Antes da execução havia
+zero sincronizações ativas, zero configurações com `FORMA_PAGAMENTO` e zero
+permissões antigas sem transferência. Não foram alterados pedidos ou associações
+comerciais. Isso não comprova retirada de consumidores antigos nem backup de
+contração: o script destrutivo permanece sem execução e com seus gates originais.
+
+A migration `20261127130000_calendario_produtos` também estava sem registro apesar
+de já ter sido executada manualmente. Após conferir colunas, chave composta em
+produtos, PK/FKs com escopo por aplicativo, índice, RLS habilitado e ausência de
+grants públicos, seu histórico foi reconciliado com `resolve --applied`, sem DDL.
