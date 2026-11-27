@@ -98,3 +98,11 @@ export async function prepararImportacao(entrada: EntradaImportacao, deps: {
   }
   return previa;
 }
+
+export const importacaoCompletaSchema = z.object({
+  vinculos: z.array(z.object({ sku: z.string().trim().min(1).max(255),
+    eventoId: z.string().refine(id => catalogoComercial.some(e => e.id === id), "Evento inválido."),
+  }).strict()).min(1).max(10000),
+}).strict().refine(dados => new Set(dados.vinculos.map(v => JSON.stringify([v.sku, v.eventoId]))).size === dados.vinculos.length,
+  "Vínculos duplicados.").refine(dados => new Set(dados.vinculos.map(v => v.sku)).size <= 5000, "No máximo 5.000 SKUs por arquivo.");
+export type ImportacaoCompleta = z.infer<typeof importacaoCompletaSchema>;

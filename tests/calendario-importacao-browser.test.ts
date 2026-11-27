@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { abrirChromeLocal, ate, chrome } from "./helpers/chrome-local";
 
-test("importação CSV: prévia, opções, lotes, falha parcial e retomada em mobile/desktop",{skip:chrome?false:"Chrome indisponível",timeout:60000},async t=>{
+test("importação CSV: prévia, opções, gravação integral e falha atômica em mobile/desktop",{skip:chrome?false:"Chrome indisponível",timeout:60000},async t=>{
   const pasta=await mkdtemp(path.join(tmpdir(),"calendario-csv-"));t.after(()=>rm(pasta,{recursive:true,force:true}));
   const arquivo=path.join(pasta,"associacoes.csv");
   await writeFile(arquivo,'\ufeffSKU;Evento principal ID;Eventos adicionais IDs;Tipo associacao\r\n'+Array.from({length:101},(_,i)=>`SKU-${i};natal;advento;Direta`).join('\r\n')+'\r\nSKU-sugestao;natal;;Sugestão comercial\r\nAUSENTE;natal;;Direta\r\n');
@@ -32,9 +32,11 @@ test("importação CSV: prévia, opções, lotes, falha parcial e retomada em mo
   assert.equal(await avaliar('document.querySelectorAll("input[type=checkbox]:checked").length'),0);
   await clicar("Importar 101 vínculos válidos");
   await ate(()=>avaliar<boolean>('document.body.textContent.includes("Falha simulada")'),"Falha parcial não exibida");
-  assert.equal(await avaliar('window.importacaoTeste.total()'),101);
-  await clicar("Retomar importação");
-  await ate(()=>avaliar<boolean>('document.body.textContent.includes("Importação concluída: 101 vínculos confirmados")'),"Retomada não concluiu");
+  assert.equal(await avaliar('window.importacaoTeste.total()'),0);
+  await clicar("Validar CSV");
+  await ate(()=>avaliar<boolean>('document.body.textContent.includes("101 vínculos novos")'),"Não revalidou");
+  await clicar("Importar 101 vínculos válidos");
+  await ate(()=>avaliar<boolean>('document.body.textContent.includes("Importação concluída: 101 vínculos confirmados")'),"Importação integral não concluiu");
   assert.equal(await avaliar('window.importacaoTeste.total()'),101);
   await clicar("Validar CSV");await ate(()=>avaliar<boolean>('document.body.textContent.includes("101 já associados")'),"Não reconciliou vínculos salvos");
   for(const largura of [390,1440])for(const dark of [false,true]){

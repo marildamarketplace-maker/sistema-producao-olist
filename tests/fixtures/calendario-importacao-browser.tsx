@@ -11,12 +11,12 @@ export async function validarImportacaoCalendario(_token:string,entrada:unknown)
     existentes:async pares=>pares.filter(p=>salvos.has(`${p.produtoId}:${p.eventoId}`)),
   })};
 }
-export async function importarLoteCalendario(_token:string,lote:{eventoId:string;skus:string[]}){
+export async function importarArquivoCalendario(_token:string,arquivo:{vinculos:{eventoId:string;sku:string}[]}){
   chamadas++;
-  for(const sku of lote.skus)salvos.add(`${sku}:${lote.eventoId}`);
-  // Simula confirmação perdida após o commit: retomar deve ser idempotente.
-  if(chamadas===2&&!falhou){falhou=true;return {ok:false,erro:"Falha simulada. Retome para continuar."};}
-  return {ok:true,processados:lote.skus.length};
+  if(!falhou){falhou=true;return {ok:false,erro:"Falha simulada. Nenhum vínculo foi salvo."};}
+  const antes=salvos.size;
+  for(const v of arquivo.vinculos)salvos.add(`${v.sku}:${v.eventoId}`);
+  return {ok:true,processados:arquivo.vinculos.length,adicionados:salvos.size-antes};
 }
 declare global {interface Window {importacaoTeste:{total:()=>number;chamadas:()=>number}}}
 window.importacaoTeste={total:()=>salvos.size,chamadas:()=>chamadas};

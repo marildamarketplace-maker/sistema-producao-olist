@@ -100,3 +100,18 @@ export async function importarLoteCalendario(token: string, entrada: unknown) {
     return { ok: false as const, erro: "Não foi possível confirmar este lote. Os lotes anteriores estão preservados; tente novamente ou valide o CSV para retomar." };
   }
 }
+
+export async function importarArquivoCalendario(token: string, entrada: unknown) {
+  const { importacaoCompletaSchema } = await import("@/lib/calendario-comercial/importacao");
+  const { salvarImportacaoCompleta } = await import("@/lib/calendario-comercial/importacao-repository");
+  const dados = importacaoCompletaSchema.safeParse(entrada);
+  if (!dados.success || new TextEncoder().encode(JSON.stringify(dados.data)).length > 750000) {
+    return { ok: false as const, erro: "Importação inválida. Limite de 10.000 vínculos únicos e 750 KB de dados de associação." };
+  }
+  try {
+    const aplicativoId = await aplicativoCalendario(token);
+    return { ok: true as const, ...await salvarImportacaoCompleta(aplicativoId, dados.data.vinculos) };
+  } catch {
+    return { ok: false as const, erro: "Não foi possível confirmar a importação inteira. Verifique se os produtos continuam ativos e valide o CSV novamente. Se houve perda de conexão, a nova validação identifica vínculos já salvos, sem duplicar." };
+  }
+}
