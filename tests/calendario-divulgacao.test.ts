@@ -35,9 +35,18 @@ test("aplicativo e eventos são resolvidos no servidor; edição de estoque tamb
   let consultas=0;
   const retorno=await consultarDivulgacao("token",{mes:11,pagina:2},{
     autenticar:async(token)=>{assert.equal(token,"token");return {...usuario,podeVisualizarEstoque:false,podeEditarEstoque:true};},
-    consultar:async(aplicativo,eventos,pagina,ordem)=>{assert.equal(ordem,"estoque_desc");consultas++;assert.equal(aplicativo,app);assert.equal(pagina,2);assert.ok(eventos.some(e=>e.id==="natal"));return vazio;},
+    consultar:async(aplicativo,eventos,pagina,ordem)=>{assert.equal(ordem,"prioridade");consultas++;assert.equal(aplicativo,app);assert.equal(pagina,2);assert.ok(eventos.some(e=>e.id==="natal"));return vazio;},
   });
   assert.equal(retorno.ok,true);assert.equal(consultas,1);
+});
+test("ordenação explícita permite análise por estoque e retorno à prioridade",async()=>{
+  for (const ordem of ["estoque_desc", "estoque_asc", "prioridade"] as const) {
+    const resultado = await consultarDivulgacao("token", { mes: 11, ordem }, {
+      autenticar: async () => usuario,
+      consultar: async (_app, _eventos, _pagina, recebida) => { assert.equal(recebida, ordem); return vazio; },
+    });
+    assert.equal(resultado.ok, true);
+  }
 });
 test("falhas de autenticação ou infraestrutura nunca expõem conteúdo interno",async()=>{
   for(const falhaAuth of [true,false]) {

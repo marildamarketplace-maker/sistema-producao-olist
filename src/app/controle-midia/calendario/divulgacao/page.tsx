@@ -7,7 +7,7 @@ import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
 import { escreverFiltros, MESES, mesAtualBrasil, REGIOES, type Regiao } from "@/lib/calendario-comercial/planejamento";
-import { filtrosDivulgacaoSchema, type ResultadoDivulgacao } from "@/lib/calendario-comercial/divulgacao";
+import { filtrosDivulgacaoSchema, type OrdemDivulgacao, type ResultadoDivulgacao } from "@/lib/calendario-comercial/divulgacao";
 import { carregarDivulgacao } from "./actions";
 import { controleDivulgacao, TabelaDivulgacao } from "./tabela-divulgacao";
 
@@ -19,7 +19,7 @@ function DivulgacaoConteudo() {
   const mes = Number(params.get("mes") ?? mesAtual);
   const regiao = params.get("regiao") ?? "Nacional";
   const pagina = Number(params.get("pagina") ?? 0);
-  const ordem = params.get("ordem") ?? "estoque_desc";
+  const ordem = params.get("ordem") ?? "prioridade";
   const filtros = filtrosDivulgacaoSchema.safeParse({ mes, regiao, pagina, ordem });
   const visao = params.get("visao") === "anual" ? "anual" : "mensal";
   const token = session?.access_token;
@@ -55,9 +55,9 @@ function DivulgacaoConteudo() {
     if (nova === 0) proximo.delete("pagina"); else proximo.set("pagina", String(nova));
     router.replace(`/controle-midia/calendario/divulgacao?${proximo}`, { scroll: false });
   }
-  function ordenarEstoque() {
+  function mudarOrdem(nova: OrdemDivulgacao) {
     const proximo = new URLSearchParams(consulta);
-    proximo.set("ordem", ordem === "estoque_desc" ? "estoque_asc" : "estoque_desc");
+    if (nova === "prioridade") proximo.delete("ordem"); else proximo.set("ordem", nova);
     proximo.delete("pagina");
     focarResultado.current = true;
     router.replace(`/controle-midia/calendario/divulgacao?${proximo}`, { scroll: false });
@@ -82,10 +82,20 @@ function DivulgacaoConteudo() {
           <select value={regiao} className="input mt-1 min-h-11" onChange={(e) => { const valor = REGIOES.find((r) => r === e.target.value); if (valor) mudarFiltros(mes, valor); }}>
             {REGIOES.map((nome) => <option key={nome}>{nome}</option>)}
           </select></label>
+        <label className="min-w-0 text-sm font-medium text-slate-700">Ordenar por
+          <select value={ordem} className="input mt-1 min-h-11" onChange={(e) => {
+            const valor = e.target.value;
+            if (valor === "prioridade" || valor === "estoque_desc" || valor === "estoque_asc") mudarOrdem(valor);
+          }}>
+            <option value="prioridade">Prioridade para divulgar</option>
+            <option value="estoque_desc">Maior estoque</option>
+            <option value="estoque_asc">Menor estoque</option>
+          </select>
+        </label>
       </div>
       <div ref={resultadoRef} tabIndex={-1} className="min-w-0 scroll-mt-4 outline-offset-4">
       <TabelaDivulgacao dados={resultado?.ok ? resultado.dados : null} eventos={resultado?.ok ? resultado.eventos : []}
-        ordem={filtros.data.ordem} onOrdenarEstoque={ordenarEstoque} pagina={pagina} carregando={!resultado} erro={resultado && !resultado.ok ? resultado.erro : ""}
+        ordem={filtros.data.ordem} onOrdenarEstoque={() => mudarOrdem(ordem === "estoque_desc" ? "estoque_asc" : "estoque_desc")} pagina={pagina} carregando={!resultado} erro={resultado && !resultado.ok ? resultado.erro : ""}
         onPagina={atualizarPagina} onAtualizar={atualizar} />
       </div>
     </>}

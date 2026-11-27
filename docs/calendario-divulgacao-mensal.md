@@ -122,13 +122,15 @@ já instaladas (`node --import tsx`, TypeScript e Next locais).
 
 ## Ordenação por estoque
 
-A tela inicia por `estoque_desc`. Clicar no cabeçalho **Estoque atual** alterna
+A tela inicia por `prioridade` (Prioridade para divulgar). O seletor **Ordenar por**
+permite restaurar essa recomendação ou escolher maior/menor estoque.
+Clicar no cabeçalho **Estoque atual** alterna
 `estoque_asc`/`estoque_desc`, volta à primeira página e mantém mês/abrangência.
 O parâmetro é validado no servidor por enum; a SQL usa fragmentos fixos.
 A ordenação considera toda a lista antes de paginar (20 + 1 registros).
 Produtos com saldo não positivo continuam ao final em ambas as direções.
-A prioridade comercial anterior desempata estoques iguais; o modo `prioridade`
-continua aceito pelo contrato. O cabeçalho anuncia a direção com `aria-sort`.
+Na ordenação manual, a prioridade comercial desempata estoques iguais. Na ordem
+padrão, vale a distribuição 60/40 e a diversidade por eventos já descritas. O cabeçalho anuncia a direção com `aria-sort`.
 Não há consulta adicional, alteração de payload nem nova migration nesta mudança.
 Testes em PostgreSQL em memória cobrem ambas as direções em duas páginas,
 indisponíveis no final, deduplicação e validação do parâmetro.

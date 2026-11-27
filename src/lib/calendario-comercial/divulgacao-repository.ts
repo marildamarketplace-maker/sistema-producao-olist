@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { montarConsultaDivulgacao, serializarPaginaDivulgacao } from "./divulgacao-consulta";
 import type { EventoDivulgacao, OrdemDivulgacao } from "./divulgacao";
 
-export async function listarDivulgacao(aplicativoId: string, eventos: EventoDivulgacao[], pagina: number, ordem: OrdemDivulgacao = "estoque_desc") {
+export async function listarDivulgacao(aplicativoId: string, eventos: EventoDivulgacao[], pagina: number, ordem: OrdemDivulgacao = "prioridade") {
   const referencia = new Date();
   // Somente leitura, sem worker ou integração externa. Limitar o statement é
   // essencial: LIMIT na resposta não limita a agregação necessária ao ranking.

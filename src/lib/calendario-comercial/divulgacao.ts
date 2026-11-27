@@ -54,7 +54,7 @@ export async function consultarDivulgacao(token: string, entrada: unknown, deps:
       return { ok: false, erro: "É necessário acesso ao calendário e ao estoque para consultar os produtos." };
     }
     const eventos = eventosParaDivulgar(filtros.data);
-    const dados = await deps.consultar(usuario.aplicativoId, eventos, filtros.data.pagina, filtros.data.ordem ?? "estoque_desc");
+    const dados = await deps.consultar(usuario.aplicativoId, eventos, filtros.data.pagina, filtros.data.ordem ?? "prioridade");
     return { ok: true, dados, eventos };
   } catch {
     return { ok: false, erro: "Não foi possível carregar os produtos para divulgação. Verifique sua sessão e tente novamente." };
