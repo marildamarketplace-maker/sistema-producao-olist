@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { consultarDivulgacao, eventosParaDivulgar, filtrosDivulgacaoSchema, type UsuarioDivulgacao } from "../src/lib/calendario-comercial/divulgacao";
+import { montarConsultaDivulgacao, serializarPaginaDivulgacao } from "../src/lib/calendario-comercial/divulgacao-consulta";
+
+const app="00000000-0000-4000-8000-000000000001";
+const usuario: UsuarioDivulgacao={ativo:true,aplicativoId:app,podeVisualizarTarefasMidia:true,podeVisualizarEstoque:true,podeEditarEstoque:false};
+const vazio={produtos:[],temMais:false,referenciaEm:"2026-11-27T12:00:00.000Z",inicioEm:"2025-11-27T12:00:00.000Z"};
+test("novembro inclui Natal antecipado e respeita a região sem duplicar nacionais",()=>{
+  const nacional=eventosParaDivulgar({mes:11,regiao:"Nacional",pagina:0});
+  assert.ok(nacional.some(e=>e.id==="natal"&&e.peso===2));
+  assert.ok(nacional.some(e=>e.id==="primavera"&&e.peso===1.6));
+  const regional=eventosParaDivulgar({mes:6,regiao:"Norte",pagina:0});
+  assert.ok(regional.some(e=>e.id==="parintins"));
+  assert.ok(!eventosParaDivulgar({mes:6,regiao:"Nacional",pagina:0}).some(e=>e.id==="parintins"));
+  assert.equal(new Set(regional.map(e=>e.id)).size,regional.length);
+});
+test("fronteira recusa filtros arbitrários, mês/região inválidos e paginação excessiva",async()=>{
+  for(const entrada of [{mes:0},{mes:13},{mes:11,regiao:"xxx"},{mes:11,pagina:-1},{mes:11,pagina:10001},{mes:11,pagina:0.5},{mes:11,aplicativoId:app},{mes:11,eventos:["juninas"]}]) {
+    assert.equal(filtrosDivulgacaoSchema.safeParse(entrada).success,false);
+    const retorno=await consultarDivulgacao("token",entrada,{autenticar:async()=>assert.fail(),consultar:async()=>assert.fail()});
+    assert.equal(retorno.ok,false);
+  }
+});
+test("sem sessão ou uma das famílias de permissão não há consulta a estoque",async()=>{
+  for(const token of ["", "t".repeat(16385)]) {
+    assert.equal((await consultarDivulgacao(token,{mes:11},{autenticar:async()=>assert.fail(),consultar:async()=>assert.fail()})).ok,false);
+  }
+  for(const invalido of [null,{...usuario,ativo:false},{...usuario,aplicativoId:null},{...usuario,podeVisualizarTarefasMidia:false},{...usuario,podeVisualizarEstoque:false}]) {
+    const retorno=await consultarDivulgacao("token",{mes:11},{autenticar:async()=>invalido,consultar:async()=>assert.fail("Não deve ler dados protegidos")});
+    assert.equal(retorno.ok,false);
+  }
+});
+test("aplicativo e eventos são resolvidos no servidor; edição de estoque também concede leitura",async()=>{
+  let consultas=0;
+  const retorno=await consultarDivulgacao("token",{mes:11,pagina:2},{
+    autenticar:async(token)=>{assert.equal(token,"token");return {...usuario,podeVisualizarEstoque:false,podeEditarEstoque:true};},
+    consultar:async(aplicativo,eventos,pagina)=>{consultas++;assert.equal(aplicativo,app);assert.equal(pagina,2);assert.ok(eventos.some(e=>e.id==="natal"));return vazio;},
+  });
+  assert.equal(retorno.ok,true);assert.equal(consultas,1);
+});
+test("falhas de autenticação ou infraestrutura nunca expõem conteúdo interno",async()=>{
+  for(const falhaAuth of [true,false]) {
+    const resultado=await consultarDivulgacao("token",{mes:11},{
+      autenticar:async()=>{if(falhaAuth)throw new Error("secret SQL postgres://senha");return usuario;},
+      consultar:async()=>{throw new Error("secret SQL postgres://senha");},
+    });
+    assert.equal(resultado.ok,false);
+    if(!resultado.ok)assert.doesNotMatch(resultado.erro,/secret|SQL|postgres|senha/);
+  }
+});
+test("SQL parametrizada usa projeção mínima, agregação global antes da página e limite de 21",()=>{
+  const referencia=new Date("2026-11-27T12:00:00Z");
+  const termo="'); DROP TABLE produtos; --";
+  const consulta=montarConsultaDivulgacao(app,[{id:termo,nome:"Teste",potencial:"Baixo",peso:1}],3,referencia);
+  assert.doesNotMatch(consulta.text,/DROP TABLE|SELECT \*|imagem_url|observacao|descricao_final/);
+  assert.ok(consulta.values.includes(termo));assert.ok(consulta.values.includes(app));
+  assert.ok(consulta.values.includes(21));assert.ok(consulta.values.includes(60));
+  assert.match(consulta.text,/percentile_disc/);assert.match(consulta.text,/GROUP BY v.id/);
+  assert.match(consulta.text,/m.aplicativo_id = \$\d+::uuid/);
+  assert.match(consulta.text,/ORDER BY o.posicao LIMIT \$\d+ OFFSET \$\d+/);
+  assert.ok(consulta.text.indexOf("LIMIT $",consulta.text.indexOf("pagina AS"))>consulta.text.indexOf("ordenados AS"));
+});
+test("serialização aceita inteiros exatos e recusa perda de precisão ou contagem negativa",()=>{
+  const datas={referenciaEm:new Date(vazio.referenciaEm),inicioEm:new Date(vazio.inicioEm)};
+  const linha={...datas,id:app,sku:"SKU",titulo:"Título",estoque:BigInt(12),saidas:"3",perfil:"estoque",eventoPrincipal:"natal",eventos:["natal"]};
+  assert.deepEqual(serializarPaginaDivulgacao([linha]).produtos.map(p=>[p.estoque,p.saidas]),[[12,3]]);
+  assert.throws(()=>serializarPaginaDivulgacao([{...linha,estoque:BigInt("9007199254740993")}]));
+  assert.throws(()=>serializarPaginaDivulgacao([{...linha,saidas:BigInt(-1)}]));
+  assert.throws(()=>serializarPaginaDivulgacao([{...linha,estoque:1.5}]));
+});

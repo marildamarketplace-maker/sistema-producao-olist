@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, Megaphone, PackagePlus } from "lucide-react";
 import { AccessGuard } from "@/components/access-guard";
 import { useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/page-header";
+import { BotaoProdutosEvento, ProdutosEventosProvider } from "./produtos-evento";
 import { carregarCalendario } from "./actions";
 import {
   MESES, REGIOES, escreverFiltros, mesAtualBrasil,
@@ -25,6 +27,7 @@ function ItemEvento({ ocorrencia, regioes }: { ocorrencia: Ocorrencia; regioes: 
     {ocorrencia.referencia && <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">Confirmar programação da edição · período de referência</p>}
     <p className="mt-2 text-xs font-medium text-slate-700">{evento.produtos.join(" · ")}</p>
     <p className="mt-1 text-sm text-slate-600">{evento.estampas}</p>
+    <BotaoProdutosEvento evento={evento} />
     <details className="mt-2">
       <summary className="flex min-h-11 cursor-pointer items-center rounded-md text-sm font-medium text-slate-700 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-500">Recomendações e fontes<span className="sr-only"> de {evento.nome}</span></summary>
       <div className="space-y-2 pt-2 text-xs text-slate-600">
@@ -86,6 +89,7 @@ function CalendarioConteudo() {
   const [modal, setModal] = useState<{ mes: number; etapa: Etapa } | null>(null);
   const token = session?.access_token;
   const permitido = Boolean(usuario?.podeVisualizarTarefasMidia);
+  const podeConsultarDivulgacao = permitido && Boolean(usuario?.podeVisualizarEstoque || usuario?.podeEditarEstoque);
 
   useEffect(() => {
     if (!token || !permitido) return;
@@ -134,7 +138,12 @@ function CalendarioConteudo() {
     { id: "acontecendo" as const, titulo: "Celebrações e temporadas", curto: "Celebrações", Icone: CalendarDays, cor: "border-l-slate-500" },
   ];
 
-  return <div className="min-w-0 space-y-6">
+  const eventosVisiveis = filtros.visao === "mensal"
+    ? selecionado[filtros.etapa].map((o) => o.evento.id)
+    : meses.flatMap((mes) => [...mes.cadastrar, ...mes.divulgar, ...mes.acontecendo].map((o) => o.evento.id));
+  // Renovar credenciais preserva a seleção; trocar identidade/aplicativo a descarta.
+  const escopoAssociacoes = JSON.stringify([session?.user?.id, usuario?.id, usuario?.aplicativo_id]);
+  return <ProdutosEventosProvider key={escopoAssociacoes} token={token ?? ""} eventos={eventos ? eventosVisiveis : []}><div className="min-w-0 space-y-6">
     <PageHeader title="Calendário Comercial" description="Planejamento fixo de janeiro a dezembro: produtos, divulgação e celebrações." />
     <section aria-label="Planejamento do calendário" className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -164,12 +173,21 @@ function CalendarioConteudo() {
               <button type="button" onClick={() => selecionarMes(mes.mes, id, true)} className="flex min-h-11 w-full items-center justify-between rounded-md text-xs font-semibold text-slate-600 focus-visible:outline focus-visible:outline-2"><span>{curto}</span><span>{mes[id].length}</span></button>
               <ul className="space-y-1">{mes[id].slice(0, 2).map((o) => <li key={o.evento.id}><button type="button" onClick={() => selecionarMes(mes.mes, id, true)} className={`min-h-11 w-full break-words rounded border-l-4 bg-slate-50 px-2 py-1.5 text-left text-xs leading-relaxed text-slate-700 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 ${cor}`}>{o.evento.nome}<span className="mt-1 block text-xs text-slate-500">Compra: {o.evento.potencialCompra.nivel} · {o.evento.potencialCompra.publico}</span></button></li>)}</ul>
               {mes[id].length > 2 && <button type="button" aria-haspopup="dialog" aria-label={`Ver todos os ${mes[id].length} itens de ${curto} de ${MESES[mes.mes - 1]}`} onClick={() => setModal({ mes: mes.mes, etapa: id })} className="min-h-11 rounded-md text-xs text-slate-600 underline focus-visible:outline focus-visible:outline-2">Ver mais {mes[id].length - 2}</button>}
+              {id === "divulgar" && podeConsultarDivulgacao && <Link className="inline-flex min-h-11 items-center rounded-md text-xs text-slate-700 underline focus-visible:outline focus-visible:outline-2"
+                href={`/controle-midia/calendario/divulgacao?${escreverFiltros({ ...filtros, mes: mes.mes, etapa: "divulgar" })}`}>
+                Produtos para divulgar<span className="sr-only"> em {MESES[mes.mes - 1]}</span>
+              </Link>}
               {!mes[id].length && <p className="py-2 text-xs text-slate-500">Sem itens previstos</p>}
             </div>)}</div>
           </section>)}
         </div>}
         {filtros.visao === "mensal" && <section id="planejamento-mes" tabIndex={-1} aria-labelledby="titulo-planejamento" className="scroll-mt-4 outline-offset-4">
           <div className="my-4 flex flex-wrap gap-2" aria-label="Etapa do planejamento">{etapas.map(({ id, titulo, Icone }) => <button key={id} type="button" aria-pressed={filtros.etapa === id} onClick={() => atualizar({ etapa: id })} className={`${controle} flex items-center gap-2 ${filtros.etapa === id ? "bg-slate-900 text-white" : ""}`}><Icone aria-hidden="true" className="h-4 w-4" />{titulo} ({selecionado[id].length})</button>)}</div>
+          {filtros.etapa === "divulgar" && podeConsultarDivulgacao && <div className="mb-4"><Link
+            href={`/controle-midia/calendario/divulgacao?${escreverFiltros(filtros)}`}
+            className={`${controle} inline-flex items-center gap-2 bg-slate-900 text-white`}>
+            <Megaphone aria-hidden="true" className="h-4 w-4" />Produtos para divulgar · {MESES[filtros.mes - 1]}
+          </Link></div>}
           <p role="status" className="mb-4 text-sm text-slate-600">{selecionado[filtros.etapa].length} itens · {etapas.find((e) => e.id === filtros.etapa)?.titulo}</p>
           {selecionado[filtros.etapa].length ? <ul className="grid items-start gap-3 lg:grid-cols-2">{selecionado[filtros.etapa].map((o) => <ItemEvento key={o.evento.id} ocorrencia={o} regioes={filtros.regioes} />)}</ul> : <p className="rounded-md bg-slate-50 p-4 text-sm text-slate-500">Nenhum item previsto nesta etapa. Selecione outra etapa, mês ou abrangência.</p>}
         </section>}
@@ -179,7 +197,7 @@ function CalendarioConteudo() {
     <details className="rounded-lg border border-slate-200 bg-white p-4"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-slate-700">Como interpretar os níveis de compra</summary><div className="space-y-2 text-sm text-slate-600"><p>Estimativa editorial para lenços, pareôs, forros de mesa e painéis. Não mede percentual de adesão da população, intenção de compra pesquisada ou vendas comprovadas.</p><p><strong>Muito alto:</strong> prioridade de coleção no mix. <strong>Alto:</strong> boa oportunidade no público indicado. <strong>Moderado:</strong> testar seleção e lotes direcionados. <strong>Baixo:</strong> priorizar encomendas e demanda identificada.</p><p>O público indicado é essencial: um nível alto regional não significa procura alta em todo o Brasil. Níveis de campanhas não avaliam a importância social da causa. Recalibrar com o histórico real da loja.</p><p>Contexto de mercado: <a className="underline" target="_blank" rel="noopener noreferrer" href="https://agenciasebrae.com.br/economia-e-politica/retorno-presencial-de-festas-juninas-aquece-mercado-dos-pequenos-negocios/">Sebrae — oportunidades juninas em vestuário e decoração</a>. A fonte não atribui estes níveis: a classificação é nossa avaliação comercial.</p></div></details>
     <p className="text-sm text-slate-600">Cadastro no mês anterior ao início. Divulgação conforme cada evento. Datas móveis aparecem em janelas de referência e precisam de confirmação.</p>
     {modal && eventos && filtros.visao === "anual" && <EventosModal mes={modal.mes} titulo={etapas.find((e) => e.id === modal.etapa)?.titulo ?? "Eventos"} itens={meses[modal.mes - 1][modal.etapa]} regioes={filtros.regioes} onFechar={() => setModal(null)} />}
-  </div>;
+  </div></ProdutosEventosProvider>;
 }
 
 export default function CalendarioPage() {

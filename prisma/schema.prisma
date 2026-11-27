@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Aplicativo {
+  produtosCalendario        CalendarioEventoProduto[]
   enviosPedidosManuais       EnvioPedidoManual[]
   id                        String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nome                      String
@@ -358,6 +359,7 @@ model ProdutoFornecedor {
 }
 
 model Produto {
+  eventosCalendario      CalendarioEventoProduto[]
   id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku                    String                         @unique
   imagemUrl              String?                        @map("imagem_url")
@@ -375,6 +377,7 @@ model Produto {
 
   @@index([idCadastroOlist], map: "idx_produtos_id_cadastro_olist")
   @@index([aplicativoId], map: "idx_produtos_aplicativo_id")
+  @@unique([id, aplicativoId], map: "produtos_id_aplicativo_key")
   @@map("produtos")
 }
 
@@ -1900,4 +1903,18 @@ model EnvioPedidoManual {
 
   @@unique([aplicativoId, pedidoOlistId], map: "uq_envio_manual_pedido_olist")
   @@map("envio_pedido_manual")
+}
+
+// O evento usa o ID estável do catálogo, sem ano.
+model CalendarioEventoProduto {
+  aplicativoId String     @map("aplicativo_id") @db.Uuid
+  eventoId     String     @map("evento_id") @db.VarChar(100)
+  produtoId    String     @map("produto_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  aplicativo   Aplicativo @relation(fields: [aplicativoId], references: [id], onDelete: Cascade)
+  produto      Produto    @relation(fields: [produtoId, aplicativoId], references: [id, aplicativoId], onDelete: Cascade)
+
+  @@id([aplicativoId, eventoId, produtoId])
+  @@index([produtoId, aplicativoId])
+  @@map("calendario_evento_produtos")
 }
