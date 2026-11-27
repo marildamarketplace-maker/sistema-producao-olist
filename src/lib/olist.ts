@@ -7,7 +7,7 @@ import { prepararTrocaSkuBaixa } from "@/lib/baixa-estoque-troca-sku";
 import { getAplicativoOlistConfig } from "@/lib/aplicativo";
 import { validarPayloadTokenOAuthOlist } from "@/lib/olist-oauth";
 import { prisma } from "@/lib/prisma";
-import { selecionarProdutoOlistPrioritario } from "@/lib/produto-olist-importacao";
+import { selecionarProdutoOlistPrioritario, tituloProdutoImportado } from "@/lib/produto-olist-importacao";
 import { calcularNecessidadeProducaoOlist } from "@/lib/necessidade-producao-olist";
 import {
   type DemandaProdutoOlist,
@@ -173,6 +173,7 @@ function isPrismaUniqueConstraintError(error: unknown) {
 }
 
 type ProdutoOlistListagem = {
+  nome?: string | null;
   id?: string | number;
   sku?: string | number | null;
   descricao?: string | null;
@@ -1205,6 +1206,7 @@ function normalizarProdutoOlist(produto: ProdutoOlistListagem) {
   return {
     sku,
     idCadastroOlist,
+    titulo: tituloProdutoImportado(produto),
     imagemUrl: null,
     ativo: situacao === SITUACAO_PRODUTO_ATIVO,
     dataCriacao: produto.dataCriacao,
@@ -1277,18 +1279,28 @@ export async function importarProdutosOlist(aplicativoId: string) {
   for (const produto of produtosPorSku.values()) {
     const existente = await prisma.produto.findUnique({
       where: { sku: produto.sku },
-      select: { id: true },
+      select: { id: true, aplicativoId: true },
     });
 
+    // O SKU é globalmente único; não sobrescrever cadastro de outra empresa.
+    if (existente && existente.aplicativoId !== aplicativoId) {
+      ignorados += 1;
+      skusIgnorados.push(produto.sku);
+      continue;
+    }
+
     await prisma.produto.upsert({
-      where: { sku: produto.sku },
+      where: { sku: produto.sku, aplicativoId },
       create: {
         sku: produto.sku,
+        aplicativoId,
+        titulo: produto.titulo,
         idCadastroOlist: produto.idCadastroOlist,
         imagemUrl: produto.imagemUrl,
         ativo: produto.ativo,
       },
       update: {
+        titulo: produto.titulo,
         idCadastroOlist: produto.idCadastroOlist,
         imagemUrl: produto.imagemUrl,
         ativo: produto.ativo,

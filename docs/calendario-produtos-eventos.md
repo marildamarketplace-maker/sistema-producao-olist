@@ -89,3 +89,21 @@ o uso do token atualizado no salvamento e a limpeza ao trocar usuário/aplicativ
 Essa regressão passou localmente, assim como os 51 testes relacionados,
 TypeScript e lint. A mudança não adiciona consultas ou payloads; mantém o
 recarregamento existente durante a renovação e não altera o impacto em egress.
+
+### Títulos do estoque importado
+
+A migration `20261127160000_produtos_titulo` adiciona `produtos.titulo`, opcional.
+A importação existente em **Estoque → Importar produtos da Olist** passa a salvar
+o nome recebido (`descricao`, ou `nome`), sem apagar um título anterior quando a
+resposta não o informa. O cadastro criado recebe o aplicativo da importação;
+SKUs de outro aplicativo são ignorados e a escrita também restringe o aplicativo.
+O calendário usa esse título antes de `produto_olist.titulo_final`, tanto na
+associação (incluindo busca) quanto na divulgação mensal. Não há consulta remota
+por produto ao abrir a tela. Sem título em ambas as fontes, permanece “Sem título”.
+
+Aplicar a migration antes de executar o código novo e reimportar para preencher
+os cadastros existentes. Não foi aplicado DDL nem executada importação em produção.
+A coluna adiciona apenas um texto às respostas já paginadas; a importação reutiliza
+as mesmas páginas do ERP e não adiciona chamadas externas. Nenhum ganho monetário
+foi medido. Os testes locais cobrem nome ausente/inválido e precedência/fallback
+executados em PostgreSQL em memória.

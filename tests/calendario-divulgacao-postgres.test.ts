@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { criarPostgresMemoria } from "./helpers/postgres-memoria";
 import { montarConsultaDivulgacao, serializarPaginaDivulgacao } from "../src/lib/calendario-comercial/divulgacao-consulta";
-import type { EventoDivulgacao } from "../src/lib/calendario-comercial/divulgacao";
+import type { EventoDivulgacao, OrdemDivulgacao } from "../src/lib/calendario-comercial/divulgacao";
 
 const db = criarPostgresMemoria();
 const app = "00000000-0000-4000-8000-000000000001", outroApp = "00000000-0000-4000-8000-000000000002";
@@ -22,6 +22,7 @@ before(async () => {
       tipo_movimento text, quantidade integer, created_at timestamptz, origem text);
     INSERT INTO public.aplicativo VALUES ('${app}'), ('${outroApp}');`);
   await db.exec(await readFile(new URL("../prisma/migrations/20261127130000_calendario_produtos/migration.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../prisma/migrations/20261127160000_produtos_titulo/migration.sql", import.meta.url), "utf8"));
 });
 beforeEach(async () => { await db.exec("TRUNCATE public.movimentacoes_estoque, public.produto_olist, public.calendario_evento_produtos, public.produtos CASCADE"); });
 after(async () => { await db.close(); });
@@ -33,11 +34,32 @@ async function produto(n: number, op: { app?: string; eventos?: string[]; ativo?
 async function movimento(n: number, tipo: string, quantidade: number, data = "2026-10-01T12:00:00Z", aplicativo = app, origem = "AJUSTE_PRODUCAO") {
   await db.query("INSERT INTO movimentacoes_estoque(produto_id,aplicativo_id,tipo_movimento,quantidade,created_at,origem) VALUES ($1,$2,$3,$4,$5,$6)", [uuid(n), aplicativo, tipo, quantidade, data, origem]);
 }
-async function consultar(pagina = 0, ref = referencia, listaEventos = eventos) {
-  const sql = montarConsultaDivulgacao(app, listaEventos, pagina, ref);
+async function consultar(pagina = 0, ref = referencia, listaEventos = eventos, ordem: OrdemDivulgacao = "prioridade") {
+  const sql = montarConsultaDivulgacao(app, listaEventos, pagina, ref, ordem);
   const { rows } = await db.query(sql.text, sql.values);
   return serializarPaginaDivulgacao(rows);
 }
+test("PostgreSQL: ordena estoque antes de paginar em ambas as direções e mantém indisponíveis no fim", async () => {
+  for (let n = 1; n <= 25; n++) { await produto(n); await movimento(n, "entrada", n); }
+  await produto(26); await produto(27); await movimento(27, "saida", 3);
+  for (const ordem of ["estoque_desc", "estoque_asc"] as const) {
+    const primeira = await consultar(0, referencia, eventos, ordem);
+    const segunda = await consultar(1, referencia, eventos, ordem);
+    const produtos = [...primeira.produtos, ...segunda.produtos];
+    const positivos = Array.from({ length: 25 }, (_, i) => ordem === "estoque_desc" ? 25 - i : i + 1);
+    assert.deepEqual(produtos.map(p => p.estoque), [...positivos, ...(ordem === "estoque_desc" ? [0, -3] : [-3, 0])]);
+    assert.equal(new Set(produtos.map(p => p.id)).size, 27);
+    assert.equal(primeira.temMais, true); assert.equal(segunda.temMais, false);
+  }
+});
+test("PostgreSQL: título importado tem prioridade e título gerado permanece como fallback", async () => {
+  await produto(1); await produto(2); await produto(3);
+  await db.query("UPDATE produtos SET titulo=$1 WHERE id=$2", ["  Forro Natal ERP  ", uuid(1)]);
+  await db.query("UPDATE produtos SET titulo='   ' WHERE id=$1", [uuid(2)]);
+  await db.query("INSERT INTO produto_olist VALUES ($1,$2,'Gerado','2026-01-01'),($3,$4,'Alternativo','2026-01-01')", [uuid(1001),uuid(1),uuid(1002),uuid(2)]);
+  const dados = await consultar();
+  assert.deepEqual(dados.produtos.map(p => p.titulo), ["Forro Natal ERP", "Alternativo", "Sem título"]);
+});
 test("PostgreSQL: saldo histórico, contagem por registro, todas as origens e vínculos deduplicados", async () => {
   await produto(1, { eventos: ["natal", "advento"] });
   await movimento(1,"entrada",100,"2020-01-01T00:00Z");

@@ -28,6 +28,8 @@ test("busca pagina no banco com projeção mínima, título determinístico e is
   const q = consultas[0];
   assert.match(q.text, /p.aplicativo_id = \$\d+::uuid/);
   assert.match(q.text, /p.ativo = true/);
+  assert.match(q.text, /NULLIF\(btrim\(p.titulo\), ''\)/);
+  assert.match(q.text, /OR p.titulo ILIKE \$\d+/);
   assert.match(q.text, /ORDER BY po.updated_at DESC, po.id ASC LIMIT 1/);
   assert.match(q.text, /LIMIT \$\d+ OFFSET \$\d+/);
   assert.doesNotMatch(q.text, /SELECT \*|descricao_final|imagem_url|estoque|x%_/);

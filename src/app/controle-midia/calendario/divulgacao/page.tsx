@@ -19,7 +19,8 @@ function DivulgacaoConteudo() {
   const mes = Number(params.get("mes") ?? mesAtual);
   const regiao = params.get("regiao") ?? "Nacional";
   const pagina = Number(params.get("pagina") ?? 0);
-  const filtros = filtrosDivulgacaoSchema.safeParse({ mes, regiao, pagina });
+  const ordem = params.get("ordem") ?? "estoque_desc";
+  const filtros = filtrosDivulgacaoSchema.safeParse({ mes, regiao, pagina, ordem });
   const visao = params.get("visao") === "anual" ? "anual" : "mensal";
   const token = session?.access_token;
   const permitido = Boolean(usuario?.podeVisualizarTarefasMidia && (usuario.podeVisualizarEstoque || usuario.podeEditarEstoque));
@@ -27,10 +28,10 @@ function DivulgacaoConteudo() {
   const focarResultado = useRef(false);
   const [revisao, setRevisao] = useState(0);
   const [resposta, setResposta] = useState<{ chave: string; resultado: ResultadoDivulgacao } | null>(null);
-  const chave = JSON.stringify([token, usuario?.aplicativo_id, permitido, mes, regiao, pagina, revisao]);
+  const chave = JSON.stringify([token, usuario?.aplicativo_id, permitido, mes, regiao, pagina, ordem, revisao]);
   useEffect(() => {
     if (!token || !permitido) return;
-    const entrada = filtrosDivulgacaoSchema.safeParse({ mes, regiao, pagina });
+    const entrada = filtrosDivulgacaoSchema.safeParse({ mes, regiao, pagina, ordem });
     if (!entrada.success) return;
     let vigente = true;
     carregarDivulgacao(token, entrada.data).then((resultado) => {
@@ -39,7 +40,7 @@ function DivulgacaoConteudo() {
       if (vigente) setResposta({ chave, resultado: { ok: false, erro: "Não foi possível carregar a lista. Tente novamente." } });
     });
     return () => { vigente = false; };
-  }, [token, permitido, mes, regiao, pagina, chave]);
+  }, [token, permitido, mes, regiao, pagina, ordem, chave]);
   const resultado = resposta?.chave === chave ? resposta.resultado : null;
   useEffect(() => {
     if (!resultado || !focarResultado.current) return;
@@ -52,6 +53,13 @@ function DivulgacaoConteudo() {
     focarResultado.current = true;
     const proximo = new URLSearchParams(consulta);
     if (nova === 0) proximo.delete("pagina"); else proximo.set("pagina", String(nova));
+    router.replace(`/controle-midia/calendario/divulgacao?${proximo}`, { scroll: false });
+  }
+  function ordenarEstoque() {
+    const proximo = new URLSearchParams(consulta);
+    proximo.set("ordem", ordem === "estoque_desc" ? "estoque_asc" : "estoque_desc");
+    proximo.delete("pagina");
+    focarResultado.current = true;
     router.replace(`/controle-midia/calendario/divulgacao?${proximo}`, { scroll: false });
   }
   function atualizar() { focarResultado.current = true; if (pagina === 0) setRevisao((v) => v + 1); else atualizarPagina(0); }
@@ -77,7 +85,7 @@ function DivulgacaoConteudo() {
       </div>
       <div ref={resultadoRef} tabIndex={-1} className="min-w-0 scroll-mt-4 outline-offset-4">
       <TabelaDivulgacao dados={resultado?.ok ? resultado.dados : null} eventos={resultado?.ok ? resultado.eventos : []}
-        pagina={pagina} carregando={!resultado} erro={resultado && !resultado.ok ? resultado.erro : ""}
+        ordem={filtros.data.ordem} onOrdenarEstoque={ordenarEstoque} pagina={pagina} carregando={!resultado} erro={resultado && !resultado.ok ? resultado.erro : ""}
         onPagina={atualizarPagina} onAtualizar={atualizar} />
       </div>
     </>}

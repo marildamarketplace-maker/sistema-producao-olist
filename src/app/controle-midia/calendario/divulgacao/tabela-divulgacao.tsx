@@ -1,6 +1,6 @@
 "use client";
 
-import { PAGINA_DIVULGACAO, type EventoDivulgacao, type PaginaDivulgacao, type PerfilDivulgacao } from "@/lib/calendario-comercial/divulgacao";
+import { PAGINA_DIVULGACAO, type OrdemDivulgacao, type EventoDivulgacao, type PaginaDivulgacao, type PerfilDivulgacao } from "@/lib/calendario-comercial/divulgacao";
 
 const perfis: Record<PerfilDivulgacao, string> = {
   estoque: "Maior estoque com poucas saídas", saidas: "Mais movimentações de saída", sem_estoque: "Sem estoque disponível",
@@ -9,9 +9,10 @@ export const controleDivulgacao = "inline-flex min-h-11 items-center justify-cen
 const numero = new Intl.NumberFormat("pt-BR");
 const data = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
 
-export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onPagina, onAtualizar }: {
+export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onPagina, onAtualizar, ordem = "prioridade", onOrdenarEstoque }: {
   dados: PaginaDivulgacao | null; eventos: EventoDivulgacao[]; pagina: number; carregando: boolean; erro: string;
   onPagina: (pagina: number) => void; onAtualizar: () => void;
+  ordem?: OrdemDivulgacao; onOrdenarEstoque?: () => void;
 }) {
   const porId = new Map(eventos.map((evento) => [evento.id, evento]));
   return <section aria-label="Produtos priorizados para divulgação" className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
@@ -39,7 +40,13 @@ export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onP
             <th scope="col" className="min-w-52 px-3 py-3 font-medium">Produto</th>
             <th scope="col" className="min-w-32 px-3 py-3 font-medium">SKU</th>
             <th scope="col" className="px-3 py-3 text-right font-medium">Movimentações de saída<br /><span className="whitespace-nowrap text-xs">12 meses</span></th>
-            <th scope="col" className="px-3 py-3 text-right font-medium">Estoque atual</th>
+            <th scope="col" aria-sort={ordem === "estoque_desc" ? "descending" : ordem === "estoque_asc" ? "ascending" : "none"} className="px-3 py-3 text-right font-medium">
+              <button type="button" onClick={onOrdenarEstoque} disabled={carregando || !onOrdenarEstoque}
+                className="min-h-11 rounded px-2 py-2 font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
+                aria-label={`Estoque atual: ordenar do ${ordem === "estoque_desc" ? "menor para o maior" : "maior para o menor"}`}>
+                Estoque atual <span aria-hidden="true">{ordem === "estoque_desc" ? "↓" : ordem === "estoque_asc" ? "↑" : "↕"}</span>
+              </button>
+            </th>
           </tr></thead>
           <tbody className="divide-y divide-slate-200">{dados.produtos.map((produto, indice) => {
             const principal = porId.get(produto.eventoPrincipal);
@@ -75,6 +82,7 @@ export function TabelaDivulgacao({ dados, eventos, pagina, carregando, erro, onP
     </nav>
     <details className="mt-4 border-t border-slate-200 pt-2"><summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium text-slate-700 focus-visible:outline focus-visible:outline-2">Como funciona a prioridade</summary>
       <div className="space-y-2 text-xs text-slate-600">
+        {ordem !== "prioridade" && <p>A lista está ordenada pelo estoque {ordem === "estoque_desc" ? "do maior para o menor" : "do menor para o maior"}, considerando todas as páginas. A prioridade equilibrada abaixo desempata saldos iguais. Produtos sem estoque continuam ao final.</p>}
         <p>Entre produtos com saldo positivo, o ciclo destina 60% das posições a maior estoque com poucas saídas e 40% a mais saídas. Se um perfil não tiver candidatos suficientes, o outro completa.</p>
         <p>O corte parte da mediana das contagens do mês; quando ela coincide com o máximo apesar de haver contagens menores, recua ao nível imediatamente inferior. Empates não são separados artificialmente.</p>
         <p>Potencial dos eventos: muito alto 2 · alto 1,6 · moderado 1,3 · baixo 1. É uma avaliação editorial, não uma previsão de vendas. A diversidade considera eventos; variantes da mesma estampa podem aparecer próximas.</p>

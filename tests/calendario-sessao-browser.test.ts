@@ -27,7 +27,11 @@ test("calendário preserva seleção ao renovar token e isola trocas de identida
   }
   async function selecionar() {
     await abrir();
-    await avaliar('document.querySelector("dialog input[type=checkbox]").click()');
+    await avaliar('[...document.querySelectorAll("dialog button")].find(b=>b.textContent==="Selecionar todos desta página").click()');
+    await ate(() => avaliar<boolean>('document.querySelector("dialog input[type=checkbox]").checked'), "Seleção em lote falhou");
+    await avaliar('[...document.querySelectorAll("dialog button")].find(b=>b.textContent==="Desmarcar todos desta página").click()');
+    await ate(() => avaliar<boolean>('!document.querySelector("dialog input[type=checkbox]").checked'), "Desmarcação em lote falhou");
+    await avaliar('[...document.querySelectorAll("dialog button")].find(b=>b.textContent==="Selecionar todos desta página").click()');
     await ate(() => avaliar<boolean>('document.querySelector("dialog footer").textContent.includes("1 alterações pendentes")'), "Seleção não foi registrada");
   }
   await cdp.pedir("Page.navigate", { url });

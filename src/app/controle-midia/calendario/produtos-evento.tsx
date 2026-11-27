@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { buscarProdutosCalendario, contarProdutosCalendario, salvarProdutosCalendario } from "./actions";
 import { useModalFocus } from "@/hooks/use-modal-focus";
 import type { ProdutoEvento } from "@/lib/calendario-comercial/produtos";
+import { selecionarPagina, type SelecaoProdutos } from "@/lib/calendario-comercial/selecao-produtos";
 
 const botao = "min-h-11 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50";
 type EventoSelecionado = { id: string; nome: string };
@@ -59,7 +60,7 @@ function ProdutosEventoModal({ token, evento, onFechar, onSalvo }: {
   const [associados, setAssociados] = useState(false);
   const [pagina, setPagina] = useState(0);
   const [resultado, setResultado] = useState<{ produtos: ProdutoEvento[]; temMais: boolean } | null>(null);
-  const [alteracoes, setAlteracoes] = useState<Record<string, { produto: ProdutoEvento; selecionado: boolean }>>({});
+  const [alteracoes, setAlteracoes] = useState<SelecaoProdutos>({});
   const [erroBusca, setErroBusca] = useState("");
   const [erroSalvar, setErroSalvar] = useState("");
   const [sucesso, setSucesso] = useState("");
@@ -104,6 +105,12 @@ function ProdutosEventoModal({ token, evento, onFechar, onSalvo }: {
     });
   }
   const pendencias = Object.values(alteracoes);
+  function selecionarTodos(selecionado: boolean) {
+    if (!resultado || salvandoRef.current) return;
+    setSucesso(""); setErroSalvar("");
+    try { setAlteracoes(selecionarPagina(alteracoes, resultado.produtos, selecionado)); }
+    catch (erro) { setErroSalvar(erro instanceof Error ? erro.message : "Não foi possível alterar a seleção."); }
+  }
   async function salvar() {
     if (salvandoRef.current || !pendencias.length) return;
     salvandoRef.current = true; setSalvando(true); setErroSalvar(""); setSucesso("");
@@ -143,6 +150,15 @@ function ProdutosEventoModal({ token, evento, onFechar, onSalvo }: {
             : !resultado ? <p role="status" className="text-sm text-slate-600">Carregando produtos...</p>
             : <>
               {!resultado.produtos.length && <p role="status" className="text-sm text-slate-600">Nenhum produto encontrado.</p>}
+              {resultado.produtos.length > 0 && <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={botao} disabled={salvando || !resultado.produtos.some(p => p.ativo && !(alteracoes[p.id]?.selecionado ?? p.associado))}
+                    onClick={() => selecionarTodos(true)}>Selecionar todos desta página</button>
+                  <button type="button" className={botao} disabled={salvando || !resultado.produtos.some(p => alteracoes[p.id]?.selecionado ?? p.associado)}
+                    onClick={() => selecionarTodos(false)}>Desmarcar todos desta página</button>
+                </div>
+                <p className="text-xs text-slate-600">Aplica aos produtos exibidos. As seleções de outras páginas e buscas são preservadas.</p>
+              </div>}
               <ul className="divide-y divide-slate-200">{resultado.produtos.map((produto) => {
                 const selecionado = alteracoes[produto.id]?.selecionado ?? produto.associado;
                 return <li key={produto.id}><label className="flex min-h-11 cursor-pointer items-start gap-3 py-3">

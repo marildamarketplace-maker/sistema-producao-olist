@@ -1,13 +1,18 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { PAGINA_DIVULGACAO, type EventoDivulgacao, type PaginaDivulgacao } from "./divulgacao";
+import { PAGINA_DIVULGACAO, type OrdemDivulgacao, type EventoDivulgacao, type PaginaDivulgacao } from "./divulgacao";
 
 // Funções de janela classificam o universo mensal antes do LIMIT. Nenhum histórico
 // ou catálogo completo sai do banco. O título só é carregado para a página final.
-export function montarConsultaDivulgacao(aplicativoId: string, eventos: EventoDivulgacao[], pagina: number, referencia: Date) {
+export function montarConsultaDivulgacao(aplicativoId: string, eventos: EventoDivulgacao[], pagina: number, referencia: Date, ordem: OrdemDivulgacao = "prioridade") {
   const valoresEventos = eventos.length
     ? Prisma.join(eventos.map((evento) => Prisma.sql`(${evento.id}::text, ${evento.peso}::numeric)`))
     : Prisma.sql`(NULL::text, NULL::numeric)`;
+  const ordenacao = ordem === "estoque_asc"
+    ? Prisma.sql`(c.estoque <= 0) ASC, c.estoque ASC, o.posicao ASC`
+    : ordem === "estoque_desc"
+      ? Prisma.sql`(c.estoque <= 0) ASC, c.estoque DESC, o.posicao ASC`
+      : Prisma.sql`o.posicao ASC`;
   return Prisma.sql`
     WITH parametros AS (
       SELECT ${referencia}::timestamptz AS referencia,
@@ -67,14 +72,15 @@ export function montarConsultaDivulgacao(aplicativoId: string, eventos: EventoDi
         ORDER BY estoque DESC, peso DESC, sku COLLATE "C", id) AS posicao
       FROM classificados WHERE estoque <= 0
     ), pagina AS (
-      SELECT c.id, c.sku, c.estoque, c.saidas, c.perfil, c.evento_principal, c.eventos, o.posicao
+      SELECT c.id, c.sku, c.estoque, c.saidas, c.perfil, c.evento_principal, c.eventos, row_number() OVER (ORDER BY ${ordenacao}) AS posicao
       FROM ordenados o JOIN classificados c ON c.id = o.id
-      ORDER BY o.posicao LIMIT ${PAGINA_DIVULGACAO + 1} OFFSET ${pagina * PAGINA_DIVULGACAO}
+      ORDER BY ${ordenacao} LIMIT ${PAGINA_DIVULGACAO + 1} OFFSET ${pagina * PAGINA_DIVULGACAO}
     )
-    SELECT pg.id, pg.sku, COALESCE(NULLIF(btrim(t.titulo), ''), 'Sem título') AS titulo,
+    SELECT pg.id, pg.sku, COALESCE(NULLIF(btrim(p.titulo), ''), NULLIF(btrim(t.titulo), ''), 'Sem título') AS titulo,
       pg.estoque, pg.saidas, pg.perfil, pg.evento_principal AS "eventoPrincipal", pg.eventos,
       par.referencia AS "referenciaEm", par.inicio AS "inicioEm"
     FROM parametros par LEFT JOIN pagina pg ON true
+    LEFT JOIN public.produtos p ON p.id = pg.id AND p.aplicativo_id = ${aplicativoId}::uuid
     LEFT JOIN LATERAL (
       SELECT po.titulo_final AS titulo FROM public.produto_olist po WHERE po.produto_id = pg.id
       ORDER BY po.updated_at DESC, po.id ASC LIMIT 1

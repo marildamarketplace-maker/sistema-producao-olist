@@ -16,7 +16,7 @@ test("novembro inclui Natal antecipado e respeita a região sem duplicar naciona
   assert.equal(new Set(regional.map(e=>e.id)).size,regional.length);
 });
 test("fronteira recusa filtros arbitrários, mês/região inválidos e paginação excessiva",async()=>{
-  for(const entrada of [{mes:0},{mes:13},{mes:11,regiao:"xxx"},{mes:11,pagina:-1},{mes:11,pagina:10001},{mes:11,pagina:0.5},{mes:11,aplicativoId:app},{mes:11,eventos:["juninas"]}]) {
+  for(const entrada of [{mes:11,ordem:"estoque; DROP TABLE produtos"},{mes:0},{mes:13},{mes:11,regiao:"xxx"},{mes:11,pagina:-1},{mes:11,pagina:10001},{mes:11,pagina:0.5},{mes:11,aplicativoId:app},{mes:11,eventos:["juninas"]}]) {
     assert.equal(filtrosDivulgacaoSchema.safeParse(entrada).success,false);
     const retorno=await consultarDivulgacao("token",entrada,{autenticar:async()=>assert.fail(),consultar:async()=>assert.fail()});
     assert.equal(retorno.ok,false);
@@ -35,7 +35,7 @@ test("aplicativo e eventos são resolvidos no servidor; edição de estoque tamb
   let consultas=0;
   const retorno=await consultarDivulgacao("token",{mes:11,pagina:2},{
     autenticar:async(token)=>{assert.equal(token,"token");return {...usuario,podeVisualizarEstoque:false,podeEditarEstoque:true};},
-    consultar:async(aplicativo,eventos,pagina)=>{consultas++;assert.equal(aplicativo,app);assert.equal(pagina,2);assert.ok(eventos.some(e=>e.id==="natal"));return vazio;},
+    consultar:async(aplicativo,eventos,pagina,ordem)=>{assert.equal(ordem,"estoque_desc");consultas++;assert.equal(aplicativo,app);assert.equal(pagina,2);assert.ok(eventos.some(e=>e.id==="natal"));return vazio;},
   });
   assert.equal(retorno.ok,true);assert.equal(consultas,1);
 });
@@ -58,7 +58,7 @@ test("SQL parametrizada usa projeção mínima, agregação global antes da pág
   assert.ok(consulta.values.includes(21));assert.ok(consulta.values.includes(60));
   assert.match(consulta.text,/percentile_disc/);assert.match(consulta.text,/GROUP BY v.id/);
   assert.match(consulta.text,/m.aplicativo_id = \$\d+::uuid/);
-  assert.match(consulta.text,/ORDER BY o.posicao LIMIT \$\d+ OFFSET \$\d+/);
+  assert.match(consulta.text,/ORDER BY o.posicao ASC LIMIT \$\d+ OFFSET \$\d+/);
   assert.ok(consulta.text.indexOf("LIMIT $",consulta.text.indexOf("pagina AS"))>consulta.text.indexOf("ordenados AS"));
 });
 test("serialização aceita inteiros exatos e recusa perda de precisão ou contagem negativa",()=>{

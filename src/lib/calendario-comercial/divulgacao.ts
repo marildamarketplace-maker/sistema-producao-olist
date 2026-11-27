@@ -3,10 +3,12 @@ import { catalogoComercial } from "./catalogo";
 import { montarPlanejamento, REGIOES } from "./planejamento";
 import type { PotencialCompra } from "./potencial-compra";
 
+export type OrdemDivulgacao = "estoque_desc" | "estoque_asc" | "prioridade";
 export const PAGINA_DIVULGACAO = 20;
 export const filtrosDivulgacaoSchema = z.object({
   mes: z.number().int().min(1).max(12),
   regiao: z.enum(REGIOES).default("Nacional"),
+  ordem: z.enum(["estoque_desc", "estoque_asc", "prioridade"]).optional(),
   pagina: z.number().int().min(0).max(10000).default(0),
 }).strict();
 export type FiltrosDivulgacao = z.infer<typeof filtrosDivulgacaoSchema>;
@@ -40,7 +42,7 @@ export type ResultadoDivulgacao = { ok: true; dados: PaginaDivulgacao; eventos: 
 // A autenticação e a consulta são fronteiras pequenas, injetáveis para testar autorização.
 export async function consultarDivulgacao(token: string, entrada: unknown, deps: {
   autenticar: (token: string) => Promise<UsuarioDivulgacao | null>;
-  consultar: (aplicativoId: string, eventos: EventoDivulgacao[], pagina: number) => Promise<PaginaDivulgacao>;
+  consultar: (aplicativoId: string, eventos: EventoDivulgacao[], pagina: number, ordem: OrdemDivulgacao) => Promise<PaginaDivulgacao>;
 }): Promise<ResultadoDivulgacao> {
   const filtros = filtrosDivulgacaoSchema.safeParse(entrada);
   if (!filtros.success) return { ok: false, erro: "Mês, abrangência ou página inválidos." };
@@ -52,7 +54,7 @@ export async function consultarDivulgacao(token: string, entrada: unknown, deps:
       return { ok: false, erro: "É necessário acesso ao calendário e ao estoque para consultar os produtos." };
     }
     const eventos = eventosParaDivulgar(filtros.data);
-    const dados = await deps.consultar(usuario.aplicativoId, eventos, filtros.data.pagina);
+    const dados = await deps.consultar(usuario.aplicativoId, eventos, filtros.data.pagina, filtros.data.ordem ?? "estoque_desc");
     return { ok: true, dados, eventos };
   } catch {
     return { ok: false, erro: "Não foi possível carregar os produtos para divulgação. Verifique sua sessão e tente novamente." };

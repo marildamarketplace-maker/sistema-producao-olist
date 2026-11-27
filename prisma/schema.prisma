@@ -359,6 +359,7 @@ model ProdutoFornecedor {
 }
 
 model Produto {
+  titulo                 String?
   eventosCalendario      CalendarioEventoProduto[]
   id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sku                    String                         @unique

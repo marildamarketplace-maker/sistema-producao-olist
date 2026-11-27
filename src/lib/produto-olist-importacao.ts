@@ -4,6 +4,14 @@ type ProdutoOlistDatado = {
   dataAlteracao?: string | null;
 };
 
+export function tituloProdutoImportado(produto: { descricao?: unknown; nome?: unknown }) {
+  for (const valor of [produto.descricao, produto.nome]) {
+    if (typeof valor === "string" && valor.trim()) return valor.trim();
+  }
+  // Ausência na resposta não deve apagar um título já importado.
+  return undefined;
+}
+
 function timestampValido(valor: string | null | undefined) {
   if (!valor) return null;
 

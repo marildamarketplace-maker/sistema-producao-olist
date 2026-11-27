@@ -8,7 +8,7 @@ export async function buscarProdutosEvento(aplicativoId: string, filtros: {
   // Literalizar curingas: a busca por SKU não deve transformar % e _ em filtros amplos.
   const termo = `%${filtros.busca.replace(/[\\%_]/g, "\\$&")}%`;
   const linhas = await prisma.$queryRaw<ProdutoEvento[]>(Prisma.sql`
-    SELECT p.id, p.sku, COALESCE(NULLIF(t.titulo, ''), 'Sem título') AS titulo,
+    SELECT p.id, p.sku, COALESCE(NULLIF(btrim(p.titulo), ''), NULLIF(btrim(t.titulo), ''), 'Sem título') AS titulo,
       p.ativo, (v.produto_id IS NOT NULL) AS associado
     FROM public.produtos p
     LEFT JOIN LATERAL (
@@ -21,7 +21,7 @@ export async function buscarProdutosEvento(aplicativoId: string, filtros: {
       AND v.produto_id = p.id
     WHERE p.aplicativo_id = ${aplicativoId}::uuid
       AND ${filtros.associados ? Prisma.sql`v.produto_id IS NOT NULL` : Prisma.sql`p.ativo = true`}
-      AND (p.sku ILIKE ${termo} OR t.titulo ILIKE ${termo})
+      AND (p.sku ILIKE ${termo} OR p.titulo ILIKE ${termo} OR t.titulo ILIKE ${termo})
     ORDER BY p.sku ASC, p.id ASC
     LIMIT ${TAMANHO_PAGINA + 1} OFFSET ${filtros.pagina * TAMANHO_PAGINA}
   `);

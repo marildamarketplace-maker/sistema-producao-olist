@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selecionarProdutoOlistPrioritario } from "../src/lib/produto-olist-importacao";
+import { selecionarProdutoOlistPrioritario, tituloProdutoImportado } from "../src/lib/produto-olist-importacao";
+
+test("preserva o nome recebido do ERP sem inventar títulos ou apagar os existentes", () => {
+  assert.equal(tituloProdutoImportado({ descricao: "  Forro de Natal  " }), "Forro de Natal");
+  assert.equal(tituloProdutoImportado({ descricao: " ", nome: "Forro" }), "Forro");
+  assert.equal(tituloProdutoImportado({ descricao: 123, nome: null }), undefined);
+  assert.equal(tituloProdutoImportado({}), undefined);
+});
 
 test("seleciona o cadastro com data de criação mais recente", () => {
   const antigo = {
