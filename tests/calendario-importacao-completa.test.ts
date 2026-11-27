@@ -9,6 +9,7 @@ const outro="00000000-0000-4000-8000-000000000002";
 const db=criarPostgresMemoria();
 const sqls:Prisma.Sql[]=[];
 function sql(q:Prisma.Sql|TemplateStringsArray,values:unknown[]){return Array.isArray(q)?Prisma.sql(q as TemplateStringsArray,...values):q as Prisma.Sql;}
+type Tx={ $queryRaw:(q:Prisma.Sql|TemplateStringsArray,...values:unknown[])=>Promise<Record<string,unknown>[]>; $executeRaw:(q:Prisma.Sql|TemplateStringsArray,...values:unknown[])=>Promise<number> };
 const cliente={
   async $queryRaw(q:Prisma.Sql|TemplateStringsArray,...values:unknown[]){const query=sql(q,values);sqls.push(query);return (await db.query(query.text,query.values)).rows;},
   async $executeRaw(q:Prisma.Sql|TemplateStringsArray,...values:unknown[]){
@@ -16,7 +17,7 @@ const cliente={
     const contar=async()=>Number((await db.query<{n:number}>("SELECT count(*)::int AS n FROM calendario_evento_produtos")).rows[0].n);
     const antes=await contar();await db.query(query.text,query.values);return await contar()-antes;
   },
-  async $transaction<T>(fn:(tx:{ $queryRaw:typeof cliente.$queryRaw;$executeRaw:typeof cliente.$executeRaw })=>Promise<T>,opcoes:{maxWait:number;timeout:number}):Promise<T>{
+  async $transaction<T>(fn:(tx:Tx)=>Promise<T>,opcoes:{maxWait:number;timeout:number}):Promise<T>{
     assert.deepEqual(opcoes,{maxWait:5000,timeout:20000});
     await db.exec("BEGIN");try{const r=await fn(cliente);await db.exec("COMMIT");return r;}catch(e){await db.exec("ROLLBACK");throw e;}
   },

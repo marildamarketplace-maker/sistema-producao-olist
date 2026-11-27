@@ -30,24 +30,32 @@ candidatos. A prévia mostra até 100 problemas e conserva o total encontrado.
 
 ## Consistência, execução e interrupção
 
-A gravação usa requisições sequenciais de até 100 SKUs por evento, com autenticação
-por requisição e nova verificação de atividade/aplicativo. Reutiliza a transação,
-locks e inserção idempotente do seletor manual. Os produtos são bloqueados para
-verificação de atividade; a chave composta protege o isolamento também no banco.
-O cliente não escolhe aplicativo nem IDs de produto para a gravação.
+A gravação usa uma única requisição e uma única transação para todos os vínculos
+válidos novos do arquivo (até 10.000 vínculos e 5.000 SKUs distintos, payload de
+750 KB). Autenticação, permissão, atividade e aplicativo são verificados no
+servidor. O cliente não escolhe aplicativo nem IDs de produto para a gravação.
 
-Cada lote é curto e limitado (statement de 8s, transação de 10s já existentes).
-Não é um job em segundo plano: não há execução após responder a requisição nem
-promise abandonada. A importação para na primeira falha, preservando os commits
-anteriores; **Retomar** repete o lote inconclusivo com proteção contra duplicidade.
-Trocar identidade/aplicativo desmonta o fluxo e impede iniciar os próximos lotes;
-renovar o token mantém a prévia e utiliza a credencial nova nas próximas chamadas.
-Uma chamada já aceita pelo servidor pode concluir mesmo ao sair da página.
+Antes da inserção, adquire em ordem estável as mesmas advisory locks por evento
+usadas pelo seletor manual. Bloqueia todos os produtos por ID em ordem estável e
+confere que estejam presentes e ativos no aplicativo. Uma única inserção com
+`ON CONFLICT DO NOTHING` preserva vínculos existentes. Qualquer indisponibilidade
+ou falha provoca rollback de todo o arquivo, sem importação parcial.
 
-O progresso informa vínculos confirmados, sem afirmar quantos foram fisicamente
-inseridos em caso de concorrência. Se fechar/recarregar, reenvie o CSV e valide:
-a prévia consulta vínculos duráveis para reconhecer os já salvos. Não há rollback
-integral entre lotes. O acompanhamento em memória não sobrevive ao reload.
+Permanece síncrono por ser uma gravação limitada de metadados locais, sem
+integrações externas: dois SETs, uma aquisição dos locks, uma consulta de produtos
+e um INSERT. Os limites são lock_timeout de 5s, statement_timeout de 12s e
+transação de 20s (maxWait de 5s). Não há trabalho disparado após a resposta. Os
+lotes de leitura da prévia continuam limitados a 500; o limite manual de 100
+alterações no seletor individual não foi alterado. A ação antiga de lotes também
+foi preservada para compatibilidade com clientes anteriores, mas não é usada
+pela nova interface de importação.
+
+A tela só confirma sucesso depois da resposta da transação completa; não exibe
+percentuais fictícios. Trocar identidade/aplicativo limpa o fluxo. Uma requisição
+já aceita pode concluir mesmo ao sair da página; renovação do token preserva a
+prévia e usa a credencial atual na confirmação. Se houver perda de conexão, não
+presumir rollback: revalidar o mesmo CSV reconhece os vínculos já gravados. Repetir
+a gravação também é idempotente. Não há job nem acompanhamento após reload.
 
 ## Egress e validação
 
@@ -65,7 +73,11 @@ real nem grava associações. O volume das respostas depende dos vínculos locai
 não houve medição de cobrança do provedor.
 
 Testes cobrem parser, limites, prévia, autorização, isolamento, atividade,
-projeção/batching e contratos de locks. O Chrome usa o componente real com ações
-simuladas e CSS do projeto: valida arquivo, prévia, confirmação, lotes, confirmação
-perdida após commit e retomada idempotente. Verifica overflow em 390/1440px e ambos
+projeção/batching e contratos de locks. A SQL de verificação dos vínculos existentes
+foi executada em PostgreSQL WASM. A gravação integral também foi testada nesse
+banco com mais de 100 vínculos em múltiplos eventos, isolamento de aplicativo,
+produto inativo, falha de constraint e rollback completo, além de repetição
+idempotente. O Chrome usa o componente real com ações
+simuladas e CSS do projeto: valida arquivo, prévia, confirmação integral de 101 vínculos, falha sem gravação parcial e nova
+validação para repetir a importação. Verifica overflow em 390/1440px e ambos
 os temas; isso é emulação de viewport, sem dispositivo real nem mutação de produção.

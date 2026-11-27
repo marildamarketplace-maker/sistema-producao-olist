@@ -17,7 +17,7 @@ test("ações de importação validam sessão, permissão, aplicativo, limites e
     }},
     $queryRaw:async(q:Prisma.Sql|TemplateStringsArray,...valores:unknown[])=>{
       const sql=Array.isArray(q)?Prisma.sql(q as TemplateStringsArray,...valores):q as Prisma.Sql;sqls.push(sql);
-      if(sql.text.includes("ORDER BY id FOR UPDATE"))return disponivel?[{id}]:[];
+      if(sql.text.includes("ORDER BY id FOR UPDATE"))return disponivel?[{id,sku:"001",ativo:true}]:[];
       return [];
     },
     $executeRaw:async(q:Prisma.Sql|TemplateStringsArray,...valores:unknown[])=>{sqls.push(Array.isArray(q)?Prisma.sql(q as TemplateStringsArray,...valores):q as Prisma.Sql);if(falha)throw new Error("secret SQL");return 1;},
@@ -26,7 +26,7 @@ test("ações de importação validam sessão, permissão, aplicativo, limites e
   Object.assign(globalThis,{prisma:cliente});
   const {supabaseAdmin}=await import("../src/lib/supabase-admin");
   t.mock.method(supabaseAdmin.auth,"getUser",async(token:string)=>{if(token==="bad")throw new Error("secret auth");return {data:{user:{id:"usuario",email:"teste@example.test"}},error:null};});
-  const {validarImportacaoCalendario,importarLoteCalendario}=await import("../src/app/controle-midia/calendario/actions");
+  const {validarImportacaoCalendario,importarLoteCalendario,importarArquivoCalendario}=await import("../src/app/controle-midia/calendario/actions");
   const lote={eventoId:"natal",skus:["001"]};
   for(const token of ["","bad"]){assert.equal((await importarLoteCalendario(token,lote)).ok,false);}
   permitido=false;assert.equal((await importarLoteCalendario("token",lote)).ok,false);permitido=true;
@@ -40,4 +40,10 @@ test("ações de importação validam sessão, permissão, aplicativo, limites e
   const entrada={linhas:[{registro:2,sku:"001",principal:"natal",adicionais:"",tipo:"Direta"}],incluirSugestoes:false,incluirAdicionais:false};
   assert.equal((await validarImportacaoCalendario("token",entrada)).ok,true);
   assert.equal((await validarImportacaoCalendario("token",{...entrada,aplicativoId:"alheio"})).ok,false);
+  const arquivo={vinculos:[{sku:"001",eventoId:"natal"}]};
+  assert.equal((await importarArquivoCalendario("bad",arquivo)).ok,false);
+  permitido=false;assert.equal((await importarArquivoCalendario("token",arquivo)).ok,false);permitido=true;
+  assert.equal((await importarArquivoCalendario("token",{...arquivo,aplicativoId:"alheio"})).ok,false);
+  assert.deepEqual(await importarArquivoCalendario("token",arquivo),{ok:true,processados:1,adicionados:1});
+
 });

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { prepararImportacao, type EntradaImportacao } from "./importacao";
+import { prepararImportacao, type EntradaImportacao, type ImportacaoCompleta } from "./importacao";
 
 export async function previaImportacaoCalendario(aplicativoId: string, entrada: EntradaImportacao) {
   return prepararImportacao(entrada, {
@@ -27,7 +27,7 @@ export async function previaImportacaoCalendario(aplicativoId: string, entrada: 
 }
 
 // Uma única transação limitada: valida e bloqueia todo o arquivo antes de inserir.
-export async function salvarImportacaoCompleta(aplicativoId: string, vinculos: import("./importacao").ImportacaoCompleta["vinculos"]) {
+export async function salvarImportacaoCompleta(aplicativoId: string, vinculos: ImportacaoCompleta["vinculos"]) {
   const skus = [...new Set(vinculos.map(v => v.sku))].sort();
   const chaves = [...new Set(vinculos.map(v => `${aplicativoId}:${v.eventoId}`))].sort();
   return prisma.$transaction(async tx => {
